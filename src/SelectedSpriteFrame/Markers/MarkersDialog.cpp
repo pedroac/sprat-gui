@@ -1,4 +1,5 @@
 #include "MarkersDialog.h"
+#include <QCoreApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QListWidget>
@@ -18,6 +19,27 @@ QString normalizedMarkerName(QString name) {
     }
     return name;
 }
+
+void populateKindCombo(QComboBox* combo) {
+    combo->clear();
+    combo->addItem(QCoreApplication::translate("MarkersDialog", "point"), static_cast<int>(MarkerKind::Point));
+    combo->addItem(QCoreApplication::translate("MarkersDialog", "circle"), static_cast<int>(MarkerKind::Circle));
+    combo->addItem(QCoreApplication::translate("MarkersDialog", "rectangle"), static_cast<int>(MarkerKind::Rectangle));
+    combo->addItem(QCoreApplication::translate("MarkersDialog", "polygon"), static_cast<int>(MarkerKind::Polygon));
+}
+
+MarkerKind markerKindFromCombo(const QComboBox* combo) {
+    const QVariant data = combo->currentData();
+    if (data.isValid()) {
+        return static_cast<MarkerKind>(data.toInt());
+    }
+    return MarkerKind::Point;
+}
+
+void setComboFromMarkerKind(QComboBox* combo, MarkerKind kind) {
+    const int idx = combo->findData(static_cast<int>(kind));
+    combo->setCurrentIndex(idx >= 0 ? idx : 0);
+}
 }
 
 /**
@@ -26,7 +48,7 @@ QString normalizedMarkerName(QString name) {
 MarkersDialog::MarkersDialog(SpritePtr sprite, QWidget* parent) 
     : QDialog(parent), m_sprite(sprite) 
 {
-    setWindowTitle("Markers Configuration");
+    setWindowTitle(tr("Markers Configuration"));
     resize(450, 500);
     setupUi();
     refreshList();
@@ -41,14 +63,14 @@ void MarkersDialog::setupUi() {
     // Add Section
     QHBoxLayout* addLayout = new QHBoxLayout();
     m_addTypeCombo = new QComboBox();
-    m_addTypeCombo->addItems({"point", "circle", "rectangle", "polygon"});
+    populateKindCombo(m_addTypeCombo);
     addLayout->addWidget(m_addTypeCombo);
     
     m_addNameEdit = new QLineEdit();
-    m_addNameEdit->setPlaceholderText("New marker name");
+    m_addNameEdit->setPlaceholderText(tr("New marker name"));
     addLayout->addWidget(m_addNameEdit);
     
-    QPushButton* addBtn = new QPushButton(QIcon::fromTheme("list-add"), "Add");
+    QPushButton* addBtn = new QPushButton(QIcon::fromTheme("list-add"), tr("Add"));
     connect(addBtn, &QPushButton::clicked, this, &MarkersDialog::onAddClicked);
     connect(m_addNameEdit, &QLineEdit::returnPressed, this, &MarkersDialog::onAddClicked);
     addLayout->addWidget(addBtn);
@@ -59,12 +81,12 @@ void MarkersDialog::setupUi() {
     connect(m_listWidget, &QListWidget::itemSelectionChanged, this, &MarkersDialog::onSelectionChanged);
     mainLayout->addWidget(m_listWidget);
 
-    QPushButton* removeBtn = new QPushButton(QIcon::fromTheme("list-remove"), "Remove Selected");
+    QPushButton* removeBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove Selected"));
     connect(removeBtn, &QPushButton::clicked, this, &MarkersDialog::onRemoveClicked);
     mainLayout->addWidget(removeBtn);
 
     // Editor
-    m_editorGroup = new QGroupBox("Edit Marker");
+    m_editorGroup = new QGroupBox(tr("Edit Marker"));
     QVBoxLayout* editLayout = new QVBoxLayout(m_editorGroup);
     
     auto createRow = [&](const QString& label, QWidget* widget) -> QWidget* {
@@ -79,21 +101,21 @@ void MarkersDialog::setupUi() {
 
     m_nameEdit = new QLineEdit();
     connect(m_nameEdit, &QLineEdit::editingFinished, this, &MarkersDialog::onFieldChanged);
-    editLayout->addWidget(createRow("Name:", m_nameEdit));
+    editLayout->addWidget(createRow(tr("Name:"), m_nameEdit));
 
     m_typeCombo = new QComboBox();
-    m_typeCombo->addItems({"point", "circle", "rectangle", "polygon"});
+    populateKindCombo(m_typeCombo);
     // connect(m_typeCombo, &QComboBox::currentTextChanged, this, &MarkersDialog::onFieldChanged);
     // editLayout->addWidget(createRow("Type:", m_typeCombo));
 
     m_xyRow = new QWidget();
     QHBoxLayout* xyLayout = new QHBoxLayout(m_xyRow);
     xyLayout->setContentsMargins(0, 0, 0, 0);
-    xyLayout->addWidget(new QLabel("X:"));
+    xyLayout->addWidget(new QLabel(tr("X:")));
     m_xSpin = new QSpinBox(); m_xSpin->setRange(0, 9999);
     connect(m_xSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     xyLayout->addWidget(m_xSpin);
-    xyLayout->addWidget(new QLabel("Y:"));
+    xyLayout->addWidget(new QLabel(tr("Y:")));
     m_ySpin = new QSpinBox(); m_ySpin->setRange(0, 9999);
     connect(m_ySpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     xyLayout->addWidget(m_ySpin);
@@ -104,18 +126,18 @@ void MarkersDialog::setupUi() {
     m_radiusRow = new QWidget();
     QHBoxLayout* radiusLayout = new QHBoxLayout(m_radiusRow);
     radiusLayout->setContentsMargins(0, 0, 0, 0);
-    radiusLayout->addWidget(new QLabel("Radius:"));
+    radiusLayout->addWidget(new QLabel(tr("Radius:")));
     radiusLayout->addWidget(m_radiusSpin);
     xyLayout->addWidget(m_radiusRow);
 
     m_rectRow = new QWidget();
     QHBoxLayout* rectLayout = new QHBoxLayout(m_rectRow);
     rectLayout->setContentsMargins(0, 0, 0, 0);
-    rectLayout->addWidget(new QLabel("W:"));
+    rectLayout->addWidget(new QLabel(tr("W:")));
     m_wSpin = new QSpinBox(); m_wSpin->setRange(1, 9999);
     connect(m_wSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     rectLayout->addWidget(m_wSpin);
-    rectLayout->addWidget(new QLabel("H:"));
+    rectLayout->addWidget(new QLabel(tr("H:")));
     m_hSpin = new QSpinBox(); m_hSpin->setRange(1, 9999);
     connect(m_hSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     rectLayout->addWidget(m_hSpin);
@@ -124,7 +146,7 @@ void MarkersDialog::setupUi() {
     xyLayout->addStretch();
     editLayout->addWidget(m_xyRow);
 
-    m_clearPolyBtn = new QPushButton("Clear Polygon Vertices");
+    m_clearPolyBtn = new QPushButton(tr("Clear Polygon Vertices"));
     connect(m_clearPolyBtn, &QPushButton::clicked, this, &MarkersDialog::onClearPolygon);
     m_polyRow = m_clearPolyBtn;
     editLayout->addWidget(m_polyRow);
@@ -147,7 +169,7 @@ void MarkersDialog::refreshList() {
     m_listWidget->clear();
     if (m_sprite) {
         for (const auto& p : m_sprite->points) {
-            m_listWidget->addItem(QString("%1 (%2)").arg(p.name, p.kind));
+            m_listWidget->addItem(QString("%1 (%2)").arg(p.name, markerKindToString(p.kind)));
         }
     }
     if (currentRow >= 0 && currentRow < m_listWidget->count()) {
@@ -173,18 +195,18 @@ void MarkersDialog::onAddClicked() {
     // Check duplicate
     for (const auto& p : m_sprite->points) {
         if (p.name == name) {
-            QMessageBox::warning(this, "Error", "Marker name already exists.");
+            QMessageBox::warning(this, tr("Error"), tr("Marker name already exists."));
             return;
         }
     }
 
     NamedPoint p;
     p.name = name;
-    p.kind = m_addTypeCombo->currentText();
+    p.kind = markerKindFromCombo(m_addTypeCombo);
     p.x = m_sprite->rect.width() / 2;
     p.y = m_sprite->rect.height() / 2;
     
-    if (p.kind == "polygon") {
+    if (p.kind == MarkerKind::Polygon) {
         // Default triangle
         p.polygonPoints = {
             QPoint(p.x, p.y - 20),
@@ -236,16 +258,16 @@ void MarkersDialog::updateEditorState() {
         m_updating = true;
         const auto& p = m_sprite->points[row];
         m_nameEdit->setText(p.name);
-        m_typeCombo->setCurrentText(p.kind);
+        setComboFromMarkerKind(m_typeCombo, p.kind);
         m_xSpin->setValue(p.x);
         m_ySpin->setValue(p.y);
         m_radiusSpin->setValue(p.radius);
         m_wSpin->setValue(p.w);
         m_hSpin->setValue(p.h);
 
-        bool isCircle = p.kind == "circle";
-        bool isRect = p.kind == "rectangle";
-        bool isPoly = p.kind == "polygon";
+        bool isCircle = p.kind == MarkerKind::Circle;
+        bool isRect = p.kind == MarkerKind::Rectangle;
+        bool isPoly = p.kind == MarkerKind::Polygon;
 
         m_radiusRow->setVisible(isCircle);
         m_rectRow->setVisible(isRect);
@@ -274,7 +296,7 @@ void MarkersDialog::onFieldChanged() {
         m_nameEdit->setText(p.name);
         m_updating = false;
     }
-    p.kind = m_typeCombo->currentText();
+    p.kind = markerKindFromCombo(m_typeCombo);
     p.x = m_xSpin->value();
     p.y = m_ySpin->value();
     p.radius = m_radiusSpin->value();

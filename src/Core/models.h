@@ -1,10 +1,46 @@
 #pragma once
 #include <QString>
+#include <QStringView>
 #include <QRect>
 #include <QVector>
 #include <QPoint>
 #include <memory>
 #include <QColor>
+
+enum class MarkerKind {
+    Point = 0,
+    Circle,
+    Rectangle,
+    Polygon
+};
+
+inline QString markerKindToString(MarkerKind kind) {
+    switch (kind) {
+    case MarkerKind::Point:
+        return "point";
+    case MarkerKind::Circle:
+        return "circle";
+    case MarkerKind::Rectangle:
+        return "rectangle";
+    case MarkerKind::Polygon:
+        return "polygon";
+    }
+    return "point";
+}
+
+inline MarkerKind markerKindFromString(QStringView kind) {
+    const QString normalized = kind.toString().trimmed().toLower();
+    if (normalized == "circle") {
+        return MarkerKind::Circle;
+    }
+    if (normalized == "rectangle" || normalized == "rect") {
+        return MarkerKind::Rectangle;
+    }
+    if (normalized == "polygon") {
+        return MarkerKind::Polygon;
+    }
+    return MarkerKind::Point;
+}
 
 /**
  * @brief Represents a named point or shape on a sprite.
@@ -13,7 +49,7 @@ struct NamedPoint {
     QString name;
     int x = 0;
     int y = 0;
-    QString kind = "point"; // point, circle, rectangle, polygon
+    MarkerKind kind = MarkerKind::Point;
     int radius = 8;
     int w = 16;
     int h = 16;

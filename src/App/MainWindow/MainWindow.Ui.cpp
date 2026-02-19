@@ -25,14 +25,14 @@
 
 void MainWindow::setupUi() {
     resize(1400, 860);
-    setWindowTitle("Sprat GUI - C++");
+    setWindowTitle(tr("Sprat GUI - C++"));
     setupToolbar();
 
     // Central Widget is a Stack
     m_mainStack = new QStackedWidget(this);
     setCentralWidget(m_mainStack);
 
-    m_debugDock = new QDockWidget("Debug", this);
+    m_debugDock = new QDockWidget(tr("Debug"), this);
     m_debugDock->setObjectName("debugDock");
     m_debugDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
     m_debugLogEdit = new QTextEdit(m_debugDock);
@@ -54,7 +54,7 @@ void MainWindow::setupUi() {
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);
     QVBoxLayout* welcomeLayout = new QVBoxLayout(m_welcomePage);
-    m_welcomeLabel = new QLabel("Drag and Drop folder with image files", m_welcomePage);
+    m_welcomeLabel = new QLabel(tr("Drag and Drop folder with image files"), m_welcomePage);
     m_welcomeLabel->setAlignment(Qt::AlignCenter);
     welcomeLayout->addWidget(m_welcomeLabel);
     m_mainStack->addWidget(m_welcomePage);
@@ -71,31 +71,31 @@ void MainWindow::setupUi() {
     m_leftSplitter = new QSplitter(Qt::Vertical, mainSplitter);
 
     // 1. Layout Canvas Frame
-    QGroupBox* canvasGroup = new QGroupBox("Layout Canvas", m_leftSplitter);
+    QGroupBox* canvasGroup = new QGroupBox(tr("Layout Canvas"), m_leftSplitter);
     QVBoxLayout* canvasLayout = new QVBoxLayout(canvasGroup);
     canvasLayout->setContentsMargins(10, 10, 10, 10);
 
     // Controls
     QHBoxLayout* canvasControls = new QHBoxLayout();
-    canvasControls->addWidget(new QLabel("Profile:"));
+    canvasControls->addWidget(new QLabel(tr("Profile:")));
     m_profileCombo = new QComboBox(this);
     m_profileCombo->addItems({"desktop", "mobile", "legacy", "space", "fast", "css"});
     m_profileCombo->setCurrentText("fast");
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
     canvasControls->addWidget(m_profileCombo);
 
-    canvasControls->addWidget(new QLabel("Padding:"));
+    canvasControls->addWidget(new QLabel(tr("Padding:")));
     m_paddingSpin = new QSpinBox(this);
     m_paddingSpin->setRange(0, 128);
     connect(m_paddingSpin, &QSpinBox::valueChanged, this, &MainWindow::onPaddingChanged);
     canvasControls->addWidget(m_paddingSpin);
 
-    m_trimCheck = new QCheckBox("Trim Transparency", this);
+    m_trimCheck = new QCheckBox(tr("Trim Transparency"), this);
     connect(m_trimCheck, &QCheckBox::toggled, this, &MainWindow::onTrimChanged);
     canvasControls->addWidget(m_trimCheck);
 
     canvasControls->addStretch();
-    canvasControls->addWidget(new QLabel("Zoom:"));
+    canvasControls->addWidget(new QLabel(tr("Zoom:")));
     m_layoutZoomSpin = new QDoubleSpinBox(this);
     m_layoutZoomSpin->setRange(0.1, 8.0);
     m_layoutZoomSpin->setValue(1.0);
@@ -124,16 +124,16 @@ void MainWindow::setupUi() {
     m_leftSplitter->addWidget(canvasGroup);
 
     // 2. Timelines Frame
-    QGroupBox* timelineGroup = new QGroupBox("Animation Timelines", m_leftSplitter);
+    QGroupBox* timelineGroup = new QGroupBox(tr("Animation Timelines"), m_leftSplitter);
     QVBoxLayout* timelineLayout = new QVBoxLayout(timelineGroup);
     timelineLayout->setContentsMargins(10, 10, 10, 10);
 
     QHBoxLayout* timelineAddLayout = new QHBoxLayout();
-    timelineAddLayout->addWidget(new QLabel("Name:"));
+    timelineAddLayout->addWidget(new QLabel(tr("Name:")));
     m_timelineCreateEdit = new QLineEdit(this);
-    m_timelineCreateEdit->setPlaceholderText("Timeline name (optional)");
+    m_timelineCreateEdit->setPlaceholderText(tr("Timeline name (optional)"));
     timelineAddLayout->addWidget(m_timelineCreateEdit);
-    QPushButton* addTimelineBtn = new QPushButton(QIcon::fromTheme("list-add"), "Add", this);
+    QPushButton* addTimelineBtn = new QPushButton(QIcon::fromTheme("list-add"), tr("Add"), this);
     connect(addTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineAddClicked);
     connect(m_timelineCreateEdit, &QLineEdit::returnPressed, this, &MainWindow::onTimelineAddClicked);
     timelineAddLayout->addWidget(addTimelineBtn);
@@ -153,19 +153,19 @@ void MainWindow::setupUi() {
     m_timelineEditorContainer->setVisible(false);
 
     QHBoxLayout* timelineNameLayout = new QHBoxLayout();
-    timelineNameLayout->addWidget(new QLabel("Name:"));
+    timelineNameLayout->addWidget(new QLabel(tr("Name:")));
     m_timelineNameEdit = new QLineEdit(this);
     m_timelineNameEdit->setEnabled(false);
     connect(m_timelineNameEdit, &QLineEdit::editingFinished, this, &MainWindow::onTimelineNameChanged);
     timelineNameLayout->addWidget(m_timelineNameEdit);
-    QPushButton* removeTimelineBtn = new QPushButton(QIcon::fromTheme("list-remove"), "Remove", this);
+    QPushButton* removeTimelineBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove"), this);
     connect(removeTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineRemoveClicked);
     timelineNameLayout->addWidget(removeTimelineBtn);
     editorContainerLayout->addLayout(timelineNameLayout);
 
     m_timelineDropArea = new QGroupBox(this);
     QVBoxLayout* dropAreaLayout = new QVBoxLayout(m_timelineDropArea);
-    m_timelineDragHintLabel = new QLabel("Drag frames from layout canvas here", m_timelineDropArea);
+    m_timelineDragHintLabel = new QLabel(tr("Drag frames from layout canvas here"), m_timelineDropArea);
     dropAreaLayout->addWidget(m_timelineDragHintLabel);
     m_timelineFramesList = new TimelineListWidget(m_timelineDropArea);
     m_timelineFramesList->setViewMode(QListWidget::IconMode);
@@ -189,16 +189,16 @@ void MainWindow::setupUi() {
     m_rightSplitter = new QSplitter(Qt::Vertical, mainSplitter);
 
     // 3. Selected Frame Editor
-    QGroupBox* editorGroup = new QGroupBox("Selected Frame Editor", m_rightSplitter);
+    QGroupBox* editorGroup = new QGroupBox(tr("Selected Frame Editor"), m_rightSplitter);
     QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorGroup);
 
     QHBoxLayout* nameRow = new QHBoxLayout();
-    nameRow->addWidget(new QLabel("Name:"));
+    nameRow->addWidget(new QLabel(tr("Name:")));
     m_spriteNameEdit = new QLineEdit(this);
     m_spriteNameEdit->setEnabled(false);
     nameRow->addWidget(m_spriteNameEdit);
 
-    nameRow->addWidget(new QLabel("Zoom:"));
+    nameRow->addWidget(new QLabel(tr("Zoom:")));
     m_previewZoomSpin = new QDoubleSpinBox(this);
     m_previewZoomSpin->setRange(0.1, 16.0);
     m_previewZoomSpin->setValue(2.0);
@@ -208,26 +208,26 @@ void MainWindow::setupUi() {
     editorLayoutBox->addLayout(nameRow);
 
     QHBoxLayout* pivotRow = new QHBoxLayout();
-    pivotRow->addWidget(new QLabel("Handle:"));
+    pivotRow->addWidget(new QLabel(tr("Handle:")));
     m_handleCombo = new QComboBox(this);
-    m_handleCombo->addItem("pivot");
+    m_handleCombo->addItem(tr("pivot"));
     pivotRow->addWidget(m_handleCombo);
     connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
-    pivotRow->addWidget(new QLabel("X:"));
+    pivotRow->addWidget(new QLabel(tr("X:")));
     m_pivotXSpin = new QSpinBox(this);
     m_pivotXSpin->setEnabled(false);
     m_pivotXSpin->setRange(0, 9999);
     connect(m_pivotXSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
     pivotRow->addWidget(m_pivotXSpin);
-    pivotRow->addWidget(new QLabel("Y:"));
+    pivotRow->addWidget(new QLabel(tr("Y:")));
     m_pivotYSpin = new QSpinBox(this);
     m_pivotYSpin->setEnabled(false);
     m_pivotYSpin->setRange(0, 9999);
     connect(m_pivotYSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
     pivotRow->addWidget(m_pivotYSpin);
     QIcon manageIcon = QIcon::fromTheme("preferences-system");
-    m_configPointsBtn = new QPushButton(manageIcon, manageIcon.isNull() ? "Manage" : "", this);
-    m_configPointsBtn->setToolTip("Manage Markers");
+    m_configPointsBtn = new QPushButton(manageIcon, manageIcon.isNull() ? tr("Manage") : "", this);
+    m_configPointsBtn->setToolTip(tr("Manage Markers"));
     connect(m_configPointsBtn, &QPushButton::clicked, this, &MainWindow::onPointsConfigClicked);
     pivotRow->addWidget(m_configPointsBtn);
     m_configPointsBtn->setEnabled(false);
@@ -249,7 +249,7 @@ void MainWindow::setupUi() {
     m_rightSplitter->addWidget(editorGroup);
 
     // 4. Animation Test
-    QGroupBox* animGroup = new QGroupBox("Animation Test", m_rightSplitter);
+    QGroupBox* animGroup = new QGroupBox(tr("Animation Test"), m_rightSplitter);
     QVBoxLayout* animLayout = new QVBoxLayout(animGroup);
     animLayout->setContentsMargins(10, 10, 10, 10);
 
@@ -257,20 +257,20 @@ void MainWindow::setupUi() {
     m_animPrevBtn = new QPushButton("<");
     connect(m_animPrevBtn, &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
     animControls->addWidget(m_animPrevBtn);
-    m_animPlayPauseBtn = new QPushButton("Play");
+    m_animPlayPauseBtn = new QPushButton(tr("Play"));
     connect(m_animPlayPauseBtn, &QPushButton::clicked, this, &MainWindow::onAnimPlayPauseClicked);
     animControls->addWidget(m_animPlayPauseBtn);
     m_animNextBtn = new QPushButton(">");
     connect(m_animNextBtn, &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
     animControls->addWidget(m_animNextBtn);
-    animControls->addWidget(new QLabel("FPS:"));
+    animControls->addWidget(new QLabel(tr("FPS:")));
     m_fpsSpin = new QSpinBox(this);
     m_fpsSpin->setRange(1, 60);
     m_fpsSpin->setValue(8);
     connect(m_fpsSpin, &QSpinBox::valueChanged, this, &MainWindow::onAnimFpsChanged);
     animControls->addWidget(m_fpsSpin);
     animControls->addStretch();
-    animControls->addWidget(new QLabel("Zoom:"));
+    animControls->addWidget(new QLabel(tr("Zoom:")));
     m_animZoomSpin = new QDoubleSpinBox(this);
     m_animZoomSpin->setRange(0.1, 16.0);
     m_animZoomSpin->setValue(2.0);
@@ -278,7 +278,7 @@ void MainWindow::setupUi() {
     animControls->addWidget(m_animZoomSpin);
     animLayout->addLayout(animControls);
 
-    m_animStatusLabel = new QLabel("Create/select a timeline and drag frames into it.", this);
+    m_animStatusLabel = new QLabel(tr("Create/select a timeline and drag frames into it."), this);
     m_animStatusLabel->setStyleSheet("color: #808080;");
     animLayout->addWidget(m_animStatusLabel);
 
@@ -335,23 +335,23 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::setupToolbar() {
-    QToolBar* toolbar = addToolBar("Main");
+    QToolBar* toolbar = addToolBar(tr("Main"));
     toolbar->setMovable(true);
 
-    m_loadAction = toolbar->addAction("Load Images Folder");
+    m_loadAction = toolbar->addAction(tr("Load Images Folder"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
 
     toolbar->addSeparator();
-    QAction* loadProjectAction = toolbar->addAction("Load...");
+    QAction* loadProjectAction = toolbar->addAction(tr("Load..."));
     connect(loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
-    m_saveAction = toolbar->addAction("Save...");
+    m_saveAction = toolbar->addAction(tr("Save..."));
     m_saveAction->setEnabled(false);
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveClicked);
 
-    QAction* settingsAction = toolbar->addAction("Settings");
+    QAction* settingsAction = toolbar->addAction(tr("Settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettingsClicked);
 
-    m_showDebugAction = toolbar->addAction("Debug");
+    m_showDebugAction = toolbar->addAction(tr("Debug"));
     m_showDebugAction->setCheckable(true);
     connect(m_showDebugAction, &QAction::toggled, this, [this](bool checked) {
         if (m_debugDock) {
@@ -359,13 +359,13 @@ void MainWindow::setupToolbar() {
         }
     });
     toolbar->addSeparator();
-    m_folderLabel = new QLabel("Folder: none", this);
+    m_folderLabel = new QLabel(tr("Folder: none"), this);
     m_folderLabel->setStyleSheet("padding-left: 10px;");
     toolbar->addWidget(m_folderLabel);
 }
 
 void MainWindow::setupStatusBarUi() {
-    m_statusLabel = new QLabel("Idle", this);
+    m_statusLabel = new QLabel(tr("Idle"), this);
     m_statusLabel->setContentsMargins(0, 0, 12, 0);
     statusBar()->addPermanentWidget(m_statusLabel);
 }

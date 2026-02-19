@@ -72,6 +72,7 @@ Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
 Q_LOGGING_CATEGORY(project, "project")
 Q_LOGGING_CATEGORY(autosave, "autosave")
+
 /**
  * @brief Constructs the MainWindow.
  * 
@@ -114,6 +115,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 }
 
+/**
+ * @brief Destroy the Main Window:: Main Window object
+ * 
+ */
 MainWindow::~MainWindow() {
     if (m_autosaveTimer) {
         m_autosaveTimer->stop();
@@ -131,45 +136,6 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     updateCliOverlayGeometry();
 }
 
-/**
- * @brief Sets up the user interface components.
- */
-/**
- * @brief Handles drag enter events for files (folders, zip, json).
- */
-/**
- * @brief Handles drop events to load projects or folders.
- */
-/**
- * @brief Checks if the required CLI tools are available.
- */
-/**
- * @brief Resolves the paths to the CLI binaries.
- */
-/**
- * @brief Loads a folder of images.
- */
-/**
- * @brief Opens a dialog to select a folder to load.
- */
-/**
- * @brief Runs the spratlayout CLI tool to generate the layout.
- */
-/**
- * @brief Handles the completion of the layout process.
- */
-/**
- * @brief Handles errors from the layout process.
- */
-/**
- * @brief Sets the loading state of the UI.
- */
-/**
- * @brief Updates the enabled state of UI controls based on application state.
- */
-/**
- * @brief Updates the main content view (Welcome vs Editor).
- */
 /**
  * @brief Parses the output from spratlayout into a LayoutModel.
  */
@@ -228,9 +194,9 @@ void MainWindow::updateManualFrameLabel() {
         return;
     }
     if (m_activeFramePaths.isEmpty()) {
-        m_folderLabel->setText("Folder: none");
+        m_folderLabel->setText(tr("Folder: none"));
     } else {
-        m_folderLabel->setText(QString("Frames: %1 (manual selection)").arg(m_activeFramePaths.size()));
+        m_folderLabel->setText(QString(tr("Frames: %1 (manual selection)")).arg(m_activeFramePaths.size()));
     }
 }
 
@@ -247,8 +213,8 @@ void MainWindow::onAddFramesRequested() {
     if (startDir.isEmpty() && !m_activeFramePaths.isEmpty()) {
         startDir = QFileInfo(m_activeFramePaths.first()).absoluteDir().absolutePath();
     }
-    QString filter = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)";
-    QStringList files = QFileDialog::getOpenFileNames(this, "Add Frames", startDir, filter);
+    QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+    QStringList files = QFileDialog::getOpenFileNames(this, tr("Add Frames"), startDir, filter);
     if (files.isEmpty()) {
         return;
     }
@@ -268,16 +234,16 @@ void MainWindow::onAddFramesRequested() {
         added.append(absPath);
     }
     if (added.isEmpty()) {
-        QMessageBox::information(this, "Add Frames", "All selected frames are already loaded.");
+        QMessageBox::information(this, tr("Add Frames"), tr("All selected frames are already loaded."));
         return;
     }
 
     const QStringList previousFramePaths = m_activeFramePaths;
     m_activeFramePaths.append(added);
-    m_statusLabel->setText(QString("Adding %1 frame(s)...").arg(added.size()));
+    m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
         m_activeFramePaths = previousFramePaths;
-        QMessageBox::warning(this, "Add Frames", "Could not create temporary frame list.");
+        QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
     onRunLayout();
@@ -308,9 +274,9 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     }
 
     if (!timelineNames.isEmpty()) {
-        QString warning = QString("The selected frame(s) are referenced by the following timelines:\n%1\nRemoving them will drop those entries from the timelines. Continue?")
+        QString warning = QString(tr("The selected frame(s) are referenced by the following timelines:\n%1\nRemoving them will drop those entries from the timelines. Continue?"))
                           .arg(QStringList(timelineNames.values()).join(", "));
-        if (QMessageBox::warning(this, "Remove Frames", warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        if (QMessageBox::warning(this, tr("Remove Frames"), warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
             return;
         }
     }
@@ -346,8 +312,8 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         m_canvas->clearCanvas();
         m_selectedSprites.clear();
         m_selectedSprite.reset();
-        m_statusLabel->setText("No frames loaded");
-        m_folderLabel->setText("Folder: none");
+        m_statusLabel->setText(tr("No frames loaded"));
+        m_folderLabel->setText(tr("Folder: none"));
         m_cachedLayoutOutput.clear();
         m_cachedLayoutScale = 1.0;
         updateMainContentView();
@@ -359,7 +325,7 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     m_activeFramePaths = remainingFramePaths;
     if (!ensureFrameListInput()) {
         m_activeFramePaths = previousFramePaths;
-        QMessageBox::warning(this, "Remove Frames", "Could not refresh the frame list after removal.");
+        QMessageBox::warning(this, tr("Remove Frames"), tr("Could not refresh the frame list after removal."));
         return;
     }
 
@@ -377,46 +343,10 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         refreshAnimationTest();
     }
 
-    m_statusLabel->setText(QString("Removed %1 frame(s)").arg(targets.size()));
+    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
     onRunLayout();
 }
 
-/**
- * @brief Opens a dialog to load a project file.
- */
-/**
- * @brief Handles the Save button click to export the project.
- */
-/**
- * @brief Updates the UI when a sprite is selected.
- */
-/**
- * @brief Handles zoom changes in the preview canvas.
- */
-/**
- * @brief Handles changes in the pivot spin boxes.
- */
-/**
- * @brief Handles pivot changes from the canvas interaction.
- */
-/**
- * @brief Handles selection changes in the handle (pivot/marker) combobox.
- */
-/**
- * @brief Opens the markers configuration dialog.
- */
-/**
- * @brief Handles marker selection from the canvas overlay.
- */
-/**
- * @brief Handles marker changes from the canvas overlay.
- */
-/**
- * @brief Handles profile changes.
- */
-/**
- * @brief Handles padding changes.
- */
 /**
  * @brief Handles trim transparency toggle changes.
  */
@@ -424,75 +354,6 @@ void MainWindow::onTrimChanged() {
     onRunLayout();
 }
 
-/**
- * @brief Handles layout zoom changes.
- */
-/**
- * @brief Adds a new animation timeline.
- */
-/**
- * @brief Removes the selected timeline.
- */
-/**
- * @brief Handles selection change in the timeline list.
- */
-/**
- * @brief Handles timeline name changes.
- */
-/**
- * @brief Refreshes the timeline list widget.
- */
-/**
- * @brief Refreshes the list of frames in the selected timeline.
- */
-/**
- * @brief Handles dropping a frame into a timeline.
- */
-/**
- * @brief Handles moving a frame within a timeline.
- */
-/**
- * @brief Handles duplicating a frame in the timeline.
- */
-/**
- * @brief Handles removing selected frames from the timeline.
- */
-/**
- * @brief Handles the previous frame button click.
- */
-/**
- * @brief Handles the play/pause button click.
- */
-/**
- * @brief Handles the next frame button click.
- */
-/**
- * @brief Gets the autosave file path.
- */
-/**
- * @brief Autosaves the project data.
- */
-/**
- * @brief Handles the animation timer timeout.
- */
-/**
- * @brief Exports the current animation to a file (GIF/Video).
- */
-/**
- * @brief Opens a dialog to save the animation.
- */
-/**
- * @brief Refreshes the animation preview widget.
- */
-/**
- * @brief Refreshes the handle (pivot/marker) combobox.
- */
-/**
- * @brief Loads a project from a JSON file or ZIP archive.
- */
-/**
- * @brief Applies the loaded project data to the application state.
- */
 /**
  * @brief Opens the settings dialog.
  */
@@ -517,11 +378,3 @@ void MainWindow::onSettingsClicked() {
 void MainWindow::applySettings() {
     SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animPreviewLabel);
 }
-
-
-/**
- * @brief Called when the autosave timer times out.
- */
-/**
- * @brief Called when CLI installation finishes.
- */

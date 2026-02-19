@@ -181,6 +181,18 @@ Generation behavior:
 - **Pull requests**  
   PRs are welcome. Keep changes focused, include rationale, and add tests or manual validation notes for behavior changes.
 
+- **Translations (Qt)**  
+  User-facing GUI strings should use Qt translation APIs (`tr(...)` in `QObject` classes, `QCoreApplication::translate(...)` in non-`QObject` code). Translation catalogs live in `i18n/`:
+  - `i18n/sprat-gui_en.ts`
+  - `i18n/sprat-gui_pt_BR.ts`
+  Typical workflow:
+  1. Update code strings using `tr`/`translate`.
+  2. Run `lupdate` to refresh `.ts` entries.
+  3. Translate in Qt Linguist.
+  4. Run `lrelease` to generate `.qm` files.
+  5. Verify by launching with a target locale (the app auto-loads `sprat-gui_<locale>.qm` from `./i18n` or the app directory).
+  Note: if `Qt6LinguistTools` is not installed, CMake still builds the app but skips automatic `.ts/.qm` generation.
+
 - **Packages / binaries**  
   Contributions for distribution packages and CI release flows are welcome, including:
   - Debian/Ubuntu (`.deb`)

@@ -43,7 +43,7 @@ void MainWindow::onRunLayout() {
                             QString::number(m_paddingSpin->value()),
                             m_trimCheck->isChecked() ? "true" : "false"));
 
-    m_statusLabel->setText("Running spratlayout...");
+    m_statusLabel->setText(tr("Running spratlayout..."));
     setLoading(true);
     m_process->start(m_spratLayoutBin, args);
 }
@@ -54,9 +54,9 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
         const QString failedProfile = m_runningLayoutProfile.isEmpty() ? m_profileCombo->currentText() : m_runningLayoutProfile;
         m_runningLayoutProfile.clear();
         const QString err = m_process->readAllStandardError();
-        m_statusLabel->setText("Error running layout");
+        m_statusLabel->setText(tr("Error running layout"));
         qCritical() << "spratlayout process failed. Exit code:" << exitCode << "Error:" << err;
-        QMessageBox::critical(this, "Error", "spratlayout failed:\n" + err);
+        QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + err);
         handleProfileFailure(failedProfile);
         if (m_layoutRunPending) {
             m_layoutRunPending = false;
@@ -102,7 +102,7 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
 
     m_layoutModel = newModel;
     m_canvas->setModel(m_layoutModel);
-    m_statusLabel->setText(QString("Loaded %1 sprites").arg(m_layoutModel.sprites.size()));
+    m_statusLabel->setText(QString(tr("Loaded %1 sprites")).arg(m_layoutModel.sprites.size()));
 
     populateActiveFrameListFromModel();
     if (m_layoutSourceIsList) {
@@ -129,16 +129,16 @@ void MainWindow::onProcessError(QProcess::ProcessError error) {
     setLoading(false);
     m_runningLayoutProfile.clear();
     if (error == QProcess::FailedToStart) {
-        m_statusLabel->setText("Error: spratlayout not found");
+        m_statusLabel->setText(tr("Error: spratlayout not found"));
         qCritical() << "Failed to start spratlayout process. Make sure it is installed and in your PATH.";
-        QMessageBox::critical(this, "Error", "Could not start 'spratlayout'.\nMake sure it is installed and in your PATH.");
+        QMessageBox::critical(this, tr("Error"), tr("Could not start 'spratlayout'.\nMake sure it is installed and in your PATH."));
         if (m_layoutRunPending) {
             m_layoutRunPending = false;
             onRunLayout();
         }
         return;
     }
-    m_statusLabel->setText("Error running layout process");
+    m_statusLabel->setText(tr("Error running layout process"));
     if (m_layoutRunPending) {
         m_layoutRunPending = false;
         onRunLayout();
@@ -191,7 +191,7 @@ void MainWindow::handleProfileFailure(const QString& failedProfile) {
     }
 
     if (fallbackProfile.isEmpty()) {
-        QMessageBox::warning(this, "Profile disabled", "The selected profile failed and was disabled. No fallback profile is available.");
+        QMessageBox::warning(this, tr("Profile disabled"), tr("The selected profile failed and was disabled. No fallback profile is available."));
         return;
     }
     if (m_profileCombo->currentText() == fallbackProfile) {
@@ -239,7 +239,7 @@ void MainWindow::setLoading(bool loading) {
             m_loadingOverlayDelayTimer->stop();
         }
         if (m_welcomeLabel) {
-            m_welcomeLabel->setText("Drag and Drop folder with image files");
+            m_welcomeLabel->setText(tr("Drag and Drop folder with image files"));
         }
         if (!m_cliInstallInProgress && m_cliInstallOverlay) {
             if (m_cliInstallProgress) {
@@ -249,7 +249,7 @@ void MainWindow::setLoading(bool loading) {
             m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
             m_loadingOverlayVisible = false;
         }
-        m_loadingUiMessage = "Loading...";
+        m_loadingUiMessage = tr("Loading...");
     }
     setCursor(loading ? Qt::WaitCursor : Qt::ArrowCursor);
     updateUiState();

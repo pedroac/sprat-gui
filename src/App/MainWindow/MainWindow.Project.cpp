@@ -35,15 +35,15 @@ void MainWindow::loadAutosavedProject() {
     }
     const QString folder = root["layout"].toObject()["folder"].toString();
     if (folder.isEmpty()) {
-        m_statusLabel->setText("Autosave missing folder.");
+        m_statusLabel->setText(tr("Autosave missing folder."));
         return;
     }
 
-    m_statusLabel->setText("Loading autosaved project");
+    m_statusLabel->setText(tr("Loading autosaved project"));
     cacheLayoutOutputFromPayload(root);
     m_pendingProjectPayload = root;
     m_currentFolder = folder;
-    m_folderLabel->setText("Folder: " + folder);
+    m_folderLabel->setText(tr("Folder: ") + folder);
     m_layoutSourcePath = QDir(folder).absolutePath();
     m_layoutSourceIsList = false;
     if (!m_frameListPath.isEmpty()) {
@@ -54,7 +54,7 @@ void MainWindow::loadAutosavedProject() {
 }
 
 void MainWindow::onLoadProject() {
-    QString file = QFileDialog::getOpenFileName(this, "Load Project", "", "Project Files (*.json *.zip)");
+    QString file = QFileDialog::getOpenFileName(this, tr("Load Project"), "", tr("Project Files (*.json *.zip)"));
     if (!file.isEmpty()) {
         loadProject(file);
     }
@@ -77,16 +77,16 @@ void MainWindow::onSaveClicked() {
 
 bool MainWindow::saveProjectWithConfig(SaveConfig config) {
     if (m_spratLayoutBin.isEmpty() || m_spratPackBin.isEmpty()) {
-        QMessageBox::critical(this, "Error", "Missing spratlayout or spratpack binaries.");
+        QMessageBox::critical(this, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
         return false;
     }
     if (m_layoutSourcePath.isEmpty()) {
-        QMessageBox::critical(this, "Error", "No layout source selected.");
+        QMessageBox::critical(this, tr("Error"), tr("No layout source selected."));
         return false;
     }
 
-    m_loadingUiMessage = "Saving...";
-    m_statusLabel->setText("Saving...");
+    m_loadingUiMessage = tr("Saving...");
+    m_statusLabel->setText(tr("Saving..."));
     QApplication::processEvents();
     m_forceImmediateLoadingOverlay = true;
     QString savedDestination;
@@ -108,9 +108,9 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         [this](const QString& message) { appendDebugLog(message); });
     m_forceImmediateLoadingOverlay = false;
     if (ok) {
-        m_statusLabel->setText("Saved to " + savedDestination);
+        m_statusLabel->setText(tr("Saved to ") + savedDestination);
         QMetaObject::invokeMethod(this, [this, savedDestination]() {
-            QMessageBox::information(this, "Saved", "Project saved successfully to:\n" + savedDestination);
+            QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + savedDestination);
         });
     }
     return ok;
@@ -148,7 +148,7 @@ void MainWindow::autosaveProject() {
 
     QString error;
     if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload({}), error)) {
-        m_statusLabel->setText("Autosaved project");
+        m_statusLabel->setText(tr("Autosaved project"));
     } else {
         m_statusLabel->setText(error);
     }
@@ -166,7 +166,7 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
             loadImagesFromZip(path, false);
             return;
         }
-        QMessageBox::warning(this, "Load Failed", error);
+        QMessageBox::warning(this, tr("Load Failed"), error);
         return;
     }
     m_pendingProjectPayload = root;
@@ -187,7 +187,7 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     QString folder = layoutInfo["folder"].toString();
     if (!folder.isEmpty()) {
         m_currentFolder = folder;
-        m_folderLabel->setText("Folder: " + folder);
+        m_folderLabel->setText(tr("Folder: ") + folder);
         m_layoutSourcePath = QDir(folder).absolutePath();
         m_layoutSourceIsList = false;
         if (!m_frameListPath.isEmpty()) {
@@ -226,7 +226,7 @@ bool MainWindow::pickImageSubdirectory(const QString& root, QString& selection, 
         labels.append(base.relativeFilePath(dirPath));
     }
     bool ok = false;
-    QString chosen = QInputDialog::getItem(const_cast<MainWindow*>(this), "Select frame folder", "Folders with images:", labels, 0, false, &ok);
+    QString chosen = QInputDialog::getItem(const_cast<MainWindow*>(this), tr("Select frame folder"), tr("Folders with images:"), labels, 0, false, &ok);
     if (!ok) {
         if (canceled) {
             *canceled = true;

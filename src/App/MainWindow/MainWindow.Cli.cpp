@@ -17,7 +17,7 @@
 void MainWindow::checkCliTools() {
     QStringList missing;
     m_cliReady = resolveCliBinaries(missing);
-    m_statusLabel->setText(m_cliReady ? "CLI ready" : "CLI missing");
+    m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI missing"));
     if (!m_cliReady) {
         showMissingCliDialog(missing);
     }
@@ -57,13 +57,13 @@ void MainWindow::showMissingCliDialog(const QStringList& missing) {
     } else if (action == MissingCliAction::ProvidePath) {
         openCliPathDialog();
     } else {
-        m_statusLabel->setText("CLI missing");
+        m_statusLabel->setText(tr("CLI missing"));
         QApplication::quit();
     }
 }
 
 void MainWindow::openCliPathDialog() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Select folder containing sprat binaries");
+    QString dir = QFileDialog::getExistingDirectory(this, tr("Select folder containing sprat binaries"));
     if (!dir.isEmpty()) {
         CliToolsConfig::saveBinDir(dir);
         checkCliTools();
@@ -74,7 +74,7 @@ void MainWindow::installCliTools() {
     if (!m_cliToolInstaller) {
         return;
     }
-    m_statusLabel->setText("Installing CLI tools...");
+    m_statusLabel->setText(tr("Installing CLI tools..."));
     m_cliToolInstaller->installCliTools();
 }
 
@@ -85,7 +85,7 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     if (!m_cliReady || m_isLoading) {
         return;
     }
-    m_loadingUiMessage = "Loading images...";
+    m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
     QString targetPath = path;
     QString selection;
@@ -93,16 +93,16 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     if (pickImageSubdirectory(path, selection, &selectionCanceled)) {
         targetPath = selection;
     } else if (selectionCanceled) {
-        m_statusLabel->setText("Load canceled");
+        m_statusLabel->setText(tr("Load canceled"));
         setLoading(false);
         return;
     } else if (!hasImageFiles(path)) {
         setLoading(false);
-        QMessageBox::warning(this, "Load Failed", "No image files found in the selected folder.");
+        QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
         return;
     }
     m_currentFolder = targetPath;
-    m_folderLabel->setText("Folder: " + QDir(targetPath).absolutePath());
+    m_folderLabel->setText(tr("Folder: ") + QDir(targetPath).absolutePath());
     m_layoutSourcePath = QDir(targetPath).absolutePath();
     m_layoutSourceIsList = false;
     m_cachedLayoutOutput.clear();
@@ -119,7 +119,7 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
         absolutePaths << QDir(targetPath).absoluteFilePath(rel);
     }
     m_activeFramePaths = absolutePaths;
-    QProgressDialog progress("Loading image frames...", "Cancel", 0, imagePaths.size(), this);
+    QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imagePaths.size(), this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(1000);
     progress.setAutoClose(true);
@@ -128,17 +128,17 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     for (int i = 0; i < absolutePaths.size(); ++i) {
         const QString absolutePath = absolutePaths[i];
         progress.setValue(i);
-        progress.setLabelText(QString("Loading: %1\n%2").arg(QFileInfo(absolutePath).fileName(), absolutePath));
-        m_statusLabel->setText("Loading frame: " + absolutePath);
+        progress.setLabelText(QString("%1: %2\n%3").arg(tr("Loading"), QFileInfo(absolutePath).fileName(), absolutePath));
+        m_statusLabel->setText(tr("Loading frame: ") + absolutePath);
         QApplication::processEvents();
         if (progress.wasCanceled()) {
-            m_statusLabel->setText("Frame loading canceled");
+            m_statusLabel->setText(tr("Frame loading canceled"));
             setLoading(false);
             return;
         }
     }
     progress.setValue(absolutePaths.size());
-    m_statusLabel->setText(QString("Loaded %1 image frame(s) from %2").arg(absolutePaths.size()).arg(QDir(targetPath).absolutePath()));
+    m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(QDir(targetPath).absolutePath()));
 
     onRunLayout();
 }
@@ -149,16 +149,16 @@ bool MainWindow::confirmLayoutReplacement() {
         return true;
     }
     QMessageBox msg(this);
-    msg.setWindowTitle("Layout Already Loaded");
-    msg.setText("A layout is already loaded. Do you want to replace it?");
-    QPushButton* replaceBtn = msg.addButton("Replace", QMessageBox::AcceptRole);
-    msg.addButton("Ignore", QMessageBox::RejectRole);
+    msg.setWindowTitle(tr("Layout Already Loaded"));
+    msg.setText(tr("A layout is already loaded. Do you want to replace it?"));
+    QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+    msg.addButton(tr("Ignore"), QMessageBox::RejectRole);
     msg.exec();
     return msg.clickedButton() == replaceBtn;
 }
 
 void MainWindow::onLoadFolder() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Select Frames Folder");
+    QString dir = QFileDialog::getExistingDirectory(this, tr("Select Frames Folder"));
     if (!dir.isEmpty()) {
         loadFolder(dir);
     }
@@ -167,12 +167,12 @@ void MainWindow::onLoadFolder() {
 void MainWindow::onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     hideCliInstallOverlay();
     if (exitStatus == QProcess::NormalExit && exitCode == 0) {
-        m_statusLabel->setText("CLI installation finished");
+        m_statusLabel->setText(tr("CLI installation finished"));
         checkCliTools();
         return;
     }
-    m_statusLabel->setText("CLI installation failed");
-    QMessageBox::warning(this, "Install Failed", "Could not install CLI tools automatically.");
+    m_statusLabel->setText(tr("CLI installation failed"));
+    QMessageBox::warning(this, tr("Install Failed"), tr("Could not install CLI tools automatically."));
 }
 
 void MainWindow::setupCliInstallOverlay() {
@@ -185,7 +185,7 @@ void MainWindow::setupCliInstallOverlay() {
     QVBoxLayout* layout = new QVBoxLayout(m_cliInstallOverlay);
     layout->setAlignment(Qt::AlignCenter);
     layout->setSpacing(12);
-    m_cliInstallOverlayLabel = new QLabel("Installing CLI tools…", m_cliInstallOverlay);
+    m_cliInstallOverlayLabel = new QLabel(tr("Installing CLI tools..."), m_cliInstallOverlay);
     m_cliInstallOverlayLabel->setStyleSheet("color: white; font-weight: bold;");
     layout->addWidget(m_cliInstallOverlayLabel);
     m_cliInstallProgress = new QProgressBar(m_cliInstallOverlay);
@@ -211,7 +211,7 @@ void MainWindow::showCliInstallOverlay() {
         m_cliInstallProgress->show();
     }
     m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    m_cliInstallOverlayLabel->setText("Installing CLI tools...");
+    m_cliInstallOverlayLabel->setText(tr("Installing CLI tools..."));
     updateCliOverlayGeometry();
     m_cliInstallOverlay->show();
     m_loadingOverlayVisible = true;

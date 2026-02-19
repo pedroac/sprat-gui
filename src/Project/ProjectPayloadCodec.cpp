@@ -12,17 +12,6 @@ QString normalizedMarkerName(QString name) {
     }
     return name;
 }
-
-QString normalizedMarkerKind(QString kind) {
-    kind = kind.trimmed().toLower();
-    if (kind == "rect") {
-        return "rectangle";
-    }
-    if (kind.isEmpty()) {
-        return "point";
-    }
-    return kind;
-}
 }
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
@@ -68,7 +57,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         QJsonArray markersArr;
         for (const auto& p : s->points) {
             QJsonObject mObj;
-            const QString kind = normalizedMarkerKind(p.kind);
+            const QString kind = markerKindToString(p.kind);
             mObj["name"] = normalizedMarkerName(p.name);
             mObj["x"] = p.x;
             mObj["y"] = p.y;
@@ -174,7 +163,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             if (kind.isEmpty()) {
                 kind = mObj["type"].toString();
             }
-            p.kind = normalizedMarkerKind(kind);
+            p.kind = markerKindFromString(kind);
             p.radius = mObj["radius"].toInt(8);
             p.w = mObj["w"].toInt(16);
             p.h = mObj["h"].toInt(16);

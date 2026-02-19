@@ -9,6 +9,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 set(PROJECT_SOURCES
     src/App/main.cpp
@@ -101,3 +102,16 @@ target_include_directories(sprat-gui PRIVATE
 )
 
 target_link_libraries(sprat-gui PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)
+
+set(TS_FILES
+    i18n/sprat-gui_en.ts
+    i18n/sprat-gui_pt_BR.ts
+)
+
+if(Qt6LinguistTools_FOUND)
+    qt_add_translations(sprat-gui
+        TS_FILES ${TS_FILES}
+    )
+else()
+    message(STATUS "Qt6 LinguistTools not found: skipping automatic .ts/.qm generation.")
+endif()

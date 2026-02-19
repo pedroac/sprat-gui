@@ -42,8 +42,8 @@ void MainWindow::onHandleComboChanged(int index) {
     }
 
     m_statusLabel->setText(m_selectedPointName.isEmpty()
-        ? "Selected: " + (m_selectedSprite ? m_selectedSprite->name : "none")
-        : "Selected Marker: " + m_selectedPointName);
+        ? tr("Selected: ") + (m_selectedSprite ? m_selectedSprite->name : tr("none"))
+        : tr("Selected Marker: ") + m_selectedPointName);
 }
 
 void MainWindow::onPointsConfigClicked() {
@@ -61,7 +61,7 @@ void MainWindow::onPointsConfigClicked() {
 void MainWindow::onMarkerSelectedFromCanvas(const QString& name) {
     m_selectedPointName = name;
     if (!name.isEmpty()) {
-        m_statusLabel->setText("Selected Marker: " + name);
+        m_statusLabel->setText(tr("Selected Marker: ") + name);
         const int idx = m_handleCombo->findText(name);
         if (idx != -1) {
             m_handleCombo->blockSignals(true);
@@ -70,7 +70,7 @@ void MainWindow::onMarkerSelectedFromCanvas(const QString& name) {
         }
         return;
     }
-    m_statusLabel->setText("Selected: " + m_selectedSprite->name);
+    m_statusLabel->setText(tr("Selected: ") + m_selectedSprite->name);
     m_handleCombo->blockSignals(true);
     m_handleCombo->setCurrentIndex(0);
     m_handleCombo->blockSignals(false);

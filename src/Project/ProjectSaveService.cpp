@@ -1,6 +1,7 @@
 #include "ProjectSaveService.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -17,23 +18,16 @@
 #include <cmath>
 
 namespace {
+QString trPS(const char* text) {
+    return QCoreApplication::translate("ProjectSaveService", text);
+}
+
 QString normalizedMarkerName(QString name) {
     name = name.trimmed();
     if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
         return "pivot";
     }
     return name;
-}
-
-QString normalizedMarkerKind(QString kind) {
-    kind = kind.trimmed().toLower();
-    if (kind == "rect") {
-        return "rectangle";
-    }
-    if (kind.isEmpty()) {
-        return "point";
-    }
-    return kind;
 }
 }
 
@@ -80,7 +74,7 @@ bool ProjectSaveService::save(
     if (isZip) {
         zipBin = QStandardPaths::findExecutable("zip");
         if (zipBin.isEmpty()) {
-            QMessageBox::critical(parent, "Error", "The 'zip' command line tool is required to save .zip projects but was not found.");
+            QMessageBox::critical(parent, trPS("Error"), trPS("The 'zip' command line tool is required to save .zip projects but was not found."));
             return false;
         }
     }
@@ -89,7 +83,7 @@ bool ProjectSaveService::save(
     QString workingPath;
     if (isZip) {
         if (!tempZipDir.isValid()) {
-            QMessageBox::critical(parent, "Error", "Could not create temporary directory.");
+            QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary directory."));
             return false;
         }
         workingPath = tempZipDir.path();
@@ -103,24 +97,24 @@ bool ProjectSaveService::save(
 
     setLoading(true);
     LoadingGuard loadingGuard{setLoading};
-    setStatus("Saving...");
+    setStatus(trPS("Saving..."));
     QApplication::processEvents();
 
     QDir destDir(workingPath);
     if (!destDir.exists()) {
         if (!destDir.mkpath(".")) {
-            QMessageBox::critical(parent, "Error", "Could not create destination directory.");
+            QMessageBox::critical(parent, trPS("Error"), trPS("Could not create destination directory."));
             return false;
         }
     }
 
     QFile projectFile(destDir.filePath("project.spart.json"));
     if (!projectFile.open(QIODevice::WriteOnly)) {
-        QMessageBox::critical(parent, "Error", "Could not write project.spart.json.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("Could not write project.spart.json."));
         return false;
     }
     if (projectFile.write(QJsonDocument(projectPayload).toJson()) < 0) {
-        QMessageBox::critical(parent, "Error", "Failed to write project.spart.json.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("Failed to write project.spart.json."));
         return false;
     }
     projectFile.close();
@@ -144,12 +138,12 @@ bool ProjectSaveService::save(
         for (auto markerIt = markersArr.begin(); markerIt != markersArr.end(); ++markerIt) {
             QJsonObject markerObj = markerIt->toObject();
             const QString markerName = normalizedMarkerName(markerObj["name"].toString());
-            QString markerKind = normalizedMarkerKind(markerObj["kind"].toString());
+            MarkerKind markerKind = markerKindFromString(markerObj["kind"].toString());
             if (markerObj["kind"].toString().isEmpty()) {
-                markerKind = normalizedMarkerKind(markerObj["type"].toString());
+                markerKind = markerKindFromString(markerObj["type"].toString());
             }
-            markerObj["kind"] = markerKind;
-            markerObj["type"] = markerKind;
+            markerObj["kind"] = markerKindToString(markerKind);
+            markerObj["type"] = markerKindToString(markerKind);
             markerObj["name"] = markerName;
             *markerIt = markerObj;
             if (markerName == "pivot") {
@@ -159,8 +153,8 @@ bool ProjectSaveService::save(
         if (!hasPivotMarker) {
             QJsonObject pivotMarker;
             pivotMarker["name"] = "pivot";
-            pivotMarker["kind"] = "point";
-            pivotMarker["type"] = "point";
+            pivotMarker["kind"] = markerKindToString(MarkerKind::Point);
+            pivotMarker["type"] = markerKindToString(MarkerKind::Point);
             pivotMarker["x"] = spriteState["pivot_x"].toInt();
             pivotMarker["y"] = spriteState["pivot_y"].toInt();
             markersArr.append(pivotMarker);
@@ -172,27 +166,27 @@ bool ProjectSaveService::save(
     QJsonObject animInfo = projectPayload["animations"].toObject();
     QTemporaryFile markersTemp;
     if (!markersTemp.open()) {
-        QMessageBox::critical(parent, "Error", "Could not create temporary markers file.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary markers file."));
         return false;
     }
     if (markersTemp.write(QJsonDocument(markersInfo).toJson()) < 0 || !markersTemp.flush()) {
-        QMessageBox::critical(parent, "Error", "Could not write temporary markers file.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("Could not write temporary markers file."));
         return false;
     }
     markersTemp.close();
     QTemporaryFile animTemp;
     if (!animTemp.open()) {
-        QMessageBox::critical(parent, "Error", "Could not create temporary animation file.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary animation file."));
         return false;
     }
     if (animTemp.write(QJsonDocument(animInfo).toJson()) < 0 || !animTemp.flush()) {
-        QMessageBox::critical(parent, "Error", "Could not write temporary animation file.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("Could not write temporary animation file."));
         return false;
     }
     animTemp.close();
 
     if (config.scales.isEmpty()) {
-        QMessageBox::critical(parent, "Error", "No output scales configured.");
+        QMessageBox::critical(parent, trPS("Error"), trPS("No output scales configured."));
         return false;
     }
 
@@ -201,7 +195,7 @@ bool ProjectSaveService::save(
     if (!framePaths.isEmpty()) {
         saveFrameList.setFileTemplate(QDir::temp().filePath("sprat-gui-save-frames-XXXXXX.txt"));
         if (!saveFrameList.open()) {
-            QMessageBox::critical(parent, "Error", "Could not create temporary frame list for save.");
+            QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary frame list for save."));
             return false;
         }
         QTextStream out(&saveFrameList);
@@ -220,19 +214,19 @@ bool ProjectSaveService::save(
     auto runProcess = [&](QProcess& process, const QString& tool, const QStringList& args, const QString& step) -> bool {
         process.start(tool, args);
         if (!process.waitForStarted()) {
-            QMessageBox::critical(parent, "Error", QString("%1: failed to start '%2'.").arg(step, tool));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("%1: failed to start '%2'.")).arg(step, tool));
             return false;
         }
         if (!process.waitForFinished(kProcessTimeoutMs)) {
             process.kill();
             process.waitForFinished();
-            QMessageBox::critical(parent, "Error", QString("%1 timed out.").arg(step));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("%1 timed out.")).arg(step));
             return false;
         }
         if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
             const QString err = readStdErr(process);
-            QMessageBox::critical(parent, "Error", err.isEmpty() ? QString("%1 failed.").arg(step)
-                                                                  : QString("%1 failed:\n%2").arg(step, err));
+            QMessageBox::critical(parent, trPS("Error"), err.isEmpty() ? QString(trPS("%1 failed.")).arg(step)
+                                                                        : QString(trPS("%1 failed:\n%2")).arg(step, err));
             return false;
         }
         return true;
@@ -258,7 +252,7 @@ bool ProjectSaveService::save(
         QDir scaleDir(destDir.filePath(scale.name));
         if (!scaleDir.exists()) {
             if (!scaleDir.mkpath(".")) {
-                QMessageBox::critical(parent, "Error", QString("Could not create scale directory: %1").arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not create scale directory: %1")).arg(scale.name));
                 return false;
             }
         }
@@ -294,8 +288,8 @@ bool ProjectSaveService::save(
             if (!layoutData.startsWith("atlas ")) {
                 const QString preview = QString::fromUtf8(layoutData.left(200)).trimmed();
                 QMessageBox::critical(parent,
-                                      "Error",
-                                      QString("Layout generation produced invalid output for scale '%1'.\nInput: %2\nOutput preview:\n%3")
+                                      trPS("Error"),
+                                      QString(trPS("Layout generation produced invalid output for scale '%1'.\nInput: %2\nOutput preview:\n%3"))
                                           .arg(scale.name, layoutPathForSave, preview.isEmpty() ? QString("<empty>") : preview));
                 return false;
             }
@@ -306,7 +300,7 @@ bool ProjectSaveService::save(
         QProcess packProc;
         packProc.start(spratPackBin, QStringList());
         if (!packProc.waitForStarted()) {
-            QMessageBox::critical(parent, "Error", QString("Packing failed for scale '%1': could not start spratpack.").arg(scale.name));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing failed for scale '%1': could not start spratpack.")).arg(scale.name));
             return false;
         }
         packProc.write(layoutData);
@@ -314,29 +308,29 @@ bool ProjectSaveService::save(
         if (!packProc.waitForFinished(kProcessTimeoutMs)) {
             packProc.kill();
             packProc.waitForFinished();
-            QMessageBox::critical(parent, "Error", QString("Packing timed out for scale '%1'.").arg(scale.name));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing timed out for scale '%1'.")).arg(scale.name));
             return false;
         }
         if (packProc.exitStatus() != QProcess::NormalExit || packProc.exitCode() != 0) {
             const QString err = readStdErr(packProc);
             const QString debugPath = dumpLayoutDataForDebug(scale.name, layoutData);
-            QString details = err.isEmpty() ? QString("Packing failed for scale '%1'.").arg(scale.name)
-                                            : QString("Packing failed for scale '%1':\n%2").arg(scale.name, err);
+            QString details = err.isEmpty() ? QString(trPS("Packing failed for scale '%1'.")).arg(scale.name)
+                                            : QString(trPS("Packing failed for scale '%1':\n%2")).arg(scale.name, err);
             if (!debugPath.isEmpty()) {
                 details += QString("\n\nLayout debug dump:\n%1").arg(debugPath);
                 debugLog(QString("[save:%1] pack failed; layout dump='%2'").arg(scale.name, debugPath));
             } else {
-                details += "\n\nLayout debug dump: failed to write debug file.";
+                details += trPS("\n\nLayout debug dump: failed to write debug file.");
                 debugLog(QString("[save:%1] pack failed; layout dump write failed").arg(scale.name));
             }
-            QMessageBox::critical(parent, "Error", details);
+            QMessageBox::critical(parent, trPS("Error"), details);
             return false;
         }
         QByteArray imageData = packProc.readAllStandardOutput();
 
         QFile imgFile(scaleDir.filePath("spritesheet.png"));
         if (!imgFile.open(QIODevice::WriteOnly) || imgFile.write(imageData) < 0) {
-            QMessageBox::critical(parent, "Error", QString("Could not write spritesheet for scale '%1'.").arg(scale.name));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write spritesheet for scale '%1'.")).arg(scale.name));
             return false;
         }
         imgFile.close();
@@ -349,7 +343,7 @@ bool ProjectSaveService::save(
             convArgs << "--animations" << animTemp.fileName();
             convProc.start(spratConvertBin, convArgs);
             if (!convProc.waitForStarted()) {
-                QMessageBox::critical(parent, "Error", QString("Format conversion failed for scale '%1': could not start spratconvert.").arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion failed for scale '%1': could not start spratconvert.")).arg(scale.name));
                 return false;
             }
             convProc.write(layoutData);
@@ -357,21 +351,21 @@ bool ProjectSaveService::save(
             if (!convProc.waitForFinished(kProcessTimeoutMs)) {
                 convProc.kill();
                 convProc.waitForFinished();
-                QMessageBox::critical(parent, "Error", QString("Format conversion timed out for scale '%1'.").arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion timed out for scale '%1'.")).arg(scale.name));
                 return false;
             }
             if (convProc.exitStatus() != QProcess::NormalExit || convProc.exitCode() != 0) {
                 const QString err = readStdErr(convProc);
-                QMessageBox::critical(parent, "Error", err.isEmpty()
-                                                          ? QString("Format conversion failed for scale '%1'.").arg(scale.name)
-                                                          : QString("Format conversion failed for scale '%1':\n%2").arg(scale.name, err));
+                QMessageBox::critical(parent, trPS("Error"), err.isEmpty()
+                                                          ? QString(trPS("Format conversion failed for scale '%1'.")).arg(scale.name)
+                                                          : QString(trPS("Format conversion failed for scale '%1':\n%2")).arg(scale.name, err));
                 return false;
             }
             QByteArray convData = convProc.readAllStandardOutput();
             QString ext = config.transform == "css" ? "css" : (config.transform == "xml" ? "xml" : (config.transform == "csv" ? "csv" : "json"));
             QFile convFile(scaleDir.filePath("layout_formatted." + ext));
             if (!convFile.open(QIODevice::WriteOnly) || convFile.write(convData) < 0) {
-                QMessageBox::critical(parent, "Error", QString("Could not write converted layout for scale '%1'.").arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write converted layout for scale '%1'.")).arg(scale.name));
                 return false;
             }
             convFile.close();
@@ -384,7 +378,7 @@ bool ProjectSaveService::save(
         QString absDest = QFileInfo(config.destination).absoluteFilePath();
         QDir().mkpath(QFileInfo(absDest).path());
         QFile::remove(absDest);
-        if (!runProcess(zipProc, zipBin, QStringList() << "-r" << absDest << ".", "Failed to create zip archive")) {
+        if (!runProcess(zipProc, zipBin, QStringList() << "-r" << absDest << ".", trPS("Failed to create zip archive"))) {
             return false;
         }
     }
