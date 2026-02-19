@@ -2,8 +2,8 @@
 #include <QMainWindow>
 #include <QWidget>
 #include <QProcess>
-#include <QHash>
 #include <QTimer>
+#include <QStringList>
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
 #include "TimelineListWidget.h"
@@ -32,6 +32,9 @@ class QResizeEvent;
 class QTemporaryDir;
 class QWidget;
 class QProgressBar;
+class QDockWidget;
+class QTextEdit;
+class QAction;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -41,6 +44,8 @@ public:
 
 private slots:
     void onLayoutCanvasPathDropped(const QString& path);
+    void onAddFramesRequested();
+    void onRemoveFramesRequested(const QStringList& paths);
     void onLoadFolder();
     void onLoadProject();
     void onRunLayout();
@@ -86,12 +91,12 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    struct LayoutCacheEntry {
-        QString folder;
-        int padding = 0;
-        bool trimTransparent = false;
-        LayoutModel model;
-    };
+    QString layoutParserFolder() const;
+    bool ensureFrameListInput();
+    void populateActiveFrameListFromModel();
+    void updateManualFrameLabel();
+    void handleProfileFailure(const QString& failedProfile);
+    bool isProfileEnabled(const QString& profile) const;
 
     void setupUi();
     void setupToolbar();
@@ -125,6 +130,8 @@ private:
     bool hasImageFiles(const QString& path) const;
     bool loadImagesFromZip(const QString& zipPath, bool confirmReplace = true);
     void clearZipTempDir();
+    void cacheLayoutOutputFromPayload(const QJsonObject& payload);
+    void appendDebugLog(const QString& message);
     void refreshHandleCombo();
     void applyProjectPayload();
     LayoutModel parseLayoutOutput(const QString& output, const QString& folderPath);
@@ -185,7 +192,10 @@ private:
 
     QAction* m_loadAction;
     QAction* m_saveAction;
+    QAction* m_showDebugAction = nullptr;
     QLabel* m_statusLabel;
+    QDockWidget* m_debugDock = nullptr;
+    QTextEdit* m_debugLogEdit = nullptr;
     
     LayoutModel m_layoutModel;
     QJsonObject m_pendingProjectPayload;
@@ -203,15 +213,26 @@ private:
     bool m_cliReady = false;
     bool m_isLoading = false;
     QTimer* m_animTimer;
+    QTimer* m_loadingOverlayDelayTimer = nullptr;
     int m_animFrameIndex = 0;
     bool m_animPlaying = false;
+    bool m_cliInstallInProgress = false;
+    bool m_loadingOverlayVisible = false;
+    bool m_forceImmediateLoadingOverlay = false;
     AppSettings m_settings;
     CliPaths m_cliPaths;
     QTemporaryDir* m_zipTempDir = nullptr;
     QWidget* m_cliInstallOverlay = nullptr;
     QLabel* m_cliInstallOverlayLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;
-    QHash<QString, LayoutCacheEntry> m_layoutCache;
-    QString m_activeLayoutCacheKey;
     QString m_loadingUiMessage = "Loading...";
+    QStringList m_activeFramePaths;
+    QString m_layoutSourcePath;
+    bool m_layoutSourceIsList = false;
+    QString m_frameListPath;
+    QString m_cachedLayoutOutput;
+    double m_cachedLayoutScale = 1.0;
+    QString m_lastSuccessfulProfile;
+    QString m_runningLayoutProfile;
+    bool m_layoutRunPending = false;
 };

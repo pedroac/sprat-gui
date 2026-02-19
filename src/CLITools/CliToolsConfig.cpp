@@ -1,5 +1,7 @@
 #include "CliToolsConfig.h"
 
+#include "SpratCliLocator.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -60,6 +62,11 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& overri
         if (fi.exists() && fi.isExecutable()) {
             return fi.absoluteFilePath();
         }
+    }
+
+    QString siblingBin = findSiblingSpratCliBinary(name);
+    if (!siblingBin.isEmpty()) {
+        return siblingBin;
     }
 
     QString localBin = QDir::homePath() + "/.local/bin/" + name;

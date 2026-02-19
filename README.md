@@ -47,12 +47,23 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   - `spratpack`
   - `spratconvert` (optional for format transforms)
   *(If the app detects them missing it can run the bundled installer and drop binaries into `~/.local/bin`.)*
+  - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratlayout`, `spratpack`, and `spratconvert` from it or let you point Settings directly at those binaries.
 - Optional export tools:
   - ImageMagick (`magick` or `convert`) for GIF
   - FFmpeg (`ffmpeg`) for video
 - Optional archive tools:
   - `zip` (save `.zip` projects)
   - `unzip` (load `.zip` projects)
+
+When the installer downloads the CLI tools for you, it clones the latest `main` version of `sprat-cli` (`git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git`) before building them, ensuring you always get the up-to-date release branch.
+
+## Local CLI development
+
+Place the `sprat-cli` repository beside this project (for example, at `../sprat-cli`) so the GUI can work with the same source tree. After building that repo (e.g., `cmake -S ../sprat-cli -B ../sprat-cli/build && cmake --build ../sprat-cli/build`), Sprat GUI auto-detects the generated `spratlayout`, `spratpack`, and `spratconvert` binaries, or you can point the Settings dialog at the directory. If you clone manually (or let the installer do it for you), make sure to pull the latest `main` branch before building so the GUI uses the most current CLI behavior.
+
+## Manual frame editing
+
+Use the layout canvas context menu to manage individual frames without reloading an entire folder. Right-click an empty area, choose **Add Frames...**, and pick one or more image files. The GUI writes a temporary plaintext list that `spratlayout` already understands (the same list-file input described in the [`sprat-cli`](https://github.com/pedroac/sprat-cli) README) and runs the layout using that list, so you can mix files from anywhere on disk. Right-clicking a selected sprite (or selection) exposes a **Remove Frame** / **Remove Frames** command; if any of the chosen frames are referenced by existing timelines you are warned that the timelines will drop those entries before the removal proceeds.
 
 ## Build
 
@@ -64,7 +75,7 @@ cmake --build . -j4
 Binary output:
 
 ```bash
-./sprat-gui-cpp
+./sprat-gui
 ```
 
 ## Quick start

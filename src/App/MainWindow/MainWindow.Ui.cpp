@@ -6,6 +6,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QDockWidget>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -18,6 +19,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QTextEdit>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -29,6 +31,25 @@ void MainWindow::setupUi() {
     // Central Widget is a Stack
     m_mainStack = new QStackedWidget(this);
     setCentralWidget(m_mainStack);
+
+    m_debugDock = new QDockWidget("Debug", this);
+    m_debugDock->setObjectName("debugDock");
+    m_debugDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+    m_debugLogEdit = new QTextEdit(m_debugDock);
+    m_debugLogEdit->setReadOnly(true);
+    m_debugDock->setWidget(m_debugLogEdit);
+    addDockWidget(Qt::BottomDockWidgetArea, m_debugDock);
+    m_debugDock->hide();
+    if (m_showDebugAction) {
+        connect(m_debugDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+            if (!m_showDebugAction) {
+                return;
+            }
+            m_showDebugAction->blockSignals(true);
+            m_showDebugAction->setChecked(visible);
+            m_showDebugAction->blockSignals(false);
+        });
+    }
 
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);
@@ -59,6 +80,7 @@ void MainWindow::setupUi() {
     canvasControls->addWidget(new QLabel("Profile:"));
     m_profileCombo = new QComboBox(this);
     m_profileCombo->addItems({"desktop", "mobile", "legacy", "space", "fast", "css"});
+    m_profileCombo->setCurrentText("fast");
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
     canvasControls->addWidget(m_profileCombo);
 
@@ -96,6 +118,8 @@ void MainWindow::setupUi() {
     });
     connect(m_canvas, &LayoutCanvas::requestTimelineGeneration, this, &MainWindow::onGenerateTimelinesFromFrames);
     connect(m_canvas, &LayoutCanvas::externalPathDropped, this, &MainWindow::onLayoutCanvasPathDropped);
+    connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onAddFramesRequested);
+    connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onRemoveFramesRequested);
 
     m_leftSplitter->addWidget(canvasGroup);
 
@@ -186,7 +210,7 @@ void MainWindow::setupUi() {
     QHBoxLayout* pivotRow = new QHBoxLayout();
     pivotRow->addWidget(new QLabel("Handle:"));
     m_handleCombo = new QComboBox(this);
-    m_handleCombo->addItem("Pivot");
+    m_handleCombo->addItem("pivot");
     pivotRow->addWidget(m_handleCombo);
     connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
     pivotRow->addWidget(new QLabel("X:"));
@@ -327,6 +351,13 @@ void MainWindow::setupToolbar() {
     QAction* settingsAction = toolbar->addAction("Settings");
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettingsClicked);
 
+    m_showDebugAction = toolbar->addAction("Debug");
+    m_showDebugAction->setCheckable(true);
+    connect(m_showDebugAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_debugDock) {
+            m_debugDock->setVisible(checked);
+        }
+    });
     toolbar->addSeparator();
     m_folderLabel = new QLabel("Folder: none", this);
     m_folderLabel->setStyleSheet("padding-left: 10px;");

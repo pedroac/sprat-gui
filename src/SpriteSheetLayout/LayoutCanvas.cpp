@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QGraphicsPathItem>
 #include <QPixmapCache>
+#include <QSet>
 
 namespace {
     const QColor kSelectionColor(10, 125, 255);
@@ -76,6 +77,20 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
     m_atlasBgItem = nullptr;
     m_borderItems.clear();
     m_scene->setSceneRect(0, 0, model.atlasWidth, model.atlasHeight);
+
+    // Keep only pixmaps that are still relevant to the incoming model.
+    QSet<QString> activePaths;
+    activePaths.reserve(model.sprites.size());
+    for (const auto& sprite : model.sprites) {
+        activePaths.insert(sprite->path);
+    }
+    for (auto it = m_sourcePixmaps.begin(); it != m_sourcePixmaps.end();) {
+        if (!activePaths.contains(it.key())) {
+            it = m_sourcePixmaps.erase(it);
+            continue;
+        }
+        ++it;
+    }
     
     // Background for the atlas area
     m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.frameColor));
@@ -86,14 +101,22 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
 
     // Load sprites into scene
     for (const auto& sprite : model.sprites) {
-        QPixmap pixmap;
-        if (!QPixmapCache::find(sprite->path, &pixmap)) {
-            pixmap.load(sprite->path);
-            QPixmapCache::insert(sprite->path, pixmap);
+        QPixmap sourcePixmap = m_sourcePixmaps.value(sprite->path);
+        if (sourcePixmap.isNull()) {
+            if (!QPixmapCache::find(sprite->path, &sourcePixmap)) {
+                sourcePixmap.load(sprite->path);
+                if (!sourcePixmap.isNull()) {
+                    QPixmapCache::insert(sprite->path, sourcePixmap);
+                }
+            }
+            if (!sourcePixmap.isNull()) {
+                m_sourcePixmaps.insert(sprite->path, sourcePixmap);
+            }
         }
-        if (pixmap.isNull()) {
+        if (sourcePixmap.isNull()) {
             continue;
         }
+        QPixmap pixmap = sourcePixmap;
 
         // Handle trim logic if necessary (cropping pixmap)
         if (sprite->trimmed) {
@@ -606,11 +629,43 @@ void LayoutCanvas::emitSelectionChanged() {
  * @brief Shows a context menu (e.g., to copy the spritesheet image).
  */
 void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
+    QStringList selectedPaths;
+    for (auto* item : m_items) {
+        if (item->isSelectedState()) {
+            selectedPaths.append(item->getData()->path);
+        }
+    }
+    SpriteItem* spriteUnderCursor = nullptr;
+    for (auto* it : items(event->pos())) {
+        if (auto* si = dynamic_cast<SpriteItem*>(it)) {
+            spriteUnderCursor = si;
+            break;
+        }
+    }
+    if (selectedPaths.isEmpty() && spriteUnderCursor) {
+        selectedPaths.append(spriteUnderCursor->getData()->path);
+    }
+
     QMenu menu(this);
-    QAction* copyLayoutAction = menu.addAction("Copy Spritesheet");
+    QAction* addFramesAction = menu.addAction("Add Frames...");
+    QAction* removeFramesAction = nullptr;
+    if (!selectedPaths.isEmpty()) {
+        QString label = selectedPaths.size() > 1 ? "Remove Frames" : "Remove Frame";
+        removeFramesAction = menu.addAction(label);
+    }
+    menu.addSeparator();
     QAction* autoTimelineAction = menu.addAction("Auto-create Timelines");
-    
+    QAction* copyLayoutAction = menu.addAction("Copy Spritesheet");
+
     QAction* selectedAction = menu.exec(event->globalPos());
+    if (selectedAction == addFramesAction) {
+        emit addFramesRequested();
+        return;
+    }
+    if (selectedAction == removeFramesAction) {
+        emit removeFramesRequested(selectedPaths);
+        return;
+    }
     if (selectedAction == autoTimelineAction) {
         emit requestTimelineGeneration();
         return;

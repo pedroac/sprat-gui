@@ -37,7 +37,7 @@ void SpriteSelectionPresenter::applySpriteSelection(
 void SpriteSelectionPresenter::refreshHandleCombo(QComboBox* handleCombo, SpritePtr selectedSprite, const QString& selectedPointName) {
     handleCombo->blockSignals(true);
     handleCombo->clear();
-    handleCombo->addItem("Pivot");
+    handleCombo->addItem("pivot");
     if (selectedSprite) {
         for (const auto& p : selectedSprite->points) {
             handleCombo->addItem(p.name);

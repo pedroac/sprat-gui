@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <QJsonObject>
+#include <QStringList>
 #include "models.h"
 
 class QWidget;
@@ -11,7 +12,8 @@ public:
     static bool save(
         QWidget* parent,
         SaveConfig config,
-        const QString& currentFolder,
+        const QString& layoutInputPath,
+        const QStringList& framePaths,
         const QString& profile,
         int padding,
         bool trimTransparent,
@@ -21,5 +23,6 @@ public:
         const QJsonObject& projectPayload,
         QString& savedDestination,
         const std::function<void(bool)>& setLoading,
-        const std::function<void(const QString&)>& setStatus);
+        const std::function<void(const QString&)>& setStatus,
+        const std::function<void(const QString&)>& debugLog);
 };

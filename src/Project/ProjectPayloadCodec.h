@@ -10,6 +10,8 @@ struct ProjectPayloadBuildInput {
     SpritePtr selectedSprite;
     QString selectedPointName;
     LayoutModel layoutModel;
+    QString layoutOutput;
+    double layoutScale = 1.0;
     QString profile;
     int padding = 0;
     bool trimTransparent = false;

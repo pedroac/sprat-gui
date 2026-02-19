@@ -1,6 +1,8 @@
 #pragma once
 #include <QGraphicsView>
 #include <QGraphicsScene>
+#include <QHash>
+#include <QStringList>
 #include "models.h"
 #include "SpriteItem.h"
 
@@ -21,6 +23,8 @@ signals:
     void spriteSelected(SpritePtr sprite);
     void requestTimelineGeneration();
     void externalPathDropped(const QString& path);
+    void addFramesRequested();
+    void removeFramesRequested(const QStringList& paths);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -54,4 +58,5 @@ private:
     AppSettings m_settings;
     QGraphicsRectItem* m_atlasBgItem = nullptr;
     QList<QAbstractGraphicsShapeItem*> m_borderItems;
+    QHash<QString, QPixmap> m_sourcePixmaps;
 };

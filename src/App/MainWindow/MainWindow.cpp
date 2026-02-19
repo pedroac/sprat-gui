@@ -23,6 +23,7 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDir>
+#include <QFileInfo>
 #include <QComboBox>
 #include <QSpinBox>
 #include <QCheckBox>
@@ -31,12 +32,12 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
-#include <QStandardPaths>
 #include <QTimer>
 #include <QPushButton>
 #include <QDirIterator>
 #include <QApplication>
 #include <algorithm>
+#include <QSet>
 #include <QStackedWidget>
 #include <QGroupBox>
 #include <QVBoxLayout>
@@ -48,6 +49,7 @@
 #include <QEvent>
 #include <QWheelEvent>
 #include <QResizeEvent>
+#include <QProgressBar>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -59,6 +61,12 @@
 #include <QAction>
 #include <QShortcut>
 #include <QPixmapCache>
+#include <QFile>
+#include <QTextStream>
+#include <QIODevice>
+#include <QTextEdit>
+#include <QUuid>
+#include <QDateTime>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -81,8 +89,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
     QTimer::singleShot(100, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
+    m_loadingOverlayDelayTimer = new QTimer(this);
+    m_loadingOverlayDelayTimer->setSingleShot(true);
 
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
+    connect(m_loadingOverlayDelayTimer, &QTimer::timeout, this, [this]() {
+        if (!m_isLoading || m_cliInstallInProgress || !m_cliInstallOverlay || !m_cliInstallOverlayLabel) {
+            return;
+        }
+        m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
+        if (m_cliInstallProgress) {
+            m_cliInstallProgress->hide();
+        }
+        m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        m_cliInstallOverlay->show();
+        m_cliInstallOverlay->raise();
+        m_loadingOverlayVisible = true;
+    });
 
     // Autosave setup
     m_autosaveTimer = new QTimer(this);
@@ -95,6 +118,10 @@ MainWindow::~MainWindow() {
     if (m_autosaveTimer) {
         m_autosaveTimer->stop();
         delete m_autosaveTimer;
+    }
+    if (!m_frameListPath.isEmpty()) {
+        QFile::remove(m_frameListPath);
+        m_frameListPath.clear();
     }
     clearZipTempDir();
 }
@@ -148,6 +175,210 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
  */
 LayoutModel MainWindow::parseLayoutOutput(const QString& output, const QString& folderPath) {
     return LayoutParser::parse(output, folderPath);
+}
+
+QString MainWindow::layoutParserFolder() const {
+    if (m_layoutSourceIsList && !m_layoutSourcePath.isEmpty()) {
+        return QFileInfo(m_layoutSourcePath).dir().absolutePath();
+    }
+    return m_layoutSourcePath;
+}
+
+bool MainWindow::ensureFrameListInput() {
+    if (m_activeFramePaths.isEmpty()) {
+        return false;
+    }
+    QString fileName = QString("sprat-gui-frames-%1.txt").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    const QString newFrameListPath = QDir::temp().filePath(fileName);
+    QFile file(newFrameListPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        return false;
+    }
+    QTextStream out(&file);
+    for (const QString& path : m_activeFramePaths) {
+        out << path << "\n";
+    }
+    out.flush();
+    file.close();
+
+    const QString oldFrameListPath = m_frameListPath;
+    m_frameListPath = newFrameListPath;
+    m_layoutSourcePath = m_frameListPath;
+    m_layoutSourceIsList = true;
+    if (!m_activeFramePaths.isEmpty()) {
+        m_currentFolder = QFileInfo(m_activeFramePaths.first()).absoluteDir().absolutePath();
+    }
+    if (!oldFrameListPath.isEmpty() && oldFrameListPath != m_frameListPath) {
+        QFile::remove(oldFrameListPath);
+    }
+    updateManualFrameLabel();
+    return true;
+}
+
+void MainWindow::populateActiveFrameListFromModel() {
+    m_activeFramePaths.clear();
+    m_activeFramePaths.reserve(m_layoutModel.sprites.size());
+    for (const auto& sprite : m_layoutModel.sprites) {
+        m_activeFramePaths.append(sprite->path);
+    }
+}
+
+void MainWindow::updateManualFrameLabel() {
+    if (!m_folderLabel) {
+        return;
+    }
+    if (m_activeFramePaths.isEmpty()) {
+        m_folderLabel->setText("Folder: none");
+    } else {
+        m_folderLabel->setText(QString("Frames: %1 (manual selection)").arg(m_activeFramePaths.size()));
+    }
+}
+
+void MainWindow::appendDebugLog(const QString& message) {
+    if (!m_debugLogEdit) {
+        return;
+    }
+    const QString stamp = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
+    m_debugLogEdit->append(QString("[%1] %2").arg(stamp, message));
+}
+
+void MainWindow::onAddFramesRequested() {
+    QString startDir = m_currentFolder;
+    if (startDir.isEmpty() && !m_activeFramePaths.isEmpty()) {
+        startDir = QFileInfo(m_activeFramePaths.first()).absoluteDir().absolutePath();
+    }
+    QString filter = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)";
+    QStringList files = QFileDialog::getOpenFileNames(this, "Add Frames", startDir, filter);
+    if (files.isEmpty()) {
+        return;
+    }
+
+    QSet<QString> existing(m_activeFramePaths.begin(), m_activeFramePaths.end());
+    QStringList added;
+    for (const QString& file : files) {
+        QFileInfo info(file);
+        if (!info.exists() || info.isDir()) {
+            continue;
+        }
+        QString absPath = info.absoluteFilePath();
+        if (existing.contains(absPath)) {
+            continue;
+        }
+        existing.insert(absPath);
+        added.append(absPath);
+    }
+    if (added.isEmpty()) {
+        QMessageBox::information(this, "Add Frames", "All selected frames are already loaded.");
+        return;
+    }
+
+    const QStringList previousFramePaths = m_activeFramePaths;
+    m_activeFramePaths.append(added);
+    m_statusLabel->setText(QString("Adding %1 frame(s)...").arg(added.size()));
+    if (!ensureFrameListInput()) {
+        m_activeFramePaths = previousFramePaths;
+        QMessageBox::warning(this, "Add Frames", "Could not create temporary frame list.");
+        return;
+    }
+    onRunLayout();
+}
+
+void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
+    if (paths.isEmpty()) {
+        return;
+    }
+    QStringList targets;
+    for (const QString& path : paths) {
+        if (m_activeFramePaths.contains(path)) {
+            targets.append(path);
+        }
+    }
+    if (targets.isEmpty()) {
+        return;
+    }
+
+    QSet<QString> timelineNames;
+    for (const auto& timeline : m_timelines) {
+        for (const QString& frame : timeline.frames) {
+            if (targets.contains(frame)) {
+                timelineNames.insert(timeline.name);
+                break;
+            }
+        }
+    }
+
+    if (!timelineNames.isEmpty()) {
+        QString warning = QString("The selected frame(s) are referenced by the following timelines:\n%1\nRemoving them will drop those entries from the timelines. Continue?")
+                          .arg(QStringList(timelineNames.values()).join(", "));
+        if (QMessageBox::warning(this, "Remove Frames", warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    QStringList remainingFramePaths = m_activeFramePaths;
+    for (const QString& path : targets) {
+        remainingFramePaths.removeAll(path);
+    }
+
+    if (remainingFramePaths.isEmpty()) {
+        bool timelineChanged = false;
+        for (auto& timeline : m_timelines) {
+            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+                if (targets.contains(timeline.frames[i])) {
+                    timeline.frames.removeAt(i);
+                    timelineChanged = true;
+                }
+            }
+        }
+        if (timelineChanged) {
+            refreshTimelineFrames();
+            refreshAnimationTest();
+        }
+
+        m_activeFramePaths.clear();
+        m_layoutSourcePath.clear();
+        m_layoutSourceIsList = false;
+        if (!m_frameListPath.isEmpty()) {
+            QFile::remove(m_frameListPath);
+            m_frameListPath.clear();
+        }
+        m_layoutModel.sprites.clear();
+        m_canvas->clearCanvas();
+        m_selectedSprites.clear();
+        m_selectedSprite.reset();
+        m_statusLabel->setText("No frames loaded");
+        m_folderLabel->setText("Folder: none");
+        m_cachedLayoutOutput.clear();
+        m_cachedLayoutScale = 1.0;
+        updateMainContentView();
+        updateUiState();
+        return;
+    }
+
+    const QStringList previousFramePaths = m_activeFramePaths;
+    m_activeFramePaths = remainingFramePaths;
+    if (!ensureFrameListInput()) {
+        m_activeFramePaths = previousFramePaths;
+        QMessageBox::warning(this, "Remove Frames", "Could not refresh the frame list after removal.");
+        return;
+    }
+
+    bool timelineChanged = false;
+    for (auto& timeline : m_timelines) {
+        for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+            if (targets.contains(timeline.frames[i])) {
+                timeline.frames.removeAt(i);
+                timelineChanged = true;
+            }
+        }
+    }
+    if (timelineChanged) {
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    }
+
+    m_statusLabel->setText(QString("Removed %1 frame(s)").arg(targets.size()));
+    onRunLayout();
 }
 
 /**

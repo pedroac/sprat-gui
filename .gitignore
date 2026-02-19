@@ -4,8 +4,8 @@ CMakeFiles/
 cmake-build-*/
 Makefile
 
-/sprat-gui-cpp
-/sprat-gui-cpp_autogen/
+/sprat-gui
+/sprat-gui_autogen/
 
 .qt/
 

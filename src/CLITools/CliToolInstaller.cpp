@@ -1,4 +1,6 @@
 #include "CliToolInstaller.h"
+#include "SpratCliLocator.h"
+
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDir>
@@ -35,7 +37,13 @@ bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
             }
         }
 
-        // 3. Check ~/.local/bin
+        // 3. Check ../sprat-cli sibling path
+        QString siblingBin = findSiblingSpratCliBinary(name);
+        if (!siblingBin.isEmpty()) {
+            return siblingBin;
+        }
+
+        // 4. Check ~/.local/bin
         QString localBin = QDir::homePath() + "/.local/bin/" + name;
         if (QFile::exists(localBin) && QFileInfo(localBin).isExecutable()) {
             return localBin;
@@ -90,7 +98,7 @@ set -euo pipefail
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 cd "$workdir"
-git clone https://github.com/pedroac/sprat-cli.git
+git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git
 cd sprat-cli
 cmake -DSPRAT_DOWNLOAD_STB=ON .
 make -j$(nproc)

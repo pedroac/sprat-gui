@@ -4,6 +4,7 @@
 #include "CliToolsUi.h"
 
 #include <QApplication>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
@@ -84,8 +85,6 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     if (!m_cliReady || m_isLoading) {
         return;
     }
-    m_layoutCache.clear();
-    m_activeLayoutCacheKey.clear();
     m_loadingUiMessage = "Loading images...";
     setLoading(true);
     QString targetPath = path;
@@ -104,17 +103,30 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     }
     m_currentFolder = targetPath;
     m_folderLabel->setText("Folder: " + QDir(targetPath).absolutePath());
-
+    m_layoutSourcePath = QDir(targetPath).absolutePath();
+    m_layoutSourceIsList = false;
+    m_cachedLayoutOutput.clear();
+    m_cachedLayoutScale = 1.0;
+    if (!m_frameListPath.isEmpty()) {
+        QFile::remove(m_frameListPath);
+        m_frameListPath.clear();
+    }
     const QStringList filters = {"*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif", "*.webp", "*.tga", "*.dds"};
     const QStringList imagePaths = QDir(targetPath).entryList(filters, QDir::Files);
+    QStringList absolutePaths;
+    absolutePaths.reserve(imagePaths.size());
+    for (const QString& rel : imagePaths) {
+        absolutePaths << QDir(targetPath).absoluteFilePath(rel);
+    }
+    m_activeFramePaths = absolutePaths;
     QProgressDialog progress("Loading image frames...", "Cancel", 0, imagePaths.size(), this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(1000);
     progress.setAutoClose(true);
     progress.setAutoReset(true);
 
-    for (int i = 0; i < imagePaths.size(); ++i) {
-        const QString absolutePath = QDir(targetPath).absoluteFilePath(imagePaths[i]);
+    for (int i = 0; i < absolutePaths.size(); ++i) {
+        const QString absolutePath = absolutePaths[i];
         progress.setValue(i);
         progress.setLabelText(QString("Loading: %1\n%2").arg(QFileInfo(absolutePath).fileName(), absolutePath));
         m_statusLabel->setText("Loading frame: " + absolutePath);
@@ -125,8 +137,8 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
             return;
         }
     }
-    progress.setValue(imagePaths.size());
-    m_statusLabel->setText(QString("Loaded %1 image frame(s) from %2").arg(imagePaths.size()).arg(QDir(targetPath).absolutePath()));
+    progress.setValue(absolutePaths.size());
+    m_statusLabel->setText(QString("Loaded %1 image frame(s) from %2").arg(absolutePaths.size()).arg(QDir(targetPath).absolutePath()));
 
     onRunLayout();
 }
@@ -191,14 +203,30 @@ void MainWindow::showCliInstallOverlay() {
     if (!m_cliInstallOverlay) {
         return;
     }
+    m_cliInstallInProgress = true;
+    if (m_loadingOverlayDelayTimer && m_loadingOverlayDelayTimer->isActive()) {
+        m_loadingOverlayDelayTimer->stop();
+    }
+    if (m_cliInstallProgress) {
+        m_cliInstallProgress->show();
+    }
+    m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    m_cliInstallOverlayLabel->setText("Installing CLI tools...");
     updateCliOverlayGeometry();
     m_cliInstallOverlay->show();
+    m_loadingOverlayVisible = true;
 }
 
 void MainWindow::hideCliInstallOverlay() {
+    m_cliInstallInProgress = false;
     if (m_cliInstallOverlay) {
         m_cliInstallOverlay->hide();
+        if (m_cliInstallProgress) {
+            m_cliInstallProgress->show();
+        }
+        m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     }
+    m_loadingOverlayVisible = false;
 }
 
 void MainWindow::updateCliOverlayGeometry() {

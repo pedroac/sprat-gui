@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDoubleSpinBox>
@@ -19,6 +20,12 @@
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QApplication>
+void MainWindow::cacheLayoutOutputFromPayload(const QJsonObject& payload) {
+    QJsonObject layoutInfo = payload["layout"].toObject();
+    m_cachedLayoutOutput = layoutInfo["output"].toString();
+    m_cachedLayoutScale = layoutInfo["scale"].toDouble(1.0);
+}
 void MainWindow::loadAutosavedProject() {
     QJsonObject root;
     QString error;
@@ -33,9 +40,16 @@ void MainWindow::loadAutosavedProject() {
     }
 
     m_statusLabel->setText("Loading autosaved project");
+    cacheLayoutOutputFromPayload(root);
     m_pendingProjectPayload = root;
     m_currentFolder = folder;
     m_folderLabel->setText("Folder: " + folder);
+    m_layoutSourcePath = QDir(folder).absolutePath();
+    m_layoutSourceIsList = false;
+    if (!m_frameListPath.isEmpty()) {
+        QFile::remove(m_frameListPath);
+        m_frameListPath.clear();
+    }
     onRunLayout();
 }
 
@@ -66,13 +80,21 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         QMessageBox::critical(this, "Error", "Missing spratlayout or spratpack binaries.");
         return false;
     }
+    if (m_layoutSourcePath.isEmpty()) {
+        QMessageBox::critical(this, "Error", "No layout source selected.");
+        return false;
+    }
 
     m_loadingUiMessage = "Saving...";
+    m_statusLabel->setText("Saving...");
+    QApplication::processEvents();
+    m_forceImmediateLoadingOverlay = true;
     QString savedDestination;
     bool ok = ProjectSaveService::save(
         this,
         config,
-        m_currentFolder,
+        m_layoutSourcePath,
+        m_activeFramePaths,
         m_profileCombo->currentText(),
         m_paddingSpin->value(),
         m_trimCheck->isChecked(),
@@ -82,7 +104,9 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         buildProjectPayload(config),
         savedDestination,
         [this](bool loading) { setLoading(loading); },
-        [this](const QString& status) { m_statusLabel->setText(status); });
+        [this](const QString& status) { m_statusLabel->setText(status); },
+        [this](const QString& message) { appendDebugLog(message); });
+    m_forceImmediateLoadingOverlay = false;
     if (ok) {
         m_statusLabel->setText("Saved to " + savedDestination);
         QMetaObject::invokeMethod(this, [this, savedDestination]() {
@@ -100,6 +124,8 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
     input.selectedSprite = m_selectedSprite;
     input.selectedPointName = m_selectedPointName;
     input.layoutModel = m_layoutModel;
+    input.layoutOutput = m_cachedLayoutOutput;
+    input.layoutScale = m_cachedLayoutScale;
     input.profile = m_profileCombo->currentText();
     input.padding = m_paddingSpin->value();
     input.trimTransparent = m_trimCheck->isChecked();
@@ -144,6 +170,7 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
         return;
     }
     m_pendingProjectPayload = root;
+    cacheLayoutOutputFromPayload(root);
 
     QJsonObject layoutOpts = root["layout_options"].toObject();
     if (layoutOpts.contains("profile")) {
@@ -161,6 +188,12 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     if (!folder.isEmpty()) {
         m_currentFolder = folder;
         m_folderLabel->setText("Folder: " + folder);
+        m_layoutSourcePath = QDir(folder).absolutePath();
+        m_layoutSourceIsList = false;
+        if (!m_frameListPath.isEmpty()) {
+            QFile::remove(m_frameListPath);
+            m_frameListPath.clear();
+        }
         onRunLayout();
     }
 }

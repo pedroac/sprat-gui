@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(sprat-gui-cpp LANGUAGES CXX)
+project(sprat-gui LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,6 +39,7 @@ set(PROJECT_SOURCES
     src/Animation/AnimationManager.cpp
     src/Animation/AnimationManager.h
     src/CLITools/CliToolsConfig.cpp
+    src/CLITools/SpratCliLocator.cpp
     src/CLITools/CliToolsConfig.h
     src/SelectedSpriteFrame/Markers/MarkersDialog.cpp
     src/SelectedSpriteFrame/Markers/MarkersDialog.h
@@ -81,9 +82,9 @@ set(PROJECT_SOURCES
     src/Core/models.h
 )
 
-add_executable(sprat-gui-cpp ${PROJECT_SOURCES})
+add_executable(sprat-gui ${PROJECT_SOURCES})
 
-target_include_directories(sprat-gui-cpp PRIVATE
+target_include_directories(sprat-gui PRIVATE
     src
     src/App
     src/App/MainWindow
@@ -99,4 +100,4 @@ target_include_directories(sprat-gui-cpp PRIVATE
     src/Core
 )
 
-target_link_libraries(sprat-gui-cpp PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)
+target_link_libraries(sprat-gui PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)

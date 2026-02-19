@@ -4,6 +4,27 @@
 #include <QFileInfo>
 #include <QJsonArray>
 
+namespace {
+QString normalizedMarkerName(QString name) {
+    name = name.trimmed();
+    if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
+        return "pivot";
+    }
+    return name;
+}
+
+QString normalizedMarkerKind(QString kind) {
+    kind = kind.trimmed().toLower();
+    if (kind == "rect") {
+        return "rectangle";
+    }
+    if (kind.isEmpty()) {
+        return "point";
+    }
+    return kind;
+}
+}
+
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
     root["version"] = 1;
@@ -16,6 +37,8 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
 
     QJsonObject layoutInfo;
     layoutInfo["folder"] = input.currentFolder;
+    layoutInfo["scale"] = input.layoutScale;
+    layoutInfo["output"] = input.layoutOutput;
     root["layout"] = layoutInfo;
 
     QJsonObject animInfo;
@@ -45,22 +68,34 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         QJsonArray markersArr;
         for (const auto& p : s->points) {
             QJsonObject mObj;
-            mObj["name"] = p.name;
+            const QString kind = normalizedMarkerKind(p.kind);
+            mObj["name"] = normalizedMarkerName(p.name);
             mObj["x"] = p.x;
             mObj["y"] = p.y;
-            mObj["kind"] = p.kind;
+            // Keep GUI field and include CLI-compatible field for spratconvert.
+            mObj["kind"] = kind;
+            mObj["type"] = kind;
             mObj["radius"] = p.radius;
             mObj["w"] = p.w;
             mObj["h"] = p.h;
             if (!p.polygonPoints.isEmpty()) {
                 QJsonArray polyArr;
+                QJsonArray verticesArr;
                 for (const auto& pt : p.polygonPoints) {
                     QJsonArray ptPair;
                     ptPair.append(pt.x());
                     ptPair.append(pt.y());
                     polyArr.append(ptPair);
+
+                    QJsonObject vertex;
+                    vertex["x"] = pt.x();
+                    vertex["y"] = pt.y();
+                    verticesArr.append(vertex);
                 }
+                // GUI legacy format.
                 mObj["polygon_points"] = polyArr;
+                // CLI format expected by spratconvert.
+                mObj["vertices"] = verticesArr;
             }
             markersArr.append(mObj);
         }
@@ -132,10 +167,14 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         for (const auto& mVal : markersArr) {
             QJsonObject mObj = mVal.toObject();
             NamedPoint p;
-            p.name = mObj["name"].toString();
+            p.name = normalizedMarkerName(mObj["name"].toString());
             p.x = mObj["x"].toInt();
             p.y = mObj["y"].toInt();
-            p.kind = mObj["kind"].toString();
+            QString kind = mObj["kind"].toString();
+            if (kind.isEmpty()) {
+                kind = mObj["type"].toString();
+            }
+            p.kind = normalizedMarkerKind(kind);
             p.radius = mObj["radius"].toInt(8);
             p.w = mObj["w"].toInt(16);
             p.h = mObj["h"].toInt(16);
@@ -145,6 +184,14 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                     QJsonArray ptPair = ptVal.toArray();
                     if (ptPair.size() == 2) {
                         p.polygonPoints.append(QPoint(ptPair[0].toInt(), ptPair[1].toInt()));
+                    }
+                }
+            } else if (mObj.contains("vertices")) {
+                QJsonArray verticesArr = mObj["vertices"].toArray();
+                for (const auto& vertexVal : verticesArr) {
+                    QJsonObject vertex = vertexVal.toObject();
+                    if (vertex.contains("x") && vertex.contains("y")) {
+                        p.polygonPoints.append(QPoint(vertex["x"].toInt(), vertex["y"].toInt()));
                     }
                 }
             }

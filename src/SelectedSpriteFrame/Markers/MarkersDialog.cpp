@@ -10,6 +10,16 @@
 #include <QGroupBox>
 #include <QMessageBox>
 
+namespace {
+QString normalizedMarkerName(QString name) {
+    name = name.trimmed();
+    if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
+        return "pivot";
+    }
+    return name;
+}
+}
+
 /**
  * @brief Constructs the MarkersDialog.
  */
@@ -158,6 +168,7 @@ void MarkersDialog::onAddClicked() {
     if (name.isEmpty()) {
         name = QString("point%1").arg(m_sprite->points.size() + 1);
     }
+    name = normalizedMarkerName(name);
     
     // Check duplicate
     for (const auto& p : m_sprite->points) {
@@ -257,7 +268,12 @@ void MarkersDialog::onFieldChanged() {
     }
 
     auto& p = m_sprite->points[row];
-    p.name = m_nameEdit->text();
+    p.name = normalizedMarkerName(m_nameEdit->text());
+    if (m_nameEdit->text() != p.name) {
+        m_updating = true;
+        m_nameEdit->setText(p.name);
+        m_updating = false;
+    }
     p.kind = m_typeCombo->currentText();
     p.x = m_xSpin->value();
     p.y = m_ySpin->value();
