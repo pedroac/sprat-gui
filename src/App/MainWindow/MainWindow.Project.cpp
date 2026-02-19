@@ -140,7 +140,6 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
     input.layoutZoom = m_layoutZoomSpin->value();
     input.previewZoom = m_previewZoomSpin->value();
     input.animationZoom = m_animZoomSpin->value();
-    input.animationFps = m_fpsSpin->value();
     input.saveConfig = config;
     return ProjectPayloadCodec::build(input);
 }
@@ -311,7 +310,6 @@ void MainWindow::applyProjectPayload() {
     QJsonObject root = m_pendingProjectPayload;
     m_pendingProjectPayload = QJsonObject();
     ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_currentFolder, m_layoutModel);
-    m_fpsSpin->setValue(applied.animationFps);
     m_timelines = applied.timelines;
     refreshTimelineList();
 }

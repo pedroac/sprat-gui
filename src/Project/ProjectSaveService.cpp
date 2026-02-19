@@ -164,6 +164,18 @@ bool ProjectSaveService::save(
     }
     markersInfo["sprites"] = spritesState;
     QJsonObject animInfo = projectPayload["animations"].toObject();
+    const int animationFps = animInfo["animation_fps"].toInt(8);
+    QJsonArray timelines = animInfo["timelines"].toArray();
+    for (int i = 0; i < timelines.size(); ++i) {
+        QJsonObject timeline = timelines[i].toObject();
+        int timelineFps = timeline["fps"].toInt(animationFps);
+        if (timelineFps <= 0) {
+            timelineFps = 8;
+        }
+        timeline["fps"] = timelineFps;
+        timelines[i] = timeline;
+    }
+    animInfo["timelines"] = timelines;
     QTemporaryFile markersTemp;
     if (!markersTemp.open()) {
         QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary markers file."));

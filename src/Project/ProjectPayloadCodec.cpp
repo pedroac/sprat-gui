@@ -31,18 +31,22 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     root["layout"] = layoutInfo;
 
     QJsonObject animInfo;
-    animInfo["animation_fps"] = input.animationFps;
     animInfo["selected_timeline_index"] = input.selectedTimelineIndex;
     QJsonArray timelinesArr;
     for (const auto& t : input.timelines) {
         QJsonObject tObj;
         tObj["name"] = t.name;
+        tObj["fps"] = t.fps;
         QJsonArray framesArr;
         for (const auto& f : t.frames) {
             framesArr.append(f);
         }
         tObj["frames"] = framesArr;
         timelinesArr.append(tObj);
+    }
+    if (!input.timelines.isEmpty()) {
+        // Keep legacy field for older consumers that still expect one global fps.
+        animInfo["animation_fps"] = input.timelines.first().fps;
     }
     animInfo["timelines"] = timelinesArr;
     root["animations"] = animInfo;
@@ -189,12 +193,16 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     }
 
     QJsonObject animInfo = root["animations"].toObject();
-    out.animationFps = animInfo["animation_fps"].toInt(8);
+    const int legacyAnimationFps = animInfo["animation_fps"].toInt(8);
     QJsonArray timelinesArr = animInfo["timelines"].toArray();
     for (const auto& tVal : timelinesArr) {
         QJsonObject tObj = tVal.toObject();
         AnimationTimeline t;
         t.name = tObj["name"].toString();
+        t.fps = tObj["fps"].toInt(legacyAnimationFps);
+        if (t.fps <= 0) {
+            t.fps = 8;
+        }
         QJsonArray framesArr = tObj["frames"].toArray();
         for (const auto& fVal : framesArr) {
             t.frames.append(fVal.toString());

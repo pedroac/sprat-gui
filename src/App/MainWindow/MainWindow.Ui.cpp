@@ -174,6 +174,13 @@ void MainWindow::setupUi() {
     m_timelineNameEdit->setEnabled(false);
     connect(m_timelineNameEdit, &QLineEdit::editingFinished, this, &MainWindow::onTimelineNameChanged);
     timelineNameLayout->addWidget(m_timelineNameEdit);
+    timelineNameLayout->addWidget(new QLabel(tr("FPS:")));
+    m_timelineFpsSpin = new QSpinBox(this);
+    m_timelineFpsSpin->setRange(1, 60);
+    m_timelineFpsSpin->setValue(8);
+    m_timelineFpsSpin->setEnabled(false);
+    connect(m_timelineFpsSpin, &QSpinBox::valueChanged, this, &MainWindow::onTimelineFpsChanged);
+    timelineNameLayout->addWidget(m_timelineFpsSpin);
     QPushButton* removeTimelineBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove"), this);
     connect(removeTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineRemoveClicked);
     timelineNameLayout->addWidget(removeTimelineBtn);
@@ -279,12 +286,6 @@ void MainWindow::setupUi() {
     m_animNextBtn = new QPushButton(">");
     connect(m_animNextBtn, &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
     animControls->addWidget(m_animNextBtn);
-    animControls->addWidget(new QLabel(tr("FPS:")));
-    m_fpsSpin = new QSpinBox(this);
-    m_fpsSpin->setRange(1, 60);
-    m_fpsSpin->setValue(8);
-    connect(m_fpsSpin, &QSpinBox::valueChanged, this, &MainWindow::onAnimFpsChanged);
-    animControls->addWidget(m_fpsSpin);
     animControls->addStretch();
     animControls->addWidget(new QLabel(tr("Zoom:")));
     m_animZoomSpin = new QDoubleSpinBox(this);

@@ -23,6 +23,14 @@ QString formatProcessCommand(const QString& program, const QStringList& args) {
     }
     return QString("%1 %2").arg(program, escapedArgs.join(' '));
 }
+
+int legacyDefaultPivotX(const SpritePtr& sprite) {
+    return sprite ? (sprite->rect.width() / 2) : 0;
+}
+
+int legacyDefaultPivotY(const SpritePtr& sprite) {
+    return sprite ? (sprite->rect.height() / 2) : 0;
+}
 }
 
 void MainWindow::onRunLayout() {
@@ -155,8 +163,14 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
             }
             auto oldS = oldSprites[s->path];
             s->name = oldS->name;
-            s->pivotX = oldS->pivotX;
-            s->pivotY = oldS->pivotY;
+            const bool oldPivotIsLegacyDefault =
+                oldS->pivotX == legacyDefaultPivotX(oldS) &&
+                oldS->pivotY == legacyDefaultPivotY(oldS);
+            // Preserve user-edited pivots; let legacy auto pivots upgrade to the new default.
+            if (!oldPivotIsLegacyDefault) {
+                s->pivotX = oldS->pivotX;
+                s->pivotY = oldS->pivotY;
+            }
             s->points = oldS->points;
         }
     }

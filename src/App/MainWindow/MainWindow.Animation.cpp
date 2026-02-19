@@ -16,7 +16,17 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QtGlobal>
 #include <algorithm>
+
+namespace {
+int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex) {
+    if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
+        return 8;
+    }
+    return qMax(1, timelines[selectedTimelineIndex].fps);
+}
+}
 
 void MainWindow::refreshTimelineList() {
     m_timelineList->clear();
@@ -129,7 +139,7 @@ void MainWindow::onAnimPlayPauseClicked() {
     AnimationPlaybackService::togglePlayPause(
         m_timelines,
         m_selectedTimelineIndex,
-        m_fpsSpin->value(),
+        selectedTimelineFps(m_timelines, m_selectedTimelineIndex),
         m_animPlaying,
         m_animTimer,
         m_animPlayPauseBtn);
@@ -148,13 +158,6 @@ void MainWindow::onAnimNextClicked() {
     refreshAnimationTest();
 }
 
-void MainWindow::onAnimFpsChanged(int fps) {
-    if (m_animPlaying) {
-        m_animTimer->setInterval(1000 / fps);
-    }
-    refreshAnimationTest();
-}
-
 void MainWindow::onAnimTimerTimeout() {
     if (!AnimationPlaybackService::tick(m_timelines, m_selectedTimelineIndex, m_animFrameIndex)) {
         return;
@@ -168,7 +171,7 @@ bool MainWindow::exportAnimation(const QString& outPath) {
         m_timelines,
         m_selectedTimelineIndex,
         m_layoutModel,
-        m_fpsSpin->value(),
+        selectedTimelineFps(m_timelines, m_selectedTimelineIndex),
         outPath,
         [this](bool loading) { setLoading(loading); },
         [this](const QString& status) { m_statusLabel->setText(status); });

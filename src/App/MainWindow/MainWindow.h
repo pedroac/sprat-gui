@@ -83,7 +83,7 @@ private slots:
     void onAutosaveTimer();
 
     void onAnimNextClicked();
-    void onAnimFpsChanged(int fps);
+    void onTimelineFpsChanged(int fps);
     void onAnimTimerTimeout();
 
 protected:
@@ -191,7 +191,7 @@ private:
     QPushButton* m_animPrevBtn;
     QPushButton* m_animPlayPauseBtn;
     QPushButton* m_animNextBtn;
-    QSpinBox* m_fpsSpin;
+    QSpinBox* m_timelineFpsSpin;
     QLabel* m_animStatusLabel;
     QLabel* m_animPreviewLabel;
 

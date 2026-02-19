@@ -88,6 +88,7 @@ struct LayoutModel {
  */
 struct AnimationTimeline {
     QString name;
+    int fps = 8;
     QStringList frames; // Paths to sprite images
 };
 

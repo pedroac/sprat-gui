@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QRegularExpression>
 
 LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath) {
@@ -34,8 +35,20 @@ LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath
                 s->trimmed = true;
                 s->trimRect = QRect(match.captured(6).toInt(), match.captured(7).toInt(), match.captured(8).toInt(), match.captured(9).toInt());
             }
-            s->pivotX = s->rect.width() / 2;
-            s->pivotY = s->rect.height() / 2;
+            // Use the original image dimensions so the pivot aligns with the visual frame center.
+            const QSize sourceSize = QImageReader(s->path).size();
+            if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0) {
+                s->pivotX = sourceSize.width() / 2;
+                s->pivotY = sourceSize.height() / 2;
+            } else if (s->trimmed) {
+                const int sourceWidth = s->trimRect.x() + s->rect.width() + s->trimRect.width();
+                const int sourceHeight = s->trimRect.y() + s->rect.height() + s->trimRect.height();
+                s->pivotX = sourceWidth / 2;
+                s->pivotY = sourceHeight / 2;
+            } else {
+                s->pivotX = s->rect.width() / 2;
+                s->pivotY = s->rect.height() / 2;
+            }
             model.sprites.append(s);
         }
     }
