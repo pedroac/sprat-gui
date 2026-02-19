@@ -76,23 +76,39 @@ void MainWindow::setupUi() {
     canvasLayout->setContentsMargins(10, 10, 10, 10);
 
     // Controls
-    QHBoxLayout* canvasControls = new QHBoxLayout();
+    QWidget* canvasControlsWidget = new QWidget(canvasGroup);
+    canvasControlsWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    QHBoxLayout* canvasControls = new QHBoxLayout(canvasControlsWidget);
+    canvasControls->setContentsMargins(0, 0, 0, 0);
     canvasControls->addWidget(new QLabel(tr("Profile:")));
-    m_profileCombo = new QComboBox(this);
-    m_profileCombo->addItems({"desktop", "mobile", "legacy", "space", "fast", "css"});
-    m_profileCombo->setCurrentText("fast");
+    m_profileSelectorStack = new QStackedWidget(this);
+    m_profileSelectorStack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    QWidget* profileSelectPage = new QWidget(m_profileSelectorStack);
+    QHBoxLayout* profileSelectLayout = new QHBoxLayout(profileSelectPage);
+    profileSelectLayout->setContentsMargins(0, 0, 0, 0);
+    profileSelectLayout->setSpacing(4);
+    m_profileCombo = new QComboBox(profileSelectPage);
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
-    canvasControls->addWidget(m_profileCombo);
+    profileSelectLayout->addWidget(m_profileCombo);
+    QIcon profileManageIcon = QIcon::fromTheme("preferences-system");
+    m_manageProfilesBtn = new QPushButton(profileManageIcon, profileManageIcon.isNull() ? tr("Manage") : "", profileSelectPage);
+    m_manageProfilesBtn->setToolTip(tr("Manage Profiles"));
+    m_manageProfilesBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    connect(m_manageProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
+    profileSelectLayout->addWidget(m_manageProfilesBtn);
+    m_profileSelectorStack->addWidget(profileSelectPage);
 
-    canvasControls->addWidget(new QLabel(tr("Padding:")));
-    m_paddingSpin = new QSpinBox(this);
-    m_paddingSpin->setRange(0, 128);
-    connect(m_paddingSpin, &QSpinBox::valueChanged, this, &MainWindow::onPaddingChanged);
-    canvasControls->addWidget(m_paddingSpin);
+    QWidget* addProfilesPage = new QWidget(m_profileSelectorStack);
+    QHBoxLayout* addProfilesLayout = new QHBoxLayout(addProfilesPage);
+    addProfilesLayout->setContentsMargins(0, 0, 0, 0);
+    addProfilesLayout->setSpacing(0);
+    m_addProfilesBtn = new QPushButton(tr("Add Profiles"), addProfilesPage);
+    connect(m_addProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
+    addProfilesLayout->addWidget(m_addProfilesBtn);
+    m_profileSelectorStack->addWidget(addProfilesPage);
 
-    m_trimCheck = new QCheckBox(tr("Trim Transparency"), this);
-    connect(m_trimCheck, &QCheckBox::toggled, this, &MainWindow::onTrimChanged);
-    canvasControls->addWidget(m_trimCheck);
+    canvasControls->addWidget(m_profileSelectorStack);
+    applyConfiguredProfiles(configuredProfiles(), QString());
 
     canvasControls->addStretch();
     canvasControls->addWidget(new QLabel(tr("Zoom:")));
@@ -103,7 +119,7 @@ void MainWindow::setupUi() {
     connect(m_layoutZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onLayoutZoomChanged);
     canvasControls->addWidget(m_layoutZoomSpin);
 
-    canvasLayout->addLayout(canvasControls);
+    canvasLayout->addWidget(canvasControlsWidget, 0, Qt::AlignTop);
 
     m_canvas = new LayoutCanvas(this);
     canvasLayout->addWidget(m_canvas);
@@ -407,15 +423,20 @@ void MainWindow::setupZoomShortcuts() {
 }
 
 void MainWindow::updateUiState() {
+    const bool enabled = m_cliReady && !m_isLoading;
     MainWindowUiState::apply(
         m_cliReady,
         m_isLoading,
         !m_layoutModel.sprites.isEmpty(),
         m_loadAction,
         m_profileCombo,
-        m_paddingSpin,
-        m_trimCheck,
         m_saveAction);
+    if (m_manageProfilesBtn) {
+        m_manageProfilesBtn->setEnabled(enabled);
+    }
+    if (m_addProfilesBtn) {
+        m_addProfilesBtn->setEnabled(enabled);
+    }
 }
 
 void MainWindow::updateMainContentView() {

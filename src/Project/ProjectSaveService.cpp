@@ -273,7 +273,6 @@ bool ProjectSaveService::save(
             QProcess layoutProc;
             QStringList layoutArgs;
             layoutArgs << layoutPathForSave;
-            layoutArgs << "--profile" << profile;
             layoutArgs << "--padding" << QString::number(padding);
             layoutArgs << "--scale" << QString::number(scale.value);
             if (trimTransparent) {

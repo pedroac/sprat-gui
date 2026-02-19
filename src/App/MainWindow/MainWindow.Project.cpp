@@ -18,6 +18,7 @@
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QApplication>
@@ -85,6 +86,11 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         return false;
     }
 
+    SpratProfile selectedProfile;
+    const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
+    const int profilePadding = hasSelectedProfile ? selectedProfile.padding : 0;
+    const bool profileTrimTransparent = hasSelectedProfile ? selectedProfile.trimTransparent : false;
+
     m_loadingUiMessage = tr("Saving...");
     m_statusLabel->setText(tr("Saving..."));
     QApplication::processEvents();
@@ -96,8 +102,8 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         m_layoutSourcePath,
         m_activeFramePaths,
         m_profileCombo->currentText(),
-        m_paddingSpin->value(),
-        m_trimCheck->isChecked(),
+        profilePadding,
+        profileTrimTransparent,
         m_spratLayoutBin,
         m_spratPackBin,
         m_spratConvertBin,
@@ -127,8 +133,10 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
     input.layoutOutput = m_cachedLayoutOutput;
     input.layoutScale = m_cachedLayoutScale;
     input.profile = m_profileCombo->currentText();
-    input.padding = m_paddingSpin->value();
-    input.trimTransparent = m_trimCheck->isChecked();
+    SpratProfile selectedProfile;
+    const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
+    input.padding = hasSelectedProfile ? selectedProfile.padding : 0;
+    input.trimTransparent = hasSelectedProfile ? selectedProfile.trimTransparent : false;
     input.layoutZoom = m_layoutZoomSpin->value();
     input.previewZoom = m_previewZoomSpin->value();
     input.animationZoom = m_animZoomSpin->value();
@@ -174,15 +182,15 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
 
     QJsonObject layoutOpts = root["layout_options"].toObject();
     if (layoutOpts.contains("profile")) {
-        m_profileCombo->setCurrentText(layoutOpts["profile"].toString());
+        const QString profile = layoutOpts["profile"].toString();
+        if (!profile.isEmpty() && m_profileCombo->findText(profile) < 0) {
+            m_profileCombo->addItem(profile);
+        }
+        m_profileCombo->setCurrentText(profile);
+        if (m_profileSelectorStack) {
+            m_profileSelectorStack->setCurrentIndex(m_profileCombo->count() > 0 ? 0 : 1);
+        }
     }
-    if (layoutOpts.contains("padding")) {
-        m_paddingSpin->setValue(layoutOpts["padding"].toInt());
-    }
-    if (layoutOpts.contains("trim_transparent")) {
-        m_trimCheck->setChecked(layoutOpts["trim_transparent"].toBool());
-    }
-
     QJsonObject layoutInfo = root["layout"].toObject();
     QString folder = layoutInfo["folder"].toString();
     if (!folder.isEmpty()) {

@@ -17,6 +17,8 @@
 #include "TimelineGenerationService.h"
 #include "ProjectSaveService.h"
 #include "TimelineUi.h"
+#include "ProfilesDialog.h"
+#include "SpratProfilesConfig.h"
 #include <QToolBar>
 #include <QSplitter>
 #include <QAction>
@@ -208,6 +210,72 @@ void MainWindow::appendDebugLog(const QString& message) {
     m_debugLogEdit->append(QString("[%1] %2").arg(stamp, message));
 }
 
+QVector<SpratProfile> MainWindow::configuredProfiles() {
+    QString error;
+    const QVector<SpratProfile> profiles = SpratProfilesConfig::loadProfileDefinitions(&error);
+    if (!error.isEmpty()) {
+        m_statusLabel->setText(tr("Invalid profiles configuration"));
+        QMessageBox::warning(this, tr("Profiles"), tr("Could not load profiles configuration:\n%1").arg(error));
+    }
+    return profiles;
+}
+
+bool MainWindow::selectedProfileDefinition(SpratProfile& out) const {
+    if (!m_profileCombo) {
+        return false;
+    }
+    const QString selectedName = m_profileCombo->currentText().trimmed();
+    if (selectedName.isEmpty()) {
+        return false;
+    }
+    const QVector<SpratProfile> profiles = SpratProfilesConfig::loadProfileDefinitions();
+    for (const SpratProfile& profile : profiles) {
+        if (profile.name.trimmed() == selectedName) {
+            out = profile;
+            return true;
+        }
+    }
+    return false;
+}
+
+void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, const QString& preferred) {
+    if (!m_profileCombo) {
+        return;
+    }
+
+    QStringList effectiveProfiles;
+    for (const SpratProfile& profile : profiles) {
+        const QString trimmed = profile.name.trimmed();
+        if (trimmed.isEmpty() || effectiveProfiles.contains(trimmed)) {
+            continue;
+        }
+        effectiveProfiles.append(trimmed);
+    }
+    const QString previousSelected = m_profileCombo->currentText().trimmed();
+    m_profileCombo->blockSignals(true);
+    m_profileCombo->clear();
+    m_profileCombo->addItems(effectiveProfiles);
+    if (!effectiveProfiles.isEmpty()) {
+        QString selected = preferred.trimmed();
+        if (selected.isEmpty()) {
+            selected = previousSelected;
+        }
+        if (selected.isEmpty() || !effectiveProfiles.contains(selected)) {
+            selected = effectiveProfiles.first();
+        }
+        m_profileCombo->setCurrentText(selected);
+    }
+    m_profileCombo->blockSignals(false);
+
+    if (m_profileSelectorStack) {
+        m_profileSelectorStack->setCurrentIndex(effectiveProfiles.isEmpty() ? 1 : 0);
+    }
+
+    if (!effectiveProfiles.contains(m_lastSuccessfulProfile)) {
+        m_lastSuccessfulProfile.clear();
+    }
+}
+
 void MainWindow::onAddFramesRequested() {
     QString startDir = m_currentFolder;
     if (startDir.isEmpty() && !m_activeFramePaths.isEmpty()) {
@@ -348,13 +416,6 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
 }
 
 /**
- * @brief Handles trim transparency toggle changes.
- */
-void MainWindow::onTrimChanged() {
-    onRunLayout();
-}
-
-/**
  * @brief Opens the settings dialog.
  */
 void MainWindow::onSettingsClicked() {
@@ -368,6 +429,25 @@ void MainWindow::onSettingsClicked() {
         CliToolsConfig::saveOverride("cli/spratpack", chosen.packBinary);
         CliToolsConfig::saveOverride("cli/spratconvert", chosen.convertBinary);
         checkCliTools();
+    }
+}
+
+void MainWindow::onManageProfiles() {
+    ProfilesDialog dialog(configuredProfiles(), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QVector<SpratProfile> profiles = dialog.profiles();
+    if (!SpratProfilesConfig::saveProfileDefinitions(profiles)) {
+        QMessageBox::warning(this, tr("Profiles"), tr("Could not save profiles configuration."));
+        return;
+    }
+
+    const QString previousProfile = m_profileCombo ? m_profileCombo->currentText() : QString();
+    applyConfiguredProfiles(profiles, previousProfile);
+    if (!m_layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentText().trimmed().isEmpty()) {
+        onRunLayout();
     }
 }
 

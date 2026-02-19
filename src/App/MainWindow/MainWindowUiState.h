@@ -2,8 +2,6 @@
 
 class QAction;
 class QComboBox;
-class QSpinBox;
-class QCheckBox;
 
 class MainWindowUiState {
 public:
@@ -13,7 +11,5 @@ public:
         bool hasSprites,
         QAction* loadAction,
         QComboBox* profileCombo,
-        QSpinBox* paddingSpin,
-        QCheckBox* trimCheck,
         QAction* saveAction);
 };

@@ -4,11 +4,13 @@
 #include <QProcess>
 #include <QTimer>
 #include <QStringList>
+#include <QVector>
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
 #include "TimelineListWidget.h"
 #include "CliToolInstaller.h"
 #include "SaveDialog.h"
+#include "SpratProfilesConfig.h"
 #include <QJsonObject>
 #include "models.h"
 
@@ -64,8 +66,7 @@ private slots:
     void onMarkerSelectedFromCanvas(const QString& name);
     void onMarkerChangedFromCanvas();
     void onProfileChanged();
-    void onPaddingChanged();
-    void onTrimChanged();
+    void onManageProfiles();
     void onLayoutZoomChanged(double value);
     void onTimelineAddClicked();
     void onTimelineRemoveClicked();
@@ -93,6 +94,9 @@ protected:
 private:
     QString layoutParserFolder() const;
     bool ensureFrameListInput();
+    QVector<SpratProfile> configuredProfiles();
+    bool selectedProfileDefinition(SpratProfile& out) const;
+    void applyConfiguredProfiles(const QVector<SpratProfile>& profiles, const QString& preferred = QString());
     void populateActiveFrameListFromModel();
     void updateManualFrameLabel();
     void handleProfileFailure(const QString& failedProfile);
@@ -157,10 +161,11 @@ private:
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas;
-    QComboBox* m_profileCombo;
-    QSpinBox* m_paddingSpin;
-    QCheckBox* m_trimCheck;
-    QDoubleSpinBox* m_layoutZoomSpin;
+    QStackedWidget* m_profileSelectorStack = nullptr;
+    QComboBox* m_profileCombo = nullptr;
+    QPushButton* m_addProfilesBtn = nullptr;
+    QPushButton* m_manageProfilesBtn = nullptr;
+    QDoubleSpinBox* m_layoutZoomSpin = nullptr;
 
     // Timelines Area
     QLineEdit* m_timelineCreateEdit;
@@ -234,5 +239,8 @@ private:
     double m_cachedLayoutScale = 1.0;
     QString m_lastSuccessfulProfile;
     QString m_runningLayoutProfile;
+    bool m_lastRunUsedTrim = false;
     bool m_layoutRunPending = false;
+    bool m_layoutFailureDialogShown = false;
+    bool m_retryWithoutTrimOnFailure = false;
 };

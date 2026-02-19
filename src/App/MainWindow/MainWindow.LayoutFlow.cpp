@@ -2,62 +2,128 @@
 
 #include "SpriteSelectionPresenter.h"
 
-#include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QMap>
 #include <QMessageBox>
 #include <QProcess>
 #include <QProgressBar>
-#include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardItem>
 #include <QStandardItemModel>
 
+namespace {
+QString formatProcessCommand(const QString& program, const QStringList& args) {
+    QStringList escapedArgs;
+    escapedArgs.reserve(args.size());
+    for (const QString& arg : args) {
+        QString escaped = arg;
+        escaped.replace('\'', "'\\''");
+        escapedArgs << QString("'%1'").arg(escaped);
+    }
+    return QString("%1 %2").arg(program, escapedArgs.join(' '));
+}
+}
+
 void MainWindow::onRunLayout() {
     if (m_layoutSourcePath.isEmpty()) {
+        appendDebugLog("Layout run skipped: layout source path is empty.");
         return;
     }
     if (!m_cliReady) {
+        appendDebugLog("Layout run skipped: CLI not ready. Triggering CLI check.");
         checkCliTools();
         return;
     }
     if (m_process && m_process->state() != QProcess::NotRunning) {
+        appendDebugLog("Layout run deferred: previous spratlayout process is still running.");
         m_layoutRunPending = true;
         return;
     }
 
-    const QString requestedProfile = m_profileCombo->currentText();
+    const QString requestedProfile = m_profileCombo->currentText().trimmed();
+    SpratProfile selectedProfile;
+    const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
 
     QStringList args;
     args << m_layoutSourcePath;
-    args << "--profile" << m_profileCombo->currentText();
-    args << "--padding" << QString::number(m_paddingSpin->value());
-    if (m_trimCheck->isChecked()) {
+    if (hasSelectedProfile) {
+        if (!selectedProfile.mode.trimmed().isEmpty()) {
+            args << "--mode" << selectedProfile.mode.trimmed();
+        }
+        if (!selectedProfile.optimize.trimmed().isEmpty()) {
+            args << "--optimize" << selectedProfile.optimize.trimmed();
+        }
+        if (selectedProfile.maxWidth > 0) {
+            args << "--max-width" << QString::number(selectedProfile.maxWidth);
+        }
+        if (selectedProfile.maxHeight > 0) {
+            args << "--max-height" << QString::number(selectedProfile.maxHeight);
+        }
+        if (selectedProfile.maxCombinations > 0) {
+            args << "--max-combinations" << QString::number(selectedProfile.maxCombinations);
+        }
+        if (selectedProfile.scale > 0.0) {
+            args << "--scale" << QString::number(selectedProfile.scale);
+        }
+    }
+    const int paddingForRun = hasSelectedProfile ? selectedProfile.padding : 0;
+    const bool trimEnabledForRun = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
+    args << "--padding" << QString::number(paddingForRun);
+    if (trimEnabledForRun) {
         args << "--trim-transparent";
     }
-    m_runningLayoutProfile = requestedProfile;
-    appendDebugLog(QString("Running spratlayout: source='%1' profile='%2' padding=%3 trim=%4")
+    m_lastRunUsedTrim = trimEnabledForRun;
+    m_runningLayoutProfile.clear();
+    appendDebugLog(QString("Running spratlayout: source='%1' selected_profile='%2' padding=%3 trim=%4")
                        .arg(m_layoutSourcePath,
-                            m_profileCombo->currentText(),
-                            QString::number(m_paddingSpin->value()),
-                            m_trimCheck->isChecked() ? "true" : "false"));
+                            requestedProfile.isEmpty() ? "<none>" : requestedProfile,
+                            QString::number(paddingForRun),
+                            trimEnabledForRun ? "true" : "false"));
+    if (hasSelectedProfile) {
+        appendDebugLog("Applying selected profile non-UI options (mode/optimize/limits/scale).");
+    } else {
+        appendDebugLog("Selected profile not found; using CLI defaults for non-UI options.");
+    }
+    appendDebugLog(QString("Command: %1").arg(formatProcessCommand(m_spratLayoutBin, args)));
 
     m_statusLabel->setText(tr("Running spratlayout..."));
     setLoading(true);
+    m_layoutFailureDialogShown = false;
     m_process->start(m_spratLayoutBin, args);
 }
 
 void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     setLoading(false);
     if (exitStatus == QProcess::CrashExit || exitCode != 0) {
-        const QString failedProfile = m_runningLayoutProfile.isEmpty() ? m_profileCombo->currentText() : m_runningLayoutProfile;
         m_runningLayoutProfile.clear();
-        const QString err = m_process->readAllStandardError();
+        const QString err = QString::fromUtf8(m_process->readAllStandardError()).trimmed();
+        const QString out = QString::fromUtf8(m_process->readAllStandardOutput()).trimmed();
+        const QString combined = (err + "\n" + out).toLower();
+        if (!m_retryWithoutTrimOnFailure &&
+            !m_layoutRunPending &&
+            m_lastRunUsedTrim &&
+            combined.contains("failed to compute compact layout")) {
+            appendDebugLog("spratlayout failed with trim enabled; retrying once without trim transparency.");
+            m_statusLabel->setText(tr("Retrying without trim transparency..."));
+            m_retryWithoutTrimOnFailure = true;
+            onRunLayout();
+            return;
+        }
+        QString details = err;
+        if (details.isEmpty()) {
+            details = out;
+        }
+        if (details.isEmpty()) {
+            details = tr("spratlayout exited with code %1.").arg(exitCode);
+        }
         m_statusLabel->setText(tr("Error running layout"));
-        qCritical() << "spratlayout process failed. Exit code:" << exitCode << "Error:" << err;
-        QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + err);
-        handleProfileFailure(failedProfile);
+        qCritical() << "spratlayout process failed. Exit code:" << exitCode << "Error:" << err << "Output:" << out;
+        if (!m_layoutFailureDialogShown) {
+            QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + details);
+            m_layoutFailureDialogShown = true;
+        }
+        m_retryWithoutTrimOnFailure = false;
         if (m_layoutRunPending) {
             m_layoutRunPending = false;
             onRunLayout();
@@ -65,6 +131,7 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
         return;
     }
     m_runningLayoutProfile.clear();
+    m_retryWithoutTrimOnFailure = false;
 
     const QByteArray processOutput = m_process->readAllStandardOutput();
     const QString layoutText = QString::fromUtf8(processOutput);
@@ -128,10 +195,27 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
 void MainWindow::onProcessError(QProcess::ProcessError error) {
     setLoading(false);
     m_runningLayoutProfile.clear();
+    m_retryWithoutTrimOnFailure = false;
+    const QString processError = m_process ? m_process->errorString().trimmed() : QString();
+    const QString err = m_process ? QString::fromUtf8(m_process->readAllStandardError()).trimmed() : QString();
+    const QString out = m_process ? QString::fromUtf8(m_process->readAllStandardOutput()).trimmed() : QString();
+    QString details = processError;
+    if (details.isEmpty()) {
+        details = err;
+    }
+    if (details.isEmpty()) {
+        details = out;
+    }
+    if (details.isEmpty()) {
+        details = tr("Unknown process error.");
+    }
     if (error == QProcess::FailedToStart) {
         m_statusLabel->setText(tr("Error: spratlayout not found"));
         qCritical() << "Failed to start spratlayout process. Make sure it is installed and in your PATH.";
-        QMessageBox::critical(this, tr("Error"), tr("Could not start 'spratlayout'.\nMake sure it is installed and in your PATH."));
+        if (!m_layoutFailureDialogShown) {
+            QMessageBox::critical(this, tr("Error"), tr("Could not start 'spratlayout'.\nMake sure it is installed and in your PATH.\n\n%1").arg(details));
+            m_layoutFailureDialogShown = true;
+        }
         if (m_layoutRunPending) {
             m_layoutRunPending = false;
             onRunLayout();
@@ -139,6 +223,11 @@ void MainWindow::onProcessError(QProcess::ProcessError error) {
         return;
     }
     m_statusLabel->setText(tr("Error running layout process"));
+    qCritical() << "spratlayout process error:" << error << details;
+    if (!m_layoutFailureDialogShown && (!m_process || m_process->state() == QProcess::NotRunning)) {
+        QMessageBox::critical(this, tr("Error"), tr("spratlayout process failed:\n") + details);
+        m_layoutFailureDialogShown = true;
+    }
     if (m_layoutRunPending) {
         m_layoutRunPending = false;
         onRunLayout();
@@ -273,10 +362,8 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 }
 
 void MainWindow::onProfileChanged() {
-    onRunLayout();
-}
-
-void MainWindow::onPaddingChanged() {
+    const QString requestedProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
+    appendDebugLog(QString("Profile changed: '%1'").arg(requestedProfile.isEmpty() ? "<none>" : requestedProfile));
     onRunLayout();
 }
 

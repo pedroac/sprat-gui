@@ -78,6 +78,10 @@ set(PROJECT_SOURCES
     src/Settings/SettingsCoordinator.h
     src/App/MainWindow/MainWindowUiState.cpp
     src/App/MainWindow/MainWindowUiState.h
+    src/Profiles/SpratProfilesConfig.cpp
+    src/Profiles/SpratProfilesConfig.h
+    src/Profiles/ProfilesDialog.cpp
+    src/Profiles/ProfilesDialog.h
     src/Animation/Timelines/TimelineBuilder.cpp
     src/Animation/Timelines/TimelineBuilder.h
     src/Core/models.h
@@ -96,6 +100,7 @@ target_include_directories(sprat-gui PRIVATE
     src/SelectedSpriteFrame
     src/SelectedSpriteFrame/Markers
     src/CLITools
+    src/Profiles
     src/Project
     src/Settings
     src/Core

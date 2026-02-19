@@ -129,6 +129,14 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
              }
         }
 
+        // spratlayout scale changes sprite rect dimensions; match rendered frame size to rect.
+        const QSize targetSize = sprite->rect.size();
+        if (targetSize.width() > 0 &&
+            targetSize.height() > 0 &&
+            (pixmap.size() != targetSize)) {
+            pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+        }
+
         auto* item = new SpriteItem(sprite);
         item->setPixmap(pixmap);
         item->setPos(sprite->rect.x(), sprite->rect.y());
