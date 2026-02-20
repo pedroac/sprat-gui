@@ -165,7 +165,11 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             if (inProfile) {
                 profiles.append(current);
             }
-            current = genericDefaultProfile(headerMatch.captured(1).trimmed());
+            QString profileName = headerMatch.captured(1).trimmed();
+            if (profileName.size() >= 2 && profileName.startsWith('"') && profileName.endsWith('"')) {
+                profileName = profileName.mid(1, profileName.size() - 2);
+            }
+            current = genericDefaultProfile(profileName);
             inProfile = true;
             inLegacyProfilesSection = false;
             continue;
@@ -179,7 +183,8 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
         if (eq <= 0) {
             continue;
         }
-        const QString key = line.left(eq).trimmed().toLower();
+        QString key = line.left(eq).trimmed().toLower();
+        key.replace('-', '_');
         const QString value = line.mid(eq + 1).trimmed();
 
         if (inLegacyProfilesSection && key == "names") {
@@ -298,27 +303,31 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         if (i > 0) {
             out << "\n";
         }
-        out << "[profile " << p.name << "]\n";
+        QString profileName = p.name;
+        if (profileName.contains(' ') || profileName.contains('[') || profileName.contains(']')) {
+            profileName = "\"" + profileName + "\"";
+        }
+        out << "[profile " << profileName << "]\n";
         out << "mode=" << p.mode << "\n";
         out << "optimize=" << p.optimize << "\n";
         if (p.maxWidth > 0) {
-            out << "max_width=" << p.maxWidth << "\n";
+            out << "max-width=" << p.maxWidth << "\n";
         }
         if (p.maxHeight > 0) {
-            out << "max_height=" << p.maxHeight << "\n";
+            out << "max-height=" << p.maxHeight << "\n";
         }
         if (p.targetResolutionUseSource) {
-            out << "target_resolution=source\n";
+            out << "target-resolution=source\n";
         } else {
-            out << "target_resolution=" << p.targetResolutionWidth << "x" << p.targetResolutionHeight << "\n";
+            out << "target-resolution=" << p.targetResolutionWidth << "x" << p.targetResolutionHeight << "\n";
         }
-        out << "resolution_reference=" << p.resolutionReference << "\n";
+        out << "resolution-reference=" << p.resolutionReference << "\n";
         out << "padding=" << p.padding << "\n";
-        out << "max_combinations=" << p.maxCombinations << "\n";
+        out << "max-combinations=" << p.maxCombinations << "\n";
         if (p.threads > 0) {
             out << "threads=" << p.threads << "\n";
         }
-        out << "trim_transparent=" << (p.trimTransparent ? "true" : "false") << "\n";
+        out << "trim-transparent=" << (p.trimTransparent ? "true" : "false") << "\n";
     }
 
     out.flush();
