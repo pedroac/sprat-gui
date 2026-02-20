@@ -36,25 +36,6 @@ void MainWindow::setupUi() {
     m_mainStack = new QStackedWidget(this);
     setCentralWidget(m_mainStack);
 
-    m_debugDock = new QDockWidget(tr("Debug"), this);
-    m_debugDock->setObjectName("debugDock");
-    m_debugDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
-    m_debugLogEdit = new QTextEdit(m_debugDock);
-    m_debugLogEdit->setReadOnly(true);
-    m_debugDock->setWidget(m_debugLogEdit);
-    addDockWidget(Qt::BottomDockWidgetArea, m_debugDock);
-    m_debugDock->hide();
-    if (m_showDebugAction) {
-        connect(m_debugDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-            if (!m_showDebugAction) {
-                return;
-            }
-            m_showDebugAction->blockSignals(true);
-            m_showDebugAction->setChecked(visible);
-            m_showDebugAction->blockSignals(false);
-        });
-    }
-
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);
     QVBoxLayout* welcomeLayout = new QVBoxLayout(m_welcomePage);
@@ -430,13 +411,6 @@ void MainWindow::setupToolbar() {
     QAction* settingsAction = toolbar->addAction(tr("Settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettingsClicked);
 
-    m_showDebugAction = toolbar->addAction(tr("Debug"));
-    m_showDebugAction->setCheckable(true);
-    connect(m_showDebugAction, &QAction::toggled, this, [this](bool checked) {
-        if (m_debugDock) {
-            m_debugDock->setVisible(checked);
-        }
-    });
     toolbar->addSeparator();
     m_folderLabel = new QLabel(tr("Folder: none"), this);
     m_folderLabel->setStyleSheet("padding-left: 10px;");

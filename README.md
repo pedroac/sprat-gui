@@ -68,18 +68,10 @@ Use the layout canvas context menu to manage individual frames without reloading
 ## Build
 
 ```bash
-./build.sh
+sh build.sh
 ```
 
 `build.sh` runs configure (`cmake .`), build (`make`), and tests (`ctest`) in sequence.
-
-Manual equivalent:
-
-```bash
-cmake .
-make
-ctest --output-on-failure
-```
 
 Binary output:
 
@@ -108,28 +100,27 @@ Binary output:
 - **Loading frame folders**
   - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.
   - When loading a ZIP with multiple image directories, the app prompts you to choose the folder to import.
-  - Use the profile selector to switch layout behavior, choose source resolution when needed, and use the **Manage Profiles** action to edit profile rules.
-  - The layout canvas lists all frames; search the frame list by name to filter sprites for quicker edits.
-  - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
   - ![Load ZIP folder selector](README_assets/load_zip_folder_selector.png)
-  - ![Profiles](README_assets/profiles.png)
+  - Use the profile selector to switch layout behavior, choose source resolution when needed, ...
   - ![Source resolution](README_assets/source_resolution.png)
-  - ![Loaded frames](README_assets/loaded_frames.png)
+  - ... and use the **Manage Profiles** action to edit profile rules.
+  - ![Profiles](README_assets/profiles.png)
+  - The layout canvas lists all frames; search the frame list by name to filter sprites for quicker edits.
   - ![Filter by name](README_assets/layout_filter_by_name.png)
-
+  - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
+  - ![Loaded frames](README_assets/loaded_frames.png)
 
 - **Sprite sheet layout editing**
   - Select a sprite to see its preview details; use zoom/scroll controls inside the preview canvas.
   - Rename the sprite, adjust its pivot (X/Y spins), or switch between markers (point/circle/rectangle/polygon) via the handle dropdown.
   - Markers show handles for precision; add/edit points, circles, rectangles, or polygons using the markers dialog and context menus—marker info is also copied to clipboard.
-  - Right-click pivot/marker handles to open context actions, including **Apply to Selected Frames** (applies from the active source sprite to the current multi-selection in the layout canvas).
-  - Context menu ownership is exclusive: when the marker/pivot menu is open, the generic selected-frame menu is suppressed.
   - ![Point marker example](README_assets/markers_point_bullet.png)
   - ![Marker points](README_assets/selected_frame_editor_point_bullet.png)
   - ![Polygon marker example](README_assets/markers_polygon_knife.png)
   - ![Marker polygon](README_assets/selected_frame_editor_polygon_knife.png)
   - ![Markers example](README_assets/markers_knife_head_body.png)
   - ![Selected frame editor](README_assets/selected_frame_editor_knife_head_body.png)
+  - Right-click pivot/marker handles to open context actions, including **Apply to Selected Frames** (applies from the active source sprite to the current multi-selection in the layout canvas).
   - ![Apply pivot to selected](README_assets/apply_pivot_to_selected.png)
 
 - **Animation authoring**

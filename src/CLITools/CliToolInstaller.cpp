@@ -1,12 +1,10 @@
 #include "CliToolInstaller.h"
-#include "SpratCliLocator.h"
-
+#include <SpratCliLocator.h>
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDir>
 #include <QProcess>
 #include <QMessageBox>
-#include <QStandardPaths>
 #include <QApplication>
 
 CliToolInstaller::CliToolInstaller(QObject* parent) : QObject(parent), m_installProcess(new QProcess(this)) {
@@ -51,18 +49,18 @@ bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
         return QString();
     };
 
-    QString m_spratLayoutBin = findBin("spratlayout");
-    if (m_spratLayoutBin.isEmpty()) {
+    QString spratLayoutBin = findBin("spratlayout");
+    if (spratLayoutBin.isEmpty()) {
         missing << "spratlayout";
     }
 
-    QString m_spratPackBin = findBin("spratpack");
-    if (m_spratPackBin.isEmpty()) {
+    QString spratPackBin = findBin("spratpack");
+    if (spratPackBin.isEmpty()) {
         missing << "spratpack";
     }
 
-    QString m_spratConvertBin = findBin("spratconvert");
-    if (m_spratConvertBin.isEmpty()) {
+    QString spratConvertBin = findBin("spratconvert");
+    if (spratConvertBin.isEmpty()) {
         missing << "spratconvert";
     }
 

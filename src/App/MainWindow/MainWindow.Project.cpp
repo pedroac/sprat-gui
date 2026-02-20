@@ -194,8 +194,8 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         buildProjectPayload(config),
         savedDestination,
         [this](bool loading) { setLoading(loading); },
-        [this](const QString& status) { m_statusLabel->setText(status); },
-        [this](const QString& message) { appendDebugLog(message); });
+        [this](const QString& status) { m_statusLabel->setText(status); }
+    );
     m_forceImmediateLoadingOverlay = false;
     if (ok) {
         m_statusLabel->setText(tr("Saved to ") + savedDestination);

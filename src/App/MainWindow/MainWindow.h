@@ -145,7 +145,6 @@ private:
     bool loadImagesFromZip(const QString& zipPath, bool confirmReplace = true);
     void clearZipTempDir();
     void cacheLayoutOutputFromPayload(const QJsonObject& payload);
-    void appendDebugLog(const QString& message);
     void refreshHandleCombo();
     void applyProjectPayload();
     LayoutModel parseLayoutOutput(const QString& output, const QString& folderPath);
@@ -213,10 +212,7 @@ private:
 
     QAction* m_loadAction;
     QAction* m_saveAction;
-    QAction* m_showDebugAction = nullptr;
     QLabel* m_statusLabel;
-    QDockWidget* m_debugDock = nullptr;
-    QTextEdit* m_debugLogEdit = nullptr;
     
     LayoutModel m_layoutModel;
     QJsonObject m_pendingProjectPayload;

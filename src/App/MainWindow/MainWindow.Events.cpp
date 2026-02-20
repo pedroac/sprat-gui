@@ -41,16 +41,11 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
 void MainWindow::dropEvent(QDropEvent* event) {
     const QList<QUrl> urls = event->mimeData()->urls();
     if (urls.count() != 1 || !urls.first().isLocalFile()) {
-        appendDebugLog("Drop ignored on release: expected exactly one local file/folder.");
         return;
     }
     const QString localPath = urls.first().toLocalFile();
-    appendDebugLog(QString("Drop received: '%1'").arg(localPath));
     if (tryHandleDroppedPath(localPath, true)) {
         event->acceptProposedAction();
-        appendDebugLog("Drop handled successfully.");
-    } else {
-        appendDebugLog(QString("Drop was not handled: '%1'").arg(localPath));
     }
 }
 
@@ -73,9 +68,7 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
 }
 
 bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) {
-    appendDebugLog(QString("Handling dropped path: '%1'").arg(path));
     if (!isSupportedDropPath(path)) {
-        appendDebugLog(QString("Dropped path is unsupported: '%1'").arg(path));
         return false;
     }
     QFileInfo info(path);
@@ -83,21 +76,17 @@ bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) 
     if (info.isDir()) {
         QDir dir(path);
         if (dir.exists("project.spart.json")) {
-            appendDebugLog(QString("Detected project folder. Loading '%1'.").arg(dir.filePath("project.spart.json")));
             loadProject(dir.filePath("project.spart.json"), confirmReplace);
         } else {
-            appendDebugLog(QString("Detected frames folder. Loading '%1'.").arg(path));
             loadFolder(path, confirmReplace);
         }
         return true;
     }
-    appendDebugLog(QString("Detected project file. Loading '%1'.").arg(path));
     loadProject(path, confirmReplace);
     return true;
 }
 
 void MainWindow::onLayoutCanvasPathDropped(const QString& path) {
-    appendDebugLog(QString("Canvas external drop: '%1'").arg(path));
     tryHandleDroppedPath(path, true);
 }
 

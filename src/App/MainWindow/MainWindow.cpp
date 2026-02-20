@@ -202,10 +202,6 @@ void MainWindow::updateManualFrameLabel() {
     }
 }
 
-void MainWindow::appendDebugLog(const QString& message) {
-    Q_UNUSED(message);
-}
-
 QVector<SpratProfile> MainWindow::configuredProfiles() {
     QString error;
     const QVector<SpratProfile> profiles = SpratProfilesConfig::loadProfileDefinitions(&error);

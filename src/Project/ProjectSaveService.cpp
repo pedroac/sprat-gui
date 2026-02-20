@@ -15,45 +15,44 @@
 #include <QTextStream>
 #include <QStringList>
 #include <QtGlobal>
-#include <cmath>
 
 namespace {
-QString trPS(const char* text) {
-    return QCoreApplication::translate("ProjectSaveService", text);
-}
-
-QString normalizedMarkerName(QString name) {
-    name = name.trimmed();
-    if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
-        return "pivot";
+    QString trPS(const char* text) {
+        return QCoreApplication::translate("ProjectSaveService", text);
     }
-    return name;
-}
 
-bool isCompactMode(const QString& mode) {
-    return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
-}
-
-QString resolutionArg(int width, int height) {
-    return QString("%1x%2").arg(width).arg(height);
-}
-
-bool parseResolution(const QString& value, int& width, int& height) {
-    const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
-    if (parts.size() != 2) {
-        return false;
+    QString normalizedMarkerName(QString name) {
+        name = name.trimmed();
+        if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
+            return "pivot";
+        }
+        return name;
     }
-    bool okW = false;
-    bool okH = false;
-    const int parsedWidth = parts[0].trimmed().toInt(&okW);
-    const int parsedHeight = parts[1].trimmed().toInt(&okH);
-    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-        return false;
+
+    bool isCompactMode(const QString& mode) {
+        return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
     }
-    width = parsedWidth;
-    height = parsedHeight;
-    return true;
-}
+
+    QString resolutionArg(int width, int height) {
+        return QString("%1x%2").arg(width).arg(height);
+    }
+
+    bool parseResolution(const QString& value, int& width, int& height) {
+        const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
+        if (parts.size() != 2) {
+            return false;
+        }
+        bool okW = false;
+        bool okH = false;
+        const int parsedWidth = parts[0].trimmed().toInt(&okW);
+        const int parsedHeight = parts[1].trimmed().toInt(&okH);
+        if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
+            return false;
+        }
+        width = parsedWidth;
+        height = parsedHeight;
+        return true;
+    }
 }
 
 bool ProjectSaveService::save(
@@ -69,9 +68,8 @@ bool ProjectSaveService::save(
     const QJsonObject& projectPayload,
     QString& savedDestination,
     const std::function<void(bool)>& setLoading,
-    const std::function<void(const QString&)>& setStatus,
-    const std::function<void(const QString&)>& debugLog) {
-    Q_UNUSED(debugLog);
+    const std::function<void(const QString&)>& setStatus
+) {
     constexpr int kProcessTimeoutMs = 120000;
 
     struct LoadingGuard {

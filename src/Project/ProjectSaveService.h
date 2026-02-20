@@ -23,6 +23,6 @@ public:
         const QJsonObject& projectPayload,
         QString& savedDestination,
         const std::function<void(bool)>& setLoading,
-        const std::function<void(const QString&)>& setStatus,
-        const std::function<void(const QString&)>& debugLog);
+        const std::function<void(const QString&)>& setStatus
+    );
 };

@@ -81,18 +81,6 @@ void MainWindow::installCliTools() {
 }
 
 void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
-    appendDebugLog(QString("loadFolder requested: path='%1' confirmReplace=%2")
-                       .arg(path, confirmReplace ? "true" : "false"));
-    if (confirmReplace && !confirmLayoutReplacement()) {
-        appendDebugLog("loadFolder aborted: user canceled layout replacement.");
-        return;
-    }
-    if (!m_cliReady || m_isLoading) {
-        appendDebugLog(QString("loadFolder aborted: cliReady=%1 isLoading=%2")
-                           .arg(m_cliReady ? "true" : "false",
-                                m_isLoading ? "true" : "false"));
-        return;
-    }
     m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
     QString targetPath = path;
@@ -100,14 +88,11 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     bool selectionCanceled = false;
     if (ImageFolderSelectionDialog::pickSingleFolderWithImages(this, path, selection, &selectionCanceled)) {
         targetPath = selection;
-        appendDebugLog(QString("loadFolder selected subdirectory: '%1'").arg(targetPath));
     } else if (selectionCanceled) {
         m_statusLabel->setText(tr("Load canceled"));
-        appendDebugLog("loadFolder canceled while selecting image subdirectory.");
         setLoading(false);
         return;
     } else if (!ImageDiscoveryService::hasImageFiles(path)) {
-        appendDebugLog(QString("loadFolder failed: no image files found in '%1'.").arg(path));
         setLoading(false);
         QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
         return;
@@ -124,8 +109,6 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     }
     const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
     const int imageCount = absolutePaths.size();
-    appendDebugLog(QString("loadFolder discovered %1 image(s) in '%2'")
-                       .arg(QString::number(absolutePaths.size()), QDir(targetPath).absolutePath()));
     m_activeFramePaths = absolutePaths;
     QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imageCount, this);
     progress.setWindowModality(Qt::WindowModal);
@@ -141,7 +124,6 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
         QApplication::processEvents();
         if (progress.wasCanceled()) {
             m_statusLabel->setText(tr("Frame loading canceled"));
-            appendDebugLog("loadFolder canceled during frame loading progress.");
             setLoading(false);
             return;
         }

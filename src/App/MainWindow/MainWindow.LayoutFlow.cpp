@@ -391,7 +391,6 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 
 void MainWindow::onProfileChanged() {
     const QString requestedProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
-    appendDebugLog(QString("Profile changed: '%1'").arg(requestedProfile.isEmpty() ? "<none>" : requestedProfile));
     onRunLayout();
 }
 
