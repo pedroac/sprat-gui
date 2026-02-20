@@ -6,6 +6,8 @@
 #include "models.h"
 #include "SpriteItem.h"
 
+class QFocusEvent;
+
 class LayoutCanvas : public QGraphicsView {
     Q_OBJECT
 public:
@@ -35,12 +37,14 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
     void drawForeground(QPainter* painter, const QRectF& rect) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     void updateSearch();
     void emitSelectionChanged();
+    void updateBorderHighlights();
 
     QGraphicsScene* m_scene;
     double m_zoomLevel = 1.0;
@@ -59,4 +63,5 @@ private:
     QGraphicsRectItem* m_atlasBgItem = nullptr;
     QList<QAbstractGraphicsShapeItem*> m_borderItems;
     QHash<QString, QPixmap> m_sourcePixmaps;
+    QString m_contextMenuTargetPath;
 };

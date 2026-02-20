@@ -63,13 +63,22 @@ Place the `sprat-cli` repository beside this project (for example, at `../sprat-
 
 ## Manual frame editing
 
-Use the layout canvas context menu to manage individual frames without reloading an entire folder. Right-click an empty area, choose **Add Frames...**, and pick one or more image files. The GUI writes a temporary plaintext list that `spratlayout` already understands (the same list-file input described in the [`sprat-cli`](https://github.com/pedroac/sprat-cli) README) and runs the layout using that list, so you can mix files from anywhere on disk. Right-clicking a selected sprite (or selection) exposes a **Remove Frame** / **Remove Frames** command; if any of the chosen frames are referenced by existing timelines you are warned that the timelines will drop those entries before the removal proceeds.
+Use the layout canvas context menu to manage individual frames without reloading an entire folder. Right-click an empty area, choose **Add Frames...**, and pick one or more image files. The GUI writes a temporary plaintext list that `spratlayout` already understands (the same list-file input described in the [`sprat-cli`](https://github.com/pedroac/sprat-cli) README) and runs the layout using that list, so you can mix files from anywhere on disk. Right-clicking a sprite exposes a **Remove Frame** action for the frame under the cursor; if that frame is referenced by existing timelines you are warned that timelines will drop those entries before removal proceeds.
 
 ## Build
 
 ```bash
+./build.sh
+```
+
+`build.sh` runs configure (`cmake .`), build (`make`), and tests (`ctest`) in sequence.
+
+Manual equivalent:
+
+```bash
 cmake .
-cmake --build . -j4
+make
+ctest --output-on-failure
 ```
 
 Binary output:
@@ -98,52 +107,91 @@ Binary output:
 
 - **Loading frame folders**
   - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.
+  - When loading a ZIP with multiple image directories, the app prompts you to choose the folder to import.
+  - Use the profile selector to switch layout behavior, choose source resolution when needed, and use the **Manage Profiles** action to edit profile rules.
   - The layout canvas lists all frames; search the frame list by name to filter sprites for quicker edits.
   - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
+  - ![Load ZIP folder selector](README_assets/load_zip_folder_selector.png)
+  - ![Profiles](README_assets/profiles.png)
+  - ![Source resolution](README_assets/source_resolution.png)
   - ![Loaded frames](README_assets/loaded_frames.png)
   - ![Filter by name](README_assets/layout_filter_by_name.png)
+
 
 - **Sprite sheet layout editing**
   - Select a sprite to see its preview details; use zoom/scroll controls inside the preview canvas.
   - Rename the sprite, adjust its pivot (X/Y spins), or switch between markers (point/circle/rectangle/polygon) via the handle dropdown.
   - Markers show handles for precision; add/edit points, circles, rectangles, or polygons using the markers dialog and context menus—marker info is also copied to clipboard.
+  - Right-click pivot/marker handles to open context actions, including **Apply to Selected Frames** (applies from the active source sprite to the current multi-selection in the layout canvas).
+  - Context menu ownership is exclusive: when the marker/pivot menu is open, the generic selected-frame menu is suppressed.
   - ![Point marker example](README_assets/markers_point_bullet.png)
   - ![Marker points](README_assets/selected_frame_editor_point_bullet.png)
   - ![Polygon marker example](README_assets/markers_polygon_knife.png)
   - ![Marker polygon](README_assets/selected_frame_editor_polygon_knife.png)
   - ![Markers example](README_assets/markers_knife_head_body.png)
   - ![Selected frame editor](README_assets/selected_frame_editor_knife_head_body.png)
+  - ![Apply pivot to selected](README_assets/apply_pivot_to_selected.png)
 
 - **Animation authoring**
   - Timelines panel lets you add simple names, remove, rename, and select timelines.
   - Drag frames from the layout into the timeline list; reorder via drop or context actions; duplicate/remove frames with toolbar buttons.
-  - Animation test area exposes play/pause/step controls plus FPS and zoom sliders. Use “Save Animation…” (right-click preview) after choosing ImageMagick/FFmpeg toolchains. 
+  - Animation test area exposes play/pause/step controls plus timeline FPS and zoom controls.
+  - The animation test area auto-sizes to the widest/tallest frame in the current timeline, keeps frames fully visible, and uses scrollbars when content exceeds the viewport.
+  - Animation test preview supports wheel scrolling, `Ctrl+Wheel` zoom, and panning (`Middle Mouse Drag` or `Space + Left Drag`).
+  - Use “Save Animation…” (right-click preview) after choosing ImageMagick/FFmpeg toolchains.
   - ![Animation panel](README_assets/animation.png)
 
-- **Project persistence**
-  - Save writes layout, markers, timelines, and export configs to `.json` or `.zip` via the Save dialog.
-  - Load restores saved projects (including ZIP archives) while reapplying layout options, selected timelines, and markers.
+- **Project save/load**
+  - Save projects as `.json` or `.zip` and pick exactly which data blocks to persist.
+  - Use load actions to resume layout, timelines, and editor context from a saved project.
   - ![Save dialog](README_assets/save.png)
+
+## Keyboard and pointer controls
+
+- **Layout canvas selection**
+  - `Ctrl + A`: select all sprites in the canvas.
+  - `Left/Right/Up/Down`: navigate selection from the current sprite.
+  - `Shift + Arrows`: extend selection while navigating.
+  - Arrow navigation does not wrap at edges.
+  - If there is no valid frame in the pressed direction, selection does not change.
+  - `Home` / `End`: jump to the first / last frame in the current row.
+
+- **Selected frame editor**
+  - `Right Click` on pivot/marker: opens context actions for alignment/apply operations.
+  - `Delete/Backspace`: removes selected polygon vertex when applicable.
+  - `Ctrl + Wheel`: zoom selected frame preview.
+  - `Space + Drag` or `Middle Mouse Drag`: pan selected frame preview.
+
+- **Animation test preview**
+  - `Wheel`: scroll preview viewport.
+  - `Ctrl + Wheel`: change animation preview zoom.
+  - `Space + Left Drag` or `Middle Mouse Drag`: pan preview viewport.
+  - `Right Click`: export/copy frame menu.
 
 ## Timeline auto-generation naming
 
 ![Auto-create timelines](README_assets/layout_auto_create_timelines.png) 
 
-Expected pattern:
+Supported patterns:
 
 ```text
 <Name> (<Index>)
+<Name> [<Index>]
+<Name>_<Index>
+<Name> <Index>
+<Name>-<Index>
+<Name><Index>
 ```
 
 Examples:
 
-- `Idle (0)`, `Idle (1)`, `Idle (2)`
-- `Run (0)`, `Run (1)`, `Run (2)`
+- `Idle (0)`, `Idle (001)`, `Idle [2]`
+- `Run_0`, `Run 01`, `Run-2`, `Punch3`
 
 Generation behavior:
 
 - Creates timeline `<Name>` if it does not exist.
-- Adds frames that start with `<Name>` and match the pattern.
+- Adds frames whose names end with a numeric index in one of the supported patterns.
 - Sorts frames by `<Index>`.
 - If a timeline exists, you can choose **Replace**, **Merge**, or **Ignore**.
 
@@ -184,7 +232,6 @@ Generation behavior:
 - **Translations (Qt)**  
   User-facing GUI strings should use Qt translation APIs (`tr(...)` in `QObject` classes, `QCoreApplication::translate(...)` in non-`QObject` code). Translation catalogs live in `i18n/`:
   - `i18n/sprat-gui_en.ts`
-  - `i18n/sprat-gui_pt_BR.ts`
   Typical workflow:
   1. Update code strings using `tr`/`translate`.
   2. Run `lupdate` to refresh `.ts` entries.

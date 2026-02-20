@@ -1,11 +1,14 @@
-cmake_install.cmake
+*.cmake
 CMakeCache.txt
 CMakeFiles/
 cmake-build-*/
 Makefile
 
-/sprat-gui
-/sprat-gui_autogen/
+sprat-gui
+sprat-gui_autogen/
+sprat-gui-tests
+sprat-gui-tests_autogen/
+Testing/
 
 .qt/
 
@@ -22,3 +25,10 @@ build/
 *.exp
 *.pdb
 *.so
+
+.DS_Store
+.idea/
+.vscode/
+compile_commands.json
+*.qm
+*.log

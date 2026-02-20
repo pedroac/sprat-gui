@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(sprat-gui LANGUAGES CXX)
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,6 +73,10 @@ set(PROJECT_SOURCES
     src/Animation/Timelines/TimelineUi.h
     src/Project/ProjectSaveService.cpp
     src/Project/ProjectSaveService.h
+    src/Project/ImageDiscoveryService.cpp
+    src/Project/ImageDiscoveryService.h
+    src/Project/ImageFolderSelectionDialog.cpp
+    src/Project/ImageFolderSelectionDialog.h
     src/SelectedSpriteFrame/SpriteSelectionPresenter.cpp
     src/SelectedSpriteFrame/SpriteSelectionPresenter.h
     src/Settings/SettingsCoordinator.cpp
@@ -80,6 +85,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindowUiState.h
     src/Profiles/SpratProfilesConfig.cpp
     src/Profiles/SpratProfilesConfig.h
+    src/Profiles/ResolutionsConfig.cpp
+    src/Profiles/ResolutionsConfig.h
     src/Profiles/ProfilesDialog.cpp
     src/Profiles/ProfilesDialog.h
     src/Animation/Timelines/TimelineBuilder.cpp
@@ -110,7 +117,6 @@ target_link_libraries(sprat-gui PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Con
 
 set(TS_FILES
     i18n/sprat-gui_en.ts
-    i18n/sprat-gui_pt_BR.ts
 )
 
 if(Qt6LinguistTools_FOUND)
@@ -119,4 +125,26 @@ if(Qt6LinguistTools_FOUND)
     )
 else()
     message(STATUS "Qt6 LinguistTools not found: skipping automatic .ts/.qm generation.")
+endif()
+
+if(BUILD_TESTING)
+    add_executable(sprat-gui-tests
+        tests/TestMain.cpp
+        src/Animation/AnimationPreviewService.cpp
+        src/Animation/Timelines/TimelineBuilder.cpp
+        src/Project/ProjectPayloadCodec.cpp
+    )
+
+    target_include_directories(sprat-gui-tests PRIVATE
+        src
+        src/Animation
+        src/Animation/Timelines
+        src/Project
+        src/Core
+    )
+
+    target_link_libraries(sprat-gui-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+
+    add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)
+    set_tests_properties(sprat-gui-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

@@ -11,7 +11,6 @@ class QDialogButtonBox;
 class QLineEdit;
 class QComboBox;
 class QSpinBox;
-class QDoubleSpinBox;
 class QCheckBox;
 
 class ProfilesDialog : public QDialog {
@@ -30,6 +29,7 @@ private:
     bool hasDuplicateName(const QString& name, int exceptRow = -1) const;
     void saveEditorsToProfile(int row);
     void loadEditorsFromProfile(int row);
+    void refreshMaxCombinationsEnabledState();
     QString uniqueProfileName(const QString& base) const;
 
     QListWidget* m_listWidget = nullptr;
@@ -44,9 +44,12 @@ private:
     QSpinBox* m_maxWidthSpin = nullptr;
     QCheckBox* m_useMaxHeightCheck = nullptr;
     QSpinBox* m_maxHeightSpin = nullptr;
+    QComboBox* m_targetResolutionCombo = nullptr;
+    QComboBox* m_resolutionReferenceCombo = nullptr;
     QSpinBox* m_paddingSpin = nullptr;
     QSpinBox* m_maxCombinationsSpin = nullptr;
-    QDoubleSpinBox* m_scaleSpin = nullptr;
+    QCheckBox* m_useThreadsCheck = nullptr;
+    QSpinBox* m_threadsSpin = nullptr;
     QCheckBox* m_trimTransparentCheck = nullptr;
 
     QVector<SpratProfile> m_profiles;

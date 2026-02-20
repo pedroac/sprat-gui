@@ -15,6 +15,7 @@ public:
         int& frameIndex,
         const LayoutModel& layoutModel,
         double zoom,
+        int previewPadding,
         QLabel* previewLabel,
         QLabel* statusLabel,
         QPushButton* prevButton,

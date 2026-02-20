@@ -10,9 +10,13 @@ struct SpratProfile {
     QString optimize;
     int maxWidth = -1;
     int maxHeight = -1;
+    int targetResolutionWidth = 1024;
+    int targetResolutionHeight = 1024;
+    bool targetResolutionUseSource = false;
+    QString resolutionReference = "largest";
     int padding = 0;
     int maxCombinations = 0;
-    double scale = 1.0;
+    int threads = 0;
     bool trimTransparent = true;
 };
 

@@ -8,6 +8,13 @@
 #include <QtMath>
 #include <QMenu>
 #include <QAction>
+#include <QCoreApplication>
+
+namespace {
+QString trOverlay(const char* text) {
+    return QCoreApplication::translate("EditorOverlayItem", text);
+}
+}
 
 EditorOverlayItem::EditorOverlayItem(QGraphicsItem* parent) : QGraphicsObject(parent) {
     setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
@@ -365,12 +372,18 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                         update();
 
                         QMenu menu;
-                        QAction* deleteAction = menu.addAction("Delete Vertex");
+                        m_suppressNextViewContextMenu = true;
+                        QAction* deleteAction = menu.addAction(trOverlay("Delete Vertex"));
+                        menu.addSeparator();
+                        QAction* applyAction = menu.addAction(trOverlay("Apply to Selected Frames"));
                         if (p->polygonPoints.size() <= 3) {
                             deleteAction->setEnabled(false);
                         }
-                        if (menu.exec(event->screenPos()) == deleteAction) {
+                        QAction* selectedAction = menu.exec(event->screenPos());
+                        if (selectedAction == deleteAction) {
                             removeSelectedVertex();
+                        } else if (selectedAction == applyAction) {
+                            emit applyMarkerToSelectedFramesRequested(p->name);
                         }
                         event->accept();
                         return;
@@ -384,38 +397,82 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         auto activeSprite = m_sprites.last();
         if (QLineF(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)).length() < hitThreshold) {
             QMenu menu;
-            QAction* left = menu.addAction("Left");
-            QAction* right = menu.addAction("Right");
-            QAction* hcenter = menu.addAction("H-Center");
-            QAction* top = menu.addAction("Top");
-            QAction* bottom = menu.addAction("Bottom");
-            QAction* vcenter = menu.addAction("V-Center");
+            m_suppressNextViewContextMenu = true;
+            QAction* left = menu.addAction(trOverlay("Left"));
+            QAction* right = menu.addAction(trOverlay("Right"));
+            QAction* hcenter = menu.addAction(trOverlay("H-Center"));
+            QAction* top = menu.addAction(trOverlay("Top"));
+            QAction* bottom = menu.addAction(trOverlay("Bottom"));
+            QAction* vcenter = menu.addAction(trOverlay("V-Center"));
+            menu.addSeparator();
+            QAction* applyAction = menu.addAction(trOverlay("Apply to Selected Frames"));
             
             QAction* sel = menu.exec(event->screenPos());
             if (sel) {
-                for (auto& sprite : m_sprites) {
-                    if (sel == left) {
-                        sprite->pivotX = 0;
+                if (sel == applyAction) {
+                    emit applyPivotToSelectedFramesRequested();
+                } else {
+                    for (auto& sprite : m_sprites) {
+                        if (sel == left) {
+                            sprite->pivotX = 0;
+                        }
+                        else if (sel == right) {
+                            sprite->pivotX = m_sceneSize.width();
+                        }
+                        else if (sel == hcenter) {
+                            sprite->pivotX = m_sceneSize.width() / 2;
+                        }
+                        else if (sel == top) {
+                            sprite->pivotY = 0;
+                        }
+                        else if (sel == bottom) {
+                            sprite->pivotY = m_sceneSize.height();
+                        }
+                        else if (sel == vcenter) {
+                            sprite->pivotY = m_sceneSize.height() / 2;
+                        }
                     }
-                    else if (sel == right) {
-                        sprite->pivotX = m_sceneSize.width();
-                    }
-                    else if (sel == hcenter) {
-                        sprite->pivotX = m_sceneSize.width() / 2;
-                    }
-                    else if (sel == top) {
-                        sprite->pivotY = 0;
-                    }
-                    else if (sel == bottom) {
-                        sprite->pivotY = m_sceneSize.height();
-                    }
-                    else if (sel == vcenter) {
-                        sprite->pivotY = m_sceneSize.height() / 2;
-                    }
+                    emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY);
+                    update();
                 }
-                
-                emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY);
+            }
+            event->accept();
+            return;
+        }
+
+        // Check marker hit (point/circle/rectangle/polygon) and show apply action.
+        for (int i = activeSprite->points.size() - 1; i >= 0; --i) {
+            const auto& p = activeSprite->points[i];
+            bool hit = false;
+            if (p.kind == MarkerKind::Point) {
+                hit = QLineF(pos, QPointF(p.x, p.y)).length() < hitThreshold;
+            } else if (p.kind == MarkerKind::Circle) {
+                hit = QLineF(pos, QPointF(p.x, p.y)).length() < p.radius;
+            } else if (p.kind == MarkerKind::Rectangle) {
+                hit = QRectF(p.x, p.y, p.w, p.h).contains(pos);
+            } else if (p.kind == MarkerKind::Polygon) {
+                QPolygonF poly;
+                for (const auto& pt : p.polygonPoints) {
+                    poly << pt;
+                }
+                hit = poly.containsPoint(pos, Qt::OddEvenFill);
+            }
+            if (!hit) {
+                continue;
+            }
+
+            if (m_selectedMarkerName != p.name) {
+                m_selectedMarkerName = p.name;
+                m_selectedVertexIndex = -1;
+                emit markerSelected(p.name);
                 update();
+            }
+
+            QMenu menu;
+            m_suppressNextViewContextMenu = true;
+            QAction* applyAction = menu.addAction(trOverlay("Apply to Selected Frames"));
+            if (menu.exec(event->screenPos()) == applyAction) {
+                emit applyMarkerToSelectedFramesRequested(p.name);
             }
             event->accept();
             return;
@@ -797,4 +854,64 @@ bool EditorOverlayItem::removeSelectedVertex() {
 void EditorOverlayItem::updateLayout() {
     prepareGeometryChange();
     update();
+}
+
+bool EditorOverlayItem::hasContextMenuTargetAt(const QPointF& pos) const {
+    if (m_sprites.isEmpty()) {
+        return false;
+    }
+
+    const double scale = getScale();
+    const double hitThreshold = 10.0 * scale;
+    const auto activeSprite = m_sprites.last();
+
+    // Match right-click priority: selected polygon vertex first.
+    if (!m_selectedMarkerName.isEmpty()) {
+        for (const auto& marker : activeSprite->points) {
+            if (marker.name != m_selectedMarkerName || marker.kind != MarkerKind::Polygon) {
+                continue;
+            }
+            for (const auto& vertex : marker.polygonPoints) {
+                if (QLineF(pos, vertex).length() < hitThreshold) {
+                    return true;
+                }
+            }
+            break;
+        }
+    }
+
+    // Pivot should always be considered a context-menu target.
+    if (QLineF(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)).length() < hitThreshold) {
+        return true;
+    }
+
+    // Any marker body is a valid context-menu target.
+    for (int i = activeSprite->points.size() - 1; i >= 0; --i) {
+        const auto& marker = activeSprite->points[i];
+        bool hit = false;
+        if (marker.kind == MarkerKind::Point) {
+            hit = QLineF(pos, QPointF(marker.x, marker.y)).length() < hitThreshold;
+        } else if (marker.kind == MarkerKind::Circle) {
+            hit = QLineF(pos, QPointF(marker.x, marker.y)).length() < marker.radius;
+        } else if (marker.kind == MarkerKind::Rectangle) {
+            hit = QRectF(marker.x, marker.y, marker.w, marker.h).contains(pos);
+        } else if (marker.kind == MarkerKind::Polygon) {
+            QPolygonF poly;
+            for (const auto& pt : marker.polygonPoints) {
+                poly << pt;
+            }
+            hit = poly.containsPoint(pos, Qt::OddEvenFill);
+        }
+        if (hit) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool EditorOverlayItem::consumeSuppressedViewContextMenu() {
+    const bool suppressed = m_suppressNextViewContextMenu;
+    m_suppressNextViewContextMenu = false;
+    return suppressed;
 }

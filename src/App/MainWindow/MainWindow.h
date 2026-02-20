@@ -5,6 +5,8 @@
 #include <QTimer>
 #include <QStringList>
 #include <QVector>
+#include <QHash>
+#include <QIcon>
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
 #include "TimelineListWidget.h"
@@ -24,6 +26,7 @@ class QListWidget;
 class QLineEdit;
 class QGroupBox;
 class QGraphicsView;
+class QScrollArea;
 class QPushButton;
 class QSplitter;
 class QDragEnterEvent;
@@ -31,6 +34,8 @@ class QDropEvent;
 class QWheelEvent;
 class QContextMenuEvent;
 class QResizeEvent;
+class QMouseEvent;
+class QKeyEvent;
 class QTemporaryDir;
 class QWidget;
 class QProgressBar;
@@ -65,6 +70,8 @@ private slots:
     void onPointsConfigClicked();
     void onMarkerSelectedFromCanvas(const QString& name);
     void onMarkerChangedFromCanvas();
+    void onApplyPivotToSelectedTimelineFrames();
+    void onApplyMarkerToSelectedTimelineFrames(const QString& markerName);
     void onProfileChanged();
     void onManageProfiles();
     void onLayoutZoomChanged(double value);
@@ -76,6 +83,7 @@ private slots:
     void onFrameMoved(int from, int to);
     void onFrameRemoveRequested();
     void onFrameDuplicateRequested(int index);
+    void onTimelineFrameSelectionChanged();
     void onAnimPrevClicked();
     void onAnimPlayPauseClicked();
     void onGenerateTimelinesFromFrames();
@@ -121,7 +129,11 @@ private:
     bool isSupportedDropPath(const QString& path) const;
     bool tryHandleDroppedPath(const QString& path, bool confirmReplace = true);
     bool handleAnimPreviewEvent(QEvent* event);
-    void handleAnimPreviewMousePress();
+    bool handleAnimPreviewMousePress(QMouseEvent* mouseEvent);
+    bool handleAnimPreviewMouseMove(QMouseEvent* mouseEvent);
+    bool handleAnimPreviewMouseRelease(QMouseEvent* mouseEvent);
+    bool handleAnimPreviewKeyPress(QKeyEvent* keyEvent);
+    bool handleAnimPreviewKeyRelease(QKeyEvent* keyEvent);
     bool handleAnimPreviewWheel(QWheelEvent* wheelEvent);
     bool handleAnimPreviewContextMenu(QContextMenuEvent* contextEvent);
     void handleAnimPreviewResize();
@@ -130,8 +142,6 @@ private:
     void updateCliOverlayGeometry();
     void setupCliInstallOverlay();
     void resizeEvent(QResizeEvent* event) override;
-    bool pickImageSubdirectory(const QString& root, QString& selection, bool* canceled = nullptr) const;
-    bool hasImageFiles(const QString& path) const;
     bool loadImagesFromZip(const QString& zipPath, bool confirmReplace = true);
     void clearZipTempDir();
     void cacheLayoutOutputFromPayload(const QJsonObject& payload);
@@ -146,6 +156,7 @@ private:
     void refreshTimelineFrames();
     bool exportAnimation(const QString& outPath);
     QTimer* m_autosaveTimer = nullptr;
+    QTimer* m_sourceResolutionDebounceTimer = nullptr;
     void onSettingsClicked();
     void applySettings();
 
@@ -165,6 +176,8 @@ private:
     QComboBox* m_profileCombo = nullptr;
     QPushButton* m_addProfilesBtn = nullptr;
     QPushButton* m_manageProfilesBtn = nullptr;
+    QComboBox* m_sourceResolutionCombo = nullptr;
+    QDoubleSpinBox* m_layoutScaleSpin = nullptr;
     QDoubleSpinBox* m_layoutZoomSpin = nullptr;
 
     // Timelines Area
@@ -175,6 +188,7 @@ private:
     QGroupBox* m_timelineDropArea;
     QLabel* m_timelineDragHintLabel;
     TimelineListWidget* m_timelineFramesList;
+    QHash<QString, QIcon> m_timelineFrameIconCache;
 
     // Selected Frame Editor Area
     QLineEdit* m_spriteNameEdit;
@@ -188,11 +202,13 @@ private:
 
     // Animation Test Area
     QDoubleSpinBox* m_animZoomSpin;
+    QSpinBox* m_animPaddingSpin = nullptr;
     QPushButton* m_animPrevBtn;
     QPushButton* m_animPlayPauseBtn;
     QPushButton* m_animNextBtn;
     QSpinBox* m_timelineFpsSpin;
     QLabel* m_animStatusLabel;
+    QScrollArea* m_animPreviewScroll = nullptr;
     QLabel* m_animPreviewLabel;
 
     QAction* m_loadAction;
@@ -221,6 +237,9 @@ private:
     QTimer* m_loadingOverlayDelayTimer = nullptr;
     int m_animFrameIndex = 0;
     bool m_animPlaying = false;
+    bool m_animPreviewPanning = false;
+    bool m_animPreviewSpacePressed = false;
+    QPoint m_animPreviewLastMousePos;
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
     bool m_forceImmediateLoadingOverlay = false;

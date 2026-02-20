@@ -13,17 +13,6 @@
 #include <QStandardItemModel>
 
 namespace {
-QString formatProcessCommand(const QString& program, const QStringList& args) {
-    QStringList escapedArgs;
-    escapedArgs.reserve(args.size());
-    for (const QString& arg : args) {
-        QString escaped = arg;
-        escaped.replace('\'', "'\\''");
-        escapedArgs << QString("'%1'").arg(escaped);
-    }
-    return QString("%1 %2").arg(program, escapedArgs.join(' '));
-}
-
 int legacyDefaultPivotX(const SpritePtr& sprite) {
     return sprite ? (sprite->rect.width() / 2) : 0;
 }
@@ -31,20 +20,42 @@ int legacyDefaultPivotX(const SpritePtr& sprite) {
 int legacyDefaultPivotY(const SpritePtr& sprite) {
     return sprite ? (sprite->rect.height() / 2) : 0;
 }
+
+bool isCompactMode(const QString& mode) {
+    return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
+}
+
+QString resolutionArg(int width, int height) {
+    return QString("%1x%2").arg(width).arg(height);
+}
+
+bool parseResolutionArg(const QString& value, int& width, int& height) {
+    const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
+    if (parts.size() != 2) {
+        return false;
+    }
+    bool okW = false;
+    bool okH = false;
+    const int parsedWidth = parts[0].trimmed().toInt(&okW);
+    const int parsedHeight = parts[1].trimmed().toInt(&okH);
+    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
+        return false;
+    }
+    width = parsedWidth;
+    height = parsedHeight;
+    return true;
+}
 }
 
 void MainWindow::onRunLayout() {
     if (m_layoutSourcePath.isEmpty()) {
-        appendDebugLog("Layout run skipped: layout source path is empty.");
         return;
     }
     if (!m_cliReady) {
-        appendDebugLog("Layout run skipped: CLI not ready. Triggering CLI check.");
         checkCliTools();
         return;
     }
     if (m_process && m_process->state() != QProcess::NotRunning) {
-        appendDebugLog("Layout run deferred: previous spratlayout process is still running.");
         m_layoutRunPending = true;
         return;
     }
@@ -68,11 +79,33 @@ void MainWindow::onRunLayout() {
         if (selectedProfile.maxHeight > 0) {
             args << "--max-height" << QString::number(selectedProfile.maxHeight);
         }
-        if (selectedProfile.maxCombinations > 0) {
+        if (isCompactMode(selectedProfile.mode) && selectedProfile.maxCombinations > 0) {
             args << "--max-combinations" << QString::number(selectedProfile.maxCombinations);
         }
-        if (selectedProfile.scale > 0.0) {
-            args << "--scale" << QString::number(selectedProfile.scale);
+        if (isCompactMode(selectedProfile.mode) && selectedProfile.threads > 0) {
+            args << "--threads" << QString::number(selectedProfile.threads);
+        }
+    }
+    const double layoutScale = m_layoutScaleSpin ? qBound(0.000001, m_layoutScaleSpin->value(), 1.0) : 1.0;
+    args << "--scale" << QString::number(layoutScale, 'g', 12);
+    int sourceResolutionWidth = 0;
+    int sourceResolutionHeight = 0;
+    const bool hasSourceResolution = m_sourceResolutionCombo &&
+        parseResolutionArg(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight);
+    const bool hasTargetResolution = hasSelectedProfile &&
+        (selectedProfile.targetResolutionUseSource ||
+         (selectedProfile.targetResolutionWidth > 0 && selectedProfile.targetResolutionHeight > 0));
+    if (hasSourceResolution && hasTargetResolution) {
+        const int targetResolutionWidth = selectedProfile.targetResolutionUseSource
+            ? sourceResolutionWidth
+            : selectedProfile.targetResolutionWidth;
+        const int targetResolutionHeight = selectedProfile.targetResolutionUseSource
+            ? sourceResolutionHeight
+            : selectedProfile.targetResolutionHeight;
+        args << "--source-resolution" << resolutionArg(sourceResolutionWidth, sourceResolutionHeight);
+        args << "--target-resolution" << resolutionArg(targetResolutionWidth, targetResolutionHeight);
+        if (!selectedProfile.resolutionReference.trimmed().isEmpty()) {
+            args << "--resolution-reference" << selectedProfile.resolutionReference.trimmed();
         }
     }
     const int paddingForRun = hasSelectedProfile ? selectedProfile.padding : 0;
@@ -83,18 +116,6 @@ void MainWindow::onRunLayout() {
     }
     m_lastRunUsedTrim = trimEnabledForRun;
     m_runningLayoutProfile.clear();
-    appendDebugLog(QString("Running spratlayout: source='%1' selected_profile='%2' padding=%3 trim=%4")
-                       .arg(m_layoutSourcePath,
-                            requestedProfile.isEmpty() ? "<none>" : requestedProfile,
-                            QString::number(paddingForRun),
-                            trimEnabledForRun ? "true" : "false"));
-    if (hasSelectedProfile) {
-        appendDebugLog("Applying selected profile non-UI options (mode/optimize/limits/scale).");
-    } else {
-        appendDebugLog("Selected profile not found; using CLI defaults for non-UI options.");
-    }
-    appendDebugLog(QString("Command: %1").arg(formatProcessCommand(m_spratLayoutBin, args)));
-
     m_statusLabel->setText(tr("Running spratlayout..."));
     setLoading(true);
     m_layoutFailureDialogShown = false;
@@ -112,7 +133,6 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
             !m_layoutRunPending &&
             m_lastRunUsedTrim &&
             combined.contains("failed to compute compact layout")) {
-            appendDebugLog("spratlayout failed with trim enabled; retrying once without trim transparency.");
             m_statusLabel->setText(tr("Retrying without trim transparency..."));
             m_retryWithoutTrimOnFailure = true;
             onRunLayout();
@@ -146,12 +166,6 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
     LayoutModel newModel = parseLayoutOutput(layoutText, layoutParserFolder());
     m_cachedLayoutOutput = layoutText;
     m_cachedLayoutScale = newModel.scale;
-    appendDebugLog(QString("spratlayout finished: atlas=%1x%2 scale=%3 sprites=%4 output_bytes=%5")
-                       .arg(QString::number(newModel.atlasWidth),
-                            QString::number(newModel.atlasHeight),
-                            QString::number(newModel.scale),
-                            QString::number(newModel.sprites.size()),
-                            QString::number(processOutput.size())));
     if (m_pendingProjectPayload.isEmpty()) {
         QMap<QString, SpritePtr> oldSprites;
         for (const auto& s : m_layoutModel.sprites) {

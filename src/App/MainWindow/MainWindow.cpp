@@ -68,7 +68,6 @@
 #include <QIODevice>
 #include <QTextEdit>
 #include <QUuid>
-#include <QDateTime>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -81,6 +80,7 @@ Q_LOGGING_CATEGORY(autosave, "autosave")
  * Initializes the UI, processes, and timers.
  */
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    m_settings = CliToolsConfig::loadAppSettings();
     setupUi();
     setupCliInstallOverlay();
     setAcceptDrops(true);
@@ -203,11 +203,7 @@ void MainWindow::updateManualFrameLabel() {
 }
 
 void MainWindow::appendDebugLog(const QString& message) {
-    if (!m_debugLogEdit) {
-        return;
-    }
-    const QString stamp = QDateTime::currentDateTime().toString("HH:mm:ss.zzz");
-    m_debugLogEdit->append(QString("[%1] %2").arg(stamp, message));
+    Q_UNUSED(message);
 }
 
 QVector<SpratProfile> MainWindow::configuredProfiles() {
@@ -424,6 +420,7 @@ void MainWindow::onSettingsClicked() {
     if (dlg.exec() == QDialog::Accepted) {
         m_settings = dlg.getSettings();
         applySettings();
+        CliToolsConfig::saveAppSettings(m_settings);
         CliPaths chosen = dlg.getCliPaths();
         CliToolsConfig::saveOverride("cli/spratlayout", chosen.layoutBinary);
         CliToolsConfig::saveOverride("cli/spratpack", chosen.packBinary);

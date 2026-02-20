@@ -3,6 +3,8 @@
 #include "models.h"
 #include "EditorOverlayItem.h"
 
+class QFocusEvent;
+
 /**
  * @brief Widget for previewing and editing a single sprite.
  * 
@@ -46,11 +48,14 @@ signals:
      * @brief Emitted when the zoom level changes via mouse wheel.
      */
     void zoomChanged(double zoom);
+    void applyPivotToSelectedFramesRequested();
+    void applyMarkerToSelectedFramesRequested(const QString& markerName);
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;

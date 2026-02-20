@@ -13,9 +13,13 @@ SpratProfile makeProfile(const QString& name,
                          const QString& optimize,
                          int maxWidth,
                          int maxHeight,
+                         int targetResolutionWidth,
+                         int targetResolutionHeight,
+                         bool targetResolutionUseSource,
+                         const QString& resolutionReference,
                          int padding,
                          int maxCombinations,
-                         double scale,
+                         int threads,
                          bool trimTransparent) {
     SpratProfile p;
     p.name = name;
@@ -23,15 +27,19 @@ SpratProfile makeProfile(const QString& name,
     p.optimize = optimize;
     p.maxWidth = maxWidth;
     p.maxHeight = maxHeight;
+    p.targetResolutionWidth = targetResolutionWidth;
+    p.targetResolutionHeight = targetResolutionHeight;
+    p.targetResolutionUseSource = targetResolutionUseSource;
+    p.resolutionReference = resolutionReference;
     p.padding = padding;
     p.maxCombinations = maxCombinations;
-    p.scale = scale;
+    p.threads = threads;
     p.trimTransparent = trimTransparent;
     return p;
 }
 
 SpratProfile genericDefaultProfile(const QString& name = QString()) {
-    return makeProfile(name, "compact", "gpu", -1, -1, 0, 0, 1.0, true);
+    return makeProfile(name, "compact", "gpu", -1, -1, 1024, 1024, false, "largest", 0, 0, 0, true);
 }
 
 bool toBool(const QString& value, bool fallback) {
@@ -43,6 +51,24 @@ bool toBool(const QString& value, bool fallback) {
         return false;
     }
     return fallback;
+}
+
+bool parseResolution(const QString& value, int& width, int& height) {
+    const QString normalized = value.trimmed().toLower();
+    const QStringList parts = normalized.split('x', Qt::SkipEmptyParts);
+    if (parts.size() != 2) {
+        return false;
+    }
+    bool okW = false;
+    bool okH = false;
+    const int parsedWidth = parts[0].trimmed().toInt(&okW);
+    const int parsedHeight = parts[1].trimmed().toInt(&okH);
+    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
+        return false;
+    }
+    width = parsedWidth;
+    height = parsedHeight;
+    return true;
 }
 
 QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
@@ -67,14 +93,23 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
         if (p.maxHeight <= 0) {
             p.maxHeight = -1;
         }
+        if (!p.targetResolutionUseSource &&
+            (p.targetResolutionWidth <= 0 || p.targetResolutionHeight <= 0)) {
+            p.targetResolutionWidth = 1024;
+            p.targetResolutionHeight = 1024;
+        }
+        p.resolutionReference = p.resolutionReference.trimmed().toLower();
+        if (p.resolutionReference != "largest" && p.resolutionReference != "smallest") {
+            p.resolutionReference = "largest";
+        }
         if (p.padding < 0) {
             p.padding = 0;
         }
         if (p.maxCombinations < 0) {
             p.maxCombinations = 0;
         }
-        if (p.scale <= 0.0) {
-            p.scale = 1.0;
+        if (p.threads < 1) {
+            p.threads = 0;
         }
         seen.append(p.name);
         cleaned.append(p);
@@ -184,17 +219,46 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             if (ok) {
                 current.padding = n;
             }
+        } else if (key == "target_resolution") {
+            int width = 0;
+            int height = 0;
+            const QString normalized = value.trimmed().toLower();
+            if (normalized == "source" ||
+                normalized == "same-as-source" ||
+                normalized == "same_as_source") {
+                current.targetResolutionUseSource = true;
+            } else if (parseResolution(value, width, height)) {
+                current.targetResolutionWidth = width;
+                current.targetResolutionHeight = height;
+                current.targetResolutionUseSource = false;
+            }
+        } else if (key == "target_width") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.targetResolutionWidth = n;
+                current.targetResolutionUseSource = false;
+            }
+        } else if (key == "target_height") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.targetResolutionHeight = n;
+                current.targetResolutionUseSource = false;
+            }
+        } else if (key == "resolution_reference") {
+            current.resolutionReference = value;
         } else if (key == "max_combinations") {
             bool ok = false;
             int n = value.toInt(&ok);
             if (ok) {
                 current.maxCombinations = n;
             }
-        } else if (key == "scale") {
+        } else if (key == "threads") {
             bool ok = false;
-            double n = value.toDouble(&ok);
+            int n = value.toInt(&ok);
             if (ok) {
-                current.scale = n;
+                current.threads = n;
             }
         } else if (key == "trim_transparent") {
             current.trimTransparent = toBool(value, current.trimTransparent);
@@ -243,9 +307,17 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         if (p.maxHeight > 0) {
             out << "max_height=" << p.maxHeight << "\n";
         }
+        if (p.targetResolutionUseSource) {
+            out << "target_resolution=source\n";
+        } else {
+            out << "target_resolution=" << p.targetResolutionWidth << "x" << p.targetResolutionHeight << "\n";
+        }
+        out << "resolution_reference=" << p.resolutionReference << "\n";
         out << "padding=" << p.padding << "\n";
         out << "max_combinations=" << p.maxCombinations << "\n";
-        out << "scale=" << QString::number(p.scale, 'g', 12) << "\n";
+        if (p.threads > 0) {
+            out << "threads=" << p.threads << "\n";
+        }
         out << "trim_transparent=" << (p.trimTransparent ? "true" : "false") << "\n";
     }
 

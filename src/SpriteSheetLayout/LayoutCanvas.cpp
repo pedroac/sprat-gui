@@ -15,9 +15,147 @@
 #include <QGraphicsPathItem>
 #include <QPixmapCache>
 #include <QSet>
+#include <QKeySequence>
+#include <limits>
 
 namespace {
     const QColor kSelectionColor(10, 125, 255);
+    const QColor kContextTargetColor(255, 215, 0);
+
+enum class NavigationDirection {
+    Left,
+    Right,
+    Up,
+    Down
+};
+
+int directionStep(NavigationDirection direction) {
+    switch (direction) {
+        case NavigationDirection::Left:
+        case NavigationDirection::Up:
+            return -1;
+        case NavigationDirection::Right:
+        case NavigationDirection::Down:
+            return 1;
+    }
+    return 1;
+}
+
+bool isHorizontalDirection(NavigationDirection direction) {
+    return direction == NavigationDirection::Left || direction == NavigationDirection::Right;
+}
+
+int directionalGuessIndex(int currentIndex, NavigationDirection direction, int size) {
+    if (size <= 0) {
+        return -1;
+    }
+    const int guess = currentIndex + directionStep(direction);
+    return qBound(0, guess, size - 1);
+}
+
+int findDirectionalNeighborIndex(const QVector<SpriteItem*>& items, int currentIndex, NavigationDirection direction) {
+    if (currentIndex < 0 || currentIndex >= items.size()) {
+        return -1;
+    }
+    if (items.size() <= 1) {
+        return -1;
+    }
+
+    const QRectF currentRect = items[currentIndex]->sceneBoundingRect();
+    const QPointF currentCenter = currentRect.center();
+    const bool horizontalMove = isHorizontalDirection(direction);
+    const int directionSign = directionStep(direction);
+    const double probeCoord = horizontalMove ? currentCenter.y() : currentCenter.x();
+    const int guessIndex = directionalGuessIndex(currentIndex, direction, items.size());
+
+    int bestCollisionIndex = -1;
+    double bestCollisionDistance = std::numeric_limits<double>::infinity();
+    for (int radius = 0; radius < items.size(); ++radius) {
+        const int leftCandidate = guessIndex - radius;
+        const int rightCandidate = guessIndex + radius;
+        int candidateIndices[2] = { leftCandidate, rightCandidate };
+        const int candidateCount = (leftCandidate == rightCandidate) ? 1 : 2;
+
+        for (int c = 0; c < candidateCount; ++c) {
+            const int i = candidateIndices[c];
+            if (i < 0 || i >= items.size()) {
+                continue;
+            }
+            if (i == currentIndex) {
+                continue;
+            }
+
+            const QRectF candidateRect = items[i]->sceneBoundingRect();
+            const QPointF candidateCenter = candidateRect.center();
+
+            const double signedPrimaryDistance = horizontalMove
+                ? (candidateCenter.x() - currentCenter.x())
+                : (candidateCenter.y() - currentCenter.y());
+            if ((directionSign < 0 && signedPrimaryDistance >= 0.0) || (directionSign > 0 && signedPrimaryDistance <= 0.0)) {
+                continue;
+            }
+
+            bool collidesProbeLine = false;
+            if (horizontalMove) {
+                collidesProbeLine = (probeCoord >= candidateRect.top() && probeCoord <= candidateRect.bottom());
+            } else {
+                collidesProbeLine = (probeCoord >= candidateRect.left() && probeCoord <= candidateRect.right());
+            }
+
+            if (collidesProbeLine) {
+                const double collisionDistance = horizontalMove
+                    ? ((directionSign > 0) ? qAbs(candidateRect.left() - currentCenter.x()) : qAbs(currentCenter.x() - candidateRect.right()))
+                    : ((directionSign > 0) ? qAbs(candidateRect.top() - currentCenter.y()) : qAbs(currentCenter.y() - candidateRect.bottom()));
+                if (collisionDistance < bestCollisionDistance) {
+                    bestCollisionDistance = collisionDistance;
+                    bestCollisionIndex = i;
+                }
+                continue;
+            }
+
+        }
+    }
+
+    if (bestCollisionIndex != -1) {
+        return bestCollisionIndex;
+    }
+
+    return -1;
+}
+
+int findRowEdgeIndex(const QVector<SpriteItem*>& items, int currentIndex, bool endOfRow) {
+    if (currentIndex < 0 || currentIndex >= items.size()) {
+        return -1;
+    }
+    if (items.isEmpty()) {
+        return -1;
+    }
+
+    const QRectF currentRect = items[currentIndex]->sceneBoundingRect();
+    const QPointF currentCenter = currentRect.center();
+    int bestIndex = currentIndex;
+    double bestX = currentCenter.x();
+    double bestY = currentCenter.y();
+
+    for (int i = 0; i < items.size(); ++i) {
+        const QRectF rect = items[i]->sceneBoundingRect();
+        const QPointF center = rect.center();
+        const bool sameRow = currentCenter.y() >= rect.top() && currentCenter.y() <= rect.bottom();
+        if (!sameRow) {
+            continue;
+        }
+
+        const bool isBetter = endOfRow
+            ? (center.x() > bestX || (qFuzzyCompare(center.x(), bestX) && center.y() < bestY))
+            : (center.x() < bestX || (qFuzzyCompare(center.x(), bestX) && center.y() < bestY));
+        if (isBetter) {
+            bestIndex = i;
+            bestX = center.x();
+            bestY = center.y();
+        }
+    }
+    return bestIndex;
+}
 }
 
 /**
@@ -29,6 +167,7 @@ LayoutCanvas::LayoutCanvas(QWidget* parent) : QGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
     setAcceptDrops(true);
+    setFocusPolicy(Qt::StrongFocus);
     setRenderHint(QPainter::Antialiasing, false);
     setRenderHint(QPainter::SmoothPixmapTransform, false);
     setDragMode(QGraphicsView::NoDrag);
@@ -220,10 +359,11 @@ void LayoutCanvas::selectSpriteByPath(const QString& path) {
  * @brief Selects multiple sprites by their file paths.
  */
 void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString& primaryPath) {
+    const QSet<QString> pathSet(paths.begin(), paths.end());
     int primaryIndex = -1;
     for (int i = 0; i < m_items.size(); ++i) {
         auto* item = m_items[i];
-        bool select = paths.contains(item->getData()->path);
+        const bool select = pathSet.contains(item->getData()->path);
         item->setSelectedState(select);
         if (select && !primaryPath.isEmpty() && item->getData()->path == primaryPath) {
             primaryIndex = i;
@@ -244,24 +384,7 @@ void LayoutCanvas::setSettings(const AppSettings& settings) {
     if (m_atlasBgItem) {
         m_atlasBgItem->setBrush(settings.frameColor);
     }
-    
-    QPen borderPen(settings.borderColor, 2, settings.borderStyle);
-    borderPen.setCosmetic(true);
-    
-    QPen selectedPen(kSelectionColor, 2, Qt::SolidLine);
-    selectedPen.setCosmetic(true);
-
-    for (int i = 0; i < m_items.size(); ++i) {
-        if (i < m_borderItems.size()) {
-            if (m_items[i]->isSelectedState()) {
-                m_borderItems[i]->setPen(selectedPen);
-                m_borderItems[i]->setZValue(m_items[i]->zValue() + 0.2);
-            } else {
-                m_borderItems[i]->setPen(borderPen);
-                m_borderItems[i]->setZValue(m_items[i]->zValue() + 0.1);
-            }
-        }
-    }
+    updateBorderHighlights();
     update();
 }
 
@@ -282,6 +405,10 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
         m_isPanning = true;
         setCursor(Qt::ClosedHandCursor);
         event->accept();
+        return;
+    }
+    if (event->button() != Qt::LeftButton) {
+        QGraphicsView::mousePressEvent(event);
         return;
     }
     QGraphicsView::mousePressEvent(event);
@@ -474,12 +601,92 @@ void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
  * @brief Handles key press events for search typing and panning (Space).
  */
 void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
+    if (event->matches(QKeySequence::SelectAll)) {
+        if (!m_items.isEmpty()) {
+            for (auto* item : m_items) {
+                item->setSelectedState(true);
+            }
+            if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+                m_lastSelectedIndex = 0;
+            }
+            emitSelectionChanged();
+        }
+        event->accept();
+        return;
+    }
+
+    int selectionTarget = -1;
+    if (event->key() == Qt::Key_Left) {
+        if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+            selectionTarget = m_items.isEmpty() ? -1 : 0;
+        } else {
+            selectionTarget = findDirectionalNeighborIndex(m_items, m_lastSelectedIndex, NavigationDirection::Left);
+        }
+    } else if (event->key() == Qt::Key_Right) {
+        if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+            selectionTarget = m_items.isEmpty() ? -1 : 0;
+        } else {
+            selectionTarget = findDirectionalNeighborIndex(m_items, m_lastSelectedIndex, NavigationDirection::Right);
+        }
+    } else if (event->key() == Qt::Key_Up) {
+        if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+            selectionTarget = m_items.isEmpty() ? -1 : (m_items.size() - 1);
+        } else {
+            selectionTarget = findDirectionalNeighborIndex(m_items, m_lastSelectedIndex, NavigationDirection::Up);
+        }
+    } else if (event->key() == Qt::Key_Down) {
+        if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+            selectionTarget = m_items.isEmpty() ? -1 : 0;
+        } else {
+            selectionTarget = findDirectionalNeighborIndex(m_items, m_lastSelectedIndex, NavigationDirection::Down);
+        }
+    } else if (event->key() == Qt::Key_Home) {
+        if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+            selectionTarget = m_items.isEmpty() ? -1 : 0;
+        } else {
+            selectionTarget = findRowEdgeIndex(m_items, m_lastSelectedIndex, false);
+        }
+    } else if (event->key() == Qt::Key_End) {
+        if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
+            selectionTarget = m_items.isEmpty() ? -1 : (m_items.size() - 1);
+        } else {
+            selectionTarget = findRowEdgeIndex(m_items, m_lastSelectedIndex, true);
+        }
+    }
+
+    if (selectionTarget != -1 && !m_items.isEmpty()) {
+        int currentIndex = m_lastSelectedIndex;
+        if (currentIndex < 0 || currentIndex >= m_items.size()) {
+            currentIndex = 0;
+        }
+        const int nextIndex = selectionTarget;
+
+        if (!(event->modifiers() & Qt::ShiftModifier)) {
+            for (auto* item : m_items) {
+                item->setSelectedState(false);
+            }
+        }
+        m_items[nextIndex]->setSelectedState(true);
+        m_lastSelectedIndex = nextIndex;
+        ensureVisible(m_items[nextIndex]);
+        emitSelectionChanged();
+        event->accept();
+        return;
+    }
+
     switch (event->key()) {
         case Qt::Key_Space:
+            if (!m_searchQuery.isEmpty()) {
+                m_searchQuery += QLatin1Char(' ');
+                updateSearch();
+                event->accept();
+                return;
+            }
             if (!event->isAutoRepeat()) {
                 m_spacePressed = true;
             }
-            break;
+            event->accept();
+            return;
         case Qt::Key_Escape:
             m_searchQuery.clear();
             updateSearch();
@@ -512,13 +719,21 @@ void LayoutCanvas::keyReleaseEvent(QKeyEvent* event) {
     QGraphicsView::keyReleaseEvent(event);
 }
 
+void LayoutCanvas::focusOutEvent(QFocusEvent* event) {
+    m_spacePressed = false;
+    m_isPanning = false;
+    setCursor(Qt::ArrowCursor);
+    QGraphicsView::focusOutEvent(event);
+}
+
 /**
  * @brief Updates the visibility and selection state of sprites based on the search query.
  */
 void LayoutCanvas::updateSearch() {
     m_lastSelectedIndex = -1;
     bool foundFirst = false;
-    for (auto* si : m_items) {
+    for (int i = 0; i < m_items.size(); ++i) {
+        auto* si = m_items[i];
         if (m_searchQuery.isEmpty()) {
             si->setSearchMatch(false);
             si->setOpacity(1.0);
@@ -529,7 +744,7 @@ void LayoutCanvas::updateSearch() {
             si->setSelectedState(match);
             si->setOpacity(match ? 1.0 : 0.3);
             if (match && !foundFirst) {
-                m_lastSelectedIndex = m_items.indexOf(si);
+                m_lastSelectedIndex = i;
                 foundFirst = true;
             }
         }
@@ -555,7 +770,7 @@ void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     painter->save();
     painter->resetTransform(); // Draw in window coordinates
     
-    QString text = "Search: " + m_searchQuery;
+    QString text = tr("Search: %1").arg(m_searchQuery);
     QFont font = painter->font();
     font.setPixelSize(14);
     font.setBold(true);
@@ -598,12 +813,6 @@ void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
  */
 void LayoutCanvas::emitSelectionChanged() {
     QList<SpritePtr> selection;
-    
-    QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
-    borderPen.setCosmetic(true);
-
-    QPen selectedPen(kSelectionColor, 2, Qt::SolidLine);
-    selectedPen.setCosmetic(true);
 
     for (int i = 0; i < m_items.size(); ++i) {
         auto* item = m_items[i];
@@ -611,17 +820,8 @@ void LayoutCanvas::emitSelectionChanged() {
         if (selected) {
             selection.append(item->getData());
         }
-        
-        if (i < m_borderItems.size()) {
-            if (selected) {
-                m_borderItems[i]->setPen(selectedPen);
-                m_borderItems[i]->setZValue(item->zValue() + 0.2);
-            } else {
-                m_borderItems[i]->setPen(borderPen);
-                m_borderItems[i]->setZValue(item->zValue() + 0.1);
-            }
-        }
     }
+    updateBorderHighlights();
     emit selectionChanged(selection);
 
     SpritePtr primary = nullptr;
@@ -631,6 +831,41 @@ void LayoutCanvas::emitSelectionChanged() {
             : selection.last();
     }
     emit spriteSelected(primary);
+}
+
+void LayoutCanvas::updateBorderHighlights() {
+    QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
+    borderPen.setCosmetic(true);
+
+    QPen selectedPen(kSelectionColor, 2, Qt::SolidLine);
+    selectedPen.setCosmetic(true);
+
+    QPen contextPen(kContextTargetColor, 2, Qt::SolidLine);
+    contextPen.setCosmetic(true);
+
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (i >= m_borderItems.size()) {
+            continue;
+        }
+        SpriteItem* item = m_items[i];
+        const bool isContextTarget = !m_contextMenuTargetPath.isEmpty() &&
+            item &&
+            item->getData() &&
+            item->getData()->path == m_contextMenuTargetPath;
+        const bool isSelected = item->isSelectedState();
+        item->setContextTargetState(isContextTarget);
+
+        if (isContextTarget) {
+            m_borderItems[i]->setPen(contextPen);
+            m_borderItems[i]->setZValue(item->zValue() + 0.3);
+        } else if (isSelected) {
+            m_borderItems[i]->setPen(selectedPen);
+            m_borderItems[i]->setZValue(item->zValue() + 0.2);
+        } else {
+            m_borderItems[i]->setPen(borderPen);
+            m_borderItems[i]->setZValue(item->zValue() + 0.1);
+        }
+    }
 }
 
 /**
@@ -650,28 +885,38 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
             break;
         }
     }
-    if (selectedPaths.isEmpty() && spriteUnderCursor) {
-        selectedPaths.append(spriteUnderCursor->getData()->path);
+    QStringList actionPaths = selectedPaths;
+    if (spriteUnderCursor && spriteUnderCursor->getData()) {
+        actionPaths = QStringList{spriteUnderCursor->getData()->path};
     }
 
+    m_contextMenuTargetPath = spriteUnderCursor && spriteUnderCursor->getData()
+        ? spriteUnderCursor->getData()->path
+        : QString();
+    updateBorderHighlights();
+    viewport()->update();
+
     QMenu menu(this);
-    QAction* addFramesAction = menu.addAction("Add Frames...");
+    QAction* addFramesAction = menu.addAction(tr("Add Frames..."));
     QAction* removeFramesAction = nullptr;
-    if (!selectedPaths.isEmpty()) {
-        QString label = selectedPaths.size() > 1 ? "Remove Frames" : "Remove Frame";
+    if (!actionPaths.isEmpty()) {
+        QString label = actionPaths.size() > 1 ? tr("Remove Frames") : tr("Remove Frame");
         removeFramesAction = menu.addAction(label);
     }
     menu.addSeparator();
-    QAction* autoTimelineAction = menu.addAction("Auto-create Timelines");
-    QAction* copyLayoutAction = menu.addAction("Copy Spritesheet");
+    QAction* autoTimelineAction = menu.addAction(tr("Auto-create Timelines"));
+    QAction* copyLayoutAction = menu.addAction(tr("Copy Spritesheet"));
 
     QAction* selectedAction = menu.exec(event->globalPos());
+    m_contextMenuTargetPath.clear();
+    updateBorderHighlights();
+    viewport()->update();
     if (selectedAction == addFramesAction) {
         emit addFramesRequested();
         return;
     }
     if (selectedAction == removeFramesAction) {
-        emit removeFramesRequested(selectedPaths);
+        emit removeFramesRequested(actionPaths);
         return;
     }
     if (selectedAction == autoTimelineAction) {

@@ -10,6 +10,7 @@ public:
     
     bool isSelectedState() const { return m_isSelected; }
     void setSelectedState(bool selected);
+    void setContextTargetState(bool contextTarget);
     void setSearchMatch(bool match);
 
 protected:
@@ -18,5 +19,6 @@ protected:
 private:
     SpritePtr m_data;
     bool m_isSelected = false;
+    bool m_isContextTarget = false;
     bool m_isMatch = false;
 };

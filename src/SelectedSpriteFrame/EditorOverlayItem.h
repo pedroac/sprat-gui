@@ -44,6 +44,8 @@ signals:
      * @brief Emitted when a marker is selected.
      */
     void markerSelected(const QString& name);
+    void applyPivotToSelectedFramesRequested();
+    void applyMarkerToSelectedFramesRequested(const QString& markerName);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
@@ -70,6 +72,7 @@ private:
     QPoint m_dragOriginalPos; // x,y or w,h depending on mode
     int m_dragOriginalRadius = 0;
     QVector<QPoint> m_dragOriginalPoly;
+    bool m_suppressNextViewContextMenu = false;
     
     // Helpers
     void drawPivot(QPainter* painter, int x, int y);
@@ -96,4 +99,7 @@ public:
      * @brief Forces a layout update and redraw.
      */
     void updateLayout();
+    const QString& selectedMarkerName() const { return m_selectedMarkerName; }
+    bool hasContextMenuTargetAt(const QPointF& pos) const;
+    bool consumeSuppressedViewContextMenu();
 };

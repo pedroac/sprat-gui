@@ -5,24 +5,53 @@
 #include <QRegularExpression>
 #include <algorithm>
 
-QVector<TimelineSeed> TimelineBuilder::buildFromSprites(const QVector<SpritePtr>& sprites) {
-    QRegularExpression pattern(R"(^(.*)\s*\((\d+)\)$)");
-    QMap<QString, QVector<QPair<int, QString>>> groups;
+namespace {
+const QRegularExpression kBracketedSuffixPattern(R"(^(.*\D)\s*[\(\[]\s*(\d+)\s*[\)\]]$)");
+const QRegularExpression kSeparatedSuffixPattern(R"(^(.*\D)[ _-]+(\d+)$)");
+const QRegularExpression kCompactSuffixPattern(R"(^(.*\D)(\d+)$)");
+const QRegularExpression kTrailingSeparatorPattern(R"([ _-]+$)");
 
-    for (const auto& sprite : sprites) {
-        QRegularExpressionMatch match = pattern.match(sprite->name);
+bool parseTimelineSeedName(const QString& spriteName, QString& label, int& index) {
+    const QRegularExpression patterns[] = {
+        kBracketedSuffixPattern,
+        kSeparatedSuffixPattern,
+        kCompactSuffixPattern
+    };
+
+    for (const QRegularExpression& pattern : patterns) {
+        const QRegularExpressionMatch match = pattern.match(spriteName);
         if (!match.hasMatch()) {
             continue;
         }
 
-        QString label = match.captured(1).trimmed();
-        if (label.isEmpty()) {
+        QString candidateLabel = match.captured(1).trimmed();
+        candidateLabel.remove(kTrailingSeparatorPattern);
+        if (candidateLabel.isEmpty()) {
             continue;
         }
 
         bool ok = false;
-        int index = match.captured(2).toInt(&ok);
+        const int candidateIndex = match.captured(2).toInt(&ok);
         if (!ok) {
+            continue;
+        }
+
+        label = candidateLabel;
+        index = candidateIndex;
+        return true;
+    }
+
+    return false;
+}
+}
+
+QVector<TimelineSeed> TimelineBuilder::buildFromSprites(const QVector<SpritePtr>& sprites) {
+    QMap<QString, QVector<QPair<int, QString>>> groups;
+
+    for (const auto& sprite : sprites) {
+        QString label;
+        int index = 0;
+        if (!parseTimelineSeedName(sprite->name, label, index)) {
             continue;
         }
 

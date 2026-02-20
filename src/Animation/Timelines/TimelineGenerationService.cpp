@@ -10,7 +10,7 @@ bool TimelineGenerationService::generateFromLayout(
     QString& statusMessage) {
     QVector<TimelineSeed> generated = TimelineBuilder::buildFromSprites(layoutModel.sprites);
     if (generated.isEmpty()) {
-        statusMessage = "No frame names match the expected pattern.";
+        statusMessage = "No frame names match the supported timeline patterns.";
         return false;
     }
 

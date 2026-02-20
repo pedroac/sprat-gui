@@ -4,10 +4,15 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QRegularExpression>
+#include <QHash>
 
 LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath) {
     LayoutModel model;
     QDir dir(folderPath);
+    static QHash<QString, QSize> sourceSizeCache;
+    if (sourceSizeCache.size() > 16384) {
+        sourceSizeCache.clear();
+    }
     QRegularExpression spriteRe("sprite\\s+\"([^\"]+)\"\\s+(\\d+),(\\d+)\\s+(\\d+),(\\d+)(?:\\s+(\\d+),(\\d+)\\s+(\\d+),(\\d+))?");
 
     QStringList lines = output.split('\n');
@@ -36,7 +41,13 @@ LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath
                 s->trimRect = QRect(match.captured(6).toInt(), match.captured(7).toInt(), match.captured(8).toInt(), match.captured(9).toInt());
             }
             // Use the original image dimensions so the pivot aligns with the visual frame center.
-            const QSize sourceSize = QImageReader(s->path).size();
+            QSize sourceSize = sourceSizeCache.value(s->path);
+            if (!sourceSize.isValid()) {
+                sourceSize = QImageReader(s->path).size();
+                if (sourceSize.isValid()) {
+                    sourceSizeCache.insert(s->path, sourceSize);
+                }
+            }
             if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0) {
                 s->pivotX = sourceSize.width() / 2;
                 s->pivotY = sourceSize.height() / 2;

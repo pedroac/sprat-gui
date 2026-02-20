@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QStringList>
 #include "models.h"
+#include "SpratProfilesConfig.h"
 
 class QWidget;
 
@@ -14,9 +15,8 @@ public:
         SaveConfig config,
         const QString& layoutInputPath,
         const QStringList& framePaths,
-        const QString& profile,
-        int padding,
-        bool trimTransparent,
+        const QVector<SpratProfile>& availableProfiles,
+        const QString& selectedProfileName,
         const QString& spratLayoutBin,
         const QString& spratPackBin,
         const QString& spratConvertBin,

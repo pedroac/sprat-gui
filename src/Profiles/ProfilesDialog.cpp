@@ -1,20 +1,24 @@
 #include "ProfilesDialog.h"
+#include "ResolutionsConfig.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStringList>
 #include <QSpinBox>
-#include <QDoubleSpinBox>
 #include <QCheckBox>
 #include <QVBoxLayout>
 
 namespace {
+constexpr auto kTargetSameAsSourceValue = "same_source";
+
 SpratProfile makeDefaultProfile(const QString& name) {
     SpratProfile p;
     p.name = name;
@@ -22,11 +26,40 @@ SpratProfile makeDefaultProfile(const QString& name) {
     p.optimize = "gpu";
     p.maxWidth = -1;
     p.maxHeight = -1;
+    p.targetResolutionWidth = 1024;
+    p.targetResolutionHeight = 1024;
+    p.targetResolutionUseSource = false;
+    p.resolutionReference = "largest";
     p.padding = 0;
     p.maxCombinations = 0;
-    p.scale = 1.0;
+    p.threads = 0;
     p.trimTransparent = true;
     return p;
+}
+
+bool isCompactMode(const QString& mode) {
+    return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
+}
+
+bool parseResolution(const QString& text, int& width, int& height) {
+    const QStringList parts = text.trimmed().toLower().split('x', Qt::SkipEmptyParts);
+    if (parts.size() != 2) {
+        return false;
+    }
+    bool okW = false;
+    bool okH = false;
+    const int parsedWidth = parts[0].trimmed().toInt(&okW);
+    const int parsedHeight = parts[1].trimmed().toInt(&okH);
+    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
+        return false;
+    }
+    width = parsedWidth;
+    height = parsedHeight;
+    return true;
+}
+
+QString formatResolution(int width, int height) {
+    return QString("%1x%2").arg(width).arg(height);
 }
 }
 
@@ -91,6 +124,21 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     maxHeightLayout->addStretch();
     detailsLayout->addRow(tr("Max height:"), maxHeightLayout);
 
+    QHBoxLayout* targetResolutionLayout = new QHBoxLayout();
+    m_targetResolutionCombo = new QComboBox(this);
+    m_targetResolutionCombo->addItem(tr("Same as source"), QString::fromLatin1(kTargetSameAsSourceValue));
+    m_targetResolutionCombo->addItems(ResolutionsConfig::loadResolutionOptions());
+    if (m_targetResolutionCombo->count() == 1) {
+        m_targetResolutionCombo->addItem("1024x768");
+    }
+    targetResolutionLayout->addWidget(m_targetResolutionCombo);
+    targetResolutionLayout->addStretch();
+    detailsLayout->addRow(tr("Target resolution:"), targetResolutionLayout);
+
+    m_resolutionReferenceCombo = new QComboBox(this);
+    m_resolutionReferenceCombo->addItems({"largest", "smallest"});
+    detailsLayout->addRow(tr("Resolution reference:"), m_resolutionReferenceCombo);
+
     m_paddingSpin = new QSpinBox(this);
     m_paddingSpin->setRange(0, 1024);
     detailsLayout->addRow(tr("Padding:"), m_paddingSpin);
@@ -99,11 +147,14 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     m_maxCombinationsSpin->setRange(0, 10000000);
     detailsLayout->addRow(tr("Max combinations:"), m_maxCombinationsSpin);
 
-    m_scaleSpin = new QDoubleSpinBox(this);
-    m_scaleSpin->setDecimals(6);
-    m_scaleSpin->setRange(0.000001, 1000000.0);
-    m_scaleSpin->setValue(1.0);
-    detailsLayout->addRow(tr("Scale:"), m_scaleSpin);
+    QHBoxLayout* threadsLayout = new QHBoxLayout();
+    m_useThreadsCheck = new QCheckBox(tr("Enable"), this);
+    m_threadsSpin = new QSpinBox(this);
+    m_threadsSpin->setRange(1, 256);
+    threadsLayout->addWidget(m_useThreadsCheck);
+    threadsLayout->addWidget(m_threadsSpin);
+    threadsLayout->addStretch();
+    detailsLayout->addRow(tr("Threads:"), threadsLayout);
 
     m_trimTransparentCheck = new QCheckBox(tr("Enabled"), this);
     detailsLayout->addRow(tr("Trim transparent:"), m_trimTransparentCheck);
@@ -120,6 +171,10 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     connect(m_listWidget, &QListWidget::currentRowChanged, this, &ProfilesDialog::onCurrentProfileChanged);
     connect(m_useMaxWidthCheck, &QCheckBox::toggled, m_maxWidthSpin, &QSpinBox::setEnabled);
     connect(m_useMaxHeightCheck, &QCheckBox::toggled, m_maxHeightSpin, &QSpinBox::setEnabled);
+    connect(m_useThreadsCheck, &QCheckBox::toggled, m_threadsSpin, &QSpinBox::setEnabled);
+    connect(m_modeCombo, &QComboBox::currentTextChanged, this, [this](const QString&) {
+        refreshMaxCombinationsEnabledState();
+    });
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, &ProfilesDialog::accept);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
@@ -230,9 +285,20 @@ void ProfilesDialog::saveEditorsToProfile(int row) {
     p.optimize = m_optimizeCombo->currentText().trimmed();
     p.maxWidth = m_useMaxWidthCheck->isChecked() ? m_maxWidthSpin->value() : -1;
     p.maxHeight = m_useMaxHeightCheck->isChecked() ? m_maxHeightSpin->value() : -1;
+    int targetWidth = 1024;
+    int targetHeight = 768;
+    p.targetResolutionUseSource = false;
+    if (m_targetResolutionCombo && m_targetResolutionCombo->currentData().toString() == QLatin1String(kTargetSameAsSourceValue)) {
+        p.targetResolutionUseSource = true;
+    } else if (m_targetResolutionCombo) {
+        parseResolution(m_targetResolutionCombo->currentText(), targetWidth, targetHeight);
+    }
+    p.targetResolutionWidth = targetWidth;
+    p.targetResolutionHeight = targetHeight;
+    p.resolutionReference = m_resolutionReferenceCombo->currentText().trimmed();
     p.padding = m_paddingSpin->value();
     p.maxCombinations = m_maxCombinationsSpin->value();
-    p.scale = m_scaleSpin->value();
+    p.threads = m_useThreadsCheck->isChecked() ? m_threadsSpin->value() : 0;
     p.trimTransparent = m_trimTransparentCheck->isChecked();
 
     const QString displayName = p.name.isEmpty() ? tr("<unnamed>") : p.name;
@@ -252,9 +318,12 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_maxWidthSpin->setEnabled(valid && m_useMaxWidthCheck->isChecked());
     m_useMaxHeightCheck->setEnabled(valid);
     m_maxHeightSpin->setEnabled(valid && m_useMaxHeightCheck->isChecked());
+    m_targetResolutionCombo->setEnabled(valid);
+    m_resolutionReferenceCombo->setEnabled(valid);
     m_paddingSpin->setEnabled(valid);
     m_maxCombinationsSpin->setEnabled(valid);
-    m_scaleSpin->setEnabled(valid);
+    m_useThreadsCheck->setEnabled(valid);
+    m_threadsSpin->setEnabled(valid && m_useThreadsCheck->isChecked());
     m_trimTransparentCheck->setEnabled(valid);
 
     if (!valid) {
@@ -265,9 +334,14 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
         m_maxWidthSpin->setValue(1024);
         m_useMaxHeightCheck->setChecked(false);
         m_maxHeightSpin->setValue(1024);
+        if (m_targetResolutionCombo->count() > 0) {
+            m_targetResolutionCombo->setCurrentIndex(0);
+        }
+        m_resolutionReferenceCombo->setCurrentText("largest");
         m_paddingSpin->setValue(0);
         m_maxCombinationsSpin->setValue(0);
-        m_scaleSpin->setValue(1.0);
+        m_useThreadsCheck->setChecked(false);
+        m_threadsSpin->setValue(4);
         m_trimTransparentCheck->setChecked(true);
         m_updatingEditors = false;
         return;
@@ -288,12 +362,38 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_maxHeightSpin->setValue(hasMaxHeight ? p.maxHeight : 1024);
     m_maxHeightSpin->setEnabled(hasMaxHeight);
 
+    if (m_targetResolutionCombo->count() > 0) {
+        if (p.targetResolutionUseSource) {
+            m_targetResolutionCombo->setCurrentIndex(0);
+        } else {
+            const QString targetResolution = formatResolution(
+                p.targetResolutionWidth > 0 ? p.targetResolutionWidth : 1024,
+                p.targetResolutionHeight > 0 ? p.targetResolutionHeight : 768);
+            const int targetIndex = m_targetResolutionCombo->findText(targetResolution, Qt::MatchFixedString);
+            m_targetResolutionCombo->setCurrentIndex(targetIndex >= 0 ? targetIndex : 0);
+        }
+    }
+    m_targetResolutionCombo->setEnabled(valid);
+    m_resolutionReferenceCombo->setCurrentText(p.resolutionReference);
+    m_resolutionReferenceCombo->setEnabled(valid);
+
     m_paddingSpin->setValue(p.padding);
     m_maxCombinationsSpin->setValue(p.maxCombinations);
-    m_scaleSpin->setValue(p.scale);
+    const bool hasThreads = p.threads > 0;
+    m_useThreadsCheck->setChecked(hasThreads);
+    m_threadsSpin->setValue(hasThreads ? p.threads : 4);
+    m_threadsSpin->setEnabled(hasThreads);
     m_trimTransparentCheck->setChecked(p.trimTransparent);
 
     m_updatingEditors = false;
+    refreshMaxCombinationsEnabledState();
+}
+
+void ProfilesDialog::refreshMaxCombinationsEnabledState() {
+    if (m_updatingEditors) {
+        return;
+    }
+    m_maxCombinationsSpin->setEnabled(m_modeCombo->isEnabled() && isCompactMode(m_modeCombo->currentText()));
 }
 
 QString ProfilesDialog::uniqueProfileName(const QString& base) const {

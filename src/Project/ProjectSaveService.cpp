@@ -9,12 +9,12 @@
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QProcess>
-#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QTextStream>
-#include <QDateTime>
+#include <QStringList>
+#include <QtGlobal>
 #include <cmath>
 
 namespace {
@@ -29,6 +29,31 @@ QString normalizedMarkerName(QString name) {
     }
     return name;
 }
+
+bool isCompactMode(const QString& mode) {
+    return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
+}
+
+QString resolutionArg(int width, int height) {
+    return QString("%1x%2").arg(width).arg(height);
+}
+
+bool parseResolution(const QString& value, int& width, int& height) {
+    const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
+    if (parts.size() != 2) {
+        return false;
+    }
+    bool okW = false;
+    bool okH = false;
+    const int parsedWidth = parts[0].trimmed().toInt(&okW);
+    const int parsedHeight = parts[1].trimmed().toInt(&okH);
+    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
+        return false;
+    }
+    width = parsedWidth;
+    height = parsedHeight;
+    return true;
+}
 }
 
 bool ProjectSaveService::save(
@@ -36,9 +61,8 @@ bool ProjectSaveService::save(
     SaveConfig config,
     const QString& layoutInputPath,
     const QStringList& framePaths,
-    const QString& profile,
-    int padding,
-    bool trimTransparent,
+    const QVector<SpratProfile>& availableProfiles,
+    const QString& selectedProfileName,
     const QString& spratLayoutBin,
     const QString& spratPackBin,
     const QString& spratConvertBin,
@@ -47,6 +71,7 @@ bool ProjectSaveService::save(
     const std::function<void(bool)>& setLoading,
     const std::function<void(const QString&)>& setStatus,
     const std::function<void(const QString&)>& debugLog) {
+    Q_UNUSED(debugLog);
     constexpr int kProcessTimeoutMs = 120000;
 
     struct LoadingGuard {
@@ -120,14 +145,18 @@ bool ProjectSaveService::save(
     projectFile.close();
 
     QJsonObject layoutInfo = projectPayload["layout"].toObject();
+    const QJsonObject layoutOptions = projectPayload["layout_options"].toObject();
     const QString cachedLayoutData = layoutInfo["output"].toString();
     const double cachedLayoutScale = layoutInfo["scale"].toDouble(1.0);
-    debugLog(QString("Save requested: destination='%1' profile='%2' padding=%3 trim=%4 scales=%5")
-                 .arg(config.destination,
-                      profile,
-                      QString::number(padding),
-                      trimTransparent ? "true" : "false",
-                      QString::number(config.scales.size())));
+    const double layoutOptionScale = [] (double value) {
+        return (value > 0.0 && value <= 1.0) ? value : 1.0;
+    }(layoutOptions["scale"].toDouble(1.0));
+    int sourceResolutionWidth = 0;
+    int sourceResolutionHeight = 0;
+    const bool hasSourceResolution = parseResolution(
+        layoutOptions["source_resolution"].toString(),
+        sourceResolutionWidth,
+        sourceResolutionHeight);
 
     QJsonObject markersInfo = projectPayload["spritemarkers"].toObject();
     QJsonObject spritesState = markersInfo["sprites"].toObject();
@@ -197,8 +226,8 @@ bool ProjectSaveService::save(
     }
     animTemp.close();
 
-    if (config.scales.isEmpty()) {
-        QMessageBox::critical(parent, trPS("Error"), trPS("No output scales configured."));
+    if (config.profiles.isEmpty()) {
+        QMessageBox::critical(parent, trPS("Error"), trPS("No output profiles selected."));
         return false;
     }
 
@@ -243,40 +272,50 @@ bool ProjectSaveService::save(
         }
         return true;
     };
-    auto dumpLayoutDataForDebug = [&](const QString& scaleName, const QByteArray& data) -> QString {
-        QString safeScale = scaleName.isEmpty() ? "unknown" : scaleName;
-        safeScale.replace(QRegularExpression("[^A-Za-z0-9_.-]"), "_");
-        const QString stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-hhmmss-zzz");
-        const QString outPath = QDir::temp().filePath(QString("sprat-gui-layout-%1-%2.txt").arg(safeScale, stamp));
-        QFile outFile(outPath);
-        if (!outFile.open(QIODevice::WriteOnly)) {
-            return QString();
+
+    auto findProfile = [&](const QString& profileName) -> const SpratProfile* {
+        for (const SpratProfile& profile : availableProfiles) {
+            if (profile.name.trimmed() == profileName) {
+                return &profile;
+            }
         }
-        if (outFile.write(data) < 0) {
-            return QString();
-        }
-        outFile.close();
-        return outPath;
+        return nullptr;
     };
 
     constexpr double kScaleMatchTolerance = 1e-6;
-    for (const auto& scale : config.scales) {
-        QDir scaleDir(destDir.filePath(scale.name));
-        if (!scaleDir.exists()) {
-            if (!scaleDir.mkpath(".")) {
-                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not create scale directory: %1")).arg(scale.name));
+    for (const QString& profileNameRaw : config.profiles) {
+        const QString profileName = profileNameRaw.trimmed();
+        if (profileName.isEmpty()) {
+            continue;
+        }
+
+        SpratProfile effectiveProfile;
+        if (const SpratProfile* found = findProfile(profileName)) {
+            effectiveProfile = *found;
+        } else {
+            effectiveProfile.name = profileName;
+            effectiveProfile.padding = 0;
+            effectiveProfile.trimTransparent = false;
+        }
+        const int profilePadding = qMax(0, effectiveProfile.padding);
+        const bool profileTrimTransparent = effectiveProfile.trimTransparent;
+
+        QDir profileDir(destDir.filePath(profileName));
+        if (!profileDir.exists()) {
+            if (!profileDir.mkpath(".")) {
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not create profile directory: %1")).arg(profileName));
                 return false;
             }
         }
 
         QByteArray layoutData;
         bool usingCachedLayout = false;
-        if (!cachedLayoutData.isEmpty() && std::abs(cachedLayoutScale - scale.value) < kScaleMatchTolerance) {
+        if (!cachedLayoutData.isEmpty() &&
+            profileName == selectedProfileName &&
+            std::abs(cachedLayoutScale - layoutOptionScale) < kScaleMatchTolerance) {
             layoutData = cachedLayoutData.toUtf8();
             if (layoutData.startsWith("atlas ")) {
                 usingCachedLayout = true;
-                debugLog(QString("[save:%1] using cached layout (scale=%2, bytes=%3)")
-                             .arg(scale.name, QString::number(scale.value), QString::number(layoutData.size())));
             } else {
                 layoutData.clear();
             }
@@ -285,33 +324,61 @@ bool ProjectSaveService::save(
             QProcess layoutProc;
             QStringList layoutArgs;
             layoutArgs << layoutPathForSave;
-            layoutArgs << "--padding" << QString::number(padding);
-            layoutArgs << "--scale" << QString::number(scale.value);
-            if (trimTransparent) {
+            if (!effectiveProfile.mode.trimmed().isEmpty()) {
+                layoutArgs << "--mode" << effectiveProfile.mode.trimmed();
+            }
+            if (!effectiveProfile.optimize.trimmed().isEmpty()) {
+                layoutArgs << "--optimize" << effectiveProfile.optimize.trimmed();
+            }
+            if (effectiveProfile.maxWidth > 0) {
+                layoutArgs << "--max-width" << QString::number(effectiveProfile.maxWidth);
+            }
+            if (effectiveProfile.maxHeight > 0) {
+                layoutArgs << "--max-height" << QString::number(effectiveProfile.maxHeight);
+            }
+            if (isCompactMode(effectiveProfile.mode) && effectiveProfile.maxCombinations > 0) {
+                layoutArgs << "--max-combinations" << QString::number(effectiveProfile.maxCombinations);
+            }
+            if (isCompactMode(effectiveProfile.mode) && effectiveProfile.threads > 0) {
+                layoutArgs << "--threads" << QString::number(effectiveProfile.threads);
+            }
+            const bool hasTargetResolution = effectiveProfile.targetResolutionUseSource ||
+                (effectiveProfile.targetResolutionWidth > 0 && effectiveProfile.targetResolutionHeight > 0);
+            if (hasSourceResolution && hasTargetResolution) {
+                const int targetResolutionWidth = effectiveProfile.targetResolutionUseSource
+                    ? sourceResolutionWidth
+                    : effectiveProfile.targetResolutionWidth;
+                const int targetResolutionHeight = effectiveProfile.targetResolutionUseSource
+                    ? sourceResolutionHeight
+                    : effectiveProfile.targetResolutionHeight;
+                layoutArgs << "--source-resolution" << resolutionArg(sourceResolutionWidth, sourceResolutionHeight);
+                layoutArgs << "--target-resolution" << resolutionArg(targetResolutionWidth, targetResolutionHeight);
+                if (!effectiveProfile.resolutionReference.trimmed().isEmpty()) {
+                    layoutArgs << "--resolution-reference" << effectiveProfile.resolutionReference.trimmed();
+                }
+            }
+            layoutArgs << "--padding" << QString::number(profilePadding);
+            layoutArgs << "--scale" << QString::number(layoutOptionScale);
+            if (profileTrimTransparent) {
                 layoutArgs << "--trim-transparent";
             }
-            if (!runProcess(layoutProc, spratLayoutBin, layoutArgs, QString("Layout generation failed for scale '%1'").arg(scale.name))) {
+            if (!runProcess(layoutProc, spratLayoutBin, layoutArgs, QString("Layout generation failed for profile '%1'").arg(profileName))) {
                 return false;
             }
             layoutData = layoutProc.readAllStandardOutput();
-            debugLog(QString("[save:%1] generated layout with spratlayout (scale=%2, bytes=%3)")
-                         .arg(scale.name, QString::number(scale.value), QString::number(layoutData.size())));
             if (!layoutData.startsWith("atlas ")) {
                 const QString preview = QString::fromUtf8(layoutData.left(200)).trimmed();
                 QMessageBox::critical(parent,
                                       trPS("Error"),
-                                      QString(trPS("Layout generation produced invalid output for scale '%1'.\nInput: %2\nOutput preview:\n%3"))
-                                          .arg(scale.name, layoutPathForSave, preview.isEmpty() ? QString("<empty>") : preview));
+                                      QString(trPS("Layout generation produced invalid output for profile '%1'.\nInput: %2\nOutput preview:\n%3"))
+                                          .arg(profileName, layoutPathForSave, preview.isEmpty() ? QString("<empty>") : preview));
                 return false;
             }
         }
-        debugLog(QString("[save:%1] layout data begin\n%2\n[save:%1] layout data end")
-                     .arg(scale.name, QString::fromUtf8(layoutData)));
-
         QProcess packProc;
         packProc.start(spratPackBin, QStringList());
         if (!packProc.waitForStarted()) {
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing failed for scale '%1': could not start spratpack.")).arg(scale.name));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing failed for profile '%1': could not start spratpack.")).arg(profileName));
             return false;
         }
         packProc.write(layoutData);
@@ -319,29 +386,21 @@ bool ProjectSaveService::save(
         if (!packProc.waitForFinished(kProcessTimeoutMs)) {
             packProc.kill();
             packProc.waitForFinished();
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing timed out for scale '%1'.")).arg(scale.name));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing timed out for profile '%1'.")).arg(profileName));
             return false;
         }
         if (packProc.exitStatus() != QProcess::NormalExit || packProc.exitCode() != 0) {
             const QString err = readStdErr(packProc);
-            const QString debugPath = dumpLayoutDataForDebug(scale.name, layoutData);
-            QString details = err.isEmpty() ? QString(trPS("Packing failed for scale '%1'.")).arg(scale.name)
-                                            : QString(trPS("Packing failed for scale '%1':\n%2")).arg(scale.name, err);
-            if (!debugPath.isEmpty()) {
-                details += QString("\n\nLayout debug dump:\n%1").arg(debugPath);
-                debugLog(QString("[save:%1] pack failed; layout dump='%2'").arg(scale.name, debugPath));
-            } else {
-                details += trPS("\n\nLayout debug dump: failed to write debug file.");
-                debugLog(QString("[save:%1] pack failed; layout dump write failed").arg(scale.name));
-            }
+            QString details = err.isEmpty() ? QString(trPS("Packing failed for profile '%1'.")).arg(profileName)
+                                            : QString(trPS("Packing failed for profile '%1':\n%2")).arg(profileName, err);
             QMessageBox::critical(parent, trPS("Error"), details);
             return false;
         }
         QByteArray imageData = packProc.readAllStandardOutput();
 
-        QFile imgFile(scaleDir.filePath("spritesheet.png"));
+        QFile imgFile(profileDir.filePath("spritesheet.png"));
         if (!imgFile.open(QIODevice::WriteOnly) || imgFile.write(imageData) < 0) {
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write spritesheet for scale '%1'.")).arg(scale.name));
+            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write spritesheet for profile '%1'.")).arg(profileName));
             return false;
         }
         imgFile.close();
@@ -354,7 +413,7 @@ bool ProjectSaveService::save(
             convArgs << "--animations" << animTemp.fileName();
             convProc.start(spratConvertBin, convArgs);
             if (!convProc.waitForStarted()) {
-                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion failed for scale '%1': could not start spratconvert.")).arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion failed for profile '%1': could not start spratconvert.")).arg(profileName));
                 return false;
             }
             convProc.write(layoutData);
@@ -362,21 +421,21 @@ bool ProjectSaveService::save(
             if (!convProc.waitForFinished(kProcessTimeoutMs)) {
                 convProc.kill();
                 convProc.waitForFinished();
-                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion timed out for scale '%1'.")).arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion timed out for profile '%1'.")).arg(profileName));
                 return false;
             }
             if (convProc.exitStatus() != QProcess::NormalExit || convProc.exitCode() != 0) {
                 const QString err = readStdErr(convProc);
                 QMessageBox::critical(parent, trPS("Error"), err.isEmpty()
-                                                          ? QString(trPS("Format conversion failed for scale '%1'.")).arg(scale.name)
-                                                          : QString(trPS("Format conversion failed for scale '%1':\n%2")).arg(scale.name, err));
+                                                          ? QString(trPS("Format conversion failed for profile '%1'.")).arg(profileName)
+                                                          : QString(trPS("Format conversion failed for profile '%1':\n%2")).arg(profileName, err));
                 return false;
             }
             QByteArray convData = convProc.readAllStandardOutput();
             QString ext = config.transform == "css" ? "css" : (config.transform == "xml" ? "xml" : (config.transform == "csv" ? "csv" : "json"));
-            QFile convFile(scaleDir.filePath("layout_formatted." + ext));
+            QFile convFile(profileDir.filePath("layout_formatted." + ext));
             if (!convFile.open(QIODevice::WriteOnly) || convFile.write(convData) < 0) {
-                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write converted layout for scale '%1'.")).arg(scale.name));
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write converted layout for profile '%1'.")).arg(profileName));
                 return false;
             }
             convFile.close();

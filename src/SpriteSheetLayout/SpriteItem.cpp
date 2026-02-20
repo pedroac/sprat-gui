@@ -19,6 +19,12 @@ void SpriteItem::setSelectedState(bool selected) {
     update();
 }
 
+void SpriteItem::setContextTargetState(bool contextTarget) {
+    if (m_isContextTarget == contextTarget) return;
+    m_isContextTarget = contextTarget;
+    update();
+}
+
 void SpriteItem::setSearchMatch(bool match) {
     if (m_isMatch == match) return;
     m_isMatch = match;
@@ -73,6 +79,12 @@ void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
     if (m_isSelected) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(10, 125, 255, 64));
+        painter->drawRect(boundingRect());
+    }
+
+    if (m_isContextTarget) {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(255, 215, 0, 64));
         painter->drawRect(boundingRect());
     }
 

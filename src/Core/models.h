@@ -93,20 +93,12 @@ struct AnimationTimeline {
 };
 
 /**
- * @brief Configuration for a single output scale.
- */
-struct ScaleConfig {
-    QString name;
-    double value;
-};
-
-/**
  * @brief Configuration for saving the project/spritesheet.
  */
 struct SaveConfig {
     QString destination;
     QString transform;
-    QVector<ScaleConfig> scales;
+    QStringList profiles;
 };
 
 /**

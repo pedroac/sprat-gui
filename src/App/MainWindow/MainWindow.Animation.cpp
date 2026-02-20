@@ -37,19 +37,29 @@ void MainWindow::refreshTimelineList() {
 }
 
 void MainWindow::refreshTimelineFrames() {
+    if (m_timelineFrameIconCache.size() > 4096) {
+        m_timelineFrameIconCache.clear();
+    }
+    m_timelineFramesList->setUpdatesEnabled(false);
     m_timelineFramesList->clear();
     if (m_selectedTimelineIndex < 0 || m_selectedTimelineIndex >= m_timelines.size()) {
+        m_timelineFramesList->setUpdatesEnabled(true);
         return;
     }
 
     const auto& timeline = m_timelines[m_selectedTimelineIndex];
     for (const QString& path : timeline.frames) {
         QFileInfo fi(path);
-        QIcon icon(path);
+        QIcon icon = m_timelineFrameIconCache.value(path);
+        if (icon.isNull()) {
+            icon = QIcon(path);
+            m_timelineFrameIconCache.insert(path, icon);
+        }
         QListWidgetItem* item = new QListWidgetItem(icon, fi.baseName());
         item->setToolTip(path);
         m_timelineFramesList->addItem(item);
     }
+    m_timelineFramesList->setUpdatesEnabled(true);
 }
 
 void MainWindow::onFrameDropped(const QString& path, int index) {
@@ -93,9 +103,21 @@ void MainWindow::onFrameRemoveRequested() {
     refreshAnimationTest();
 }
 
+void MainWindow::onTimelineFrameSelectionChanged() {
+    if (m_animPlaying || m_selectedTimelineIndex < 0 || m_selectedTimelineIndex >= m_timelines.size() || !m_timelineFramesList) {
+        return;
+    }
+    const int selectedRow = m_timelineFramesList->currentRow();
+    if (selectedRow < 0 || selectedRow >= m_timelines[m_selectedTimelineIndex].frames.size()) {
+        return;
+    }
+    m_animFrameIndex = selectedRow;
+    refreshAnimationTest();
+}
+
 void MainWindow::onGenerateTimelinesFromFrames() {
     if (m_layoutModel.sprites.isEmpty()) {
-        QMessageBox::information(this, "Generate Timelines", "Load or generate a layout before creating timelines.");
+        QMessageBox::information(this, tr("Generate Timelines"), tr("Load or generate a layout before creating timelines."));
         return;
     }
 
@@ -118,7 +140,7 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         refreshAnimationTest();
         m_statusLabel->setText(status);
     } else {
-        QMessageBox::information(this, "Generate Timelines", status);
+        QMessageBox::information(this, tr("Generate Timelines"), status);
     }
 }
 
@@ -181,18 +203,20 @@ void MainWindow::saveAnimationToFile() {
     QString path = AnimationExportService::chooseOutputPath(this);
     if (!path.isEmpty()) {
         if (exportAnimation(path)) {
-            m_statusLabel->setText("Animation saved to " + path);
+            m_statusLabel->setText(tr("Animation saved to %1").arg(path));
         }
     }
 }
 
 void MainWindow::refreshAnimationTest() {
+    const int previewPadding = m_animPaddingSpin ? m_animPaddingSpin->value() : 24;
     AnimationPreviewService::refresh(
         m_timelines,
         m_selectedTimelineIndex,
         m_animFrameIndex,
         m_layoutModel,
         m_animZoomSpin->value(),
+        previewPadding,
         m_animPreviewLabel,
         m_animStatusLabel,
         m_animPrevBtn,

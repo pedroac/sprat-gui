@@ -8,6 +8,7 @@
 #include <QAction>
 #include <QClipboard>
 #include <QApplication>
+#include <QFocusEvent>
 
 PreviewCanvas::PreviewCanvas(QWidget* parent) : QGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
@@ -107,6 +108,8 @@ void PreviewCanvas::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spacePressed = true;
         setCursor(Qt::OpenHandCursor);
+        event->accept();
+        return;
     }
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         if (m_overlay->removeSelectedVertex()) {
@@ -121,8 +124,17 @@ void PreviewCanvas::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spacePressed = false;
         if (!m_isPanning) setCursor(Qt::ArrowCursor);
+        event->accept();
+        return;
     }
     QGraphicsView::keyReleaseEvent(event);
+}
+
+void PreviewCanvas::focusOutEvent(QFocusEvent* event) {
+    m_spacePressed = false;
+    m_isPanning = false;
+    setCursor(Qt::ArrowCursor);
+    QGraphicsView::focusOutEvent(event);
 }
 
 void PreviewCanvas::mousePressEvent(QMouseEvent* event) {
@@ -162,12 +174,33 @@ void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
     if (m_sprites.isEmpty()) {
         return;
     }
+    if (m_overlay && m_overlay->consumeSuppressedViewContextMenu()) {
+        event->accept();
+        return;
+    }
+    if (m_overlay && m_overlay->hasContextMenuTargetAt(mapToScene(event->pos()))) {
+        // Let the overlay own marker/pivot context menus without showing a second menu here.
+        event->accept();
+        return;
+    }
     
     QMenu menu(this);
-    QAction* copyAction = menu.addAction("Copy Image");
+    QAction* copyAction = menu.addAction(tr("Copy Image"));
+    menu.addSeparator();
+    QAction* applyPivotAction = menu.addAction(tr("Apply Pivot to Selected Frames"));
+    const QString markerName = m_overlay ? m_overlay->selectedMarkerName().trimmed() : QString();
+    QAction* applyMarkerAction = menu.addAction(
+        markerName.isEmpty()
+            ? tr("Apply Marker to Selected Frames")
+            : tr("Apply Marker '%1' to Selected Frames").arg(markerName));
+    applyMarkerAction->setEnabled(!markerName.isEmpty());
     QAction* selected = menu.exec(event->globalPos());
     if (selected == copyAction) {
         QApplication::clipboard()->setImage(QImage(m_sprites.first()->path));
+    } else if (selected == applyPivotAction) {
+        emit applyPivotToSelectedFramesRequested();
+    } else if (selected == applyMarkerAction && !markerName.isEmpty()) {
+        emit applyMarkerToSelectedFramesRequested(markerName);
     }
 }
 

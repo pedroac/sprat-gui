@@ -2,6 +2,8 @@
 
 #include "CliToolsConfig.h"
 #include "CliToolsUi.h"
+#include "ImageDiscoveryService.h"
+#include "ImageFolderSelectionDialog.h"
 
 #include <QApplication>
 #include <QFile>
@@ -96,7 +98,7 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
     QString targetPath = path;
     QString selection;
     bool selectionCanceled = false;
-    if (pickImageSubdirectory(path, selection, &selectionCanceled)) {
+    if (ImageFolderSelectionDialog::pickSingleFolderWithImages(this, path, selection, &selectionCanceled)) {
         targetPath = selection;
         appendDebugLog(QString("loadFolder selected subdirectory: '%1'").arg(targetPath));
     } else if (selectionCanceled) {
@@ -104,7 +106,7 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
         appendDebugLog("loadFolder canceled while selecting image subdirectory.");
         setLoading(false);
         return;
-    } else if (!hasImageFiles(path)) {
+    } else if (!ImageDiscoveryService::hasImageFiles(path)) {
         appendDebugLog(QString("loadFolder failed: no image files found in '%1'.").arg(path));
         setLoading(false);
         QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
@@ -120,17 +122,12 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
         QFile::remove(m_frameListPath);
         m_frameListPath.clear();
     }
-    const QStringList filters = {"*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif", "*.webp", "*.tga", "*.dds"};
-    const QStringList imagePaths = QDir(targetPath).entryList(filters, QDir::Files);
-    QStringList absolutePaths;
-    absolutePaths.reserve(imagePaths.size());
-    for (const QString& rel : imagePaths) {
-        absolutePaths << QDir(targetPath).absoluteFilePath(rel);
-    }
+    const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
+    const int imageCount = absolutePaths.size();
     appendDebugLog(QString("loadFolder discovered %1 image(s) in '%2'")
                        .arg(QString::number(absolutePaths.size()), QDir(targetPath).absolutePath()));
     m_activeFramePaths = absolutePaths;
-    QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imagePaths.size(), this);
+    QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imageCount, this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(1000);
     progress.setAutoClose(true);
@@ -149,7 +146,7 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
             return;
         }
     }
-    progress.setValue(absolutePaths.size());
+    progress.setValue(imageCount);
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(QDir(targetPath).absolutePath()));
 
     onRunLayout();

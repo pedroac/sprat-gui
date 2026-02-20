@@ -6,6 +6,9 @@
 #include <QPainter>
 #include <QMenu>
 #include <QAction>
+#include <QItemSelectionModel>
+#include <QKeySequence>
+#include <QtGlobal>
 
 /**
  * @brief Constructs the TimelineListWidget.
@@ -96,8 +99,40 @@ void TimelineListWidget::dropEvent(QDropEvent* event) {
  * @brief Handles key press events (Delete/Backspace to remove frames).
  */
 void TimelineListWidget::keyPressEvent(QKeyEvent* event) {
+    if (event->matches(QKeySequence::SelectAll)) {
+        selectAll();
+        event->accept();
+        return;
+    }
+
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         emit removeSelectedRequested();
+        event->accept();
+        return;
+    }
+
+    int rowDelta = 0;
+    if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Up) {
+        rowDelta = -1;
+    } else if (event->key() == Qt::Key_Right || event->key() == Qt::Key_Down) {
+        rowDelta = 1;
+    }
+
+    if (rowDelta != 0 && count() > 0) {
+        int current = currentRow();
+        if (current < 0) {
+            current = 0;
+        }
+        const int next = qBound(0, current + rowDelta, count() - 1);
+        if (next != current || currentRow() < 0) {
+            const auto selectionFlag = (event->modifiers() & Qt::ShiftModifier)
+                ? QItemSelectionModel::SelectCurrent
+                : QItemSelectionModel::ClearAndSelect;
+            setCurrentRow(next, selectionFlag);
+            scrollToItem(item(next));
+        }
+        event->accept();
+        return;
     } else {
         QListWidget::keyPressEvent(event);
     }
