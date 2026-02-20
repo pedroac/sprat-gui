@@ -123,6 +123,11 @@ void MainWindow::setupUi() {
     m_layoutScaleSpin->setSingleStep(0.05);
     m_layoutScaleSpin->setValue(1.0);
     canvasControls->addWidget(m_layoutScaleSpin);
+    if (!m_sourceResolutionDebounceTimer) {
+        m_sourceResolutionDebounceTimer = new QTimer(this);
+        m_sourceResolutionDebounceTimer->setSingleShot(true);
+        connect(m_sourceResolutionDebounceTimer, &QTimer::timeout, this, [this]() { onRunLayout(); });
+    }
     connect(m_layoutScaleSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) {
         if (!m_sourceResolutionDebounceTimer) {
             onRunLayout();

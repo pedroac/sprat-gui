@@ -141,8 +141,8 @@ void AnimationPreviewService::refresh(
     const int animationHeight = qMax(1, maxTopExtent + maxBottomExtent);
 
     const QSize canvasSize(
-        qMax(animationWidth, spriteSize.width()) + (effectivePadding * 2),
-        qMax(animationHeight, spriteSize.height()) + (effectivePadding * 2));
+        qMax(animationWidth, spriteSize.width()) + (effectivePadding > 0 ? effectivePadding * 2 : 0),
+        qMax(animationHeight, spriteSize.height()) + (effectivePadding > 0 ? effectivePadding * 2 : 0));
 
     qreal dpr = previewLabel->devicePixelRatioF();
     QPixmap canvas(canvasSize * dpr);

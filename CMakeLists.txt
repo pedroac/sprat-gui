@@ -2,16 +2,20 @@ cmake_minimum_required(VERSION 3.16)
 project(sprat-gui LANGUAGES CXX)
 include(CTest)
 
+# === Configuration ===
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# === Qt6 Configuration ===
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# === Find Dependencies ===
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
+# === Source Files ===
 set(PROJECT_SOURCES
     src/App/main.cpp
     src/App/MainWindow/MainWindow.cpp
@@ -94,8 +98,10 @@ set(PROJECT_SOURCES
     src/Core/models.h
 )
 
+# === Executable ===
 add_executable(sprat-gui ${PROJECT_SOURCES})
 
+# === Include Directories ===
 target_include_directories(sprat-gui PRIVATE
     src
     src/App
@@ -113,8 +119,15 @@ target_include_directories(sprat-gui PRIVATE
     src/Core
 )
 
-target_link_libraries(sprat-gui PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent)
+# === Link Libraries ===
+target_link_libraries(sprat-gui PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Concurrent
+)
 
+# === Translations ===
 set(TS_FILES
     i18n/sprat-gui_en.ts
 )
@@ -126,6 +139,9 @@ if(Qt6LinguistTools_FOUND)
 else()
     message(STATUS "Qt6 LinguistTools not found: skipping automatic .ts/.qm generation.")
 endif()
+
+# === Testing ===
+set(BUILD_TESTING ON CACHE BOOL "Enable testing" FORCE)
 
 if(BUILD_TESTING)
     add_executable(sprat-gui-tests
@@ -143,7 +159,11 @@ if(BUILD_TESTING)
         src/Core
     )
 
-    target_link_libraries(sprat-gui-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+    target_link_libraries(sprat-gui-tests PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+    )
 
     add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)
     set_tests_properties(sprat-gui-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

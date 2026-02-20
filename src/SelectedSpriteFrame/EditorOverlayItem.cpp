@@ -257,7 +257,7 @@ void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
                 baseColor.getRgbF(&r, &g, &b);
                 float gray = (r + g + b) / 3.0f;
                 // Desaturate: mix 35% color with 65% gray
-                color = QColor::fromRgbF(r * 0.35 + gray * 0.65, g * 0.35 + gray * 0.65, b * 0.35 + gray * 0.65);
+                color = QColor::fromRgbF(r * 0.35 + gray * 0.35, g * 0.35 + gray * 0.35, b * 0.35 + gray * 0.35);
             }
             
             QPainterPath path;
