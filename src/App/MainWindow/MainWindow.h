@@ -44,6 +44,9 @@ class QDockWidget;
 class QTextEdit;
 class QAction;
 
+// Forward declarations for custom classes
+class FrameDetectionDialog;
+
 /**
  * @class MainWindow
  * @brief Main application window for sprat-gui.
@@ -711,6 +714,57 @@ private:
      */
     void applySettings();
 
+    /**
+     * @brief Loads an image file and performs frame detection.
+     * 
+     * @param imagePath Path to the image file
+     * @param confirmReplace Whether to confirm replacement
+     */
+    void loadImageWithFrameDetection(const QString& imagePath, bool confirmReplace);
+
+    /**
+     * @brief Loads a tar file and extracts frames.
+     * 
+     * @param tarPath Path to the tar file
+     * @param confirmReplace Whether to confirm replacement
+     */
+    void loadTarFile(const QString& tarPath, bool confirmReplace);
+
+    /**
+     * @brief Detects frames in an image using spratframes.
+     * 
+     * @param imagePath Path to the image file
+     * @return QVector<QRect> Detected frame rectangles
+     */
+    QVector<QRect> detectFramesInImage(const QString& imagePath);
+
+    /**
+     * @brief Generates spratframes format from frame rectangles.
+     * 
+     * @param frames Frame rectangles
+     * @param imagePath Path to the source image
+     * @return QString spratframes format string
+     */
+    QString generateSpratFramesFormat(const QVector<QRect>& frames, const QString& imagePath);
+
+    /**
+     * @brief Handles layout for a single image used as a frame.
+     * 
+     * @param imagePath Path to the image file
+     */
+    void handleSingleImageLayout(const QString& imagePath);
+
+    /**
+     * @brief Processes frames extracted to a temporary directory.
+     * 
+     * Lists files, sorts them numerically, and updates internal state.
+     * 
+     * @param tempPath Path to the temporary directory
+     * @param sourcePath Original source path for reference
+     * @return bool True if frames were found and processed
+     */
+    bool processExtractedFrames(const QString& tempPath, const QString& sourcePath);
+
     // === UI Components ===
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
@@ -780,6 +834,8 @@ private:
     QString m_spratPackBin;
     CliToolInstaller* m_cliToolInstaller;
     QString m_spratConvertBin;
+    QString m_spratFramesBin;
+    QString m_spratUnpackBin;
     QProcess* m_process;
     bool m_cliReady = false;
     bool m_isLoading = false;

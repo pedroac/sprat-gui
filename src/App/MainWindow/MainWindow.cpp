@@ -19,54 +19,24 @@
 #include "TimelineUi.h"
 #include "ProfilesDialog.h"
 #include "SpratProfilesConfig.h"
-#include <QToolBar>
-#include <QSplitter>
-#include <QAction>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QComboBox>
-#include <QSpinBox>
-#include <QCheckBox>
 #include <QLabel>
-#include <QStatusBar>
-#include <QDragEnterEvent>
-#include <QDropEvent>
-#include <QMimeData>
 #include <QTimer>
-#include <QPushButton>
-#include <QDirIterator>
 #include <QApplication>
-#include <algorithm>
 #include <QSet>
 #include <QStackedWidget>
-#include <QGroupBox>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QDoubleSpinBox>
-#include <QScrollArea>
-#include <QEvent>
-#include <QWheelEvent>
 #include <QResizeEvent>
 #include <QProgressBar>
-#include <QJsonDocument>
 #include <QJsonObject>
-#include <QJsonArray>
 #include <QLoggingCategory>
 #include <QProcess>
-#include <QPixmap>
-#include <QClipboard>
-#include <QMenu>
-#include <QAction>
-#include <QShortcut>
-#include <QPixmapCache>
 #include <QFile>
 #include <QTextStream>
 #include <QIODevice>
-#include <QTextEdit>
 #include <QUuid>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
@@ -418,9 +388,11 @@ void MainWindow::onSettingsClicked() {
         applySettings();
         CliToolsConfig::saveAppSettings(m_settings);
         CliPaths chosen = dlg.getCliPaths();
-        CliToolsConfig::saveOverride("cli/spratlayout", chosen.layoutBinary);
-        CliToolsConfig::saveOverride("cli/spratpack", chosen.packBinary);
-        CliToolsConfig::saveOverride("cli/spratconvert", chosen.convertBinary);
+    CliToolsConfig::saveOverride("cli/spratlayout", chosen.layoutBinary);
+    CliToolsConfig::saveOverride("cli/spratpack", chosen.packBinary);
+    CliToolsConfig::saveOverride("cli/spratconvert", chosen.convertBinary);
+    CliToolsConfig::saveOverride("cli/spratframes", chosen.framesBinary);
+    CliToolsConfig::saveOverride("cli/spratunpack", chosen.unpackBinary);
         checkCliTools();
     }
 }

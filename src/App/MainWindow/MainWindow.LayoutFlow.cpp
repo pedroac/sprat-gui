@@ -3,6 +3,7 @@
 #include "SpriteSelectionPresenter.h"
 
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QLabel>
 #include <QMap>
 #include <QMessageBox>

@@ -23,6 +23,8 @@ CliPaths CliToolsConfig::loadOverrides() {
     paths.layoutBinary = settings.value("cli/spratlayout").toString();
     paths.packBinary = settings.value("cli/spratpack").toString();
     paths.convertBinary = settings.value("cli/spratconvert").toString();
+    paths.framesBinary = settings.value("cli/spratframes").toString();
+    paths.unpackBinary = settings.value("cli/spratunpack").toString();
     return paths;
 }
 

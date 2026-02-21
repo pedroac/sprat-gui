@@ -67,6 +67,16 @@ void SettingsDialog::setupUi() {
     connect(convertBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_convertPathEdit); });
     cliForm->addRow("spratconvert:", createCliPathWidget(m_convertPathEdit, convertBrowse));
 
+    m_framesPathEdit = new QLineEdit(m_cliPaths.framesBinary, this);
+    QPushButton* framesBrowse = new QPushButton("Browse", this);
+    connect(framesBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_framesPathEdit); });
+    cliForm->addRow("spratframes:", createCliPathWidget(m_framesPathEdit, framesBrowse));
+
+    m_unpackPathEdit = new QLineEdit(m_cliPaths.unpackBinary, this);
+    QPushButton* unpackBrowse = new QPushButton("Browse", this);
+    connect(unpackBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_unpackPathEdit); });
+    cliForm->addRow("spratunpack:", createCliPathWidget(m_unpackPathEdit, unpackBrowse));
+
     cliGroupLayout->addLayout(cliForm);
     m_installCliBtn = new QPushButton("Install CLI Tools", this);
     connect(m_installCliBtn, &QPushButton::clicked, this, &SettingsDialog::installCliToolsRequested);
@@ -110,6 +120,8 @@ CliPaths SettingsDialog::getCliPaths() const {
     paths.layoutBinary = m_layoutPathEdit->text().trimmed();
     paths.packBinary = m_packPathEdit->text().trimmed();
     paths.convertBinary = m_convertPathEdit->text().trimmed();
+    paths.framesBinary = m_framesPathEdit->text().trimmed();
+    paths.unpackBinary = m_unpackPathEdit->text().trimmed();
     return paths;
 }
 

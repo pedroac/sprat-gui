@@ -45,9 +45,21 @@ bool MainWindow::resolveCliBinaries(QStringList& missing) {
         missing << "spratconvert";
     }
 
+    m_spratFramesBin = CliToolsConfig::resolveBinary("spratframes", overrides.framesBinary, binDir);
+    if (m_spratFramesBin.isEmpty()) {
+        missing << "spratframes";
+    }
+
+    m_spratUnpackBin = CliToolsConfig::resolveBinary("spratunpack", overrides.unpackBinary, binDir);
+    if (m_spratUnpackBin.isEmpty()) {
+        missing << "spratunpack";
+    }
+
     m_cliPaths.layoutBinary = overrides.layoutBinary.isEmpty() ? m_spratLayoutBin : overrides.layoutBinary;
     m_cliPaths.packBinary = overrides.packBinary.isEmpty() ? m_spratPackBin : overrides.packBinary;
     m_cliPaths.convertBinary = overrides.convertBinary.isEmpty() ? m_spratConvertBin : overrides.convertBinary;
+    m_cliPaths.framesBinary = overrides.framesBinary.isEmpty() ? m_spratFramesBin : overrides.framesBinary;
+    m_cliPaths.unpackBinary = overrides.unpackBinary.isEmpty() ? m_spratUnpackBin : overrides.unpackBinary;
 
     return missing.isEmpty();
 }

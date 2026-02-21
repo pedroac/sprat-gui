@@ -14,7 +14,6 @@
 #include <QLabel>
 #include <QListWidgetItem>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QSpinBox>
 #include <QtGlobal>
 #include <algorithm>

@@ -4,10 +4,8 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
-#include <QDockWidget>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -23,7 +21,6 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTimer>
-#include <QTextEdit>
 #include <QToolBar>
 #include <QVBoxLayout>
 

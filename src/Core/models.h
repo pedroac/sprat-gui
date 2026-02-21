@@ -372,4 +372,18 @@ struct CliPaths {
      * Used for format conversions (optional).
      */
     QString convertBinary;
+
+    /**
+     * @brief Path to spratframes binary.
+     * 
+     * Used for detecting frames in images.
+     */
+    QString framesBinary;
+
+    /**
+     * @brief Path to spratunpack binary.
+     * 
+     * Used for extracting frames from tar data.
+     */
+    QString unpackBinary;
 };

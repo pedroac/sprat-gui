@@ -27,7 +27,10 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.LayoutFlow.cpp
     src/App/MainWindow/MainWindow.Marker.cpp
     src/App/MainWindow/MainWindow.TimelineEditor.cpp
+    src/App/MainWindow/MainWindow.ImageLoading.cpp
     src/App/MainWindow/MainWindow.h
+    src/App/MainWindow/FrameDetectionDialog.cpp
+    src/App/MainWindow/FrameDetectionDialog.h
     src/SpriteSheetLayout/LayoutCanvas.cpp
     src/SpriteSheetLayout/LayoutCanvas.h
     src/SpriteSheetLayout/SpriteItem.cpp

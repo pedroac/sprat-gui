@@ -37,5 +37,7 @@ private:
     QLineEdit* m_layoutPathEdit;
     QLineEdit* m_packPathEdit;
     QLineEdit* m_convertPathEdit;
+    QLineEdit* m_framesPathEdit;
+    QLineEdit* m_unpackPathEdit;
     QPushButton* m_installCliBtn;
 };

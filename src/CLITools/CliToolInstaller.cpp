@@ -64,6 +64,16 @@ bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
         missing << "spratconvert";
     }
 
+    QString spratFramesBin = findBin("spratframes");
+    if (spratFramesBin.isEmpty()) {
+        missing << "spratframes";
+    }
+
+    QString spratUnpackBin = findBin("spratunpack");
+    if (spratUnpackBin.isEmpty()) {
+        missing << "spratunpack";
+    }
+
     return missing.isEmpty();
 }
 
@@ -99,9 +109,9 @@ cd "$workdir"
 git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git
 cd sprat-cli
 cmake -DSPRAT_DOWNLOAD_STB=ON .
-make -j$(nproc)
+            make -j$(nproc 2>/dev/null || echo 1)
 mkdir -p "$HOME/.local/bin"
-install -m 0755 spratlayout spratpack spratconvert "$HOME/.local/bin/"
+install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOME/.local/bin/"
 echo 'Installation Complete.  You may need to restart this application.'
 )";
 

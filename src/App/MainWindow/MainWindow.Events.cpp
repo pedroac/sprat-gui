@@ -64,7 +64,8 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
         return true;
     }
     const QString ext = info.suffix().toLower();
-    return ext == "zip" || ext == "json";
+    return ext == "zip" || ext == "json" || ext == "tar" || ext == "tar.gz" || ext == "tar.bz2" || ext == "tar.xz" ||
+           ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds";
 }
 
 bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) {
@@ -82,6 +83,18 @@ bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) 
         }
         return true;
     }
+    
+    const QString ext = info.suffix().toLower();
+    if (ext == "tar" || ext == "tar.gz" || ext == "tar.bz2" || ext == "tar.xz") {
+        loadTarFile(path, confirmReplace);
+        return true;
+    }
+    
+    if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds") {
+        loadImageWithFrameDetection(path, confirmReplace);
+        return true;
+    }
+    
     loadProject(path, confirmReplace);
     return true;
 }

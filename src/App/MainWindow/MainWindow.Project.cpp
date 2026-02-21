@@ -8,21 +8,19 @@
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
 
-#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDoubleSpinBox>
-#include <QJsonDocument>
 #include <QJsonArray>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QSpinBox>
-#include <QStackedWidget>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QApplication>

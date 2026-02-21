@@ -1,6 +1,5 @@
 #include "MainWindow.h"
 
-#include <QGroupBox>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QSignalBlocker>
