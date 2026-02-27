@@ -34,6 +34,7 @@ SpratProfile makeDefaultProfile(const QString& name) {
     p.maxCombinations = 0;
     p.threads = 0;
     p.trimTransparent = true;
+    p.allowRotation = false;
     return p;
 }
 
@@ -158,6 +159,9 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
 
     m_trimTransparentCheck = new QCheckBox(tr("Enabled"), this);
     detailsLayout->addRow(tr("Trim transparent:"), m_trimTransparentCheck);
+
+    m_allowRotationCheck = new QCheckBox(tr("Enabled"), this);
+    detailsLayout->addRow(tr("Allow rotation:"), m_allowRotationCheck);
 
     contentLayout->addWidget(detailsGroup, 2);
 
@@ -300,6 +304,7 @@ void ProfilesDialog::saveEditorsToProfile(int row) {
     p.maxCombinations = m_maxCombinationsSpin->value();
     p.threads = m_useThreadsCheck->isChecked() ? m_threadsSpin->value() : 0;
     p.trimTransparent = m_trimTransparentCheck->isChecked();
+    p.allowRotation = m_allowRotationCheck->isChecked();
 
     const QString displayName = p.name.isEmpty() ? tr("<unnamed>") : p.name;
     if (QListWidgetItem* item = m_listWidget->item(row)) {
@@ -325,6 +330,7 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_useThreadsCheck->setEnabled(valid);
     m_threadsSpin->setEnabled(valid && m_useThreadsCheck->isChecked());
     m_trimTransparentCheck->setEnabled(valid);
+    m_allowRotationCheck->setEnabled(valid);
 
     if (!valid) {
         m_nameEdit->clear();
@@ -343,6 +349,7 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
         m_useThreadsCheck->setChecked(false);
         m_threadsSpin->setValue(4);
         m_trimTransparentCheck->setChecked(true);
+        m_allowRotationCheck->setChecked(false);
         m_updatingEditors = false;
         return;
     }
@@ -384,6 +391,7 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_threadsSpin->setValue(hasThreads ? p.threads : 4);
     m_threadsSpin->setEnabled(hasThreads);
     m_trimTransparentCheck->setChecked(p.trimTransparent);
+    m_allowRotationCheck->setChecked(p.allowRotation);
 
     m_updatingEditors = false;
     refreshMaxCombinationsEnabledState();

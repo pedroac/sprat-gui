@@ -111,9 +111,13 @@ void MainWindow::onRunLayout() {
     }
     const int paddingForRun = hasSelectedProfile ? selectedProfile.padding : 0;
     const bool trimEnabledForRun = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
+    const bool rotateEnabledForRun = hasSelectedProfile ? selectedProfile.allowRotation : false;
     args << "--padding" << QString::number(paddingForRun);
     if (trimEnabledForRun) {
         args << "--trim-transparent";
+    }
+    if (rotateEnabledForRun) {
+        args << "--rotate";
     }
     m_lastRunUsedTrim = trimEnabledForRun;
     m_runningLayoutProfile.clear();

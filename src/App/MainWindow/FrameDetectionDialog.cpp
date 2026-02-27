@@ -81,13 +81,16 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
 
     m_acceptBtn = new QPushButton(tr("Accept Frames"), this);
     m_rejectBtn = new QPushButton(tr("Use as Single Frame"), this);
+    m_cancelBtn = new QPushButton(tr("Cancel"), this);
     
     connect(m_acceptBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onAcceptClicked);
     connect(m_rejectBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onRejectClicked);
+    connect(m_cancelBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onCancelClicked);
     
     // Layout
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch();
+    buttonLayout->addWidget(m_cancelBtn);
     buttonLayout->addWidget(m_rejectBtn);
     buttonLayout->addWidget(m_acceptBtn);
     
@@ -428,6 +431,10 @@ void FrameDetectionDialog::onAcceptClicked() {
 void FrameDetectionDialog::onRejectClicked() {
     m_userAccepted = false;
     accept();
+}
+
+void FrameDetectionDialog::onCancelClicked() {
+    reject();
 }
 
 void FrameDetectionDialog::drawFrame(QPainter& painter, const QRect& rect, bool isSelected, bool isHovered) {

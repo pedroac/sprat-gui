@@ -13,7 +13,7 @@ LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath
     if (sourceSizeCache.size() > 16384) {
         sourceSizeCache.clear();
     }
-    QRegularExpression spriteRe("sprite\\s+\"([^\"]+)\"\\s+(\\d+),(\\d+)\\s+(\\d+),(\\d+)(?:\\s+(\\d+),(\\d+)\\s+(\\d+),(\\d+))?");
+    QRegularExpression spriteRe(R"raw(sprite\s+"((?:[^"\\]|\\.)*)"\s+(\d+),(\d+)\s+(\d+),(\d+)(?:\s+(\d+),(\d+)\s+(\d+),(\d+))?(?:\s+(rotated))?)raw");
 
     QStringList lines = output.split('\n');
     for (const QString& line : lines) {
@@ -33,12 +33,18 @@ LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath
                 continue;
             }
             auto s = std::make_shared<Sprite>();
-            s->path = dir.absoluteFilePath(match.captured(1));
+            QString capturedPath = match.captured(1);
+            capturedPath.replace("\\\"", "\"");
+            capturedPath.replace("\\\\", "\\");
+            s->path = dir.absoluteFilePath(capturedPath);
             s->name = QFileInfo(s->path).baseName();
             s->rect = QRect(match.captured(2).toInt(), match.captured(3).toInt(), match.captured(4).toInt(), match.captured(5).toInt());
             if (!match.captured(6).isEmpty()) {
                 s->trimmed = true;
                 s->trimRect = QRect(match.captured(6).toInt(), match.captured(7).toInt(), match.captured(8).toInt(), match.captured(9).toInt());
+            }
+            if (!match.captured(10).isEmpty()) {
+                s->rotated = true;
             }
             // Use the original image dimensions so the pivot aligns with the visual frame center.
             QSize sourceSize = sourceSizeCache.value(s->path);

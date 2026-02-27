@@ -18,6 +18,7 @@ struct SpratProfile {
     int maxCombinations = 0;
     int threads = 0;
     bool trimTransparent = true;
+    bool allowRotation = false;
 };
 
 class SpratProfilesConfig {

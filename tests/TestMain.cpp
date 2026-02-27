@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "AnimationPreviewService.h"
+#include "LayoutParser.h"
 #include "ProjectPayloadCodec.h"
 #include "TimelineBuilder.h"
 #include "models.h"
@@ -20,6 +21,25 @@ namespace {
 bool expectTrue(bool condition, const char* message) {
     if (!condition) {
         std::cerr << "FAIL: " << message << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool testLayoutParserHandlesEscapedQuotes() {
+    const QString output = 
+        "atlas 100,100\n"
+        "scale 1.0\n"
+        "sprite \"path/with/\\\"quotes\\\".png\" 0,0 10,10\n";
+    
+    LayoutModel model = LayoutParser::parse(output, "/tmp");
+    if (!expectTrue(model.sprites.size() == 1, "should parse one sprite")) {
+        return false;
+    }
+    
+    QString expectedPath = QDir("/tmp").absoluteFilePath("path/with/\"quotes\".png");
+    if (!expectTrue(model.sprites[0]->path == expectedPath, "path should be un-escaped correctly")) {
+        std::cerr << "Actual path: " << model.sprites[0]->path.toStdString() << "\n";
         return false;
     }
     return true;
@@ -186,6 +206,9 @@ int main(int argc, char** argv) {
 
     int failed = 0;
     if (!testAnimationPreviewUsesTimelineBounds()) {
+        ++failed;
+    }
+    if (!testLayoutParserHandlesEscapedQuotes()) {
         ++failed;
     }
     if (!testProjectPayloadBuildStoresListSource()) {

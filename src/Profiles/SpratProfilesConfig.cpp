@@ -267,6 +267,8 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             }
         } else if (key == "trim_transparent") {
             current.trimTransparent = toBool(value, current.trimTransparent);
+        } else if (key == "rotate") {
+            current.allowRotation = toBool(value, current.allowRotation);
         }
     }
 
@@ -311,23 +313,24 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         out << "mode=" << p.mode << "\n";
         out << "optimize=" << p.optimize << "\n";
         if (p.maxWidth > 0) {
-            out << "max-width=" << p.maxWidth << "\n";
+            out << "max_width=" << p.maxWidth << "\n";
         }
         if (p.maxHeight > 0) {
-            out << "max-height=" << p.maxHeight << "\n";
+            out << "max_height=" << p.maxHeight << "\n";
         }
         if (p.targetResolutionUseSource) {
-            out << "target-resolution=source\n";
+            out << "target_resolution=source\n";
         } else {
-            out << "target-resolution=" << p.targetResolutionWidth << "x" << p.targetResolutionHeight << "\n";
+            out << "target_resolution=" << p.targetResolutionWidth << "x" << p.targetResolutionHeight << "\n";
         }
-        out << "resolution-reference=" << p.resolutionReference << "\n";
+        out << "resolution_reference=" << p.resolutionReference << "\n";
         out << "padding=" << p.padding << "\n";
-        out << "max-combinations=" << p.maxCombinations << "\n";
+        out << "max_combinations=" << p.maxCombinations << "\n";
         if (p.threads > 0) {
             out << "threads=" << p.threads << "\n";
         }
-        out << "trim-transparent=" << (p.trimTransparent ? "true" : "false") << "\n";
+        out << "trim_transparent=" << (p.trimTransparent ? "true" : "false") << "\n";
+        out << "rotate=" << (p.allowRotation ? "true" : "false") << "\n";
     }
 
     out.flush();

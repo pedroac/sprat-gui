@@ -152,6 +152,7 @@ if(BUILD_TESTING)
         src/Animation/AnimationPreviewService.cpp
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Project/ProjectPayloadCodec.cpp
+        src/SpriteSheetLayout/LayoutParser.cpp
     )
 
     target_include_directories(sprat-gui-tests PRIVATE
@@ -160,6 +161,7 @@ if(BUILD_TESTING)
         src/Animation/Timelines
         src/Project
         src/Core
+        src/SpriteSheetLayout
     )
 
     target_link_libraries(sprat-gui-tests PRIVATE

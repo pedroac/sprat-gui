@@ -34,6 +34,7 @@ public:
 private slots:
     void onAcceptClicked();
     void onRejectClicked();
+    void onCancelClicked();
     
 private:
     enum ResizeHandle {
@@ -94,6 +95,7 @@ protected:
     
     QPushButton* m_acceptBtn;
     QPushButton* m_rejectBtn;
+    QPushButton* m_cancelBtn;
     QGraphicsView* m_imageView;
     QGraphicsScene* m_scene;
     QGraphicsPixmapItem* m_imageItem;

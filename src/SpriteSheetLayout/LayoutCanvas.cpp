@@ -268,6 +268,13 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
              }
         }
 
+        // Handle rotation if necessary
+        if (sprite->rotated) {
+            QTransform trans;
+            trans.rotate(90);
+            pixmap = pixmap.transformed(trans, Qt::SmoothTransformation);
+        }
+
         // spratlayout scale changes sprite rect dimensions; match rendered frame size to rect.
         const QSize targetSize = sprite->rect.size();
         if (targetSize.width() > 0 &&

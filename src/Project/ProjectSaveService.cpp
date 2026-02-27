@@ -158,67 +158,112 @@ bool ProjectSaveService::save(
 
     QJsonObject markersInfo = projectPayload["spritemarkers"].toObject();
     QJsonObject spritesState = markersInfo["sprites"].toObject();
+    
+    QString markersContent;
+    QTextStream markersStream(&markersContent);
+
     for (auto it = spritesState.begin(); it != spritesState.end(); ++it) {
         QJsonObject spriteState = it.value().toObject();
         QJsonArray markersArr = spriteState["markers"].toArray();
         bool hasPivotMarker = false;
+        
+        QString spritePath = it.key();
+        markersStream << "path \"" << spritePath << "\"\n";
+
         for (auto markerIt = markersArr.begin(); markerIt != markersArr.end(); ++markerIt) {
             QJsonObject markerObj = markerIt->toObject();
             const QString markerName = normalizedMarkerName(markerObj["name"].toString());
-            MarkerKind markerKind = markerKindFromString(markerObj["kind"].toString());
-            if (markerObj["kind"].toString().isEmpty()) {
-                markerKind = markerKindFromString(markerObj["type"].toString());
+            QString markerKindStr = markerObj["kind"].toString();
+            if (markerKindStr.isEmpty()) {
+                markerKindStr = markerObj["type"].toString();
             }
-            markerObj["kind"] = markerKindToString(markerKind);
-            markerObj["type"] = markerKindToString(markerKind);
-            markerObj["name"] = markerName;
-            *markerIt = markerObj;
+            if (markerKindStr.isEmpty()) {
+                markerKindStr = "point";
+            }
+            
+            markersStream << "- marker \"" << markerName << "\" " << markerKindStr;
+            
+            if (markerKindStr == "point") {
+                markersStream << " " << markerObj["x"].toInt() << "," << markerObj["y"].toInt();
+            } else if (markerKindStr == "circle") {
+                markersStream << " " << markerObj["x"].toInt() << "," << markerObj["y"].toInt() 
+                              << " " << markerObj["radius"].toInt();
+            } else if (markerKindStr == "rectangle") {
+                markersStream << " " << markerObj["x"].toInt() << "," << markerObj["y"].toInt() 
+                              << " " << markerObj["w"].toInt() << "," << markerObj["h"].toInt();
+            } else if (markerKindStr == "polygon") {
+                QJsonArray vertices = markerObj["vertices"].toArray();
+                if (vertices.isEmpty()) {
+                    vertices = markerObj["polygon_points"].toArray(); // Legacy fallback
+                }
+                for (const auto& vVal : vertices) {
+                    if (vVal.isArray()) {
+                        QJsonArray vArr = vVal.toArray();
+                        if (vArr.size() >= 2) {
+                            markersStream << " " << vArr[0].toInt() << "," << vArr[1].toInt();
+                        }
+                    } else {
+                        QJsonObject vObj = vVal.toObject();
+                        markersStream << " " << vObj["x"].toInt() << "," << vObj["y"].toInt();
+                    }
+                }
+            }
+            markersStream << "\n";
+
             if (markerName == "pivot") {
                 hasPivotMarker = true;
             }
         }
+        
         if (!hasPivotMarker) {
-            QJsonObject pivotMarker;
-            pivotMarker["name"] = "pivot";
-            pivotMarker["kind"] = markerKindToString(MarkerKind::Point);
-            pivotMarker["type"] = markerKindToString(MarkerKind::Point);
-            pivotMarker["x"] = spriteState["pivot_x"].toInt();
-            pivotMarker["y"] = spriteState["pivot_y"].toInt();
-            markersArr.append(pivotMarker);
-            spriteState["markers"] = markersArr;
-            it.value() = spriteState;
+            markersStream << "- marker \"pivot\" point " 
+                          << spriteState["pivot_x"].toInt() << "," << spriteState["pivot_y"].toInt() << "\n";
         }
+        markersStream << "\n";
     }
-    markersInfo["sprites"] = spritesState;
+
     QJsonObject animInfo = projectPayload["animations"].toObject();
     const int animationFps = animInfo["animation_fps"].toInt(8);
     QJsonArray timelines = animInfo["timelines"].toArray();
+    
+    QString animContent;
+    QTextStream animStream(&animContent);
+    animStream << "fps " << animationFps << "\n\n";
+
     for (int i = 0; i < timelines.size(); ++i) {
         QJsonObject timeline = timelines[i].toObject();
         int timelineFps = timeline["fps"].toInt(animationFps);
         if (timelineFps <= 0) {
             timelineFps = 8;
         }
-        timeline["fps"] = timelineFps;
-        timelines[i] = timeline;
+        
+        animStream << "animation \"" << timeline["name"].toString() << "\" " << timelineFps << "\n";
+        QJsonArray frames = timeline["frames"].toArray();
+        for (const auto& fVal : frames) {
+            animStream << "- frame \"" << fVal.toString() << "\"\n";
+        }
+        animStream << "\n";
     }
-    animInfo["timelines"] = timelines;
+
     QTemporaryFile markersTemp;
+    markersTemp.setFileTemplate(QDir::temp().filePath("sprat-gui-markers-XXXXXX.txt"));
     if (!markersTemp.open()) {
         QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary markers file."));
         return false;
     }
-    if (markersTemp.write(QJsonDocument(markersInfo).toJson()) < 0 || !markersTemp.flush()) {
+    if (markersTemp.write(markersContent.toUtf8()) < 0 || !markersTemp.flush()) {
         QMessageBox::critical(parent, trPS("Error"), trPS("Could not write temporary markers file."));
         return false;
     }
     markersTemp.close();
+
     QTemporaryFile animTemp;
+    animTemp.setFileTemplate(QDir::temp().filePath("sprat-gui-animations-XXXXXX.txt"));
     if (!animTemp.open()) {
         QMessageBox::critical(parent, trPS("Error"), trPS("Could not create temporary animation file."));
         return false;
     }
-    if (animTemp.write(QJsonDocument(animInfo).toJson()) < 0 || !animTemp.flush()) {
+    if (animTemp.write(animContent.toUtf8()) < 0 || !animTemp.flush()) {
         QMessageBox::critical(parent, trPS("Error"), trPS("Could not write temporary animation file."));
         return false;
     }
@@ -359,6 +404,9 @@ bool ProjectSaveService::save(
             layoutArgs << "--scale" << QString::number(layoutOptionScale);
             if (profileTrimTransparent) {
                 layoutArgs << "--trim-transparent";
+            }
+            if (effectiveProfile.allowRotation) {
+                layoutArgs << "--rotate";
             }
             if (!runProcess(layoutProc, spratLayoutBin, layoutArgs, QString("Layout generation failed for profile '%1'").arg(profileName))) {
                 return false;

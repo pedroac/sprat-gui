@@ -168,6 +168,11 @@ struct Sprite {
     bool trimmed = false;
 
     /**
+     * @brief Whether the sprite has been rotated 90 degrees clockwise.
+     */
+    bool rotated = false;
+
+    /**
      * @brief Rectangle defining the trimmed area.
      * 
      * Stored as x=l, y=t, w=r, h=b where:

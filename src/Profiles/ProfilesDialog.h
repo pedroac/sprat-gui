@@ -51,6 +51,7 @@ private:
     QCheckBox* m_useThreadsCheck = nullptr;
     QSpinBox* m_threadsSpin = nullptr;
     QCheckBox* m_trimTransparentCheck = nullptr;
+    QCheckBox* m_allowRotationCheck = nullptr;
 
     QVector<SpratProfile> m_profiles;
     int m_currentRow = -1;

@@ -50,57 +50,56 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool conf
     
     // Show modal dialog with detected frames
     FrameDetectionDialog dialog(imagePath, detectedFrames, this);
-    dialog.exec();
-    
-    if (dialog.userAccepted()) {
-        // User accepted the detected frames, generate spratframes format and use spratunpack
-        QVector<QRect> selectedFrames = dialog.getSelectedFrames();
-        
-        // Use persistent temp dir (m_zipTempDir) instead of local one to ensure files persist
-        clearZipTempDir();
-        m_zipTempDir = new QTemporaryDir();
-        if (!m_zipTempDir->isValid()) {
-            m_statusLabel->setText(tr("Error: Could not create temporary directory"));
-            setLoading(false);
-            delete m_zipTempDir;
-            m_zipTempDir = nullptr;
-            return;
-        }
-        
-        // Create temporary frames file
-        QTemporaryFile framesFile(m_zipTempDir->path() + "/frames.txt");
-        if (!framesFile.open()) {
-            m_statusLabel->setText(tr("Error: Could not create temporary frames file"));
-            setLoading(false);
-            return;
-        }
-        
-        // Write spratframes format to file
-        QTextStream stream(&framesFile);
-        stream << generateSpratFramesFormat(selectedFrames, imagePath);
-        framesFile.close();
-        
-        // Use spratunpack with the correct command syntax
-        // spratunpack <input_image> <frames_file> <output_directory>
-        QProcess unpackProcess;
-        QStringList args;
-        args << imagePath << framesFile.fileName() << m_zipTempDir->path();
-        unpackProcess.start(m_spratUnpackBin, args);
-        unpackProcess.waitForFinished();
-        
-        if (unpackProcess.exitCode() == 0) {
-            if (processExtractedFrames(m_zipTempDir->path(), imagePath)) {
-                onRunLayout();
+    if (dialog.exec() == QDialog::Accepted) {
+        if (dialog.userAccepted()) {
+            // User accepted the detected frames, generate spratframes format and use spratunpack
+            QVector<QRect> selectedFrames = dialog.getSelectedFrames();
+            
+            // Use persistent temp dir (m_zipTempDir) instead of local one to ensure files persist
+            clearZipTempDir();
+            m_zipTempDir = new QTemporaryDir();
+            if (!m_zipTempDir->isValid()) {
+                m_statusLabel->setText(tr("Error: Could not create temporary directory"));
+                setLoading(false);
+                delete m_zipTempDir;
+                m_zipTempDir = nullptr;
+                return;
+            }
+            
+            // Generate spratframes format
+            QString framesData = generateSpratFramesFormat(selectedFrames, imagePath);
+            
+            // Use spratunpack with the correct command syntax
+            // spratunpack <input_image> --frames - --output <output_directory>
+            QProcess unpackProcess;
+            QStringList args;
+            args << imagePath << "--frames" << "-" << "--output" << m_zipTempDir->path();
+            unpackProcess.start(m_spratUnpackBin, args);
+            
+            // Write frames data to stdin
+            unpackProcess.write(framesData.toUtf8());
+            unpackProcess.closeWriteChannel();
+            
+            unpackProcess.waitForFinished();
+            
+            if (unpackProcess.exitCode() == 0) {
+                if (processExtractedFrames(m_zipTempDir->path(), imagePath)) {
+                    onRunLayout();
+                }
+            } else {
+                QString error = QString::fromUtf8(unpackProcess.readAllStandardError());
+                m_statusLabel->setText(tr("Error running spratunpack: ") + error);
+                setLoading(false);
             }
         } else {
-            QString error = QString::fromUtf8(unpackProcess.readAllStandardError());
-            m_statusLabel->setText(tr("Error running spratunpack: ") + error);
-            setLoading(false);
+            // User rejected, use image as single frame
+            m_statusLabel->setText(tr("Using image as single frame"));
+            handleSingleImageLayout(imagePath);
         }
     } else {
-        // User rejected, use image as single frame
-        m_statusLabel->setText(tr("Using image as single frame"));
-        handleSingleImageLayout(imagePath);
+        // User cancelled the dialog
+        m_statusLabel->setText(tr("Frame detection cancelled"));
+        setLoading(false);
     }
 }
 
@@ -133,29 +132,18 @@ void MainWindow::loadTarFile(const QString& tarPath, bool confirmReplace) {
         return;
     }
 
-    // Optimization: Pipe spratunpack output directly to tar input
-    // spratunpack <tarPath> - | tar -xf - -C <tempDir>
-    QProcess unpackProcess;
+    // Use tar directly to extract the file
+    // tar -xf <tarPath> -C <tempDir>
     QProcess tarProcess;
-
     tarProcess.setProgram("tar");
-    tarProcess.setArguments(QStringList() << "-xf" << "-" << "-C" << m_zipTempDir->path());
+    tarProcess.setArguments(QStringList() << "-xf" << tarPath << "-C" << m_zipTempDir->path());
 
-    unpackProcess.setProgram(m_spratUnpackBin);
-    unpackProcess.setArguments(QStringList() << tarPath << "-");
-    unpackProcess.setStandardOutputProcess(&tarProcess);
-
-    unpackProcess.start();
+    tarProcess.start();
+    bool finished = tarProcess.waitForFinished();
     
-    bool unpackFinished = unpackProcess.waitForFinished();
-    bool tarFinished = tarProcess.waitForFinished();
-    
-    if (!unpackFinished || !tarFinished || unpackProcess.exitCode() != 0 || tarProcess.exitCode() != 0) {
-        QString error = QString::fromUtf8(unpackProcess.readAllStandardError());
-        if (error.isEmpty()) {
-            error = QString::fromUtf8(tarProcess.readAllStandardError());
-        }
-        m_statusLabel->setText(tr("Error running spratunpack: ") + error);
+    if (!finished || tarProcess.exitCode() != 0) {
+        QString error = QString::fromUtf8(tarProcess.readAllStandardError());
+        m_statusLabel->setText(tr("Error extracting tar file: ") + error);
         setLoading(false);
         return;
     }
@@ -173,8 +161,8 @@ QVector<QRect> MainWindow::detectFramesInImage(const QString& imagePath) {
     }
     
     QProcess framesProcess;
-    // Use --spratframes option to generate spratframes format
-    framesProcess.start(m_spratFramesBin, QStringList() << "--spratframes" << imagePath);
+    // Use spratframes to detect frames in the image
+    framesProcess.start(m_spratFramesBin, QStringList() << imagePath);
     framesProcess.waitForFinished();
     
     if (framesProcess.exitCode() != 0) {
