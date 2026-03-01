@@ -65,8 +65,8 @@ void syncSourceResolutionPresetSelection(QComboBox* combo, int width, int height
 }
 void MainWindow::cacheLayoutOutputFromPayload(const QJsonObject& payload) {
     QJsonObject layoutInfo = payload["layout"].toObject();
-    m_cachedLayoutOutput = layoutInfo["output"].toString();
-    m_cachedLayoutScale = layoutInfo["scale"].toDouble(1.0);
+    m_session->cachedLayoutOutput = layoutInfo["output"].toString();
+    m_session->cachedLayoutScale = layoutInfo["scale"].toDouble(1.0);
 }
 void MainWindow::loadAutosavedProject() {
     QJsonObject root;
@@ -96,8 +96,8 @@ void MainWindow::loadAutosavedProject() {
 
     m_statusLabel->setText(tr("Loading autosaved project"));
     cacheLayoutOutputFromPayload(root);
-    m_pendingProjectPayload = root;
-    m_currentFolder = folder;
+    m_session->pendingProjectPayload = root;
+    m_session->currentFolder = folder;
     const QString sourceMode = layoutInfo["source_mode"].toString();
     QStringList framePaths;
     for (const auto& frameVal : layoutInfo["frame_paths"].toArray()) {
@@ -107,23 +107,23 @@ void MainWindow::loadAutosavedProject() {
         }
     }
     if (sourceMode == "list" && !framePaths.isEmpty()) {
-        m_activeFramePaths = framePaths;
+        m_session->activeFramePaths = framePaths;
         if (!ensureFrameListInput()) {
             QMessageBox::warning(this, tr("Load Failed"), tr("Could not restore autosaved frame list; falling back to folder source."));
-            m_layoutSourcePath = QDir(folder).absolutePath();
-            m_layoutSourceIsList = false;
-            if (!m_frameListPath.isEmpty()) {
-                QFile::remove(m_frameListPath);
-                m_frameListPath.clear();
+            m_session->layoutSourcePath = QDir(folder).absolutePath();
+            m_session->layoutSourceIsList = false;
+            if (!m_session->frameListPath.isEmpty()) {
+                QFile::remove(m_session->frameListPath);
+                m_session->frameListPath.clear();
             }
             m_folderLabel->setText(tr("Folder: ") + folder);
         }
     } else {
-        m_layoutSourcePath = QDir(folder).absolutePath();
-        m_layoutSourceIsList = false;
-        if (!m_frameListPath.isEmpty()) {
-            QFile::remove(m_frameListPath);
-            m_frameListPath.clear();
+        m_session->layoutSourcePath = QDir(folder).absolutePath();
+        m_session->layoutSourceIsList = false;
+        if (!m_session->frameListPath.isEmpty()) {
+            QFile::remove(m_session->frameListPath);
+            m_session->frameListPath.clear();
         }
         m_folderLabel->setText(tr("Folder: ") + folder);
     }
@@ -139,8 +139,8 @@ void MainWindow::onLoadProject() {
 
 void MainWindow::onSaveClicked() {
     QString defaultPath = QDir::currentPath() + "/export";
-    if (!m_currentFolder.isEmpty()) {
-        defaultPath = QFileInfo(m_currentFolder).dir().filePath("export");
+    if (!m_session->currentFolder.isEmpty()) {
+        defaultPath = QFileInfo(m_session->currentFolder).dir().filePath("export");
     }
 
     SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(), m_lastSaveConfig, this);
@@ -158,7 +158,7 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         QMessageBox::critical(this, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
         return false;
     }
-    if (m_layoutSourcePath.isEmpty()) {
+    if (m_session->layoutSourcePath.isEmpty()) {
         QMessageBox::critical(this, tr("Error"), tr("No layout source selected."));
         return false;
     }
@@ -171,14 +171,14 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
     bool ok = ProjectSaveService::save(
         this,
         config,
-        m_layoutSourcePath,
-        m_activeFramePaths,
+        m_session->layoutSourcePath,
+        m_session->activeFramePaths,
         configuredProfiles(),
         m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
         m_spratLayoutBin,
         m_spratPackBin,
         m_spratConvertBin,
-        buildProjectPayload(config),
+        buildProjectPayload(config, m_session),
         savedDestination,
         [this](bool loading) { setLoading(loading); },
         [this](const QString& status) { m_statusLabel->setText(status); }
@@ -193,13 +193,13 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
     return ok;
 }
 
-QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
+QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* session) {
     ProjectPayloadBuildInput input;
-    input.currentFolder = m_currentFolder;
-    input.activeFramePaths = m_activeFramePaths;
-    input.layoutSourceIsList = m_layoutSourceIsList;
-    input.timelines = m_timelines;
-    input.selectedTimelineIndex = m_selectedTimelineIndex;
+    input.currentFolder = session->currentFolder;
+    input.activeFramePaths = session->activeFramePaths;
+    input.layoutSourceIsList = session->layoutSourceIsList;
+    input.timelines = session->timelines;
+    input.selectedTimelineIndex = session->selectedTimelineIndex;
     QVector<int> selectedTimelineRows;
     const QList<QListWidgetItem*> selectedFrameItems = m_timelineFramesList ? m_timelineFramesList->selectedItems() : QList<QListWidgetItem*>();
     selectedTimelineRows.reserve(selectedFrameItems.size());
@@ -210,17 +210,17 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
     input.selectedTimelineFrameRows = selectedTimelineRows;
     input.animationFrameIndex = m_animFrameIndex;
     input.animationPlaying = m_animPlaying;
-    input.selectedSprite = m_selectedSprite;
-    for (const auto& sprite : m_selectedSprites) {
+    input.selectedSprite = session->selectedSprite;
+    for (const auto& sprite : session->selectedSprites) {
         if (sprite) {
             input.selectedSpritePaths.append(sprite->path);
         }
     }
-    input.primarySelectedSpritePath = m_selectedSprite ? m_selectedSprite->path : QString();
-    input.selectedPointName = m_selectedPointName;
-    input.layoutModel = m_layoutModel;
-    input.layoutOutput = m_cachedLayoutOutput;
-    input.layoutScale = m_cachedLayoutScale;
+    input.primarySelectedSpritePath = session->selectedSprite ? session->selectedSprite->path : QString();
+    input.selectedPointName = session->selectedPointName;
+    input.layoutModel = session->layoutModel;
+    input.layoutOutput = session->cachedLayoutOutput;
+    input.layoutScale = session->cachedLayoutScale;
     input.profile = m_profileCombo->currentText();
     SpratProfile selectedProfile;
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
@@ -254,12 +254,12 @@ QString MainWindow::getAutosaveFilePath() const {
 }
 
 void MainWindow::autosaveProject() {
-    if (m_currentFolder.isEmpty() || m_isLoading) {
+    if (m_session->currentFolder.isEmpty() || m_isLoading) {
         return;
     }
 
     QString error;
-    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload(m_lastSaveConfig), error)) {
+    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload(m_lastSaveConfig, m_session), error)) {
         m_statusLabel->setText(tr("Autosaved project"));
     } else {
         m_statusLabel->setText(error);
@@ -284,7 +284,7 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
         QMessageBox::warning(this, tr("Load Failed"), error);
         return;
     }
-    m_pendingProjectPayload = root;
+    m_session->pendingProjectPayload = root;
     cacheLayoutOutputFromPayload(root);
 
     QJsonObject layoutOpts = root["layout_options"].toObject();
@@ -319,25 +319,25 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
         }
     }
     if (!folder.isEmpty()) {
-        m_currentFolder = folder;
+        m_session->currentFolder = folder;
         if (sourceMode == "list" && !framePaths.isEmpty()) {
-            m_activeFramePaths = framePaths;
+            m_session->activeFramePaths = framePaths;
             if (!ensureFrameListInput()) {
                 QMessageBox::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
-                m_layoutSourcePath = QDir(folder).absolutePath();
-                m_layoutSourceIsList = false;
-                if (!m_frameListPath.isEmpty()) {
-                    QFile::remove(m_frameListPath);
-                    m_frameListPath.clear();
+                m_session->layoutSourcePath = QDir(folder).absolutePath();
+                m_session->layoutSourceIsList = false;
+                if (!m_session->frameListPath.isEmpty()) {
+                    QFile::remove(m_session->frameListPath);
+                    m_session->frameListPath.clear();
                 }
                 m_folderLabel->setText(tr("Folder: ") + folder);
             }
         } else {
-            m_layoutSourcePath = QDir(folder).absolutePath();
-            m_layoutSourceIsList = false;
-            if (!m_frameListPath.isEmpty()) {
-                QFile::remove(m_frameListPath);
-                m_frameListPath.clear();
+            m_session->layoutSourcePath = QDir(folder).absolutePath();
+            m_session->layoutSourceIsList = false;
+            if (!m_session->frameListPath.isEmpty()) {
+                QFile::remove(m_session->frameListPath);
+                m_session->frameListPath.clear();
             }
             m_folderLabel->setText(tr("Folder: ") + folder);
         }
@@ -395,11 +395,11 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, bool confirmReplace) 
         }
         m_loadingUiMessage = tr("Loading images...");
         setLoading(true);
-        if (!m_frameListPath.isEmpty()) {
-            QFile::remove(m_frameListPath);
-            m_frameListPath.clear();
+        if (!m_session->frameListPath.isEmpty()) {
+            QFile::remove(m_session->frameListPath);
+            m_session->frameListPath.clear();
         }
-        m_activeFramePaths = absolutePaths;
+        m_session->activeFramePaths = absolutePaths;
         if (!ensureFrameListInput()) {
             setLoading(false);
             clearZipTempDir();
@@ -427,9 +427,9 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, bool confirmReplace) 
 
 void MainWindow::applyProjectPayload() {
     m_isRestoringProject = true;
-    QJsonObject root = m_pendingProjectPayload;
-    m_pendingProjectPayload = QJsonObject();
-    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_currentFolder, m_layoutModel);
+    QJsonObject root = m_session->pendingProjectPayload;
+    m_session->pendingProjectPayload = QJsonObject();
+    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->layoutModel);
 
     if (m_layoutZoomSpin) {
         m_layoutZoomSpin->setValue(applied.layoutZoom * 100.0);
@@ -473,15 +473,15 @@ void MainWindow::applyProjectPayload() {
         updateUiState();
     }
 
-    m_timelines = applied.timelines;
+    m_session->timelines = applied.timelines;
     refreshTimelineList();
-    if (applied.selectedTimelineIndex >= 0 && applied.selectedTimelineIndex < m_timelines.size()) {
+    if (applied.selectedTimelineIndex >= 0 && applied.selectedTimelineIndex < m_session->timelines.size()) {
         m_timelineList->setCurrentRow(applied.selectedTimelineIndex);
-    } else if (!m_timelines.isEmpty()) {
+    } else if (!m_session->timelines.isEmpty()) {
         m_timelineList->setCurrentRow(0);
     }
 
-    if (m_selectedTimelineIndex >= 0 && m_selectedTimelineIndex < m_timelines.size() && !applied.selectedTimelineFrameRows.isEmpty()) {
+    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size() && !applied.selectedTimelineFrameRows.isEmpty()) {
         for (int row : applied.selectedTimelineFrameRows) {
             if (row >= 0 && row < m_timelineFramesList->count()) {
                 if (QListWidgetItem* item = m_timelineFramesList->item(row)) {
@@ -491,7 +491,7 @@ void MainWindow::applyProjectPayload() {
         }
     }
 
-    m_selectedPointName = applied.selectedMarkerName;
+    m_session->selectedPointName = applied.selectedMarkerName;
     QStringList selectedPaths = applied.selectedSpritePaths;
     if (selectedPaths.isEmpty() && !applied.selectedSpritePath.isEmpty()) {
         selectedPaths.append(applied.selectedSpritePath);
@@ -505,15 +505,15 @@ void MainWindow::applyProjectPayload() {
     }
 
     m_animFrameIndex = qMax(0, applied.animationFrameIndex);
-    if (m_selectedTimelineIndex >= 0 && m_selectedTimelineIndex < m_timelines.size()) {
-        const int frameCount = m_timelines[m_selectedTimelineIndex].frames.size();
+    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size()) {
+        const int frameCount = m_session->timelines[m_session->selectedTimelineIndex].frames.size();
         if (frameCount > 0) {
             m_animFrameIndex = qBound(0, m_animFrameIndex, frameCount - 1);
         } else {
             m_animFrameIndex = 0;
         }
     }
-    if (applied.animationPlaying && m_selectedTimelineIndex >= 0 && m_selectedTimelineIndex < m_timelines.size()) {
+    if (applied.animationPlaying && m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size()) {
         onAnimPlayPauseClicked();
     } else if (m_animPlaying) {
         onAnimPlayPauseClicked();

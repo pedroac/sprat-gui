@@ -261,8 +261,8 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath) {
     singleImageModel.sprites.append(sprite);
     
     // Apply the model to the canvas
-    m_layoutModel = singleImageModel;
-    m_canvas->setModel(m_layoutModel);
+    m_session->layoutModel = singleImageModel;
+    m_canvas->setModel(m_session->layoutModel);
     QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
     m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));
     
@@ -295,14 +295,14 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         framePaths.append(extractDir.absoluteFilePath(fileName));
     }
     
-    m_activeFramePaths = framePaths;
-    m_layoutSourcePath = tempPath;
-    m_layoutSourceIsList = false;
-    m_currentFolder = QFileInfo(sourcePath).absoluteDir().absolutePath();
+    m_session->activeFramePaths = framePaths;
+    m_session->layoutSourcePath = tempPath;
+    m_session->layoutSourceIsList = false;
+    m_session->currentFolder = QFileInfo(sourcePath).absoluteDir().absolutePath();
     
-    if (!m_frameListPath.isEmpty()) {
-        QFile::remove(m_frameListPath);
-        m_frameListPath.clear();
+    if (!m_session->frameListPath.isEmpty()) {
+        QFile::remove(m_session->frameListPath);
+        m_session->frameListPath.clear();
     }
     
     // Ensure we generate a list file so spratlayout respects our sort order

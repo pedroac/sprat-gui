@@ -51,10 +51,16 @@ Q_LOGGING_CATEGORY(autosave, "autosave")
  * Initializes the UI, processes, and timers.
  */
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    m_session = new ProjectSession(this);
     m_settings = CliToolsConfig::loadAppSettings();
     setupUi();
     setupCliInstallOverlay();
     setAcceptDrops(true);
+
+    m_layoutRunner = new LayoutRunner(this);
+    connect(m_layoutRunner, &LayoutRunner::finished, this, &MainWindow::onLayoutFinished);
+    connect(m_layoutRunner, &LayoutRunner::errorOccurred, this, &MainWindow::onLayoutError);
+
     m_process = new QProcess(this);
     m_cliToolInstaller = new CliToolInstaller(this);
     connect(m_process, &QProcess::finished, this, &MainWindow::onProcessFinished);
@@ -98,9 +104,9 @@ MainWindow::~MainWindow() {
         m_autosaveTimer->stop();
         delete m_autosaveTimer;
     }
-    if (!m_frameListPath.isEmpty()) {
-        QFile::remove(m_frameListPath);
-        m_frameListPath.clear();
+    if (m_session && !m_session->frameListPath.isEmpty()) {
+        QFile::remove(m_session->frameListPath);
+        m_session->frameListPath.clear();
     }
     clearZipTempDir();
 }
@@ -118,14 +124,14 @@ LayoutModel MainWindow::parseLayoutOutput(const QString& output, const QString& 
 }
 
 QString MainWindow::layoutParserFolder() const {
-    if (m_layoutSourceIsList && !m_layoutSourcePath.isEmpty()) {
-        return QFileInfo(m_layoutSourcePath).dir().absolutePath();
+    if (m_session->layoutSourceIsList && !m_session->layoutSourcePath.isEmpty()) {
+        return QFileInfo(m_session->layoutSourcePath).dir().absolutePath();
     }
-    return m_layoutSourcePath;
+    return m_session->layoutSourcePath;
 }
 
 bool MainWindow::ensureFrameListInput() {
-    if (m_activeFramePaths.isEmpty()) {
+    if (m_session->activeFramePaths.isEmpty()) {
         return false;
     }
     QString fileName = QString("sprat-gui-frames-%1.txt").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -135,20 +141,20 @@ bool MainWindow::ensureFrameListInput() {
         return false;
     }
     QTextStream out(&file);
-    for (const QString& path : m_activeFramePaths) {
+    for (const QString& path : m_session->activeFramePaths) {
         out << path << "\n";
     }
     out.flush();
     file.close();
 
-    const QString oldFrameListPath = m_frameListPath;
-    m_frameListPath = newFrameListPath;
-    m_layoutSourcePath = m_frameListPath;
-    m_layoutSourceIsList = true;
-    if (!m_activeFramePaths.isEmpty()) {
-        m_currentFolder = QFileInfo(m_activeFramePaths.first()).absoluteDir().absolutePath();
+    const QString oldFrameListPath = m_session->frameListPath;
+    m_session->frameListPath = newFrameListPath;
+    m_session->layoutSourcePath = m_session->frameListPath;
+    m_session->layoutSourceIsList = true;
+    if (!m_session->activeFramePaths.isEmpty()) {
+        m_session->currentFolder = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
     }
-    if (!oldFrameListPath.isEmpty() && oldFrameListPath != m_frameListPath) {
+    if (!oldFrameListPath.isEmpty() && oldFrameListPath != m_session->frameListPath) {
         QFile::remove(oldFrameListPath);
     }
     updateManualFrameLabel();
@@ -156,10 +162,10 @@ bool MainWindow::ensureFrameListInput() {
 }
 
 void MainWindow::populateActiveFrameListFromModel() {
-    m_activeFramePaths.clear();
-    m_activeFramePaths.reserve(m_layoutModel.sprites.size());
-    for (const auto& sprite : m_layoutModel.sprites) {
-        m_activeFramePaths.append(sprite->path);
+    m_session->activeFramePaths.clear();
+    m_session->activeFramePaths.reserve(m_session->layoutModel.sprites.size());
+    for (const auto& sprite : m_session->layoutModel.sprites) {
+        m_session->activeFramePaths.append(sprite->path);
     }
 }
 
@@ -167,10 +173,10 @@ void MainWindow::updateManualFrameLabel() {
     if (!m_folderLabel) {
         return;
     }
-    if (m_activeFramePaths.isEmpty()) {
+    if (m_session->activeFramePaths.isEmpty()) {
         m_folderLabel->setText(tr("Folder: none"));
     } else {
-        m_folderLabel->setText(QString(tr("Frames: %1 (manual selection)")).arg(m_activeFramePaths.size()));
+        m_folderLabel->setText(QString(tr("Frames: %1 (manual selection)")).arg(m_session->activeFramePaths.size()));
     }
 }
 
@@ -235,15 +241,15 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
         m_profileSelectorStack->setCurrentIndex(effectiveProfiles.isEmpty() ? 1 : 0);
     }
 
-    if (!effectiveProfiles.contains(m_lastSuccessfulProfile)) {
-        m_lastSuccessfulProfile.clear();
+    if (!effectiveProfiles.contains(m_session->lastSuccessfulProfile)) {
+        m_session->lastSuccessfulProfile.clear();
     }
 }
 
 void MainWindow::onAddFramesRequested() {
-    QString startDir = m_currentFolder;
-    if (startDir.isEmpty() && !m_activeFramePaths.isEmpty()) {
-        startDir = QFileInfo(m_activeFramePaths.first()).absoluteDir().absolutePath();
+    QString startDir = m_session->currentFolder;
+    if (startDir.isEmpty() && !m_session->activeFramePaths.isEmpty()) {
+        startDir = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
     }
     QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
     QStringList files = QFileDialog::getOpenFileNames(this, tr("Add Frames"), startDir, filter);
@@ -251,7 +257,7 @@ void MainWindow::onAddFramesRequested() {
         return;
     }
 
-    QSet<QString> existing(m_activeFramePaths.begin(), m_activeFramePaths.end());
+    QSet<QString> existing(m_session->activeFramePaths.begin(), m_session->activeFramePaths.end());
     QStringList added;
     for (const QString& file : files) {
         QFileInfo info(file);
@@ -270,11 +276,11 @@ void MainWindow::onAddFramesRequested() {
         return;
     }
 
-    const QStringList previousFramePaths = m_activeFramePaths;
-    m_activeFramePaths.append(added);
+    const QStringList previousFramePaths = m_session->activeFramePaths;
+    m_session->activeFramePaths.append(added);
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
-        m_activeFramePaths = previousFramePaths;
+        m_session->activeFramePaths = previousFramePaths;
         QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
@@ -287,7 +293,7 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     }
     QStringList targets;
     for (const QString& path : paths) {
-        if (m_activeFramePaths.contains(path)) {
+        if (m_session->activeFramePaths.contains(path)) {
             targets.append(path);
         }
     }
@@ -296,7 +302,7 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     }
 
     QSet<QString> timelineNames;
-    for (const auto& timeline : m_timelines) {
+    for (const auto& timeline : m_session->timelines) {
         for (const QString& frame : timeline.frames) {
             if (targets.contains(frame)) {
                 timelineNames.insert(timeline.name);
@@ -313,14 +319,14 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         }
     }
 
-    QStringList remainingFramePaths = m_activeFramePaths;
+    QStringList remainingFramePaths = m_session->activeFramePaths;
     for (const QString& path : targets) {
         remainingFramePaths.removeAll(path);
     }
 
     if (remainingFramePaths.isEmpty()) {
         bool timelineChanged = false;
-        for (auto& timeline : m_timelines) {
+        for (auto& timeline : m_session->timelines) {
             for (int i = timeline.frames.size() - 1; i >= 0; --i) {
                 if (targets.contains(timeline.frames[i])) {
                     timeline.frames.removeAt(i);
@@ -333,36 +339,36 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
             refreshAnimationTest();
         }
 
-        m_activeFramePaths.clear();
-        m_layoutSourcePath.clear();
-        m_layoutSourceIsList = false;
-        if (!m_frameListPath.isEmpty()) {
-            QFile::remove(m_frameListPath);
-            m_frameListPath.clear();
+        m_session->activeFramePaths.clear();
+        m_session->layoutSourcePath.clear();
+        m_session->layoutSourceIsList = false;
+        if (!m_session->frameListPath.isEmpty()) {
+            QFile::remove(m_session->frameListPath);
+            m_session->frameListPath.clear();
         }
-        m_layoutModel.sprites.clear();
+        m_session->layoutModel.sprites.clear();
         m_canvas->clearCanvas();
-        m_selectedSprites.clear();
-        m_selectedSprite.reset();
+        m_session->selectedSprites.clear();
+        m_session->selectedSprite.reset();
         m_statusLabel->setText(tr("No frames loaded"));
         m_folderLabel->setText(tr("Folder: none"));
-        m_cachedLayoutOutput.clear();
-        m_cachedLayoutScale = 1.0;
+        m_session->cachedLayoutOutput.clear();
+        m_session->cachedLayoutScale = 1.0;
         updateMainContentView();
         updateUiState();
         return;
     }
 
-    const QStringList previousFramePaths = m_activeFramePaths;
-    m_activeFramePaths = remainingFramePaths;
+    const QStringList previousFramePaths = m_session->activeFramePaths;
+    m_session->activeFramePaths = remainingFramePaths;
     if (!ensureFrameListInput()) {
-        m_activeFramePaths = previousFramePaths;
+        m_session->activeFramePaths = previousFramePaths;
         QMessageBox::warning(this, tr("Remove Frames"), tr("Could not refresh the frame list after removal."));
         return;
     }
 
     bool timelineChanged = false;
-    for (auto& timeline : m_timelines) {
+    for (auto& timeline : m_session->timelines) {
         for (int i = timeline.frames.size() - 1; i >= 0; --i) {
             if (targets.contains(timeline.frames[i])) {
                 timeline.frames.removeAt(i);
@@ -413,7 +419,7 @@ void MainWindow::onManageProfiles() {
 
     const QString previousProfile = m_profileCombo ? m_profileCombo->currentText() : QString();
     applyConfiguredProfiles(profiles, previousProfile);
-    if (!m_layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentText().trimmed().isEmpty()) {
+    if (!m_session->layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentText().trimmed().isEmpty()) {
         onRunLayout();
     }
 }

@@ -110,19 +110,19 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
         QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
         return;
     }
-    m_currentFolder = targetPath;
+    m_session->currentFolder = targetPath;
     m_folderLabel->setText(tr("Folder: ") + QDir(targetPath).absolutePath());
-    m_layoutSourcePath = QDir(targetPath).absolutePath();
-    m_layoutSourceIsList = false;
-    m_cachedLayoutOutput.clear();
-    m_cachedLayoutScale = 1.0;
-    if (!m_frameListPath.isEmpty()) {
-        QFile::remove(m_frameListPath);
-        m_frameListPath.clear();
+    m_session->layoutSourcePath = QDir(targetPath).absolutePath();
+    m_session->layoutSourceIsList = false;
+    m_session->cachedLayoutOutput.clear();
+    m_session->cachedLayoutScale = 1.0;
+    if (!m_session->frameListPath.isEmpty()) {
+        QFile::remove(m_session->frameListPath);
+        m_session->frameListPath.clear();
     }
     const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
     const int imageCount = absolutePaths.size();
-    m_activeFramePaths = absolutePaths;
+    m_session->activeFramePaths = absolutePaths;
     QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imageCount, this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(1000);
@@ -148,7 +148,7 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
 }
 
 bool MainWindow::confirmLayoutReplacement() {
-    bool hasLayout = m_layoutModel.sprites.size() > 0;
+    bool hasLayout = m_session->layoutModel.sprites.size() > 0;
     if (!hasLayout) {
         return true;
     }
@@ -240,4 +240,12 @@ void MainWindow::updateCliOverlayGeometry() {
     }
     m_cliInstallOverlay->setGeometry(rect());
     m_cliInstallOverlay->raise();
+}
+
+void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    // General process finished handler if needed
+}
+
+void MainWindow::onProcessError(QProcess::ProcessError error) {
+    // General process error handler
 }

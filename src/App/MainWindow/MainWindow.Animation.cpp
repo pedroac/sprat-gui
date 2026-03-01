@@ -32,10 +32,10 @@ int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selecte
 
 void MainWindow::refreshTimelineList() {
     m_timelineList->clear();
-    for (const auto& timeline : m_timelines) {
+    for (const auto& timeline : m_session->timelines) {
         m_timelineList->addItem(timeline.name);
     }
-    m_timelineList->setVisible(!m_timelines.isEmpty());
+    m_timelineList->setVisible(!m_session->timelines.isEmpty());
 }
 
 void MainWindow::refreshTimelineFrames() {
@@ -44,12 +44,12 @@ void MainWindow::refreshTimelineFrames() {
     }
     m_timelineFramesList->setUpdatesEnabled(false);
     m_timelineFramesList->clear();
-    if (m_selectedTimelineIndex < 0 || m_selectedTimelineIndex >= m_timelines.size()) {
+    if (m_session->selectedTimelineIndex < 0 || m_session->selectedTimelineIndex >= m_session->timelines.size()) {
         m_timelineFramesList->setUpdatesEnabled(true);
         return;
     }
 
-    const auto& timeline = m_timelines[m_selectedTimelineIndex];
+    const auto& timeline = m_session->timelines[m_session->selectedTimelineIndex];
     for (const QString& path : timeline.frames) {
         QFileInfo fi(path);
         QIcon icon = m_timelineFrameIconCache.value(path);
@@ -65,7 +65,7 @@ void MainWindow::refreshTimelineFrames() {
 }
 
 void MainWindow::onFrameDropped(const QString& path, int index) {
-    if (!AnimationTimelineOps::dropFrame(m_timelines, m_selectedTimelineIndex, path, index)) {
+    if (!AnimationTimelineOps::dropFrame(m_session->timelines, m_session->selectedTimelineIndex, path, index)) {
         return;
     }
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
@@ -75,7 +75,7 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
 }
 
 void MainWindow::onFrameMoved(int from, int to) {
-    if (!AnimationTimelineOps::moveFrame(m_timelines, m_selectedTimelineIndex, from, to)) {
+    if (!AnimationTimelineOps::moveFrame(m_session->timelines, m_session->selectedTimelineIndex, from, to)) {
         return;
     }
     refreshTimelineFrames();
@@ -83,7 +83,7 @@ void MainWindow::onFrameMoved(int from, int to) {
 }
 
 void MainWindow::onFrameDuplicateRequested(int index) {
-    if (!AnimationTimelineOps::duplicateFrame(m_timelines, m_selectedTimelineIndex, index)) {
+    if (!AnimationTimelineOps::duplicateFrame(m_session->timelines, m_session->selectedTimelineIndex, index)) {
         return;
     }
     refreshTimelineFrames();
@@ -91,7 +91,7 @@ void MainWindow::onFrameDuplicateRequested(int index) {
 }
 
 void MainWindow::onFrameRemoveRequested() {
-    if (m_selectedTimelineIndex < 0) {
+    if (m_session->selectedTimelineIndex < 0) {
         return;
     }
     QList<QListWidgetItem*> items = m_timelineFramesList->selectedItems();
@@ -102,17 +102,17 @@ void MainWindow::onFrameRemoveRequested() {
     }
     std::sort(rows.begin(), rows.end(), std::greater<int>());
 
-    AnimationTimelineOps::removeFrames(m_timelines, m_selectedTimelineIndex, rows);
+    AnimationTimelineOps::removeFrames(m_session->timelines, m_session->selectedTimelineIndex, rows);
     refreshTimelineFrames();
     refreshAnimationTest();
 }
 
 void MainWindow::onTimelineFrameSelectionChanged() {
-    if (m_animPlaying || m_selectedTimelineIndex < 0 || m_selectedTimelineIndex >= m_timelines.size() || !m_timelineFramesList) {
+    if (m_animPlaying || m_session->selectedTimelineIndex < 0 || m_session->selectedTimelineIndex >= m_session->timelines.size() || !m_timelineFramesList) {
         return;
     }
     const int selectedRow = m_timelineFramesList->currentRow();
-    if (selectedRow < 0 || selectedRow >= m_timelines[m_selectedTimelineIndex].frames.size()) {
+    if (selectedRow < 0 || selectedRow >= m_session->timelines[m_session->selectedTimelineIndex].frames.size()) {
         return;
     }
     m_animFrameIndex = selectedRow;
@@ -120,7 +120,7 @@ void MainWindow::onTimelineFrameSelectionChanged() {
 }
 
 void MainWindow::onGenerateTimelinesFromFrames() {
-    if (m_layoutModel.sprites.isEmpty()) {
+    if (m_session->layoutModel.sprites.isEmpty()) {
         QMessageBox::information(this, tr("Generate Timelines"), tr("Load or generate a layout before creating timelines."));
         return;
     }
@@ -128,8 +128,8 @@ void MainWindow::onGenerateTimelinesFromFrames() {
     int focusIndex = -1;
     QString status;
     bool changed = TimelineGenerationService::generateFromLayout(
-        m_layoutModel,
-        m_timelines,
+        m_session->layoutModel,
+        m_session->timelines,
         focusIndex,
         [this](const QString& timelineName) {
             return TimelineUi::askTimelineConflictResolution(this, timelineName);
@@ -161,8 +161,8 @@ void MainWindow::onAnimZoomChanged(double value) {
 
 void MainWindow::onAnimPrevClicked() {
     if (!AnimationPlaybackService::prev(
-            m_timelines,
-            m_selectedTimelineIndex,
+            m_session->timelines,
+            m_session->selectedTimelineIndex,
             m_animFrameIndex,
             m_animPlaying,
             m_animTimer,
@@ -174,9 +174,9 @@ void MainWindow::onAnimPrevClicked() {
 
 void MainWindow::onAnimPlayPauseClicked() {
     AnimationPlaybackService::togglePlayPause(
-        m_timelines,
-        m_selectedTimelineIndex,
-        selectedTimelineFps(m_timelines, m_selectedTimelineIndex),
+        m_session->timelines,
+        m_session->selectedTimelineIndex,
+        selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex),
         m_animPlaying,
         m_animTimer,
         m_animPlayPauseBtn);
@@ -184,8 +184,8 @@ void MainWindow::onAnimPlayPauseClicked() {
 
 void MainWindow::onAnimNextClicked() {
     if (!AnimationPlaybackService::next(
-            m_timelines,
-            m_selectedTimelineIndex,
+            m_session->timelines,
+            m_session->selectedTimelineIndex,
             m_animFrameIndex,
             m_animPlaying,
             m_animTimer,
@@ -196,7 +196,7 @@ void MainWindow::onAnimNextClicked() {
 }
 
 void MainWindow::onAnimTimerTimeout() {
-    if (!AnimationPlaybackService::tick(m_timelines, m_selectedTimelineIndex, m_animFrameIndex)) {
+    if (!AnimationPlaybackService::tick(m_session->timelines, m_session->selectedTimelineIndex, m_animFrameIndex)) {
         return;
     }
     refreshAnimationTest();
@@ -205,10 +205,10 @@ void MainWindow::onAnimTimerTimeout() {
 bool MainWindow::exportAnimation(const QString& outPath) {
     return AnimationExportService::exportAnimation(
         this,
-        m_timelines,
-        m_selectedTimelineIndex,
-        m_layoutModel,
-        selectedTimelineFps(m_timelines, m_selectedTimelineIndex),
+        m_session->timelines,
+        m_session->selectedTimelineIndex,
+        m_session->layoutModel,
+        selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex),
         outPath,
         [this](bool loading) { setLoading(loading); },
         [this](const QString& status) { m_statusLabel->setText(status); });
@@ -228,10 +228,10 @@ void MainWindow::refreshAnimationTest() {
     bool hasFrames = false;
     bool playing = m_animPlaying;
     QPixmap pixmap = AnimationPreviewService::refresh(
-        m_timelines,
-        m_selectedTimelineIndex,
+        m_session->timelines,
+        m_session->selectedTimelineIndex,
         m_animFrameIndex,
-        m_layoutModel,
+        m_session->layoutModel,
         statusText,
         hasFrames,
         playing,
@@ -262,5 +262,5 @@ void MainWindow::fitAnimationToViewport() {
 }
 
 void MainWindow::refreshHandleCombo() {
-    SpriteSelectionPresenter::refreshHandleCombo(m_handleCombo, m_selectedSprite, m_selectedPointName);
+    SpriteSelectionPresenter::refreshHandleCombo(m_handleCombo, m_session->selectedSprite, m_session->selectedPointName);
 }

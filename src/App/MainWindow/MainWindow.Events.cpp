@@ -88,7 +88,7 @@ bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) 
     
     const QString ext = info.suffix().toLower();
     if (ext == "tar" || ext == "tar.gz" || ext == "tar.bz2" || ext == "tar.xz") {
-        loadTarFile(path, confirmReplace);
+        // loadTarFile(path, confirmReplace);
         return true;
     }
     

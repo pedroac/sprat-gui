@@ -50,6 +50,8 @@ set(PROJECT_SOURCES
     src/CLITools/CliToolsConfig.cpp
     src/CLITools/SpratCliLocator.cpp
     src/CLITools/CliToolsConfig.h
+    src/CLITools/LayoutRunner.cpp
+    src/CLITools/LayoutRunner.h
     src/SelectedSpriteFrame/Markers/MarkersDialog.cpp
     src/SelectedSpriteFrame/Markers/MarkersDialog.h
     src/Project/SaveDialog.cpp
@@ -62,6 +64,8 @@ set(PROJECT_SOURCES
     src/Project/ProjectPayloadCodec.h
     src/Project/AutosaveProjectStore.cpp
     src/Project/AutosaveProjectStore.h
+    src/Project/ProjectSession.cpp
+    src/Project/ProjectSession.h
     src/Animation/Timelines/AnimationTimelineOps.cpp
     src/Animation/Timelines/AnimationTimelineOps.h
     src/Animation/Test/AnimationTestOps.cpp

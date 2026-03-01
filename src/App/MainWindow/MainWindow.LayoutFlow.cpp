@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "SpriteSelectionPresenter.h"
+#include "LayoutRunner.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -22,14 +23,6 @@ int legacyDefaultPivotY(const SpritePtr& sprite) {
     return sprite ? (sprite->rect.height() / 2) : 0;
 }
 
-bool isCompactMode(const QString& mode) {
-    return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
-}
-
-QString resolutionArg(int width, int height) {
-    return QString("%1x%2").arg(width).arg(height);
-}
-
 bool parseResolutionArg(const QString& value, int& width, int& height) {
     const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
     if (parts.size() != 2) {
@@ -49,14 +42,14 @@ bool parseResolutionArg(const QString& value, int& width, int& height) {
 }
 
 void MainWindow::onRunLayout() {
-    if (m_layoutSourcePath.isEmpty()) {
+    if (m_session->layoutSourcePath.isEmpty()) {
         return;
     }
     if (!m_cliReady) {
         checkCliTools();
         return;
     }
-    if (m_process && m_process->state() != QProcess::NotRunning) {
+    if (m_layoutRunner && m_layoutRunner->isRunning()) {
         m_layoutRunPending = true;
         return;
     }
@@ -65,97 +58,63 @@ void MainWindow::onRunLayout() {
     SpratProfile selectedProfile;
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
 
-    QStringList args;
-    args << m_layoutSourcePath;
+    LayoutRunConfig config;
+    config.sourcePath = m_session->layoutSourcePath;
+    config.layoutBinary = m_spratLayoutBin;
+    
     if (hasSelectedProfile) {
-        if (!selectedProfile.mode.trimmed().isEmpty()) {
-            args << "--mode" << selectedProfile.mode.trimmed();
-        }
-        if (!selectedProfile.optimize.trimmed().isEmpty()) {
-            args << "--optimize" << selectedProfile.optimize.trimmed();
-        }
-        if (selectedProfile.maxWidth > 0) {
-            args << "--max-width" << QString::number(selectedProfile.maxWidth);
-        }
-        if (selectedProfile.maxHeight > 0) {
-            args << "--max-height" << QString::number(selectedProfile.maxHeight);
-        }
-        if (isCompactMode(selectedProfile.mode) && selectedProfile.maxCombinations > 0) {
-            args << "--max-combinations" << QString::number(selectedProfile.maxCombinations);
-        }
-        if (isCompactMode(selectedProfile.mode) && selectedProfile.threads > 0) {
-            args << "--threads" << QString::number(selectedProfile.threads);
-        }
+        config.profile = selectedProfile;
     }
-    const double layoutScale = 1.0;
-    args << "--scale" << QString::number(layoutScale, 'g', 12);
+    
+    config.scale = 1.0;
+
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
-    const bool hasSourceResolution = m_sourceResolutionCombo &&
+    if (m_sourceResolutionCombo) {
         parseResolutionArg(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight);
-    const bool hasTargetResolution = hasSelectedProfile &&
-        (selectedProfile.targetResolutionUseSource ||
-         (selectedProfile.targetResolutionWidth > 0 && selectedProfile.targetResolutionHeight > 0));
-    if (hasSourceResolution && hasTargetResolution) {
-        const int targetResolutionWidth = selectedProfile.targetResolutionUseSource
-            ? sourceResolutionWidth
-            : selectedProfile.targetResolutionWidth;
-        const int targetResolutionHeight = selectedProfile.targetResolutionUseSource
-            ? sourceResolutionHeight
-            : selectedProfile.targetResolutionHeight;
-        args << "--source-resolution" << resolutionArg(sourceResolutionWidth, sourceResolutionHeight);
-        args << "--target-resolution" << resolutionArg(targetResolutionWidth, targetResolutionHeight);
-        if (!selectedProfile.resolutionReference.trimmed().isEmpty()) {
-            args << "--resolution-reference" << selectedProfile.resolutionReference.trimmed();
-        }
     }
-    const int paddingForRun = hasSelectedProfile ? selectedProfile.padding : 0;
-    const bool trimEnabledForRun = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
-    const bool rotateEnabledForRun = hasSelectedProfile ? selectedProfile.allowRotation : false;
-    args << "--padding" << QString::number(paddingForRun);
-    if (trimEnabledForRun) {
-        args << "--trim-transparent";
-    }
-    if (rotateEnabledForRun) {
-        args << "--rotate";
-    }
-    m_lastRunUsedTrim = trimEnabledForRun;
+    config.sourceResolutionWidth = sourceResolutionWidth;
+    config.sourceResolutionHeight = sourceResolutionHeight;
+    config.retryWithoutTrim = m_retryWithoutTrimOnFailure;
+
+    m_session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile.clear();
     m_statusLabel->setText(tr("Running spratlayout..."));
     setLoading(true);
     m_layoutFailureDialogShown = false;
-    m_process->start(m_spratLayoutBin, args);
+    
+    m_layoutRunner->run(config);
 }
 
-void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+void MainWindow::onLayoutFinished(const LayoutResult& result) {
     setLoading(false);
-    if (exitStatus == QProcess::CrashExit || exitCode != 0) {
+
+    if (!result.success) {
         m_runningLayoutProfile.clear();
-        const QString err = QString::fromUtf8(m_process->readAllStandardError()).trimmed();
-        const QString out = QString::fromUtf8(m_process->readAllStandardOutput()).trimmed();
-        const QString combined = (err + "\n" + out).toLower();
+        
+        const QString combined = (result.error + "\n" + result.output).toLower();
         if (!m_retryWithoutTrimOnFailure &&
             !m_layoutRunPending &&
-            m_lastRunUsedTrim &&
+            m_session->lastRunUsedTrim &&
             combined.contains("failed to compute compact layout")) {
             m_statusLabel->setText(tr("Retrying without trim transparency..."));
             m_retryWithoutTrimOnFailure = true;
             onRunLayout();
             return;
         }
-        QString details = err;
-        if (details.isEmpty()) {
-            details = out;
-        }
-        if (details.isEmpty()) {
-            details = tr("spratlayout exited with code %1.").arg(exitCode);
-        }
+
+        QString details = result.error;
+        if (details.isEmpty()) details = result.output;
+        if (details.isEmpty()) details = tr("spratlayout exited with code %1.").arg(result.exitCode);
+
         m_statusLabel->setText(tr("Error running layout"));
-        qCritical() << "spratlayout process failed. Exit code:" << exitCode << "Error:" << err << "Output:" << out;
+        qCritical() << "spratlayout process failed. Exit code:" << result.exitCode << "Error:" << result.error << "Output:" << result.output;
+
         if (!m_layoutFailureDialogShown) {
             QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + details);
             m_layoutFailureDialogShown = true;
         }
+        
         m_retryWithoutTrimOnFailure = false;
         if (m_layoutRunPending) {
             m_layoutRunPending = false;
@@ -163,17 +122,17 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
         }
         return;
     }
+
     m_runningLayoutProfile.clear();
     m_retryWithoutTrimOnFailure = false;
 
-    const QByteArray processOutput = m_process->readAllStandardOutput();
-    const QString layoutText = QString::fromUtf8(processOutput);
+    const QString layoutText = result.output;
     LayoutModel newModel = parseLayoutOutput(layoutText, layoutParserFolder());
-    m_cachedLayoutOutput = layoutText;
-    m_cachedLayoutScale = newModel.scale;
-    if (m_pendingProjectPayload.isEmpty()) {
+    m_session->cachedLayoutOutput = layoutText;
+    m_session->cachedLayoutScale = newModel.scale;
+    if (m_session->pendingProjectPayload.isEmpty()) {
         QMap<QString, SpritePtr> oldSprites;
-        for (const auto& s : m_layoutModel.sprites) {
+        for (const auto& s : m_session->layoutModel.sprites) {
             oldSprites[s->path] = s;
         }
         for (auto& s : newModel.sprites) {
@@ -195,29 +154,29 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
     }
 
     QStringList selectedPaths;
-    for (const auto& s : m_selectedSprites) {
+    for (const auto& s : m_session->selectedSprites) {
         selectedPaths << s->path;
     }
-    const QString primaryPath = m_selectedSprite ? m_selectedSprite->path : QString();
+    const QString primaryPath = m_session->selectedSprite ? m_session->selectedSprite->path : QString();
 
-    m_layoutModel = newModel;
-    m_canvas->setModel(m_layoutModel);
+    m_session->layoutModel = newModel;
+    m_canvas->setModel(m_session->layoutModel);
     m_canvas->setZoomManual(false);
     QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
-    m_statusLabel->setText(QString(tr("Loaded %1 sprites")).arg(m_layoutModel.sprites.size()));
+    m_statusLabel->setText(QString(tr("Loaded %1 sprites")).arg(m_session->layoutModel.sprites.size()));
 
     populateActiveFrameListFromModel();
-    if (m_layoutSourceIsList) {
+    if (m_session->layoutSourceIsList) {
         updateManualFrameLabel();
     }
 
-    if (!m_pendingProjectPayload.isEmpty()) {
+    if (!m_session->pendingProjectPayload.isEmpty()) {
         applyProjectPayload();
     } else if (!selectedPaths.isEmpty()) {
         m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
     }
 
-    m_lastSuccessfulProfile = m_profileCombo->currentText();
+    m_session->lastSuccessfulProfile = m_profileCombo->currentText();
 
     updateMainContentView();
     updateUiState();
@@ -227,42 +186,19 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
     }
 }
 
-void MainWindow::onProcessError(QProcess::ProcessError error) {
+void MainWindow::onLayoutError(const QString& details) {
     setLoading(false);
     m_runningLayoutProfile.clear();
     m_retryWithoutTrimOnFailure = false;
-    const QString processError = m_process ? m_process->errorString().trimmed() : QString();
-    const QString err = m_process ? QString::fromUtf8(m_process->readAllStandardError()).trimmed() : QString();
-    const QString out = m_process ? QString::fromUtf8(m_process->readAllStandardOutput()).trimmed() : QString();
-    QString details = processError;
-    if (details.isEmpty()) {
-        details = err;
-    }
-    if (details.isEmpty()) {
-        details = out;
-    }
-    if (details.isEmpty()) {
-        details = tr("Unknown process error.");
-    }
-    if (error == QProcess::FailedToStart) {
-        m_statusLabel->setText(tr("Error: spratlayout not found"));
-        qCritical() << "Failed to start spratlayout process. Make sure it is installed and in your PATH.";
-        if (!m_layoutFailureDialogShown) {
-            QMessageBox::critical(this, tr("Error"), tr("Could not start 'spratlayout'.\nMake sure it is installed and in your PATH.\n\n%1").arg(details));
-            m_layoutFailureDialogShown = true;
-        }
-        if (m_layoutRunPending) {
-            m_layoutRunPending = false;
-            onRunLayout();
-        }
-        return;
-    }
+    
     m_statusLabel->setText(tr("Error running layout process"));
-    qCritical() << "spratlayout process error:" << error << details;
-    if (!m_layoutFailureDialogShown && (!m_process || m_process->state() == QProcess::NotRunning)) {
+    qCritical() << "spratlayout process error:" << details;
+    
+    if (!m_layoutFailureDialogShown) {
         QMessageBox::critical(this, tr("Error"), tr("spratlayout process failed:\n") + details);
         m_layoutFailureDialogShown = true;
     }
+    
     if (m_layoutRunPending) {
         m_layoutRunPending = false;
         onRunLayout();
@@ -295,10 +231,10 @@ void MainWindow::handleProfileFailure(const QString& failedProfile) {
     }
 
     QString fallbackProfile;
-    if (!m_lastSuccessfulProfile.isEmpty() &&
-        m_lastSuccessfulProfile != failedProfile &&
-        isProfileEnabled(m_lastSuccessfulProfile)) {
-        fallbackProfile = m_lastSuccessfulProfile;
+    if (!m_session->lastSuccessfulProfile.isEmpty() &&
+        m_session->lastSuccessfulProfile != failedProfile &&
+        isProfileEnabled(m_session->lastSuccessfulProfile)) {
+        fallbackProfile = m_session->lastSuccessfulProfile;
     } else if (failedProfile != "fast" && isProfileEnabled("fast")) {
         fallbackProfile = "fast";
     } else {
@@ -342,10 +278,10 @@ void MainWindow::setLoading(bool loading) {
         m_loadingOverlayVisible = true;
     };
     if (loading) {
-        if (m_welcomeLabel && m_layoutModel.sprites.isEmpty()) {
+        if (m_welcomeLabel && m_session->layoutModel.sprites.isEmpty()) {
             m_welcomeLabel->setText(m_loadingUiMessage);
         }
-        if (m_mainStack && m_welcomePage && m_layoutModel.sprites.isEmpty()) {
+        if (m_mainStack && m_welcomePage && m_session->layoutModel.sprites.isEmpty()) {
             m_mainStack->setCurrentWidget(m_welcomePage);
         }
         if (!m_cliInstallInProgress && m_loadingOverlayDelayTimer) {
@@ -380,13 +316,13 @@ void MainWindow::setLoading(bool loading) {
 }
 
 void MainWindow::onSpriteSelected(SpritePtr sprite) {
-    m_selectedSprite = sprite;
+    m_session->selectedSprite = sprite;
     if (sprite) {
         m_statusLabel->setText("Selected: " + sprite->name);
     }
     SpriteSelectionPresenter::applySpriteSelection(
         sprite,
-        m_selectedPointName,
+        m_session->selectedPointName,
         m_spriteNameEdit,
         m_pivotXSpin,
         m_pivotYSpin,

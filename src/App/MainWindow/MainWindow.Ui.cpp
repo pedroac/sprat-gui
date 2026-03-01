@@ -131,7 +131,7 @@ void MainWindow::setupUi() {
     canvasLayout->addWidget(m_canvas);
     connect(m_canvas, &LayoutCanvas::spriteSelected, this, &MainWindow::onSpriteSelected);
     connect(m_canvas, &LayoutCanvas::selectionChanged, this, [this](const QList<SpritePtr>& selection) {
-        m_selectedSprites = selection;
+        m_session->selectedSprites = selection;
     });
     connect(m_canvas, &LayoutCanvas::zoomChanged, this, [this](double zoom) {
         m_layoutZoomSpin->blockSignals(true);
@@ -435,7 +435,7 @@ void MainWindow::updateUiState() {
     MainWindowUiState::apply(
         m_cliReady,
         m_isLoading,
-        !m_layoutModel.sprites.isEmpty(),
+        m_session && !m_session->layoutModel.sprites.isEmpty(),
         m_loadAction,
         m_profileCombo,
         m_saveAction);

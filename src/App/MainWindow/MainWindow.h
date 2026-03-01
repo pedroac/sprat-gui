@@ -1,19 +1,21 @@
 #pragma once
 #include <QMainWindow>
-#include <QWidget>
 #include <QProcess>
 #include <QTimer>
 #include <QStringList>
 #include <QVector>
 #include <QHash>
 #include <QIcon>
+#include <QJsonObject>
+
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
 #include "TimelineListWidget.h"
 #include "CliToolInstaller.h"
+#include "LayoutRunner.h"
+#include "ProjectSession.h"
 #include "SaveDialog.h"
 #include "SpratProfilesConfig.h"
-#include <QJsonObject>
 #include "models.h"
 
 // Forward declarations for Qt classes
@@ -109,12 +111,18 @@ private slots:
     void onRunLayout();
 
     /**
-     * @brief Handles when a process finishes execution.
+     * @brief Handles when layout process finishes execution.
      * 
-     * @param exitCode Exit code of the process
-     * @param exitStatus Exit status of the process
+     * @param result Result of the layout process
      */
-    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    void onLayoutFinished(const LayoutResult& result);
+
+    /**
+     * @brief Handles errors from layout process.
+     * 
+     * @param error Description of the error
+     */
+    void onLayoutError(const QString& error);
 
     /**
      * @brief Handles autosave of the current project.
@@ -132,7 +140,15 @@ private slots:
     void onSaveClicked();
 
     /**
-     * @brief Handles errors from processes.
+     * @brief Handles when a generic process finishes execution.
+     * 
+     * @param exitCode Exit code of the process
+     * @param exitStatus Exit status of the process
+     */
+    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+
+    /**
+     * @brief Handles errors from generic processes.
      * 
      * @param error Type of process error
      */
@@ -310,9 +326,10 @@ private slots:
      * @brief Builds project payload for saving.
      * 
      * @param config Save configuration
+     * @param session Project session
      * @return QJsonObject Project payload
      */
-    QJsonObject buildProjectPayload(SaveConfig config);
+    QJsonObject buildProjectPayload(SaveConfig config, ProjectSession* session);
 
     /**
      * @brief Handles autosave timer timeout.
@@ -786,7 +803,7 @@ private:
     QLabel* m_folderLabel;
     QSplitter* m_leftSplitter;
     QSplitter* m_rightSplitter;
-    bool m_syncingSplitters;
+    bool m_syncingSplitters = false;
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas;
@@ -832,20 +849,15 @@ private:
     QLabel* m_statusLabel;
 
     // === Data Models ===
-    LayoutModel m_layoutModel;
-    QJsonObject m_pendingProjectPayload;
-    QVector<AnimationTimeline> m_timelines;
-    int m_selectedTimelineIndex = -1;
-    SpritePtr m_selectedSprite;
-    QList<SpritePtr> m_selectedSprites;
-    QString m_selectedPointName;
-    QString m_currentFolder;
+    ProjectSession* m_session;
+    
+    CliToolInstaller* m_cliToolInstaller;
     QString m_spratLayoutBin;
     QString m_spratPackBin;
-    CliToolInstaller* m_cliToolInstaller;
     QString m_spratConvertBin;
     QString m_spratFramesBin;
     QString m_spratUnpackBin;
+    LayoutRunner* m_layoutRunner;
     QProcess* m_process;
     bool m_cliReady = false;
     bool m_isLoading = false;
@@ -864,15 +876,8 @@ private:
     QLabel* m_cliInstallOverlayLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;
     QString m_loadingUiMessage = "Loading...";
-    QStringList m_activeFramePaths;
-    QString m_layoutSourcePath;
-    bool m_layoutSourceIsList = false;
-    QString m_frameListPath;
-    QString m_cachedLayoutOutput;
-    double m_cachedLayoutScale = 1.0;
-    QString m_lastSuccessfulProfile;
+    
     QString m_runningLayoutProfile;
-    bool m_lastRunUsedTrim = false;
     bool m_layoutRunPending = false;
     bool m_layoutFailureDialogShown = false;
     bool m_retryWithoutTrimOnFailure = false;
