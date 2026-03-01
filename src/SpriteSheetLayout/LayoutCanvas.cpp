@@ -358,14 +358,31 @@ void LayoutCanvas::initialFit() {
         return;
     }
     
-    if (sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height()) {
+    bool isLarger = sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height();
+    
+    if (isLarger) {
+        if (sceneRect.height() > sceneRect.width()) {
+            // Portrait: fit width to viewport, allow vertical scrolling
+            m_zoomLevel = (double)viewportRect.width() / sceneRect.width();
+        } else {
+            // Landscape or Square: fit height to viewport, allow horizontal scrolling
+            m_zoomLevel = (double)viewportRect.height() / sceneRect.height();
+        }
+    } else {
+        // Scene fits in viewport: fit it as large as possible without scrolling
         fitInView(sceneRect, Qt::KeepAspectRatio);
         m_zoomLevel = transform().m11();
-    } else {
-        resetTransform();
-        m_zoomLevel = 1.0;
-        centerOn(sceneRect.center());
     }
+    
+    // Clamp zoom level to supported range [0.1, 8.0]
+    if (m_zoomLevel < 0.1) {
+        m_zoomLevel = 0.1;
+    } else if (m_zoomLevel > 8.0) {
+        m_zoomLevel = 8.0;
+    }
+    
+    setZoom(m_zoomLevel);
+    centerOn(sceneRect.center());
     emit zoomChanged(m_zoomLevel);
 }
 
