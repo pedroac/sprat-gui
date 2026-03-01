@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDoubleSpinBox>
+#include <QTimer>
 
 void SpriteSelectionPresenter::applySpriteSelection(
     SpritePtr sprite,
@@ -12,7 +13,8 @@ void SpriteSelectionPresenter::applySpriteSelection(
     QPushButton* configPointsBtn,
     PreviewCanvas* previewView,
     QDoubleSpinBox* previewZoomSpin,
-    QComboBox* handleCombo) {
+    QComboBox* handleCombo,
+    bool useCurrentZoom) {
     if (sprite) {
         spriteNameEdit->setText(sprite->name);
         spriteNameEdit->setEnabled(true);
@@ -21,8 +23,12 @@ void SpriteSelectionPresenter::applySpriteSelection(
         pivotYSpin->setValue(sprite->pivotY);
         pivotYSpin->setEnabled(true);
         previewView->setSprites({sprite});
-        previewView->setZoom(previewZoomSpin->value());
-        previewView->centerContent();
+        if (useCurrentZoom) {
+            previewView->setZoom(previewZoomSpin->value());
+            previewView->centerContent();
+        } else {
+            QTimer::singleShot(0, previewView, &PreviewCanvas::initialFit);
+        }
         configPointsBtn->setEnabled(true);
     } else {
         spriteNameEdit->clear();

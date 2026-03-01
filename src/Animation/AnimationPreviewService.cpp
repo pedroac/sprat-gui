@@ -164,3 +164,60 @@ void AnimationPreviewService::refresh(
     previewLabel->setPixmap(canvas);
     previewLabel->setFixedSize(canvasSize);
 }
+
+QSize AnimationPreviewService::calculateAnimationSize(
+    const QVector<AnimationTimeline>& timelines,
+    int selectedTimelineIndex,
+    const LayoutModel& layoutModel,
+    double zoom,
+    int previewPadding) {
+    if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size() || timelines[selectedTimelineIndex].frames.isEmpty()) {
+        return QSize(kDefaultPreviewWidth, kDefaultPreviewHeight);
+    }
+
+    const auto& frames = timelines[selectedTimelineIndex].frames;
+    static QHash<QString, QSize> frameSizeCache;
+    if (frameSizeCache.size() > 16384) {
+        frameSizeCache.clear();
+    }
+    int maxLeftExtent = 0;
+    int maxRightExtent = 0;
+    int maxTopExtent = 0;
+    int maxBottomExtent = 0;
+
+    for (const QString& framePath : frames) {
+        QSize frameSize = frameSizeCache.value(framePath);
+        if (!frameSize.isValid()) {
+            frameSize = QImageReader(framePath).size();
+            if (frameSize.isValid()) {
+                frameSizeCache.insert(framePath, frameSize);
+            }
+        }
+        if (!frameSize.isValid()) {
+            continue;
+        }
+
+        int framePivotX = frameSize.width() / 2;
+        int framePivotY = frameSize.height() / 2;
+        for (const auto& sprite : layoutModel.sprites) {
+            if (sprite->path == framePath) {
+                framePivotX = qBound(0, sprite->pivotX, frameSize.width());
+                framePivotY = qBound(0, sprite->pivotY, frameSize.height());
+                break;
+            }
+        }
+
+        maxLeftExtent = qMax(maxLeftExtent, qRound(framePivotX * zoom));
+        maxRightExtent = qMax(maxRightExtent, qRound((frameSize.width() - framePivotX) * zoom));
+        maxTopExtent = qMax(maxTopExtent, qRound(framePivotY * zoom));
+        maxBottomExtent = qMax(maxBottomExtent, qRound((frameSize.height() - framePivotY) * zoom));
+    }
+
+    const int animationWidth = qMax(1, maxLeftExtent + maxRightExtent);
+    const int animationHeight = qMax(1, maxTopExtent + maxBottomExtent);
+    const int effectivePadding = qMax(0, previewPadding);
+
+    return QSize(
+        animationWidth + (effectivePadding > 0 ? effectivePadding * 2 : 0),
+        animationHeight + (effectivePadding > 0 ? effectivePadding * 2 : 0));
+}

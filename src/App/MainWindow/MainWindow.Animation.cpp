@@ -66,6 +66,7 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
         return;
     }
     refreshTimelineFrames();
+    fitAnimationToViewport();
     refreshAnimationTest();
 }
 
@@ -136,6 +137,7 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         if (focusIndex >= 0) {
             m_timelineList->setCurrentRow(focusIndex);
         }
+        fitAnimationToViewport();
         refreshAnimationTest();
         m_statusLabel->setText(status);
     } else {
@@ -223,6 +225,35 @@ void MainWindow::refreshAnimationTest() {
         m_animNextBtn,
         m_animPlaying,
         m_animTimer);
+}
+
+void MainWindow::fitAnimationToViewport() {
+    if (!m_animPreviewScroll || !m_animZoomSpin) {
+        return;
+    }
+    const QSize viewportSize = m_animPreviewScroll->viewport()->size();
+    if (viewportSize.isEmpty()) {
+        return;
+    }
+    const int previewPadding = m_animPaddingSpin ? m_animPaddingSpin->value() : 24;
+    const QSize baseSize = AnimationPreviewService::calculateAnimationSize(
+        m_timelines,
+        m_selectedTimelineIndex,
+        m_layoutModel,
+        1.0,
+        previewPadding);
+    if (baseSize.width() <= 0 || baseSize.height() <= 0) {
+        return;
+    }
+
+    if (baseSize.width() > viewportSize.width() || baseSize.height() > viewportSize.height()) {
+        const double zoomW = static_cast<double>(viewportSize.width()) / baseSize.width();
+        const double zoomH = static_cast<double>(viewportSize.height()) / baseSize.height();
+        double zoom = qMin(zoomW, zoomH);
+        m_animZoomSpin->setValue(zoom);
+    } else {
+        m_animZoomSpin->setValue(1.0);
+    }
 }
 
 void MainWindow::refreshHandleCombo() {

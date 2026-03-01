@@ -85,6 +85,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
     m_autosaveTimer->start(300000); // Autosave every 5 minutes
 
+    m_isRestoringProject = false;
 }
 
 /**

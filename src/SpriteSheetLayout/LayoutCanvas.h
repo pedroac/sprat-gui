@@ -50,6 +50,11 @@ public:
     void setZoom(double zoom);
 
     /**
+     * @brief Centers the layout in the view, fitting it if it's larger than the viewport.
+     */
+    void initialFit();
+
+    /**
      * @brief Selects a sprite by its file path.
      * 
      * @param path File path of the sprite to select

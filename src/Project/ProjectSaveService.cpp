@@ -146,9 +146,7 @@ bool ProjectSaveService::save(
     const QJsonObject layoutOptions = projectPayload["layout_options"].toObject();
     const QString cachedLayoutData = layoutInfo["output"].toString();
     const double cachedLayoutScale = layoutInfo["scale"].toDouble(1.0);
-    const double layoutOptionScale = [] (double value) {
-        return (value > 0.0 && value <= 1.0) ? value : 1.0;
-    }(layoutOptions["scale"].toDouble(1.0));
+    const double layoutOptionScale = 1.0;
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolution(
@@ -451,18 +449,30 @@ bool ProjectSaveService::save(
         }
         imgFile.close();
 
+        // Save combined layout, markers and animations to a file that can be used for future transformations
+        QByteArray combinedInput = layoutData;
+        if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
+        combinedInput.append(markersContent.toUtf8());
+        if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
+        combinedInput.append(animContent.toUtf8());
+
+        QFile layoutRawFile(profileDir.filePath("layout_raw.txt"));
+        if (layoutRawFile.open(QIODevice::WriteOnly)) {
+            layoutRawFile.write(combinedInput);
+            layoutRawFile.close();
+        }
+
         if (config.transform != "none" && !spratConvertBin.isEmpty()) {
             QProcess convProc;
             QStringList convArgs;
             convArgs << "--transform" << config.transform;
-            convArgs << "--markers" << markersTemp.fileName();
-            convArgs << "--animations" << animTemp.fileName();
+            // No need for --markers and --animations as they are now in stdin
             convProc.start(spratConvertBin, convArgs);
             if (!convProc.waitForStarted()) {
                 QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion failed for profile '%1': could not start spratconvert.")).arg(profileName));
                 return false;
             }
-            convProc.write(layoutData);
+            convProc.write(combinedInput);
             convProc.closeWriteChannel();
             if (!convProc.waitForFinished(kProcessTimeoutMs)) {
                 convProc.kill();

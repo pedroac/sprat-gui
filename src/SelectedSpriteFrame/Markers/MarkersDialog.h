@@ -9,10 +9,15 @@ class QSpinBox;
 class QPushButton;
 class QGroupBox;
 
+struct SuggestedMarkerPosition {
+    QPoint pos;
+    int baseSize = 20;
+};
+
 class MarkersDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit MarkersDialog(SpritePtr sprite, QWidget* parent = nullptr);
+    explicit MarkersDialog(SpritePtr sprite, const SuggestedMarkerPosition& suggestion, QWidget* parent = nullptr);
 
 signals:
     void markersChanged();
@@ -30,6 +35,7 @@ private:
     void updateEditorState();
 
     SpritePtr m_sprite;
+    SuggestedMarkerPosition m_suggestion;
     QListWidget* m_listWidget;
     QLineEdit* m_addNameEdit;
     QComboBox* m_addTypeCombo;

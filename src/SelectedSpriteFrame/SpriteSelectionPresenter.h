@@ -20,7 +20,8 @@ public:
         QPushButton* configPointsBtn,
         PreviewCanvas* previewView,
         QDoubleSpinBox* previewZoomSpin,
-        QComboBox* handleCombo);
+        QComboBox* handleCombo,
+        bool useCurrentZoom = false);
 
     static void refreshHandleCombo(QComboBox* handleCombo, SpritePtr selectedSprite, const QString& selectedPointName);
 };

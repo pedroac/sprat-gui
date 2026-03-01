@@ -48,13 +48,6 @@ bool parseResolution(const QString& value, int& width, int& height) {
     return true;
 }
 
-double sanitizeLayoutOptionScale(double scale) {
-    if (scale <= 0.0 || scale > 1.0) {
-        return 1.0;
-    }
-    return scale;
-}
-
 QString formatResolution(int width, int height) {
     return QString("%1x%2").arg(width).arg(height);
 }
@@ -85,16 +78,10 @@ void MainWindow::loadAutosavedProject() {
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolution(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
-    const double layoutOptionScale = sanitizeLayoutOptionScale(layoutOpts["scale"].toDouble(1.0));
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
         hasSourceResolution ? sourceResolutionWidth : 1024,
         hasSourceResolution ? sourceResolutionHeight : 1024);
-    if (m_layoutScaleSpin) {
-        const bool blocked = m_layoutScaleSpin->blockSignals(true);
-        m_layoutScaleSpin->setValue(layoutOptionScale);
-        m_layoutScaleSpin->blockSignals(blocked);
-    }
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(true);
     }
@@ -155,13 +142,13 @@ void MainWindow::onSaveClicked() {
         defaultPath = QFileInfo(m_currentFolder).dir().filePath("export");
     }
 
-    SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(), this);
+    SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(), m_lastSaveConfig, this);
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }
 
-    SaveConfig config = dlg.getConfig();
-    saveProjectWithConfig(config);
+    m_lastSaveConfig = dlg.getConfig();
+    saveProjectWithConfig(m_lastSaveConfig);
 }
 
 bool MainWindow::saveProjectWithConfig(SaveConfig config) {
@@ -237,7 +224,6 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
     input.padding = hasSelectedProfile ? selectedProfile.padding : 0;
     input.trimTransparent = hasSelectedProfile ? selectedProfile.trimTransparent : false;
-    input.layoutOptionScale = sanitizeLayoutOptionScale(m_layoutScaleSpin ? m_layoutScaleSpin->value() : 1.0);
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     if (m_sourceResolutionCombo && parseResolution(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight)) {
@@ -310,16 +296,10 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolution(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
-    const double layoutOptionScale = sanitizeLayoutOptionScale(layoutOpts["scale"].toDouble(1.0));
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
         hasSourceResolution ? sourceResolutionWidth : 1024,
         hasSourceResolution ? sourceResolutionHeight : 1024);
-    if (m_layoutScaleSpin) {
-        const bool blocked = m_layoutScaleSpin->blockSignals(true);
-        m_layoutScaleSpin->setValue(layoutOptionScale);
-        m_layoutScaleSpin->blockSignals(blocked);
-    }
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(true);
     }
@@ -441,6 +421,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, bool confirmReplace) 
 }
 
 void MainWindow::applyProjectPayload() {
+    m_isRestoringProject = true;
     QJsonObject root = m_pendingProjectPayload;
     m_pendingProjectPayload = QJsonObject();
     ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_currentFolder, m_layoutModel);
@@ -453,11 +434,6 @@ void MainWindow::applyProjectPayload() {
     }
     if (m_animZoomSpin) {
         m_animZoomSpin->setValue(applied.animationZoom);
-    }
-    if (m_layoutScaleSpin) {
-        const bool blocked = m_layoutScaleSpin->blockSignals(true);
-        m_layoutScaleSpin->setValue(sanitizeLayoutOptionScale(applied.layoutOptionScale));
-        m_layoutScaleSpin->blockSignals(blocked);
     }
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
@@ -474,6 +450,7 @@ void MainWindow::applyProjectPayload() {
     }
 
     m_settings = applied.appSettings;
+    m_lastSaveConfig = applied.saveConfig;
     applySettings();
     if (!applied.cliPaths.layoutBinary.isEmpty() ||
         !applied.cliPaths.packBinary.isEmpty() ||
@@ -536,6 +513,7 @@ void MainWindow::applyProjectPayload() {
         onAnimPlayPauseClicked();
     }
     refreshAnimationTest();
+    m_isRestoringProject = false;
 }
 
 void MainWindow::onAutosaveTimer() {

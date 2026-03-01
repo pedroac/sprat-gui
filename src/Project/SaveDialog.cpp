@@ -28,10 +28,20 @@ QStringList uniqueProfileNames(const QVector<SpratProfile>& profiles) {
 SaveDialog::SaveDialog(const QString& defaultPath,
                        const QVector<SpratProfile>& availableProfiles,
                        const QString& selectedProfileName,
+                       const SaveConfig& lastConfig,
                        QWidget* parent)
     : QDialog(parent) {
     setupUi();
-    m_destEdit->setText(defaultPath);
+    
+    if (!lastConfig.destination.isEmpty()) {
+        m_destEdit->setText(lastConfig.destination);
+    } else {
+        m_destEdit->setText(defaultPath);
+    }
+
+    if (!lastConfig.transform.isEmpty()) {
+        m_transformCombo->setCurrentText(lastConfig.transform);
+    }
 
     QStringList profileNames = uniqueProfileNames(availableProfiles);
     if (profileNames.isEmpty()) {
@@ -40,13 +50,17 @@ SaveDialog::SaveDialog(const QString& defaultPath,
     }
     for (const QString& profileName : profileNames) {
         QCheckBox* checkBox = new QCheckBox(profileName, this);
-        checkBox->setChecked(profileName == selectedProfileName);
+        if (!lastConfig.profiles.isEmpty()) {
+            checkBox->setChecked(lastConfig.profiles.contains(profileName));
+        } else {
+            checkBox->setChecked(profileName == selectedProfileName);
+        }
         connect(checkBox, &QCheckBox::toggled, this, [this]() { updateProfileSelectionState(); });
         m_profilesLayout->addWidget(checkBox);
         m_profileChecks.append(checkBox);
     }
 
-    if (!m_profileChecks.isEmpty() && selectedProfileName.trimmed().isEmpty()) {
+    if (lastConfig.profiles.isEmpty() && !m_profileChecks.isEmpty() && selectedProfileName.trimmed().isEmpty()) {
         m_profileChecks.first()->setChecked(true);
     }
     updateProfileSelectionState();

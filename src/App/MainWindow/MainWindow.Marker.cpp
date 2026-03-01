@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QSpinBox>
 #include <QSet>
+#include <QImageReader>
 #include <algorithm>
 
 namespace {
@@ -63,7 +64,46 @@ void MainWindow::onPointsConfigClicked() {
     if (!m_selectedSprite) {
         return;
     }
-    MarkersDialog dlg(m_selectedSprite, this);
+
+    SuggestedMarkerPosition suggestion;
+    if (m_previewView && m_previewView->scene()) {
+        // Find visible area in scene coordinates
+        QRect viewportRect = m_previewView->viewport()->rect();
+        QRectF visibleRectInScene = m_previewView->mapToScene(viewportRect).boundingRect();
+
+        // Get actual image dimensions
+        QSize imgSize = QImageReader(m_selectedSprite->path).size();
+        if (!imgSize.isValid()) {
+            imgSize = m_selectedSprite->rect.size();
+        }
+        QRectF imageRect(0, 0, imgSize.width(), imgSize.height());
+
+        // Find intersection of visible area and image
+        QRectF visiblePart = imageRect.intersected(visibleRectInScene);
+        
+        double zoom = m_previewView->transform().m11();
+        if (zoom <= 1e-9) zoom = 1.0;
+        
+        // Target ~80 pixels on screen for the marker size
+        double targetSceneSize = 80.0 / zoom;
+
+        if (!visiblePart.isEmpty()) {
+            // Use center of visible part of the image
+            suggestion.pos = visiblePart.center().toPoint();
+            // Size: target 80px on screen, but don't let it exceed 50% of the visible part's smaller dimension
+            double maxSafeSize = qMin(visiblePart.width(), visiblePart.height()) * 0.5;
+            suggestion.baseSize = qMax(8, qRound(qMin(targetSceneSize, maxSafeSize > 16 ? maxSafeSize : targetSceneSize)));
+        } else {
+            // Image not visible at all, fallback to image center
+            suggestion.pos = imageRect.center().toPoint();
+            suggestion.baseSize = qMax(8, qRound(targetSceneSize));
+        }
+    } else {
+        suggestion.pos = QPoint(m_selectedSprite->rect.width() / 2, m_selectedSprite->rect.height() / 2);
+        suggestion.baseSize = 20;
+    }
+
+    MarkersDialog dlg(m_selectedSprite, suggestion, this);
     connect(&dlg, &MarkersDialog::markersChanged, this, [this]() {
         m_previewView->overlay()->updateLayout();
         refreshHandleCombo();

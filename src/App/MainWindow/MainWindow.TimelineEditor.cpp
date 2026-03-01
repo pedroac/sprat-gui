@@ -49,6 +49,7 @@ void MainWindow::onTimelineSelectionChanged() {
         refreshTimelineFrames();
         m_animFrameIndex = 0;
         m_timelineEditorContainer->setVisible(true);
+        fitAnimationToViewport();
         refreshAnimationTest();
         return;
     }

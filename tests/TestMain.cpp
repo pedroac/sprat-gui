@@ -127,7 +127,6 @@ bool testProjectPayloadBuildStoresListSource() {
         "/tmp/project/a/frame_0.png",
         "/tmp/project/a/frame_1.png"
     };
-    input.layoutOptionScale = 0.5;
     input.sourceResolutionWidth = 1920;
     input.sourceResolutionHeight = 1080;
 

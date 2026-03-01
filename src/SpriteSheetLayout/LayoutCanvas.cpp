@@ -346,6 +346,30 @@ void LayoutCanvas::setZoom(double zoom) {
 }
 
 /**
+ * @brief Centers the layout in the view, fitting it if it's larger than the viewport.
+ */
+void LayoutCanvas::initialFit() {
+    QRectF sceneRect = m_scene->sceneRect();
+    if (sceneRect.isEmpty()) {
+        return;
+    }
+    const QRect viewportRect = viewport()->rect();
+    if (viewportRect.isEmpty()) {
+        return;
+    }
+    
+    if (sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height()) {
+        fitInView(sceneRect, Qt::KeepAspectRatio);
+        m_zoomLevel = transform().m11();
+    } else {
+        resetTransform();
+        m_zoomLevel = 1.0;
+        centerOn(sceneRect.center());
+    }
+    emit zoomChanged(m_zoomLevel);
+}
+
+/**
  * @brief Selects a sprite by its file path.
  */
 void LayoutCanvas::selectSpriteByPath(const QString& path) {

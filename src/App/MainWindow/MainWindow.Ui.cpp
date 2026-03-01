@@ -113,25 +113,6 @@ void MainWindow::setupUi() {
         m_sourceResolutionDebounceTimer->start(350);
     };
     connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, scheduleSourceResolutionLayoutRun);
-    canvasControls->addWidget(new QLabel(tr("Scale:")));
-    m_layoutScaleSpin = new QDoubleSpinBox(canvasControlsWidget);
-    m_layoutScaleSpin->setDecimals(6);
-    m_layoutScaleSpin->setRange(0.000001, 1.0);
-    m_layoutScaleSpin->setSingleStep(0.05);
-    m_layoutScaleSpin->setValue(1.0);
-    canvasControls->addWidget(m_layoutScaleSpin);
-    if (!m_sourceResolutionDebounceTimer) {
-        m_sourceResolutionDebounceTimer = new QTimer(this);
-        m_sourceResolutionDebounceTimer->setSingleShot(true);
-        connect(m_sourceResolutionDebounceTimer, &QTimer::timeout, this, [this]() { onRunLayout(); });
-    }
-    connect(m_layoutScaleSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) {
-        if (!m_sourceResolutionDebounceTimer) {
-            onRunLayout();
-            return;
-        }
-        m_sourceResolutionDebounceTimer->start(350);
-    });
 
     canvasControls->addStretch();
     canvasControls->addWidget(new QLabel(tr("Zoom:")));
@@ -481,9 +462,6 @@ void MainWindow::updateUiState() {
     }
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(enabled);
-    }
-    if (m_layoutScaleSpin) {
-        m_layoutScaleSpin->setEnabled(enabled);
     }
 }
 

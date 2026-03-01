@@ -687,6 +687,11 @@ private:
     void refreshAnimationTest();
 
     /**
+     * @brief Fits the animation preview to the scroll area viewport.
+     */
+    void fitAnimationToViewport();
+
+    /**
      * @brief Saves animation to file.
      */
     void saveAnimationToFile();
@@ -782,7 +787,6 @@ private:
     QPushButton* m_addProfilesBtn = nullptr;
     QPushButton* m_manageProfilesBtn = nullptr;
     QComboBox* m_sourceResolutionCombo = nullptr;
-    QDoubleSpinBox* m_layoutScaleSpin = nullptr;
     QDoubleSpinBox* m_layoutZoomSpin = nullptr;
     QTimer* m_sourceResolutionDebounceTimer = nullptr;
 
@@ -851,6 +855,7 @@ private:
     bool m_forceImmediateLoadingOverlay = false;
     AppSettings m_settings;
     CliPaths m_cliPaths;
+    SaveConfig m_lastSaveConfig;
     QTemporaryDir* m_zipTempDir = nullptr;
     QWidget* m_cliInstallOverlay = nullptr;
     QLabel* m_cliInstallOverlayLabel = nullptr;
@@ -869,4 +874,5 @@ private:
     bool m_layoutFailureDialogShown = false;
     bool m_retryWithoutTrimOnFailure = false;
     QTimer* m_autosaveTimer = nullptr;
+    bool m_isRestoringProject = false;
 };

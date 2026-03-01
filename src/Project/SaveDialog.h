@@ -21,11 +21,13 @@ public:
      * @param defaultPath The default destination path.
      * @param availableProfiles Profiles available for export.
      * @param selectedProfileName Name currently selected in layout UI.
+     * @param lastConfig Previously used configuration.
      * @param parent The parent widget.
      */
     explicit SaveDialog(const QString& defaultPath,
                         const QVector<SpratProfile>& availableProfiles,
                         const QString& selectedProfileName,
+                        const SaveConfig& lastConfig,
                         QWidget* parent = nullptr);
     /**
      * @brief Retrieves the configuration entered by the user.

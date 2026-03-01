@@ -64,7 +64,6 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     layoutOpts["profile"] = input.profile;
     layoutOpts["padding"] = input.padding;
     layoutOpts["trim_transparent"] = input.trimTransparent;
-    layoutOpts["scale"] = input.layoutOptionScale;
     if (input.sourceResolutionWidth > 0 && input.sourceResolutionHeight > 0) {
         layoutOpts["source_resolution"] = formatResolution(input.sourceResolutionWidth, input.sourceResolutionHeight);
     }
@@ -315,8 +314,6 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             out.sourceResolutionWidth = sourceWidth;
             out.sourceResolutionHeight = sourceHeight;
         }
-        const double scale = layoutOpts["scale"].toDouble(1.0);
-        out.layoutOptionScale = (scale > 0.0 && scale <= 1.0) ? scale : 1.0;
     }
 
     QJsonObject uiOpts = root["ui_options"].toObject();
@@ -346,5 +343,14 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         out.cliPaths.packBinary = settings["cli_spratpack"].toString();
         out.cliPaths.convertBinary = settings["cli_spratconvert"].toString();
     }
+
+    QJsonObject saveOpts = root["save_options"].toObject();
+    out.saveConfig.destination = saveOpts["destination"].toString();
+    out.saveConfig.transform = saveOpts["transform"].toString();
+    QJsonArray profilesArr = saveOpts["profiles"].toArray();
+    for (const auto& pVal : profilesArr) {
+        out.saveConfig.profiles.append(pVal.toString());
+    }
+
     return out;
 }

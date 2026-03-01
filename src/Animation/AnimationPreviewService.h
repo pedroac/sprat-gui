@@ -23,4 +23,11 @@ public:
         QPushButton* nextButton,
         bool& playing,
         QTimer* timer);
+
+    static QSize calculateAnimationSize(
+        const QVector<AnimationTimeline>& timelines,
+        int selectedTimelineIndex,
+        const LayoutModel& layoutModel,
+        double zoom,
+        int previewPadding);
 };

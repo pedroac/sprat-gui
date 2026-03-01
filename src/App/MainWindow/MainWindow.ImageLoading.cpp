@@ -263,6 +263,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath) {
     // Apply the model to the canvas
     m_layoutModel = singleImageModel;
     m_canvas->setModel(m_layoutModel);
+    QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
     m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));
     
     // Update UI state

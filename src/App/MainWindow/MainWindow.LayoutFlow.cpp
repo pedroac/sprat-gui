@@ -87,7 +87,7 @@ void MainWindow::onRunLayout() {
             args << "--threads" << QString::number(selectedProfile.threads);
         }
     }
-    const double layoutScale = m_layoutScaleSpin ? qBound(0.000001, m_layoutScaleSpin->value(), 1.0) : 1.0;
+    const double layoutScale = 1.0;
     args << "--scale" << QString::number(layoutScale, 'g', 12);
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
@@ -202,6 +202,7 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
 
     m_layoutModel = newModel;
     m_canvas->setModel(m_layoutModel);
+    QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
     m_statusLabel->setText(QString(tr("Loaded %1 sprites")).arg(m_layoutModel.sprites.size()));
 
     populateActiveFrameListFromModel();
@@ -391,7 +392,8 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
         m_configPointsBtn,
         m_previewView,
         m_previewZoomSpin,
-        m_handleCombo);
+        m_handleCombo,
+        m_isRestoringProject);
 }
 
 void MainWindow::onProfileChanged() {

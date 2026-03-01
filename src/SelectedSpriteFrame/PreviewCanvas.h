@@ -33,6 +33,14 @@ public:
      */
     void centerContent();
     /**
+     * @brief Centers the content in the view, fitting it if it's larger than the viewport.
+     */
+    void initialFit();
+    /**
+     * @brief Gets the center of the viewport in scene coordinates.
+     */
+    QPointF viewportCenterInScene() const;
+    /**
      * @brief Updates visual settings.
      * @param settings The application settings.
      */

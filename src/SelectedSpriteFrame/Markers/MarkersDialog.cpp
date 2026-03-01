@@ -45,8 +45,8 @@ void setComboFromMarkerKind(QComboBox* combo, MarkerKind kind) {
 /**
  * @brief Constructs the MarkersDialog.
  */
-MarkersDialog::MarkersDialog(SpritePtr sprite, QWidget* parent) 
-    : QDialog(parent), m_sprite(sprite) 
+MarkersDialog::MarkersDialog(SpritePtr sprite, const SuggestedMarkerPosition& suggestion, QWidget* parent) 
+    : QDialog(parent), m_sprite(sprite), m_suggestion(suggestion)
 {
     setWindowTitle(tr("Markers Configuration"));
     resize(450, 500);
@@ -203,18 +203,26 @@ void MarkersDialog::onAddClicked() {
     NamedPoint p;
     p.name = name;
     p.kind = markerKindFromCombo(m_addTypeCombo);
-    p.x = m_sprite->rect.width() / 2;
-    p.y = m_sprite->rect.height() / 2;
+    p.x = m_suggestion.pos.x();
+    p.y = m_suggestion.pos.y();
+    p.w = m_suggestion.baseSize;
+    p.h = m_suggestion.baseSize;
+    p.radius = m_suggestion.baseSize / 2;
+    if (p.radius < 2) p.radius = 2;
+    
+    if (p.kind == MarkerKind::Rectangle) {
+        p.x -= p.w / 2;
+        p.y -= p.h / 2;
+    }
     
     if (p.kind == MarkerKind::Polygon) {
-        // Default triangle
+        int s = m_suggestion.baseSize;
+        // Default triangle centered at x,y
         p.polygonPoints = {
-            QPoint(p.x, p.y - 20),
-            QPoint(p.x - 20, p.y + 20),
-            QPoint(p.x + 20, p.y + 20)
+            QPoint(p.x, p.y - (s / 2)),
+            QPoint(p.x - (s / 2), p.y + (s / 2)),
+            QPoint(p.x + (s / 2), p.y + (s / 2))
         };
-        p.x = p.polygonPoints[0].x();
-        p.y = p.polygonPoints[0].y();
     }
 
     m_sprite->points.append(p);

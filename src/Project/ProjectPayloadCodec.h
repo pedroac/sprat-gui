@@ -22,7 +22,6 @@ struct ProjectPayloadBuildInput {
     QString profile;
     int padding = 0;
     bool trimTransparent = false;
-    double layoutOptionScale = 1.0;
     int sourceResolutionWidth = 1024;
     int sourceResolutionHeight = 1024;
     double layoutZoom = 1.0;
@@ -45,7 +44,6 @@ struct ProjectPayloadApplyResult {
     QStringList selectedSpritePaths;
     QString primarySelectedSpritePath;
     QString selectedMarkerName;
-    double layoutOptionScale = 1.0;
     int sourceResolutionWidth = 1024;
     int sourceResolutionHeight = 1024;
     double layoutZoom = 1.0;
@@ -55,6 +53,7 @@ struct ProjectPayloadApplyResult {
     QVector<int> rightSplitterSizes;
     AppSettings appSettings;
     CliPaths cliPaths;
+    SaveConfig saveConfig;
 };
 
 class ProjectPayloadCodec {

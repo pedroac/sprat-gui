@@ -85,6 +85,32 @@ void PreviewCanvas::centerContent() {
     }
 }
 
+void PreviewCanvas::initialFit() {
+    QRectF sceneRect = m_scene->sceneRect();
+    if (sceneRect.isEmpty()) {
+        return;
+    }
+    const QRect viewportRect = viewport()->rect();
+    if (viewportRect.isEmpty()) {
+        return;
+    }
+    
+    if (sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height()) {
+        fitInView(sceneRect, Qt::KeepAspectRatio);
+        double zoom = transform().m11();
+        emit zoomChanged(zoom);
+    } else {
+        resetTransform();
+        emit zoomChanged(1.0);
+        centerOn(sceneRect.center());
+    }
+    m_overlay->update();
+}
+
+QPointF PreviewCanvas::viewportCenterInScene() const {
+    return mapToScene(viewport()->rect().center());
+}
+
 void PreviewCanvas::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
         double zoom = transform().m11();
