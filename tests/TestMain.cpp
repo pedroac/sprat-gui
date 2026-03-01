@@ -89,31 +89,26 @@ bool testAnimationPreviewUsesTimelineBounds() {
     int frameIndex = 0;
     bool playing = false;
     QTimer timer;
-    QLabel previewLabel;
-    QLabel statusLabel;
-    QPushButton prevButton;
-    QPushButton playPauseButton;
-    QPushButton nextButton;
+    QString statusText;
+    bool hasFrames = false;
 
-    AnimationPreviewService::refresh(
+    QPixmap pixmap = AnimationPreviewService::refresh(
         timelines,
         0,
         frameIndex,
         model,
-        1.0,
-        0,
-        &previewLabel,
-        &statusLabel,
-        &prevButton,
-        &playPauseButton,
-        &nextButton,
+        statusText,
+        hasFrames,
         playing,
         &timer);
 
-    if (!expectTrue(previewLabel.width() >= 300, "preview width should include the widest frame bounds")) {
+    if (!expectTrue(!pixmap.isNull(), "pixmap should be generated")) {
         return false;
     }
-    if (!expectTrue(previewLabel.height() >= 120, "preview height should include the tallest frame bounds")) {
+    if (!expectTrue(pixmap.width() >= 120, "pixmap width should include the widest frame bounds")) {
+        return false;
+    }
+    if (!expectTrue(pixmap.height() >= 120, "pixmap height should include the tallest frame bounds")) {
         return false;
     }
     return true;

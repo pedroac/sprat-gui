@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AnimationCanvas.h"
 #include "MarkersDialog.h"
 #include "SettingsDialog.h"
 #include "CliToolsConfig.h"
@@ -422,5 +423,5 @@ void MainWindow::onManageProfiles() {
  * @brief Applies application settings.
  */
 void MainWindow::applySettings() {
-    SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animPreviewLabel);
+    SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
 }

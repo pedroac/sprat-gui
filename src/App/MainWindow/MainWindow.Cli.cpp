@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AnimationCanvas.h"
 
 #include "CliToolsConfig.h"
 #include "CliToolsUi.h"
@@ -163,6 +164,7 @@ bool MainWindow::confirmLayoutReplacement() {
 void MainWindow::onLoadFolder() {
     QString dir = QFileDialog::getExistingDirectory(this, tr("Select Frames Folder"));
     if (!dir.isEmpty()) {
+        if (m_animCanvas) m_animCanvas->setZoomManual(false);
         loadFolder(dir);
     }
 }

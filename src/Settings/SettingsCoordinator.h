@@ -4,7 +4,7 @@
 
 class LayoutCanvas;
 class PreviewCanvas;
-class QLabel;
+class AnimationCanvas;
 
 /**
  * @class SettingsCoordinator
@@ -20,13 +20,13 @@ public:
      * @brief Applies settings to UI components.
      * 
      * This method applies the given settings to the layout canvas,
-     * preview canvas, and animation preview label, ensuring consistent
+     * preview canvas, and animation canvas, ensuring consistent
      * visual appearance across the application.
      * 
      * @param settings Application settings to apply
      * @param canvas Layout canvas to update
      * @param previewView Preview canvas to update
-     * @param animPreviewLabel Animation preview label to update
+     * @param animCanvas Animation canvas to update
      */
-    static void apply(const AppSettings& settings, LayoutCanvas* canvas, PreviewCanvas* previewView, QLabel* animPreviewLabel);
+    static void apply(const AppSettings& settings, LayoutCanvas* canvas, PreviewCanvas* previewView, AnimationCanvas* animCanvas);
 };

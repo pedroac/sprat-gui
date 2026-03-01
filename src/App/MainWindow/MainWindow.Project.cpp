@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AnimationCanvas.h"
 
 #include "AutosaveProjectStore.h"
 #include "ImageDiscoveryService.h"
@@ -143,11 +144,12 @@ void MainWindow::onSaveClicked() {
     }
 
     SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(), m_lastSaveConfig, this);
-    if (dlg.exec() != QDialog::Accepted) {
+    const int result = dlg.exec();
+    m_lastSaveConfig = dlg.getConfig();
+    if (result != QDialog::Accepted) {
         return;
     }
 
-    m_lastSaveConfig = dlg.getConfig();
     saveProjectWithConfig(m_lastSaveConfig);
 }
 
@@ -230,9 +232,9 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config) {
         input.sourceResolutionWidth = sourceResolutionWidth;
         input.sourceResolutionHeight = sourceResolutionHeight;
     }
-    input.layoutZoom = m_layoutZoomSpin->value();
-    input.previewZoom = m_previewZoomSpin->value();
-    input.animationZoom = m_animZoomSpin->value();
+    input.layoutZoom = m_layoutZoomSpin->value() / 100.0;
+    input.previewZoom = m_previewZoomSpin->value() / 100.0;
+    input.animationZoom = m_animZoomSpin->value() / 100.0;
     if (m_leftSplitter) {
         const QList<int> splitterSizes = m_leftSplitter->sizes();
         input.leftSplitterSizes = QVector<int>(splitterSizes.begin(), splitterSizes.end());
@@ -257,7 +259,7 @@ void MainWindow::autosaveProject() {
     }
 
     QString error;
-    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload({}), error)) {
+    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload(m_lastSaveConfig), error)) {
         m_statusLabel->setText(tr("Autosaved project"));
     } else {
         m_statusLabel->setText(error);
@@ -268,6 +270,9 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     if (confirmReplace && !confirmLayoutReplacement()) {
         return;
     }
+    if (m_animCanvas) m_animCanvas->setZoomManual(false);
+    if (m_canvas) m_canvas->setZoomManual(false);
+    if (m_previewView) m_previewView->setZoomManual(false);
     QJsonObject root;
     QString error;
     if (!ProjectFileLoader::load(path, root, error)) {
@@ -427,14 +432,15 @@ void MainWindow::applyProjectPayload() {
     ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_currentFolder, m_layoutModel);
 
     if (m_layoutZoomSpin) {
-        m_layoutZoomSpin->setValue(applied.layoutZoom);
+        m_layoutZoomSpin->setValue(applied.layoutZoom * 100.0);
     }
     if (m_previewZoomSpin) {
-        m_previewZoomSpin->setValue(applied.previewZoom);
+        m_previewZoomSpin->setValue(applied.previewZoom * 100.0);
     }
     if (m_animZoomSpin) {
-        m_animZoomSpin->setValue(applied.animationZoom);
+        m_animZoomSpin->setValue(applied.animationZoom * 100.0);
     }
+    if (m_animCanvas) m_animCanvas->setZoomManual(false);
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
         applied.sourceResolutionWidth > 0 ? applied.sourceResolutionWidth : 1024,

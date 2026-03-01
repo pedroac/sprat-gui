@@ -202,6 +202,7 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
 
     m_layoutModel = newModel;
     m_canvas->setModel(m_layoutModel);
+    m_canvas->setZoomManual(false);
     QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
     m_statusLabel->setText(QString(tr("Loaded %1 sprites")).arg(m_layoutModel.sprites.size()));
 
@@ -402,5 +403,8 @@ void MainWindow::onProfileChanged() {
 }
 
 void MainWindow::onLayoutZoomChanged(double value) {
-    m_canvas->setZoom(value);
+    if (!m_layoutZoomSpin->signalsBlocked()) {
+        m_canvas->setZoomManual(true);
+    }
+    m_canvas->setZoom(value / 100.0);
 }

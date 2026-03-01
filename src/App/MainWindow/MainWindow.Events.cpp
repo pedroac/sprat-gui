@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AnimationCanvas.h"
 
 #include <QAction>
 #include <QApplication>
@@ -21,7 +22,6 @@
 #include <QScrollBar>
 
 namespace {
-constexpr double kAnimPreviewZoomScaleFactor = 1.15;
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
@@ -50,10 +50,12 @@ void MainWindow::dropEvent(QDropEvent* event) {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
-    if ((watched == m_animPreviewLabel ||
-         (m_animPreviewScroll && watched == m_animPreviewScroll->viewport())) &&
-        handleAnimPreviewEvent(event)) {
-        return true;
+    if (m_animCanvas && (watched == m_animCanvas || watched == m_animCanvas->viewport())) {
+        if (event->type() == QEvent::Resize) {
+            handleAnimPreviewResize();
+        } else if (event->type() == QEvent::ContextMenu) {
+            return handleAnimPreviewContextMenu(static_cast<QContextMenuEvent*>(event));
+        }
     }
     return QMainWindow::eventFilter(watched, event);
 }
@@ -103,111 +105,25 @@ void MainWindow::onLayoutCanvasPathDropped(const QString& path) {
     tryHandleDroppedPath(path, true);
 }
 
-bool MainWindow::handleAnimPreviewEvent(QEvent* event) {
-    switch (event->type()) {
-        case QEvent::MouseButtonPress:
-            return handleAnimPreviewMousePress(static_cast<QMouseEvent*>(event));
-        case QEvent::MouseMove:
-            return handleAnimPreviewMouseMove(static_cast<QMouseEvent*>(event));
-        case QEvent::MouseButtonRelease:
-            return handleAnimPreviewMouseRelease(static_cast<QMouseEvent*>(event));
-        case QEvent::KeyPress:
-            return handleAnimPreviewKeyPress(static_cast<QKeyEvent*>(event));
-        case QEvent::KeyRelease:
-            return handleAnimPreviewKeyRelease(static_cast<QKeyEvent*>(event));
-        case QEvent::Wheel:
-            return handleAnimPreviewWheel(static_cast<QWheelEvent*>(event));
-        case QEvent::Resize:
-            handleAnimPreviewResize();
-            return false;
-        case QEvent::ContextMenu:
-            return handleAnimPreviewContextMenu(static_cast<QContextMenuEvent*>(event));
-        default:
-            return false;
-    }
-}
+bool MainWindow::handleAnimPreviewEvent(QEvent*) { return false; }
+bool MainWindow::handleAnimPreviewMousePress(QMouseEvent*) { return false; }
+bool MainWindow::handleAnimPreviewMouseMove(QMouseEvent*) { return false; }
+bool MainWindow::handleAnimPreviewMouseRelease(QMouseEvent*) { return false; }
+bool MainWindow::handleAnimPreviewKeyPress(QKeyEvent*) { return false; }
+bool MainWindow::handleAnimPreviewKeyRelease(QKeyEvent*) { return false; }
 
-bool MainWindow::handleAnimPreviewMousePress(QMouseEvent* mouseEvent) {
-    if (m_animPreviewScroll && m_animPreviewScroll->viewport()) {
-        m_animPreviewScroll->viewport()->setFocus();
-        if (mouseEvent->button() == Qt::MiddleButton ||
-            (mouseEvent->button() == Qt::LeftButton && m_animPreviewSpacePressed)) {
-            m_animPreviewPanning = true;
-            m_animPreviewLastMousePos = mouseEvent->pos();
-            m_animPreviewScroll->viewport()->setCursor(Qt::ClosedHandCursor);
-            return true;
-        }
-        return false;
-    }
-    m_animPreviewLabel->setFocus();
+bool MainWindow::handleAnimPreviewWheel(QWheelEvent*) {
     return false;
-}
-
-bool MainWindow::handleAnimPreviewMouseMove(QMouseEvent* mouseEvent) {
-    if (!m_animPreviewPanning || !m_animPreviewScroll) {
-        return false;
-    }
-    const QPoint delta = mouseEvent->pos() - m_animPreviewLastMousePos;
-    m_animPreviewLastMousePos = mouseEvent->pos();
-    m_animPreviewScroll->horizontalScrollBar()->setValue(m_animPreviewScroll->horizontalScrollBar()->value() - delta.x());
-    m_animPreviewScroll->verticalScrollBar()->setValue(m_animPreviewScroll->verticalScrollBar()->value() - delta.y());
-    return true;
-}
-
-bool MainWindow::handleAnimPreviewMouseRelease(QMouseEvent* mouseEvent) {
-    if (!m_animPreviewPanning) {
-        return false;
-    }
-    if (mouseEvent->button() != Qt::MiddleButton && mouseEvent->button() != Qt::LeftButton) {
-        return false;
-    }
-    m_animPreviewPanning = false;
-    if (m_animPreviewScroll && m_animPreviewScroll->viewport()) {
-        m_animPreviewScroll->viewport()->setCursor(m_animPreviewSpacePressed ? Qt::OpenHandCursor : Qt::ArrowCursor);
-    }
-    return true;
-}
-
-bool MainWindow::handleAnimPreviewKeyPress(QKeyEvent* keyEvent) {
-    if (keyEvent->key() != Qt::Key_Space || keyEvent->isAutoRepeat()) {
-        return false;
-    }
-    m_animPreviewSpacePressed = true;
-    if (!m_animPreviewPanning && m_animPreviewScroll && m_animPreviewScroll->viewport()) {
-        m_animPreviewScroll->viewport()->setCursor(Qt::OpenHandCursor);
-    }
-    return false;
-}
-
-bool MainWindow::handleAnimPreviewKeyRelease(QKeyEvent* keyEvent) {
-    if (keyEvent->key() != Qt::Key_Space || keyEvent->isAutoRepeat()) {
-        return false;
-    }
-    m_animPreviewSpacePressed = false;
-    if (!m_animPreviewPanning && m_animPreviewScroll && m_animPreviewScroll->viewport()) {
-        m_animPreviewScroll->viewport()->setCursor(Qt::ArrowCursor);
-    }
-    return false;
-}
-
-bool MainWindow::handleAnimPreviewWheel(QWheelEvent* wheelEvent) {
-    if (!(wheelEvent->modifiers() & Qt::ControlModifier)) {
-        return false;
-    }
-    double zoom = m_animZoomSpin->value();
-    zoom = wheelEvent->angleDelta().y() > 0 ? zoom * kAnimPreviewZoomScaleFactor : zoom / kAnimPreviewZoomScaleFactor;
-    m_animZoomSpin->setValue(zoom);
-    return true;
 }
 
 void MainWindow::handleAnimPreviewResize() {
+    if (m_animCanvas && !m_animCanvas->isZoomManual()) {
+        fitAnimationToViewport();
+    }
     refreshAnimationTest();
 }
 
 bool MainWindow::handleAnimPreviewContextMenu(QContextMenuEvent* contextEvent) {
-    if (m_animPreviewPanning) {
-        return true;
-    }
     QMenu menu(this);
     QString ffmpegExe = QStandardPaths::findExecutable("ffmpeg");
     QString magickExe = QStandardPaths::findExecutable("magick");
@@ -223,8 +139,8 @@ bool MainWindow::handleAnimPreviewContextMenu(QContextMenuEvent* contextEvent) {
     QAction* selectedAction = menu.exec(contextEvent->globalPos());
     if (selectedAction == saveAnim) {
         saveAnimationToFile();
-    } else if (selectedAction == copyFrame && !m_animPreviewLabel->pixmap().isNull()) {
-        QApplication::clipboard()->setPixmap(m_animPreviewLabel->pixmap());
+    } else if (selectedAction == copyFrame && m_animCanvas) {
+        QApplication::clipboard()->setPixmap(m_animCanvas->grab());
     }
     return true;
 }

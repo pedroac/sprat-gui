@@ -113,7 +113,10 @@ QPointF PreviewCanvas::viewportCenterInScene() const {
 
 void PreviewCanvas::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
-        double zoom = transform().m11();
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        m_isZoomManual = true;
+        double oldZoom = transform().m11();
+        double zoom = oldZoom;
         const double scaleFactor = 1.15;
         if (event->angleDelta().y() > 0) {
             zoom *= scaleFactor;
@@ -122,7 +125,10 @@ void PreviewCanvas::wheelEvent(QWheelEvent* event) {
         }
         if (zoom < 0.1) zoom = 0.1;
         if (zoom > 16.0) zoom = 16.0;
-        setZoom(zoom);
+
+        double relativeScale = zoom / oldZoom;
+        scale(relativeScale, relativeScale);
+        
         emit zoomChanged(zoom);
         event->accept();
     } else {
@@ -194,6 +200,13 @@ void PreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     QGraphicsView::mouseReleaseEvent(event);
+}
+
+void PreviewCanvas::resizeEvent(QResizeEvent* event) {
+    QGraphicsView::resizeEvent(event);
+    if (!m_isZoomManual) {
+        initialFit();
+    }
 }
 
 void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {

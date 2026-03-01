@@ -21,7 +21,10 @@ SpritePtr spriteByPath(const LayoutModel& model, const QString& path) {
 }
 
 void MainWindow::onPreviewZoomChanged(double value) {
-    m_previewView->setZoom(value);
+    if (!m_previewZoomSpin->signalsBlocked()) {
+        m_previewView->setZoomManual(true);
+    }
+    m_previewView->setZoom(value / 100.0);
 }
 
 void MainWindow::onPivotSpinChanged() {

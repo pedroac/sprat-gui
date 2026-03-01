@@ -46,6 +46,7 @@ class QAction;
 
 // Forward declarations for custom classes
 class FrameDetectionDialog;
+class AnimationCanvas;
 
 /**
  * @class MainWindow
@@ -283,6 +284,13 @@ private slots:
     void onTimelineFrameSelectionChanged();
 
     // === Animation Events ===
+    /**
+     * @brief Handles changes to animation zoom level.
+     * 
+     * @param value New zoom level
+     */
+    void onAnimZoomChanged(double value);
+
     /**
      * @brief Handles previous frame button click.
      */
@@ -812,14 +820,12 @@ private:
 
     // Animation Test Area
     QDoubleSpinBox* m_animZoomSpin;
-    QSpinBox* m_animPaddingSpin = nullptr;
     QPushButton* m_animPrevBtn;
     QPushButton* m_animPlayPauseBtn;
     QPushButton* m_animNextBtn;
     QSpinBox* m_timelineFpsSpin;
     QLabel* m_animStatusLabel;
-    QScrollArea* m_animPreviewScroll = nullptr;
-    QLabel* m_animPreviewLabel;
+    AnimationCanvas* m_animCanvas = nullptr;
 
     QAction* m_loadAction;
     QAction* m_saveAction;
@@ -847,9 +853,6 @@ private:
     QTimer* m_loadingOverlayDelayTimer = nullptr;
     int m_animFrameIndex = 0;
     bool m_animPlaying = false;
-    bool m_animPreviewPanning = false;
-    bool m_animPreviewSpacePressed = false;
-    QPoint m_animPreviewLastMousePos;
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
     bool m_forceImmediateLoadingOverlay = false;

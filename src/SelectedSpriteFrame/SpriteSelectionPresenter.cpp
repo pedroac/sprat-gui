@@ -24,9 +24,10 @@ void SpriteSelectionPresenter::applySpriteSelection(
         pivotYSpin->setEnabled(true);
         previewView->setSprites({sprite});
         if (useCurrentZoom) {
-            previewView->setZoom(previewZoomSpin->value());
+            previewView->setZoom(previewZoomSpin->value() / 100.0);
             previewView->centerContent();
         } else {
+            previewView->setZoomManual(false);
             QTimer::singleShot(0, previewView, &PreviewCanvas::initialFit);
         }
         configPointsBtn->setEnabled(true);

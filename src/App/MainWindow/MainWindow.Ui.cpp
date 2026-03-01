@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
+#include "AnimationCanvas.h"
 
 #include <QAction>
 #include <QApplication>
@@ -117,9 +118,10 @@ void MainWindow::setupUi() {
     canvasControls->addStretch();
     canvasControls->addWidget(new QLabel(tr("Zoom:")));
     m_layoutZoomSpin = new QDoubleSpinBox(this);
-    m_layoutZoomSpin->setRange(0.1, 8.0);
-    m_layoutZoomSpin->setValue(1.0);
-    m_layoutZoomSpin->setSingleStep(0.1);
+    m_layoutZoomSpin->setRange(10.0, 800.0);
+    m_layoutZoomSpin->setValue(100.0);
+    m_layoutZoomSpin->setSuffix("%");
+    m_layoutZoomSpin->setSingleStep(10.0);
     connect(m_layoutZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onLayoutZoomChanged);
     canvasControls->addWidget(m_layoutZoomSpin);
 
@@ -133,7 +135,7 @@ void MainWindow::setupUi() {
     });
     connect(m_canvas, &LayoutCanvas::zoomChanged, this, [this](double zoom) {
         m_layoutZoomSpin->blockSignals(true);
-        m_layoutZoomSpin->setValue(zoom);
+        m_layoutZoomSpin->setValue(zoom * 100.0);
         m_layoutZoomSpin->blockSignals(false);
     });
     connect(m_canvas, &LayoutCanvas::requestTimelineGeneration, this, &MainWindow::onGenerateTimelinesFromFrames);
@@ -228,9 +230,10 @@ void MainWindow::setupUi() {
 
     nameRow->addWidget(new QLabel(tr("Zoom:")));
     m_previewZoomSpin = new QDoubleSpinBox(this);
-    m_previewZoomSpin->setRange(0.1, 16.0);
-    m_previewZoomSpin->setValue(2.0);
-    m_previewZoomSpin->setSingleStep(0.1);
+    m_previewZoomSpin->setRange(10.0, 1600.0);
+    m_previewZoomSpin->setValue(200.0);
+    m_previewZoomSpin->setSuffix("%");
+    m_previewZoomSpin->setSingleStep(10.0);
     nameRow->addWidget(m_previewZoomSpin);
 
     editorLayoutBox->addLayout(nameRow);
@@ -272,7 +275,7 @@ void MainWindow::setupUi() {
     connect(m_previewView, &PreviewCanvas::applyMarkerToSelectedFramesRequested, this, &MainWindow::onApplyMarkerToSelectedTimelineFrames);
     connect(m_previewView, &PreviewCanvas::zoomChanged, this, [this](double zoom) {
         m_previewZoomSpin->blockSignals(true);
-        m_previewZoomSpin->setValue(zoom);
+        m_previewZoomSpin->setValue(zoom * 100.0);
         m_previewZoomSpin->blockSignals(false);
     });
     connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onPreviewZoomChanged);
@@ -298,40 +301,25 @@ void MainWindow::setupUi() {
     animControls->addStretch();
     animControls->addWidget(new QLabel(tr("Zoom:")));
     m_animZoomSpin = new QDoubleSpinBox(this);
-    m_animZoomSpin->setRange(0.1, 16.0);
-    m_animZoomSpin->setValue(2.0);
-    connect(m_animZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) { refreshAnimationTest(); });
+    m_animZoomSpin->setRange(10.0, 1600.0);
+    m_animZoomSpin->setValue(200.0);
+    m_animZoomSpin->setSuffix("%");
+    m_animZoomSpin->setSingleStep(10.0);
+    connect(m_animZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onAnimZoomChanged);
     animControls->addWidget(m_animZoomSpin);
-    animControls->addWidget(new QLabel(tr("Pan space:")));
-    m_animPaddingSpin = new QSpinBox(this);
-    m_animPaddingSpin->setRange(0, 1024);
-    m_animPaddingSpin->setSingleStep(8);
-    m_animPaddingSpin->setValue(24);
-    connect(m_animPaddingSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { refreshAnimationTest(); });
-    animControls->addWidget(m_animPaddingSpin);
     animLayout->addLayout(animControls);
 
     m_animStatusLabel = new QLabel(tr("Create/select a timeline and drag frames into it."), this);
     m_animStatusLabel->setStyleSheet("color: #808080;");
     animLayout->addWidget(m_animStatusLabel);
 
-    constexpr int kAnimPreviewMinWidth = 280;
-    constexpr int kAnimPreviewMinHeight = 180;
-    m_animPreviewScroll = new QScrollArea(this);
-    m_animPreviewScroll->setWidgetResizable(false);
-    m_animPreviewScroll->setAlignment(Qt::AlignCenter);
-    m_animPreviewScroll->setFrameShape(QFrame::NoFrame);
-    m_animPreviewScroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_animPreviewScroll->setStyleSheet("border: 1px solid #565656; background: #5a5a5a;");
-    m_animPreviewLabel = new QLabel(m_animPreviewScroll);
-    m_animPreviewLabel->setAlignment(Qt::AlignCenter);
-    m_animPreviewLabel->setMinimumSize(kAnimPreviewMinWidth, kAnimPreviewMinHeight);
-    m_animPreviewLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    m_animPreviewLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_animPreviewScroll->setWidget(m_animPreviewLabel);
-    m_animPreviewLabel->installEventFilter(this);
-    m_animPreviewScroll->viewport()->installEventFilter(this);
-    animLayout->addWidget(m_animPreviewScroll);
+    m_animCanvas = new AnimationCanvas(this);
+    connect(m_animCanvas, &AnimationCanvas::zoomChanged, this, [this](double zoom) {
+        m_animZoomSpin->blockSignals(true);
+        m_animZoomSpin->setValue(zoom * 100.0);
+        m_animZoomSpin->blockSignals(false);
+    });
+    animLayout->addWidget(m_animCanvas);
 
     m_rightSplitter->addWidget(animGroup);
 
@@ -421,10 +409,7 @@ void MainWindow::setupZoomShortcuts() {
             targetSpin = m_layoutZoomSpin;
         } else if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
             targetSpin = m_previewZoomSpin;
-        } else if (m_animPreviewScroll &&
-                   (fw == m_animPreviewScroll ||
-                    fw == m_animPreviewScroll->viewport() ||
-                    m_animPreviewScroll->isAncestorOf(fw))) {
+        } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
             targetSpin = m_animZoomSpin;
         }
 

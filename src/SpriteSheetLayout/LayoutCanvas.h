@@ -50,6 +50,20 @@ public:
     void setZoom(double zoom);
 
     /**
+     * @brief Checks if the zoom level has been manually changed by the user.
+     * 
+     * @return true if zoom is manual, false if it should auto-fit
+     */
+    bool isZoomManual() const { return m_isZoomManual; }
+
+    /**
+     * @brief Sets whether the zoom level is considered manual.
+     * 
+     * @param manual true if zoom is manual, false to allow auto-fitting
+     */
+    void setZoomManual(bool manual) { m_isZoomManual = manual; }
+
+    /**
      * @brief Centers the layout in the view, fitting it if it's larger than the viewport.
      */
     void initialFit();
@@ -188,6 +202,13 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
 
     /**
+     * @brief Handles resize events.
+     * 
+     * @param event Resize event
+     */
+    void resizeEvent(QResizeEvent* event) override;
+
+    /**
      * @brief Draws foreground elements on the canvas.
      * 
      * @param painter Painter to use for drawing
@@ -222,6 +243,7 @@ private:
     // === Member Variables ===
     QGraphicsScene* m_scene;                    ///< Graphics scene containing all items
     double m_zoomLevel = 1.0;                   ///< Current zoom level
+    bool m_isZoomManual = false;                ///< Whether zoom was manually changed
     bool m_isPanning = false;                   ///< Whether the user is currently panning
     QPoint m_lastMousePos;                      ///< Last mouse position for panning
     bool m_spacePressed = false;                 ///< Whether space key is pressed for panning

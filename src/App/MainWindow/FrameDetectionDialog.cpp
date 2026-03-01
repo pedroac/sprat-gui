@@ -55,27 +55,18 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     topBarLayout->addStretch();
     topBarLayout->addWidget(new QLabel(tr("Zoom:")));
     m_zoomSpin = new QDoubleSpinBox(this);
-    m_zoomSpin->setRange(0.1, 50.0);
-    m_zoomSpin->setValue(1.0);
-    m_zoomSpin->setSingleStep(0.1);
+    m_zoomSpin->setRange(10.0, 5000.0);
+    m_zoomSpin->setValue(100.0);
+    m_zoomSpin->setSuffix("%");
+    m_zoomSpin->setSingleStep(10.0);
     connect(m_zoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value){
-        if (m_imageView && m_imageView->viewport()) {
-            const QPoint viewPos = m_imageView->viewport()->mapFromGlobal(QCursor::pos());
-
-            const QRectF sceneRect = m_imageView->sceneRect();
-            const QSize viewportSize = m_imageView->viewport()->size();
-            const bool fitsInView = (sceneRect.width() * value <= viewportSize.width()) && 
-                                    (sceneRect.height() * value <= viewportSize.height());
-
-            if (!fitsInView && m_imageView->viewport()->rect().contains(viewPos)) {
-                m_imageView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-            } else {
-                m_imageView->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
-            }
+        if (!m_zoomSpin->signalsBlocked()) {
+            m_isZoomManual = true;
         }
-        QTransform t;
-        t.scale(value, value);
-        m_imageView->setTransform(t);
+        double zoomFactor = value / 100.0;
+        m_imageView->setTransformationAnchor(QGraphicsView::AnchorViewCenter);
+        m_imageView->resetTransform();
+        m_imageView->scale(zoomFactor, zoomFactor);
     });
     topBarLayout->addWidget(m_zoomSpin);
 
@@ -164,14 +155,26 @@ bool FrameDetectionDialog::eventFilter(QObject* watched, QEvent* event) {
         } else if (event->type() == QEvent::Wheel) {
             QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
             if (wheelEvent->modifiers() & Qt::ControlModifier) {
-                double current = m_zoomSpin->value();
+                m_isZoomManual = true;
+                m_imageView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+                double oldZoom = m_zoomSpin->value() / 100.0;
+                double newZoomFactor = oldZoom;
                 const double scaleFactor = 1.15;
                 if (wheelEvent->angleDelta().y() > 0) {
-                    current *= scaleFactor;
+                    newZoomFactor *= scaleFactor;
                 } else {
-                    current /= scaleFactor;
+                    newZoomFactor /= scaleFactor;
                 }
-                m_zoomSpin->setValue(current);
+                
+                if (newZoomFactor < 0.1) newZoomFactor = 0.1;
+                if (newZoomFactor > 50.0) newZoomFactor = 50.0;
+                
+                m_imageView->scale(newZoomFactor / oldZoom, newZoomFactor / oldZoom);
+                
+                // Update spinbox without triggering the relative scale again
+                const bool blocked = m_zoomSpin->blockSignals(true);
+                m_zoomSpin->setValue(newZoomFactor * 100.0);
+                m_zoomSpin->blockSignals(blocked);
                 return true;
             }
         } else if (event->type() == QEvent::ContextMenu) {
@@ -375,19 +378,70 @@ bool FrameDetectionDialog::handleMouseRelease(QMouseEvent* event) {
 
 void FrameDetectionDialog::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
-        double current = m_zoomSpin->value();
+        m_isZoomManual = true;
+        m_imageView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        double oldZoom = m_zoomSpin->value() / 100.0;
+        double newZoomFactor = oldZoom;
         const double scaleFactor = 1.15;
         if (event->angleDelta().y() > 0) {
-            current *= scaleFactor;
+            newZoomFactor *= scaleFactor;
         } else {
-            current /= scaleFactor;
+            newZoomFactor /= scaleFactor;
         }
-        m_zoomSpin->setValue(current);
+        
+        if (newZoomFactor < 0.1) newZoomFactor = 0.1;
+        if (newZoomFactor > 50.0) newZoomFactor = 50.0;
+        
+        m_imageView->scale(newZoomFactor / oldZoom, newZoomFactor / oldZoom);
+        
+        const bool blocked = m_zoomSpin->blockSignals(true);
+        m_zoomSpin->setValue(newZoomFactor * 100.0);
+        m_zoomSpin->blockSignals(blocked);
         event->accept();
     } else {
         // Pass the event to the base class
         QDialog::wheelEvent(event);
     }
+}
+
+void FrameDetectionDialog::resizeEvent(QResizeEvent* event) {
+    QDialog::resizeEvent(event);
+    if (!m_isZoomManual) {
+        initialFit();
+    }
+}
+
+void FrameDetectionDialog::showEvent(QShowEvent* event) {
+    QDialog::showEvent(event);
+    if (!m_isZoomManual) {
+        initialFit();
+    }
+}
+
+void FrameDetectionDialog::initialFit() {
+    if (!m_imageView || !m_scene || m_image.isNull()) {
+        return;
+    }
+    const QRectF sceneRect = m_scene->sceneRect();
+    const QSize viewportSize = m_imageView->viewport()->size();
+    if (sceneRect.isEmpty() || viewportSize.isEmpty()) {
+        return;
+    }
+
+    double zoom = 1.0;
+    if (sceneRect.width() > viewportSize.width() || sceneRect.height() > viewportSize.height()) {
+        double zoomW = static_cast<double>(viewportSize.width()) / sceneRect.width();
+        double zoomH = static_cast<double>(viewportSize.height()) / sceneRect.height();
+        zoom = qMin(zoomW, zoomH);
+    }
+
+    const bool blocked = m_zoomSpin->blockSignals(true);
+    m_zoomSpin->setValue(zoom * 100.0);
+    m_zoomSpin->blockSignals(blocked);
+
+    m_imageView->resetTransform();
+    m_imageView->scale(zoom, zoom);
+    m_imageView->centerOn(sceneRect.center());
 }
 
 void FrameDetectionDialog::keyPressEvent(QKeyEvent* event) {

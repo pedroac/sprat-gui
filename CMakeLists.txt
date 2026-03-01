@@ -70,6 +70,8 @@ set(PROJECT_SOURCES
     src/Animation/AnimationPlaybackService.h
     src/Animation/AnimationPreviewService.cpp
     src/Animation/AnimationPreviewService.h
+    src/Animation/AnimationCanvas.cpp
+    src/Animation/AnimationCanvas.h
     src/Animation/AnimationExportService.cpp
     src/Animation/AnimationExportService.h
     src/Project/ProjectFileLoader.cpp

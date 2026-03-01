@@ -2,58 +2,40 @@
 
 #include <QFileInfo>
 #include <QImageReader>
-#include <QLabel>
 #include <QPainter>
 #include <QPixmapCache>
-#include <QPushButton>
 #include <QTimer>
 #include <QCoreApplication>
 #include <QHash>
 #include <QtGlobal>
 
 namespace {
-constexpr int kDefaultPreviewWidth = 280;
-constexpr int kDefaultPreviewHeight = 180;
-
 QString trAnimationPreview(const char* text) {
     return QCoreApplication::translate("AnimationPreviewService", text);
 }
 }
 
-void AnimationPreviewService::refresh(
+QPixmap AnimationPreviewService::refresh(
     const QVector<AnimationTimeline>& timelines,
     int selectedTimelineIndex,
     int& frameIndex,
     const LayoutModel& layoutModel,
-    double zoom,
-    int previewPadding,
-    QLabel* previewLabel,
-    QLabel* statusLabel,
-    QPushButton* prevButton,
-    QPushButton* playPauseButton,
-    QPushButton* nextButton,
+    QString& statusText,
+    bool& hasFrames,
     bool& playing,
     QTimer* timer) {
+    
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size() || timelines[selectedTimelineIndex].frames.isEmpty()) {
-        previewLabel->clear();
-        previewLabel->setText(trAnimationPreview("No frames"));
-        previewLabel->setFixedSize(kDefaultPreviewWidth, kDefaultPreviewHeight);
-        statusLabel->setText(trAnimationPreview("Create/select a timeline and drag frames into it."));
-        prevButton->setEnabled(false);
-        playPauseButton->setEnabled(false);
-        nextButton->setEnabled(false);
+        statusText = trAnimationPreview("Create/select a timeline and drag frames into it.");
+        hasFrames = false;
         if (playing) {
             playing = false;
             timer->stop();
-            playPauseButton->setText(trAnimationPreview("Play"));
         }
-        return;
+        return QPixmap();
     }
 
-    prevButton->setEnabled(true);
-    playPauseButton->setEnabled(true);
-    nextButton->setEnabled(true);
-
+    hasFrames = true;
     const auto& frames = timelines[selectedTimelineIndex].frames;
     if (frameIndex >= frames.size()) {
         frameIndex = 0;
@@ -70,11 +52,11 @@ void AnimationPreviewService::refresh(
         }
     }
 
-    statusLabel->setText(QString("%1 | frame %2/%3 | %4")
+    statusText = QString("%1 | frame %2/%3 | %4")
                              .arg(timelines[selectedTimelineIndex].name)
                              .arg(frameIndex + 1)
                              .arg(frames.size())
-                             .arg(spriteName));
+                             .arg(spriteName);
 
     QPixmap pix;
     if (!QPixmapCache::find(path, &pix)) {
@@ -82,14 +64,8 @@ void AnimationPreviewService::refresh(
         QPixmapCache::insert(path, pix);
     }
     if (pix.isNull()) {
-        previewLabel->setText(trAnimationPreview("Invalid image"));
-        previewLabel->setPixmap(QPixmap());
-        previewLabel->setFixedSize(kDefaultPreviewWidth, kDefaultPreviewHeight);
-        return;
+        return QPixmap();
     }
-
-    const int effectivePadding = qMax(0, previewPadding);
-    const QSize spriteSize(qMax(1, qRound(pix.width() * zoom)), qMax(1, qRound(pix.height() * zoom)));
 
     static QHash<QString, QSize> frameSizeCache;
     if (frameSizeCache.size() > 16384) {
@@ -122,47 +98,38 @@ void AnimationPreviewService::refresh(
             }
         }
 
-        maxLeftExtent = qMax(maxLeftExtent, qRound(framePivotX * zoom));
-        maxRightExtent = qMax(maxRightExtent, qRound((frameSize.width() - framePivotX) * zoom));
-        maxTopExtent = qMax(maxTopExtent, qRound(framePivotY * zoom));
-        maxBottomExtent = qMax(maxBottomExtent, qRound((frameSize.height() - framePivotY) * zoom));
+        maxLeftExtent = qMax(maxLeftExtent, framePivotX);
+        maxRightExtent = qMax(maxRightExtent, frameSize.width() - framePivotX);
+        maxTopExtent = qMax(maxTopExtent, framePivotY);
+        maxBottomExtent = qMax(maxBottomExtent, frameSize.height() - framePivotY);
     }
 
     if (maxLeftExtent <= 0 && maxRightExtent <= 0 && maxTopExtent <= 0 && maxBottomExtent <= 0) {
         int pivotX = currentSprite ? qBound(0, currentSprite->pivotX, pix.width()) : pix.width() / 2;
         int pivotY = currentSprite ? qBound(0, currentSprite->pivotY, pix.height()) : pix.height() / 2;
-        maxLeftExtent = qMax(1, qRound(pivotX * zoom));
-        maxRightExtent = qMax(1, qRound((pix.width() - pivotX) * zoom));
-        maxTopExtent = qMax(1, qRound(pivotY * zoom));
-        maxBottomExtent = qMax(1, qRound((pix.height() - pivotY) * zoom));
+        maxLeftExtent = qMax(1, pivotX);
+        maxRightExtent = qMax(1, pix.width() - pivotX);
+        maxTopExtent = qMax(1, pivotY);
+        maxBottomExtent = qMax(1, pix.height() - pivotY);
     }
 
     const int animationWidth = qMax(1, maxLeftExtent + maxRightExtent);
     const int animationHeight = qMax(1, maxTopExtent + maxBottomExtent);
 
-    const QSize canvasSize(
-        qMax(animationWidth, spriteSize.width()) + (effectivePadding > 0 ? effectivePadding * 2 : 0),
-        qMax(animationHeight, spriteSize.height()) + (effectivePadding > 0 ? effectivePadding * 2 : 0));
-
-    qreal dpr = previewLabel->devicePixelRatioF();
-    QPixmap canvas(canvasSize * dpr);
-    canvas.setDevicePixelRatio(dpr);
+    QPixmap canvas(animationWidth, animationHeight);
     canvas.fill(Qt::transparent);
 
     QPainter p(&canvas);
-    if (zoom < 1.0) {
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-    }
     int pivotX = currentSprite ? qBound(0, currentSprite->pivotX, pix.width()) : pix.width() / 2;
     int pivotY = currentSprite ? qBound(0, currentSprite->pivotY, pix.height()) : pix.height() / 2;
-    const int anchorX = effectivePadding + maxLeftExtent;
-    const int anchorY = effectivePadding + maxTopExtent;
-    double destX = anchorX - (pivotX * zoom);
-    double destY = anchorY - (pivotY * zoom);
-    p.drawPixmap(QRectF(destX, destY, pix.width() * zoom, pix.height() * zoom), pix, pix.rect());
+    const int anchorX = maxLeftExtent;
+    const int anchorY = maxTopExtent;
+    int destX = anchorX - pivotX;
+    int destY = anchorY - pivotY;
+    p.drawPixmap(destX, destY, pix);
     p.end();
-    previewLabel->setPixmap(canvas);
-    previewLabel->setFixedSize(canvasSize);
+
+    return canvas;
 }
 
 QSize AnimationPreviewService::calculateAnimationSize(
@@ -172,7 +139,7 @@ QSize AnimationPreviewService::calculateAnimationSize(
     double zoom,
     int previewPadding) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size() || timelines[selectedTimelineIndex].frames.isEmpty()) {
-        return QSize(kDefaultPreviewWidth, kDefaultPreviewHeight);
+        return QSize(280, 180);
     }
 
     const auto& frames = timelines[selectedTimelineIndex].frames;
@@ -207,17 +174,14 @@ QSize AnimationPreviewService::calculateAnimationSize(
             }
         }
 
-        maxLeftExtent = qMax(maxLeftExtent, qRound(framePivotX * zoom));
-        maxRightExtent = qMax(maxRightExtent, qRound((frameSize.width() - framePivotX) * zoom));
-        maxTopExtent = qMax(maxTopExtent, qRound(framePivotY * zoom));
-        maxBottomExtent = qMax(maxBottomExtent, qRound((frameSize.height() - framePivotY) * zoom));
+        maxLeftExtent = qMax(maxLeftExtent, framePivotX);
+        maxRightExtent = qMax(maxRightExtent, frameSize.width() - framePivotX);
+        maxTopExtent = qMax(maxTopExtent, framePivotY);
+        maxBottomExtent = qMax(maxBottomExtent, frameSize.height() - framePivotY);
     }
 
     const int animationWidth = qMax(1, maxLeftExtent + maxRightExtent);
     const int animationHeight = qMax(1, maxTopExtent + maxBottomExtent);
-    const int effectivePadding = qMax(0, previewPadding);
 
-    return QSize(
-        animationWidth + (effectivePadding > 0 ? effectivePadding * 2 : 0),
-        animationHeight + (effectivePadding > 0 ? effectivePadding * 2 : 0));
+    return QSize(qRound(animationWidth * zoom), qRound(animationHeight * zoom));
 }

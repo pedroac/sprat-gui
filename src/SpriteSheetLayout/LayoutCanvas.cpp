@@ -316,19 +316,23 @@ void LayoutCanvas::clearCanvas() {
  */
 void LayoutCanvas::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+        m_isZoomManual = true;
+        
+        double oldZoom = m_zoomLevel;
         const double scaleFactor = 1.15;
         if (event->angleDelta().y() > 0) {
             m_zoomLevel *= scaleFactor;
         } else {
             m_zoomLevel /= scaleFactor;
         }
-        if (m_zoomLevel < 0.1) {
-            m_zoomLevel = 0.1;
-        }
-        if (m_zoomLevel > 8.0) {
-            m_zoomLevel = 8.0;
-        }
-        setZoom(m_zoomLevel);
+        
+        if (m_zoomLevel < 0.1) m_zoomLevel = 0.1;
+        if (m_zoomLevel > 8.0) m_zoomLevel = 8.0;
+
+        double relativeScale = m_zoomLevel / oldZoom;
+        scale(relativeScale, relativeScale);
+        
         emit zoomChanged(m_zoomLevel);
         event->accept();
     } else {
@@ -772,6 +776,13 @@ void LayoutCanvas::focusOutEvent(QFocusEvent* event) {
     m_isPanning = false;
     setCursor(Qt::ArrowCursor);
     QGraphicsView::focusOutEvent(event);
+}
+
+void LayoutCanvas::resizeEvent(QResizeEvent* event) {
+    QGraphicsView::resizeEvent(event);
+    if (!m_isZoomManual) {
+        initialFit();
+    }
 }
 
 /**

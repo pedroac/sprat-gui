@@ -1,35 +1,50 @@
 #pragma once
 #include <QDialog>
-#include <QPixmap>
 #include <QVector>
 #include <QRect>
-#include <QString>
-#include <QPoint>
-#include <QGraphicsView>
+#include <QPixmap>
 #include <QGraphicsScene>
+#include <QGraphicsView>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsRectItem>
-#include <QPushButton>
-#include <QMouseEvent>
-#include <QWheelEvent>
-#include <QKeyEvent>
-#include <QWidget>
-#include <QPainter>
-#include <QObject>
-#include <QEvent>
-#include <QGraphicsItem>
 #include <QGraphicsLineItem>
-class QDoubleSpinBox;
+#include <QPushButton>
+#include <QDoubleSpinBox>
 
 class FrameDetectionDialog : public QDialog {
     Q_OBJECT
-    
 public:
-    explicit FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& detectedFrames, QWidget* parent = nullptr);
+    enum ResizeHandle {
+        NoHandle,
+        TopLeft, Top, TopRight,
+        Left, Right,
+        BottomLeft, Bottom, BottomRight
+    };
+
+    explicit FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& initialFrames, QWidget* parent = nullptr);
     ~FrameDetectionDialog() override;
-    
+
     QVector<QRect> getSelectedFrames() const;
     bool userAccepted() const;
+
+protected:
+    void wheelEvent(QWheelEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
+private:
+    void setupUi(const QString& imagePath);
+    void setupPanning();
+    void showContextMenu(const QPoint& globalPos);
+    void drawFrame(QPainter& painter, const QRect& rect, bool isSelected, bool isHovered);
+    void drawFrameRectangles();
+    void updateFrameVisuals();
+    int findFrameAt(const QPoint& pos);
+    void updateCursor(const QPoint& pos);
+    void initialFit();
     
 private slots:
     void onAcceptClicked();
@@ -37,45 +52,19 @@ private slots:
     void onCancelClicked();
     
 private:
-    enum ResizeHandle {
-        NoHandle,
-        TopLeft, Top, TopRight,
-        Right, BottomRight, Bottom,
-        BottomLeft, Left
-    };
-    
-    ResizeHandle getResizeHandle(const QPoint& pos, const QRect& rect) const;
-    void updateResizeCursor(ResizeHandle handle);
-    void resizeFrame(int frameIndex, ResizeHandle handle, const QPointF& scenePos);
-    void moveFrame(int frameIndex, const QPointF& sceneDelta);
-    void splitFrame(int frameIndex, Qt::Orientation orientation, int pos);
-    void createFrame(const QPointF& scenePos);
-    void createDefaultFrame(const QPointF& center);
-    void deleteSelectedFrames();
-    
+    // Interaction methods
     bool handleMousePress(QMouseEvent* event);
     bool handleMouseMove(QMouseEvent* event);
     bool handleMouseRelease(QMouseEvent* event);
-    
-protected:
-    void keyPressEvent(QKeyEvent* event) override;
-    void keyReleaseEvent(QKeyEvent* event) override;
+    void createFrame(const QPointF& scenePos);
+    void createDefaultFrame(const QPointF& scenePos);
+    void deleteSelectedFrames();
+    void moveFrame(int index, const QPointF& delta);
+    void resizeFrame(int index, ResizeHandle handle, const QPointF& scenePos);
+    ResizeHandle getResizeHandle(const QPoint& pos, const QRect& rect) const;
+    void updateResizeCursor(ResizeHandle handle);
+    void splitFrame(int index, Qt::Orientation orientation, int pos);
 
-private:
-    void setupPanning();
-    bool eventFilter(QObject* watched, QEvent* event) override;
-    void showContextMenu(const QPoint& globalPos);
-    
-private:
-    void drawFrame(QPainter& painter, const QRect& rect, bool isSelected, bool isHovered);
-    void drawFrameRectangles();
-    void updateFrameVisuals();
-    int findFrameAt(const QPoint& pos);
-    void updateCursor(const QPoint& pos);
-    
-protected:
-    void wheelEvent(QWheelEvent* event) override;
-    
     QPixmap m_image;
     QVector<QRect> m_frames;
     QVector<bool> m_selected;
@@ -108,4 +97,5 @@ protected:
 
     QDoubleSpinBox* m_zoomSpin = nullptr;
     bool m_splitMode = false;
+    bool m_isZoomManual = false;
 };

@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AnimationCanvas.h"
 
 #include "AnimationExportService.h"
 #include "AnimationPlaybackService.h"
@@ -9,11 +10,13 @@
 #include "TimelineUi.h"
 
 #include <QDoubleSpinBox>
+#include <QApplication>
 #include <QFileInfo>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidgetItem>
 #include <QMessageBox>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QtGlobal>
 #include <algorithm>
@@ -65,6 +68,7 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
     if (!AnimationTimelineOps::dropFrame(m_timelines, m_selectedTimelineIndex, path, index)) {
         return;
     }
+    if (m_animCanvas) m_animCanvas->setZoomManual(false);
     refreshTimelineFrames();
     fitAnimationToViewport();
     refreshAnimationTest();
@@ -137,11 +141,21 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         if (focusIndex >= 0) {
             m_timelineList->setCurrentRow(focusIndex);
         }
+        if (m_animCanvas) m_animCanvas->setZoomManual(false);
         fitAnimationToViewport();
         refreshAnimationTest();
         m_statusLabel->setText(status);
     } else {
         QMessageBox::information(this, tr("Generate Timelines"), status);
+    }
+}
+
+void MainWindow::onAnimZoomChanged(double value) {
+    if (m_animCanvas) {
+        if (!m_animZoomSpin->signalsBlocked()) {
+            m_animCanvas->setZoomManual(true);
+        }
+        m_animCanvas->setZoom(value / 100.0);
     }
 }
 
@@ -210,50 +224,41 @@ void MainWindow::saveAnimationToFile() {
 }
 
 void MainWindow::refreshAnimationTest() {
-    const int previewPadding = m_animPaddingSpin ? m_animPaddingSpin->value() : 24;
-    AnimationPreviewService::refresh(
+    QString statusText;
+    bool hasFrames = false;
+    bool playing = m_animPlaying;
+    QPixmap pixmap = AnimationPreviewService::refresh(
         m_timelines,
         m_selectedTimelineIndex,
         m_animFrameIndex,
         m_layoutModel,
-        m_animZoomSpin->value(),
-        previewPadding,
-        m_animPreviewLabel,
-        m_animStatusLabel,
-        m_animPrevBtn,
-        m_animPlayPauseBtn,
-        m_animNextBtn,
-        m_animPlaying,
+        statusText,
+        hasFrames,
+        playing,
         m_animTimer);
+
+    if (playing != m_animPlaying) {
+        m_animPlaying = playing;
+        m_animPlayPauseBtn->setText(tr("Play"));
+    }
+
+    m_animStatusLabel->setText(statusText);
+    m_animPrevBtn->setEnabled(hasFrames);
+    m_animPlayPauseBtn->setEnabled(hasFrames);
+    m_animNextBtn->setEnabled(hasFrames);
+    
+    if (m_animCanvas) {
+        m_animCanvas->setPixmap(pixmap);
+    }
 }
 
 void MainWindow::fitAnimationToViewport() {
-    if (!m_animPreviewScroll || !m_animZoomSpin) {
+    if (!m_animCanvas || !m_animZoomSpin || m_animCanvas->isZoomManual()) {
         return;
     }
-    const QSize viewportSize = m_animPreviewScroll->viewport()->size();
-    if (viewportSize.isEmpty()) {
-        return;
-    }
-    const int previewPadding = m_animPaddingSpin ? m_animPaddingSpin->value() : 24;
-    const QSize baseSize = AnimationPreviewService::calculateAnimationSize(
-        m_timelines,
-        m_selectedTimelineIndex,
-        m_layoutModel,
-        1.0,
-        previewPadding);
-    if (baseSize.width() <= 0 || baseSize.height() <= 0) {
-        return;
-    }
-
-    if (baseSize.width() > viewportSize.width() || baseSize.height() > viewportSize.height()) {
-        const double zoomW = static_cast<double>(viewportSize.width()) / baseSize.width();
-        const double zoomH = static_cast<double>(viewportSize.height()) / baseSize.height();
-        double zoom = qMin(zoomW, zoomH);
-        m_animZoomSpin->setValue(zoom);
-    } else {
-        m_animZoomSpin->setValue(1.0);
-    }
+    const bool blocked = m_animZoomSpin->blockSignals(true);
+    m_animCanvas->initialFit();
+    m_animZoomSpin->blockSignals(blocked);
 }
 
 void MainWindow::refreshHandleCombo() {

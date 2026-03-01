@@ -28,6 +28,8 @@ public:
      * @param zoom The zoom factor.
      */
     void setZoom(double zoom);
+    bool isZoomManual() const { return m_isZoomManual; }
+    void setZoomManual(bool manual) { m_isZoomManual = manual; }
     /**
      * @brief Centers the content in the view.
      */
@@ -68,6 +70,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     QGraphicsScene* m_scene;
@@ -79,5 +82,6 @@ private:
     bool m_isPanning = false;
     QPoint m_lastMousePos;
     bool m_spacePressed = false;
+    bool m_isZoomManual = false;
     AppSettings m_settings;
 };

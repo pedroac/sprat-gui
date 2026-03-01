@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QVector>
+#include <QPixmap>
 #include "models.h"
 
 class QLabel;
@@ -9,18 +10,13 @@ class QTimer;
 
 class AnimationPreviewService {
 public:
-    static void refresh(
+    static QPixmap refresh(
         const QVector<AnimationTimeline>& timelines,
         int selectedTimelineIndex,
         int& frameIndex,
         const LayoutModel& layoutModel,
-        double zoom,
-        int previewPadding,
-        QLabel* previewLabel,
-        QLabel* statusLabel,
-        QPushButton* prevButton,
-        QPushButton* playPauseButton,
-        QPushButton* nextButton,
+        QString& statusText,
+        bool& hasFrames,
         bool& playing,
         QTimer* timer);
 
