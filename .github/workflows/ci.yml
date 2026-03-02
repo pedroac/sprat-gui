@@ -21,6 +21,12 @@ jobs:
           - os: macos-latest
             qt_arch: clang_64
 
+    # Build Windows and macOS only on the release branch.
+    # Always build on Ubuntu.
+    if: >
+      matrix.os == 'ubuntu-latest' || 
+      github.ref == 'refs/heads/release'
+
     runs-on: ${{ matrix.os }}
 
     steps:
