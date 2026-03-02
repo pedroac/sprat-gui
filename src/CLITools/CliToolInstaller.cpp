@@ -1,7 +1,6 @@
 #include "CliToolInstaller.h"
-#include "SpratCliLocator.h"
+#include "CliToolsConfig.h"
 #include <QStandardPaths>
-#include <QSettings>
 #include <QDir>
 #include <QProcess>
 #include <QMessageBox>
