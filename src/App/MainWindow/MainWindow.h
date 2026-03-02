@@ -163,12 +163,19 @@ private slots:
     // === CLI Tool Management Events ===
     /**
      * @brief Handles when CLI tool installation finishes.
-     * 
+     *
      * @param exitCode Exit code of the installation process
      * @param exitStatus Exit status of the installation process
      */
     void onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus);
 
+    /**
+     * @brief Handles download progress of CLI tools.
+     *
+     * @param bytesReceived Bytes received so far
+     * @param bytesTotal Total bytes to receive
+     */
+    void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
     /**
      * @brief Handles sprite selection from the layout canvas.
      * 

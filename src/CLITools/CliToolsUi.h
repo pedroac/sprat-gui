@@ -6,6 +6,7 @@ class QWidget;
 
 enum class MissingCliAction {
     Install,
+    Upgrade,
     ProvidePath,
     Quit
 };
@@ -13,4 +14,5 @@ enum class MissingCliAction {
 class CliToolsUi {
 public:
     static MissingCliAction askMissingCliAction(QWidget* parent, const QStringList& missing);
+    static bool askUpgrade(QWidget* parent, const QString& currentVersion, const QString& requiredVersion);
 };

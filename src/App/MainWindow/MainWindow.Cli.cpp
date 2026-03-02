@@ -20,8 +20,19 @@
 void MainWindow::checkCliTools() {
     QStringList missing;
     m_cliReady = resolveCliBinaries(missing);
-    m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI missing"));
-    if (!m_cliReady) {
+    
+    if (m_cliReady) {
+        QString currentVersion = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
+        QString requiredVersion = SPRAT_CLI_VERSION;
+        if (!currentVersion.isEmpty() && currentVersion != requiredVersion) {
+            if (CliToolsUi::askUpgrade(this, currentVersion, requiredVersion)) {
+                installCliTools();
+                return;
+            }
+        }
+        m_statusLabel->setText(tr("CLI ready (%1)").arg(currentVersion));
+    } else {
+        m_statusLabel->setText(tr("CLI missing"));
         showMissingCliDialog(missing);
     }
     updateUiState();
@@ -178,6 +189,20 @@ void MainWindow::onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus
     }
     m_statusLabel->setText(tr("CLI installation failed"));
     QMessageBox::warning(this, tr("Install Failed"), tr("Could not install CLI tools automatically."));
+}
+
+void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
+    if (m_cliInstallProgress) {
+        if (bytesTotal > 0) {
+            m_cliInstallProgress->setRange(0, 100);
+            m_cliInstallProgress->setValue(static_cast<int>(bytesReceived * 100 / bytesTotal));
+            m_cliInstallOverlayLabel->setText(QString(tr("Downloading CLI tools (%1%)..."))
+                .arg(m_cliInstallProgress->value()));
+        } else {
+            m_cliInstallProgress->setRange(0, 0);
+            m_cliInstallOverlayLabel->setText(tr("Downloading CLI tools..."));
+        }
+    }
 }
 
 void MainWindow::setupCliInstallOverlay() {

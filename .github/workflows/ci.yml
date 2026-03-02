@@ -1,0 +1,132 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            qt_arch: gcc_64
+          - os: windows-latest
+            qt_arch: win64_msvc2019_64
+          - os: macos-latest
+            qt_arch: clang_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.5.*'
+          arch: ${{ matrix.qt_arch }}
+
+      - name: Install Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            export PATH="$PATH:$(pwd)/build/Release"
+          else
+            export PATH="$PATH:$(pwd)/build"
+          fi
+          ctest --test-dir build --output-on-failure -C Release
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux' && github.ref == 'refs/heads/release'
+        run: |
+          mkdir dist
+          cp build/sprat-gui dist/
+          tar -czf sprat-gui-linux.tar.gz -C dist sprat-gui
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows' && github.ref == 'refs/heads/release'
+        shell: pwsh
+        run: |
+          mkdir dist
+          # Bundle sprat-cli (read version from DEPENDENCIES)
+          $cli_version = (Get-Content DEPENDENCIES).Trim()
+          $cli_url = "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-windows-x64.zip"
+          Invoke-WebRequest -Uri $cli_url -OutFile cli.zip
+          Expand-Archive cli.zip -DestinationPath cli-temp
+          # Copy everything from the extracted subdir to dist/
+          Copy-Item -Path cli-temp/sprat-cli-windows-x64/* -Destination dist/ -Force
+          # Bundle GUI
+          Copy-Item -Path build/Release/sprat-gui.exe -Destination dist/ -Force
+          windeployqt dist/sprat-gui.exe
+          Compress-Archive -Path dist/* -DestinationPath sprat-gui-windows.zip
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS' && github.ref == 'refs/heads/release'
+        run: |
+          mkdir dist
+          cp -r build/sprat-gui.app dist/
+          # Bundle sprat-cli (read version from DEPENDENCIES) into the App Bundle
+          cli_version=$(cat DEPENDENCIES | xargs)
+          curl -L -o cli.dmg "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-macos-x64.dmg"
+          MOUNT_POINT=$(hdiutil mount cli.dmg | grep -o '/Volumes/.*' | head -n 1)
+          cp "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/MacOS/
+          hdiutil unmount "$MOUNT_POINT"
+          # Package DMG
+          macdeployqt dist/sprat-gui.app -dmg
+          mv dist/sprat-gui.dmg sprat-gui-macos.dmg
+
+      - name: Upload Artifacts
+        if: github.ref == 'refs/heads/release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprat-gui-${{ runner.os }}
+          path: |
+            sprat-gui-linux.tar.gz
+            sprat-gui-windows.zip
+            sprat-gui-macos.dmg
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release tag
+        id: release_tag
+        run: echo "tag=release-gui-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.release_tag.outputs.tag }}
+          name: Release GUI ${{ steps.release_tag.outputs.tag }}
+          commit: ${{ github.sha }}
+          generateReleaseNotes: true
+          artifacts: "dist/sprat-gui-*"

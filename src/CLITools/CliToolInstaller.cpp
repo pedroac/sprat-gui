@@ -1,123 +1,167 @@
 #include "CliToolInstaller.h"
-#include <SpratCliLocator.h>
+#include "SpratCliLocator.h"
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDir>
 #include <QProcess>
 #include <QMessageBox>
 #include <QApplication>
+#include <QTemporaryFile>
+#include <QFileInfo>
+#include <QNetworkReply>
 
-CliToolInstaller::CliToolInstaller(QObject* parent) : QObject(parent), m_installProcess(new QProcess(this)) {
+CliToolInstaller::CliToolInstaller(QObject* parent) 
+    : QObject(parent), 
+      m_installProcess(new QProcess(this)),
+      m_networkManager(new QNetworkAccessManager(this)) {
     connect(m_installProcess, &QProcess::finished, this, &CliToolInstaller::onInstallProcessFinished);
+    connect(m_networkManager, &QNetworkAccessManager::finished, this, &CliToolInstaller::onDownloadFinished);
 }
 
 CliToolInstaller::~CliToolInstaller() {
     delete m_installProcess;
+    delete m_networkManager;
 }
 
 bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
+    // Note: This method is currently redundant as MainWindow uses CliToolsConfig::resolveBinary
+    // but we keep it for consistency with the header.
     QString configPath = QDir::homePath() + "/.config/sprat/sprat.conf";
     QSettings settings(configPath, QSettings::IniFormat);
     QString binDir = settings.value("cli/bin_dir").toString();
 
     auto findBin = [&](const QString& name) -> QString {
-        // 1. Check PATH
+        QString execName = name;
+#ifdef Q_OS_WIN
+        if (!execName.endsWith(".exe")) execName += ".exe";
+#endif
         QString path = QStandardPaths::findExecutable(name);
-        if (!path.isEmpty()) {
-            return path;
-        }
+        if (!path.isEmpty()) return path;
 
-        // 2. Check config bin_dir
         if (!binDir.isEmpty()) {
-            QFileInfo fi(QDir(binDir).filePath(name));
-            if (fi.exists() && fi.isExecutable()) {
-                return fi.absoluteFilePath();
-            }
+            QFileInfo fi(QDir(binDir).filePath(execName));
+            if (fi.exists() && fi.isExecutable()) return fi.absoluteFilePath();
         }
 
-        // 3. Check ../sprat-cli sibling path
         QString siblingBin = findSiblingSpratCliBinary(name);
-        if (!siblingBin.isEmpty()) {
-            return siblingBin;
-        }
+        if (!siblingBin.isEmpty()) return siblingBin;
 
-        // 4. Check ~/.local/bin
-        QString localBin = QDir::homePath() + "/.local/bin/" + name;
-        if (QFile::exists(localBin) && QFileInfo(localBin).isExecutable()) {
-            return localBin;
-        }
+        QString localBin = QDir::homePath() + "/.local/bin/" + execName;
+        if (QFile::exists(localBin) && QFileInfo(localBin).isExecutable()) return localBin;
+
         return QString();
     };
 
-    QString spratLayoutBin = findBin("spratlayout");
-    if (spratLayoutBin.isEmpty()) {
-        missing << "spratlayout";
-    }
-
-    QString spratPackBin = findBin("spratpack");
-    if (spratPackBin.isEmpty()) {
-        missing << "spratpack";
-    }
-
-    QString spratConvertBin = findBin("spratconvert");
-    if (spratConvertBin.isEmpty()) {
-        missing << "spratconvert";
-    }
-
-    QString spratFramesBin = findBin("spratframes");
-    if (spratFramesBin.isEmpty()) {
-        missing << "spratframes";
-    }
-
-    QString spratUnpackBin = findBin("spratunpack");
-    if (spratUnpackBin.isEmpty()) {
-        missing << "spratunpack";
+    QStringList tools = {"spratlayout", "spratpack", "spratconvert", "spratframes", "spratunpack"};
+    for (const auto& tool : tools) {
+        if (findBin(tool).isEmpty()) missing << tool;
     }
 
     return missing.isEmpty();
 }
 
 void CliToolInstaller::installCliTools() {
-    // Check for g++ or c++
+    emit installStarted();
+
+#ifdef Q_OS_LINUX
+    installOnLinux();
+#else
+    QString osSuffix;
+#ifdef Q_OS_WIN
+    osSuffix = "windows-x64.zip";
+#elif defined(Q_OS_MACOS)
+    osSuffix = "macos-x64.dmg";
+#endif
+
+    if (osSuffix.isEmpty()) {
+        QMessageBox::critical(nullptr, "Unsupported OS", "Automatic installation is not supported on this operating system.");
+        emit installFinished(-1, QProcess::CrashExit);
+        return;
+    }
+
+    QUrl url(QString("https://github.com/pedroac/sprat-cli/releases/download/%1/sprat-cli-%2")
+             .arg(m_cliVersion, osSuffix));
+    startDownload(url);
+#endif
+}
+
+void CliToolInstaller::installOnLinux() {
     bool hasCpp = !QStandardPaths::findExecutable("g++").isEmpty() || !QStandardPaths::findExecutable("c++").isEmpty();
     QStringList deps = {"git", "cmake", "make"};
     QStringList missing;
     for (const auto& dep : deps) {
-        if (QStandardPaths::findExecutable(dep).isEmpty()) {
-            missing << dep;
-        }
+        if (QStandardPaths::findExecutable(dep).isEmpty()) missing << dep;
     }
-
-    if (!hasCpp) {
-        missing << "g++";
-    }
+    if (!hasCpp) missing << "g++";
 
     if (!missing.isEmpty()) {
         QMessageBox::critical(nullptr, "Missing Dependencies",
                               "Cannot install sprat-cli. Missing build tools: " + missing.join(", "));
+        emit installFinished(-1, QProcess::CrashExit);
         return;
     }
 
-    emit installStarted();
-
-#ifdef Q_OS_LINUX
-    QString script = R"(
+    QString script = QString(R"(
 set -euo pipefail
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 cd "$workdir"
-git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git
+git clone --depth 1 --branch %1 https://github.com/pedroac/sprat-cli.git
 cd sprat-cli
 cmake -DSPRAT_DOWNLOAD_STB=ON .
-            make -j$(nproc 2>/dev/null || echo 1)
+make -j$(nproc 2>/dev/null || echo 1)
 mkdir -p "$HOME/.local/bin"
 install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOME/.local/bin/"
-echo 'Installation Complete.  You may need to restart this application.'
-)";
+)").arg(m_cliVersion);
 
     m_installProcess->start("bash", QStringList() << "-c" << script);
-#endif
+}
 
+void CliToolInstaller::startDownload(const QUrl& url) {
+    QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply* reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::downloadProgress, this, &CliToolInstaller::onDownloadProgress);
+}
+
+void CliToolInstaller::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
+    emit downloadProgress(bytesReceived, bytesTotal);
+}
+
+void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
+    if (reply->error() != QNetworkReply::NoError) {
+        QMessageBox::critical(nullptr, "Download Failed", "Could not download sprat-cli: " + reply->errorString());
+        emit installFinished(-1, QProcess::CrashExit);
+        reply->deleteLater();
+        return;
+    }
+
+    QTemporaryFile* tempFile = new QTemporaryFile(this);
+    if (tempFile->open()) {
+        tempFile->write(reply->readAll());
+        QString tempPath = tempFile->fileName();
+        tempFile->close();
+        installFromDownloadedFile(tempPath);
+    }
+    reply->deleteLater();
+}
+
+void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
+    QString appDir = QApplication::applicationDirPath();
+    
+#ifdef Q_OS_WIN
+    // Use PowerShell to extract ZIP
+    QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(filePath, appDir);
+    m_installProcess->start("powershell", QStringList() << "-Command" << script);
+#elif defined(Q_OS_MACOS)
+    // Use hdiutil to mount and cp
+    QString script = QString(R"(
+MOUNT_POINT=$(hdiutil mount "%1" | grep -o '/Volumes/.*' | head -n 1)
+cp "$MOUNT_POINT"/* "%2/"
+hdiutil unmount "$MOUNT_POINT"
+)").arg(filePath, appDir);
+    m_installProcess->start("bash", QStringList() << "-c" << script);
+#endif
 }
 
 void CliToolInstaller::onInstallProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {

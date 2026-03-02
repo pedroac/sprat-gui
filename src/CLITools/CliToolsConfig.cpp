@@ -2,6 +2,7 @@
 
 #include "SpratCliLocator.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -66,37 +67,70 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
 }
 
+#include <QProcess>
+
+QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
+    if (binaryPath.isEmpty()) {
+        return QString();
+    }
+    QProcess process;
+    process.start(binaryPath, QStringList() << "--version");
+    if (!process.waitForFinished(2000)) {
+        return QString();
+    }
+    QString output = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    // Expected output format: "spratlayout version v0.1.0"
+    QStringList parts = output.split(' ');
+    if (parts.size() >= 3) {
+        return parts.last();
+    }
+    return QString();
+}
+
 QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDir) {
+    QString executableName = name;
+#ifdef Q_OS_WIN
+    if (!executableName.endsWith(".exe", Qt::CaseInsensitive)) {
+        executableName += ".exe";
+    }
+#endif
+
     // 1. Check provided baseDir
     if (!baseDir.isEmpty()) {
-        QFileInfo fi(QDir(baseDir).filePath(name));
+        QFileInfo fi(QDir(baseDir).filePath(executableName));
         if (fi.exists() && fi.isExecutable()) {
             return fi.absoluteFilePath();
         }
     }
 
-    // 2. Check current directory
-    QFileInfo localFi(QDir::current().filePath(name));
+    // 2. Check application directory
+    QFileInfo appFi(QDir(QCoreApplication::applicationDirPath()).filePath(executableName));
+    if (appFi.exists() && appFi.isExecutable()) {
+        return appFi.absoluteFilePath();
+    }
+
+    // 3. Check current directory
+    QFileInfo localFi(QDir::current().filePath(executableName));
     if (localFi.exists() && localFi.isExecutable()) {
         return localFi.absoluteFilePath();
     }
 
-    // 3. Check standard PATH
+    // 4. Check standard PATH
     QString inPath = QStandardPaths::findExecutable(name);
     if (!inPath.isEmpty()) {
         return inPath;
     }
 
-    // 4. Check sibling directories (development/relative paths)
+    // 5. Check sibling directories (development/relative paths)
     QString siblingBin = findSiblingSpratCliBinary(name);
     if (!siblingBin.isEmpty()) {
         return siblingBin;
     }
 
-    // 5. Check home config/bin locations
+    // 6. Check home config/bin locations
     QStringList homeLocations;
-    homeLocations << QDir::homePath() + "/.local/bin/" + name;
-    homeLocations << QDir::homePath() + "/.config/sprat/bin/" + name;
+    homeLocations << QDir::homePath() + "/.local/bin/" + executableName;
+    homeLocations << QDir::homePath() + "/.config/sprat/bin/" + executableName;
     
     for (const QString& loc : homeLocations) {
         if (QFile::exists(loc) && QFileInfo(loc).isExecutable()) {

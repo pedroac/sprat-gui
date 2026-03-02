@@ -23,3 +23,17 @@ MissingCliAction CliToolsUi::askMissingCliAction(QWidget* parent, const QStringL
     Q_UNUSED(quitBtn);
     return MissingCliAction::Quit;
 }
+
+bool CliToolsUi::askUpgrade(QWidget* parent, const QString& currentVersion, const QString& requiredVersion) {
+    QMessageBox msgBox(parent);
+    msgBox.setWindowTitle("CLI Version Mismatch");
+    msgBox.setText(QString("An outdated version of sprat-cli was found (%1).\nRequired version: %2")
+                   .arg(currentVersion, requiredVersion));
+    msgBox.setInformativeText("Would you like to upgrade to the required version now?");
+
+    QPushButton* upgradeBtn = msgBox.addButton("Upgrade", QMessageBox::ActionRole);
+    QPushButton* ignoreBtn = msgBox.addButton("Ignore (Risky)", QMessageBox::RejectRole);
+    msgBox.exec();
+
+    return msgBox.clickedButton() == upgradeBtn;
+}

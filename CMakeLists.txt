@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.16)
 project(sprat-gui LANGUAGES CXX)
 include(CTest)
 
+# === CLI Dependency ===
+set(SPRAT_CLI_VERSION "v0.0.0")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES" DEPENDENCIES_CONTENT)
+    string(STRIP "${DEPENDENCIES_CONTENT}" SPRAT_CLI_VERSION)
+endif()
+add_definitions(-DSPRAT_CLI_VERSION="${SPRAT_CLI_VERSION}")
+
 # === Configuration ===
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,7 +20,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # === Find Dependencies ===
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 # === Source Files ===
@@ -112,7 +120,13 @@ set(PROJECT_SOURCES
 )
 
 # === Executable ===
-add_executable(sprat-gui ${PROJECT_SOURCES})
+if(WIN32)
+    add_executable(sprat-gui WIN32 ${PROJECT_SOURCES})
+elseif(APPLE)
+    add_executable(sprat-gui MACOSX_BUNDLE ${PROJECT_SOURCES})
+else()
+    add_executable(sprat-gui ${PROJECT_SOURCES})
+endif()
 
 # === Include Directories ===
 target_include_directories(sprat-gui PRIVATE
@@ -138,6 +152,7 @@ target_link_libraries(sprat-gui PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Concurrent
+    Qt6::Network
 )
 
 # === Translations ===
@@ -178,6 +193,7 @@ if(BUILD_TESTING)
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        Qt6::Network
     )
 
     add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)
