@@ -71,8 +71,8 @@ void FrameDetectionCanvas::setImage(const QPixmap& image) {
 
 void FrameDetectionCanvas::setFrames(const QVector<QRect>& frames) {
     m_frames = frames;
-    m_selected.assign(frames.size(), false);
-    m_hovered.assign(frames.size(), false);
+    m_selected.fill(false, frames.size());
+    m_hovered.fill(false, frames.size());
     drawFrameRectangles();
 }
 
