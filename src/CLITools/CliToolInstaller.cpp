@@ -24,39 +24,12 @@ CliToolInstaller::~CliToolInstaller() {
 }
 
 bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
-    // Note: This method is currently redundant as MainWindow uses CliToolsConfig::resolveBinary
-    // but we keep it for consistency with the header.
-    QString configPath = QDir::homePath() + "/.config/sprat/sprat.conf";
-    QSettings settings(configPath, QSettings::IniFormat);
-    QString binDir = settings.value("cli/bin_dir").toString();
-
-    auto findBin = [&](const QString& name) -> QString {
-        QString execName = name;
-#ifdef Q_OS_WIN
-        if (!execName.endsWith(".exe")) execName += ".exe";
-#endif
-        QString path = QStandardPaths::findExecutable(name);
-        if (!path.isEmpty()) return path;
-
-        if (!binDir.isEmpty()) {
-            QFileInfo fi(QDir(binDir).filePath(execName));
-            if (fi.exists() && fi.isExecutable()) return fi.absoluteFilePath();
-        }
-
-        QString siblingBin = findSiblingSpratCliBinary(name);
-        if (!siblingBin.isEmpty()) return siblingBin;
-
-        QString localBin = QDir::homePath() + "/.local/bin/" + execName;
-        if (QFile::exists(localBin) && QFileInfo(localBin).isExecutable()) return localBin;
-
-        return QString();
-    };
-
     QStringList tools = {"spratlayout", "spratpack", "spratconvert", "spratframes", "spratunpack"};
     for (const auto& tool : tools) {
-        if (findBin(tool).isEmpty()) missing << tool;
+        if (CliToolsConfig::resolveBinary(tool).isEmpty()) {
+            missing << tool;
+        }
     }
-
     return missing.isEmpty();
 }
 

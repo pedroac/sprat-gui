@@ -8,11 +8,25 @@ on:
       - release
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/release" ]; then
+            echo 'matrix=["ubuntu-latest", "windows-latest", "macos-latest"]' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=["ubuntu-latest"]' >> $GITHUB_OUTPUT
+          fi
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJson(needs.prepare.outputs.matrix) }}
         include:
           - os: ubuntu-latest
             qt_arch: gcc_64
@@ -20,12 +34,6 @@ jobs:
             qt_arch: win64_msvc2019_64
           - os: macos-latest
             qt_arch: clang_64
-
-    # Build Windows and macOS only on the release branch.
-    # Always build on Ubuntu.
-    if: >
-      matrix.os == 'ubuntu-latest' || 
-      github.ref == 'refs/heads/release'
 
     runs-on: ${{ matrix.os }}
 
