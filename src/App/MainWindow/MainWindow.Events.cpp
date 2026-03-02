@@ -13,6 +13,8 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMimeData>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QPixmapCache>
 #include <QStandardPaths>
 #include <QWheelEvent>
@@ -44,8 +46,11 @@ void MainWindow::dropEvent(QDropEvent* event) {
         return;
     }
     const QString localPath = urls.first().toLocalFile();
-    if (tryHandleDroppedPath(localPath, true)) {
-        event->acceptProposedAction();
+    DropAction action = confirmDropAction(localPath);
+    if (action != DropAction::Cancel) {
+        if (tryHandleDroppedPath(localPath, action)) {
+            event->acceptProposedAction();
+        }
     }
 }
 
@@ -70,8 +75,28 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
            ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds";
 }
 
-bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) {
-    if (!isSupportedDropPath(path)) {
+MainWindow::DropAction MainWindow::confirmDropAction(const QString& path) {
+    if (m_session->layoutModel.sprites.isEmpty()) {
+        return DropAction::Replace;
+    }
+
+    QMessageBox msg(this);
+    msg.setWindowTitle(tr("Layout Already Loaded"));
+    msg.setText(QString(tr("A layout is already loaded. What would you like to do with '%1'?")).arg(QFileInfo(path).fileName()));
+    
+    QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+    QPushButton* mergeBtn = msg.addButton(tr("Merge"), QMessageBox::AcceptRole);
+    msg.addButton(tr("Cancel"), QMessageBox::RejectRole);
+    
+    msg.exec();
+    
+    if (msg.clickedButton() == replaceBtn) return DropAction::Replace;
+    if (msg.clickedButton() == mergeBtn) return DropAction::Merge;
+    return DropAction::Cancel;
+}
+
+bool MainWindow::tryHandleDroppedPath(const QString& path, DropAction action) {
+    if (!isSupportedDropPath(path) || action == DropAction::Cancel) {
         return false;
     }
     QFileInfo info(path);
@@ -79,30 +104,33 @@ bool MainWindow::tryHandleDroppedPath(const QString& path, bool confirmReplace) 
     if (info.isDir()) {
         QDir dir(path);
         if (dir.exists("project.spart.json")) {
-            loadProject(dir.filePath("project.spart.json"), confirmReplace);
+            loadProject(dir.filePath("project.spart.json"), action);
         } else {
-            loadFolder(path, confirmReplace);
+            loadFolder(path, action);
         }
         return true;
     }
     
     const QString ext = info.suffix().toLower();
     if (ext == "tar" || ext == "tar.gz" || ext == "tar.bz2" || ext == "tar.xz") {
-        // loadTarFile(path, confirmReplace);
+        loadTarFile(path, action);
         return true;
     }
     
     if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds") {
-        loadImageWithFrameDetection(path, confirmReplace);
+        loadImageWithFrameDetection(path, action);
         return true;
     }
     
-    loadProject(path, confirmReplace);
+    loadProject(path, action);
     return true;
 }
 
 void MainWindow::onLayoutCanvasPathDropped(const QString& path) {
-    tryHandleDroppedPath(path, true);
+    DropAction action = confirmDropAction(path);
+    if (action != DropAction::Cancel) {
+        tryHandleDroppedPath(path, action);
+    }
 }
 
 bool MainWindow::handleAnimPreviewEvent(QEvent*) { return false; }

@@ -284,20 +284,10 @@ void MainWindow::setLoading(bool loading) {
         if (m_mainStack && m_welcomePage && m_session->layoutModel.sprites.isEmpty()) {
             m_mainStack->setCurrentWidget(m_welcomePage);
         }
-        if (!m_cliInstallInProgress && m_loadingOverlayDelayTimer) {
-            if (m_forceImmediateLoadingOverlay) {
-                if (m_loadingOverlayDelayTimer->isActive()) {
-                    m_loadingOverlayDelayTimer->stop();
-                }
-                showLoadingOverlayNow();
-            } else {
-                m_loadingOverlayDelayTimer->start(3000);
-            }
+        if (!m_cliInstallInProgress) {
+            showLoadingOverlayNow();
         }
     } else {
-        if (m_loadingOverlayDelayTimer && m_loadingOverlayDelayTimer->isActive()) {
-            m_loadingOverlayDelayTimer->stop();
-        }
         if (m_welcomeLabel) {
             m_welcomeLabel->setText(tr("Drag and Drop folder with image files"));
         }

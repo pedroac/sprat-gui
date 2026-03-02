@@ -5,7 +5,7 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 
-FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& detectedFrames, QWidget* parent)
+FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& detectedFrames, const AppSettings& settings, const QColor& backgroundColor, QWidget* parent)
     : QDialog(parent)
     , m_image(imagePath)
 {
@@ -14,6 +14,10 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     resize(1000, 800);
     
     m_canvas = new FrameDetectionCanvas(this);
+    m_canvas->setSettings(settings);
+    if (backgroundColor.isValid()) {
+        m_canvas->setTransparentColor(backgroundColor);
+    }
     m_canvas->setImage(m_image);
     m_canvas->setFrames(detectedFrames);
 

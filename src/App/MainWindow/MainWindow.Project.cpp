@@ -166,7 +166,6 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
     m_loadingUiMessage = tr("Saving...");
     m_statusLabel->setText(tr("Saving..."));
     QApplication::processEvents();
-    m_forceImmediateLoadingOverlay = true;
     QString savedDestination;
     bool ok = ProjectSaveService::save(
         this,
@@ -183,7 +182,6 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         [this](bool loading) { setLoading(loading); },
         [this](const QString& status) { m_statusLabel->setText(status); }
     );
-    m_forceImmediateLoadingOverlay = false;
     if (ok) {
         m_statusLabel->setText(tr("Saved to ") + savedDestination);
         QMetaObject::invokeMethod(this, [this, savedDestination]() {
@@ -266,8 +264,11 @@ void MainWindow::autosaveProject() {
     }
 }
 
-void MainWindow::loadProject(const QString& path, bool confirmReplace) {
-    if (confirmReplace && !confirmLayoutReplacement()) {
+void MainWindow::loadProject(const QString& path, DropAction action) {
+    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+        return;
+    }
+    if (action == DropAction::Cancel) {
         return;
     }
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
@@ -278,12 +279,31 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     if (!ProjectFileLoader::load(path, root, error)) {
         if (path.endsWith(".zip", Qt::CaseInsensitive) && error.contains("project.spart.json")) {
             // Fallback: ZIP can still be useful when it only contains image frames.
-            loadImagesFromZip(path, false);
+            loadImagesFromZip(path, action);
             return;
         }
         QMessageBox::warning(this, tr("Load Failed"), error);
         return;
     }
+    
+    QJsonObject layoutInfo = root["layout"].toObject();
+    QString folder = layoutInfo["folder"].toString();
+    QStringList framePaths;
+    for (const auto& frameVal : layoutInfo["frame_paths"].toArray()) {
+        const QString framePath = frameVal.toString().trimmed();
+        if (!framePath.isEmpty()) {
+            framePaths.append(framePath);
+        }
+    }
+
+    if (action == DropAction::Merge) {
+        if (!framePaths.isEmpty()) {
+            m_session->activeFramePaths.append(framePaths);
+            onRunLayout();
+        }
+        return;
+    }
+
     m_session->pendingProjectPayload = root;
     cacheLayoutOutputFromPayload(root);
 
@@ -308,16 +328,8 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(true);
     }
-    QJsonObject layoutInfo = root["layout"].toObject();
-    QString folder = layoutInfo["folder"].toString();
+    
     const QString sourceMode = layoutInfo["source_mode"].toString();
-    QStringList framePaths;
-    for (const auto& frameVal : layoutInfo["frame_paths"].toArray()) {
-        const QString framePath = frameVal.toString().trimmed();
-        if (!framePath.isEmpty()) {
-            framePaths.append(framePath);
-        }
-    }
     if (!folder.isEmpty()) {
         m_session->currentFolder = folder;
         if (sourceMode == "list" && !framePaths.isEmpty()) {
@@ -345,15 +357,12 @@ void MainWindow::loadProject(const QString& path, bool confirmReplace) {
     }
 }
 
-void MainWindow::clearZipTempDir() {
-    if (m_zipTempDir) {
-        delete m_zipTempDir;
-        m_zipTempDir = nullptr;
-    }
-}
+bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
 
-bool MainWindow::loadImagesFromZip(const QString& zipPath, bool confirmReplace) {
-    if (confirmReplace && !confirmLayoutReplacement()) {
+    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+        return false;
+    }
+    if (action == DropAction::Cancel) {
         return false;
     }
     if (!m_cliReady || m_isLoading) {
@@ -366,43 +375,48 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, bool confirmReplace) 
         return false;
     }
 
-    clearZipTempDir();
-    m_zipTempDir = new QTemporaryDir();
-    if (!m_zipTempDir->isValid()) {
-        delete m_zipTempDir;
-        m_zipTempDir = nullptr;
+    if (action == DropAction::Replace) {
+        m_session->clearTempDirs();
+    }
+    auto tempDir = std::make_unique<QTemporaryDir>();
+    if (!tempDir->isValid()) {
         QMessageBox::warning(this, "Load Failed", "Unable to create temporary directory for ZIP extraction.");
         return false;
     }
+    QString tempPath = tempDir->path();
+    m_session->addTempDir(std::move(tempDir));
 
     QProcess unzip;
-    unzip.start(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << m_zipTempDir->path());
+    unzip.start(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
     unzip.waitForFinished();
     if (unzip.exitCode() != 0) {
-        clearZipTempDir();
         QMessageBox::warning(this, "Load Failed", "Could not extract ZIP archive.");
         return false;
     }
 
     QStringList selections;
     bool selectionCanceled = false;
-    if (ImageFolderSelectionDialog::pickMultipleFoldersWithImages(this, m_zipTempDir->path(), selections, &selectionCanceled)) {
+    if (ImageFolderSelectionDialog::pickMultipleFoldersWithImages(this, tempPath, selections, &selectionCanceled)) {
         const QStringList absolutePaths = ImageDiscoveryService::collectImagesRecursive(selections);
         if (absolutePaths.isEmpty()) {
-            clearZipTempDir();
             QMessageBox::warning(this, tr("Load Failed"), tr("No images found in selected folders."));
             return false;
         }
         m_loadingUiMessage = tr("Loading images...");
         setLoading(true);
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
+        
+        if (action == DropAction::Merge) {
+            m_session->activeFramePaths.append(absolutePaths);
+        } else {
+            if (!m_session->frameListPath.isEmpty()) {
+                QFile::remove(m_session->frameListPath);
+                m_session->frameListPath.clear();
+            }
+            m_session->activeFramePaths = absolutePaths;
         }
-        m_session->activeFramePaths = absolutePaths;
+
         if (!ensureFrameListInput()) {
             setLoading(false);
-            clearZipTempDir();
             QMessageBox::warning(this, tr("Load Failed"), tr("Could not create temporary frame list from ZIP selection."));
             return false;
         }
@@ -412,15 +426,13 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, bool confirmReplace) 
         return true;
     }
     if (selectionCanceled) {
-        clearZipTempDir();
         m_statusLabel->setText("Load canceled");
         return false;
     }
-    if (ImageDiscoveryService::hasImageFiles(m_zipTempDir->path())) {
-        loadFolder(m_zipTempDir->path(), confirmReplace);
+    if (ImageDiscoveryService::hasImageFiles(tempPath)) {
+        loadFolder(tempPath, action);
         return true;
     }
-    clearZipTempDir();
     QMessageBox::warning(this, "Load Failed", "ZIP archive does not contain recognizable image folders.");
     return false;
 }
@@ -458,22 +470,15 @@ void MainWindow::applyProjectPayload() {
     m_settings = applied.appSettings;
     m_lastSaveConfig = applied.saveConfig;
     applySettings();
-    if (!applied.cliPaths.layoutBinary.isEmpty() ||
-        !applied.cliPaths.packBinary.isEmpty() ||
-        !applied.cliPaths.convertBinary.isEmpty()) {
-        const QString configuredBinDir = CliToolsConfig::loadBinDir();
-        m_spratLayoutBin = CliToolsConfig::resolveBinary("spratlayout", applied.cliPaths.layoutBinary, configuredBinDir);
-        m_spratPackBin = CliToolsConfig::resolveBinary("spratpack", applied.cliPaths.packBinary, configuredBinDir);
-        m_spratConvertBin = CliToolsConfig::resolveBinary("spratconvert", applied.cliPaths.convertBinary, configuredBinDir);
-        m_cliPaths.layoutBinary = applied.cliPaths.layoutBinary.isEmpty() ? m_spratLayoutBin : applied.cliPaths.layoutBinary;
-        m_cliPaths.packBinary = applied.cliPaths.packBinary.isEmpty() ? m_spratPackBin : applied.cliPaths.packBinary;
-        m_cliPaths.convertBinary = applied.cliPaths.convertBinary.isEmpty() ? m_spratConvertBin : applied.cliPaths.convertBinary;
-        m_cliReady = !m_spratLayoutBin.isEmpty() && !m_spratPackBin.isEmpty();
-        m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI missing"));
-        updateUiState();
-    }
+    
+    QStringList missing;
+    resolveCliBinaries(missing);
+    m_cliReady = !m_spratLayoutBin.isEmpty() && !m_spratPackBin.isEmpty();
+    m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI missing"));
+    updateUiState();
 
     m_session->timelines = applied.timelines;
+
     refreshTimelineList();
     if (applied.selectedTimelineIndex >= 0 && applied.selectedTimelineIndex < m_session->timelines.size()) {
         m_timelineList->setCurrentRow(applied.selectedTimelineIndex);

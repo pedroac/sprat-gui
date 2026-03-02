@@ -188,8 +188,8 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     root["ui_options"] = uiOpts;
 
     QJsonObject settings;
-    settings["canvas_color"] = input.appSettings.canvasColor.name(QColor::HexArgb);
-    settings["frame_color"] = input.appSettings.frameColor.name(QColor::HexArgb);
+    settings["canvas_color"] = input.appSettings.workspaceColor.name(QColor::HexArgb);
+    settings["frame_color"] = input.appSettings.spriteFrameColor.name(QColor::HexArgb);
     settings["show_borders"] = input.appSettings.showBorders;
     settings["border_color"] = input.appSettings.borderColor.name(QColor::HexArgb);
     settings["border_style"] = static_cast<int>(input.appSettings.borderStyle);
@@ -325,13 +325,13 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
 
     QJsonObject settings = root["settings"].toObject();
     {
-        const QString canvasColor = settings["canvas_color"].toString();
-        if (!canvasColor.isEmpty()) {
-            out.appSettings.canvasColor = QColor(canvasColor);
+        const QString workspaceColor = settings["canvas_color"].toString();
+        if (!workspaceColor.isEmpty()) {
+            out.appSettings.workspaceColor = QColor(workspaceColor);
         }
-        const QString frameColor = settings["frame_color"].toString();
-        if (!frameColor.isEmpty()) {
-            out.appSettings.frameColor = QColor(frameColor);
+        const QString spriteFrameColor = settings["frame_color"].toString();
+        if (!spriteFrameColor.isEmpty()) {
+            out.appSettings.spriteFrameColor = QColor(spriteFrameColor);
         }
         out.appSettings.showBorders = settings["show_borders"].toBool(out.appSettings.showBorders);
         const QString borderColor = settings["border_color"].toString();

@@ -8,6 +8,7 @@
 #include <QGraphicsPixmapItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsLineItem>
+#include "models.h"
 
 /**
  * @class FrameDetectionCanvas
@@ -26,6 +27,7 @@ public:
     explicit FrameDetectionCanvas(QWidget* parent = nullptr);
 
     void setImage(const QPixmap& image);
+    void setTransparentColor(const QColor& color);
     void setFrames(const QVector<QRect>& frames);
     QVector<QRect> getFrames() const { return m_frames; }
 
@@ -33,6 +35,7 @@ public:
     bool isSplitMode() const { return m_splitMode; }
 
     void deleteSelectedFrames();
+    void setSettings(const AppSettings& settings);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -54,6 +57,7 @@ private:
     int findFrameAt(const QPoint& pos);
 
     QPixmap m_image;
+    QColor m_transparentColor;
     QVector<QRect> m_frames;
     QVector<bool> m_selected;
     QVector<bool> m_hovered;
@@ -75,4 +79,5 @@ private:
     int m_splitFrameIndex = -1;
     Qt::Orientation m_splitOrientation = Qt::Horizontal;
     int m_splitPos = 0;
+    AppSettings m_settings;
 };

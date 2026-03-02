@@ -4,6 +4,7 @@ ProjectSession::ProjectSession(QObject* parent) : QObject(parent) {
 }
 
 void ProjectSession::clear() {
+    clearTempDirs();
     currentFolder.clear();
     layoutSourcePath.clear();
     layoutSourceIsList = false;
@@ -33,4 +34,12 @@ void ProjectSession::clear() {
 
 bool ProjectSession::isEmpty() const {
     return activeFramePaths.isEmpty() && layoutModel.sprites.isEmpty();
+}
+
+void ProjectSession::addTempDir(std::unique_ptr<QTemporaryDir> dir) {
+    m_tempDirs.push_back(std::move(dir));
+}
+
+void ProjectSession::clearTempDirs() {
+    m_tempDirs.clear();
 }

@@ -1,14 +1,28 @@
 #include "AnimationCanvas.h"
 #include <QScrollBar>
 #include <QApplication>
+#include "ViewUtils.h"
 
 AnimationCanvas::AnimationCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
-    setBackgroundBrush(QColor(90, 90, 90));
+    if (m_settings.showCheckerboard) {
+        setBackgroundBrush(QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
+    } else {
+        setBackgroundBrush(m_settings.spriteFrameColor);
+    }
 
     m_pixmapItem = new QGraphicsPixmapItem();
     m_scene->addItem(m_pixmapItem);
+}
+
+void AnimationCanvas::setSettings(const AppSettings& settings) {
+    m_settings = settings;
+    if (m_settings.showCheckerboard) {
+        setBackgroundBrush(QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
+    } else {
+        setBackgroundBrush(m_settings.spriteFrameColor);
+    }
 }
 
 void AnimationCanvas::setPixmap(const QPixmap& pixmap) {

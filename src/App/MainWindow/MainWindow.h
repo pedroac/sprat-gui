@@ -61,6 +61,12 @@ class AnimationCanvas;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
+    enum class DropAction {
+        Replace,
+        Merge,
+        Cancel
+    };
+
     /**
      * @brief Constructor for MainWindow.
      * 
@@ -484,6 +490,14 @@ private:
     void showMissingCliDialog(const QStringList& missing);
 
     /**
+     * @brief Confirms the action to take when a file/folder is dropped.
+     * 
+     * @param path Path of the dropped item
+     * @return DropAction The selected action
+     */
+    DropAction confirmDropAction(const QString& path);
+
+    /**
      * @brief Sets loading state of the application.
      * 
      * @param loading True to show loading state
@@ -501,11 +515,6 @@ private:
     void updateMainContentView();
 
     /**
-     * @brief Opens dialog for CLI path configuration.
-     */
-    void openCliPathDialog();
-
-    /**
      * @brief Installs CLI tools.
      */
     void installCliTools();
@@ -514,17 +523,17 @@ private:
      * @brief Loads a folder with images.
      * 
      * @param path Path to folder
-     * @param confirmReplace Whether to confirm replacement
+     * @param action Action to take (Replace or Merge)
      */
-    void loadFolder(const QString& path, bool confirmReplace = true);
+    void loadFolder(const QString& path, DropAction action = DropAction::Replace);
 
     /**
      * @brief Loads a saved project.
      * 
      * @param path Path to project file
-     * @param confirmReplace Whether to confirm replacement
+     * @param action Action to take (Replace or Merge)
      */
-    void loadProject(const QString& path, bool confirmReplace = true);
+    void loadProject(const QString& path, DropAction action = DropAction::Replace);
 
     /**
      * @brief Confirms layout replacement with the user.
@@ -553,10 +562,10 @@ private:
      * @brief Tries to handle a dropped path.
      * 
      * @param path Path that was dropped
-     * @param confirmReplace Whether to confirm replacement
+     * @param action Action to take (Replace or Merge)
      * @return bool True if path was handled
      */
-    bool tryHandleDroppedPath(const QString& path, bool confirmReplace = true);
+    bool tryHandleDroppedPath(const QString& path, DropAction action = DropAction::Replace);
 
     /**
      * @brief Handles animation preview events.
@@ -658,15 +667,10 @@ private:
      * @brief Loads images from a ZIP file.
      * 
      * @param zipPath Path to ZIP file
-     * @param confirmReplace Whether to confirm replacement
+     * @param action Action to take (Replace or Merge)
      * @return bool True if images were loaded successfully
      */
-    bool loadImagesFromZip(const QString& zipPath, bool confirmReplace = true);
-
-    /**
-     * @brief Clears temporary ZIP directory.
-     */
-    void clearZipTempDir();
+    bool loadImagesFromZip(const QString& zipPath, DropAction action = DropAction::Replace);
 
     /**
      * @brief Caches layout output from project payload.
@@ -748,25 +752,30 @@ private:
      * @brief Loads an image file and performs frame detection.
      * 
      * @param imagePath Path to the image file
-     * @param confirmReplace Whether to confirm replacement
+     * @param action Action to take (Replace or Merge)
      */
-    void loadImageWithFrameDetection(const QString& imagePath, bool confirmReplace);
+    void loadImageWithFrameDetection(const QString& imagePath, DropAction action);
 
     /**
      * @brief Loads a tar file and extracts frames.
      * 
      * @param tarPath Path to the tar file
-     * @param confirmReplace Whether to confirm replacement
+     * @param action Action to take (Replace or Merge)
      */
-    void loadTarFile(const QString& tarPath, bool confirmReplace);
+    void loadTarFile(const QString& tarPath, DropAction action);
+
+    struct FrameDetectionResult {
+        QVector<QRect> frames;
+        QColor backgroundColor;
+    };
 
     /**
      * @brief Detects frames in an image using spratframes.
      * 
      * @param imagePath Path to the image file
-     * @return QVector<QRect> Detected frame rectangles
+     * @return FrameDetectionResult Detected frames and background color
      */
-    QVector<QRect> detectFramesInImage(const QString& imagePath);
+    FrameDetectionResult detectFramesInImage(const QString& imagePath);
 
     /**
      * @brief Generates spratframes format from frame rectangles.
@@ -781,8 +790,10 @@ private:
      * @brief Handles layout for a single image used as a frame.
      * 
      * @param imagePath Path to the image file
+     * @param action Action to take (Replace or Merge)
      */
-    void handleSingleImageLayout(const QString& imagePath);
+    void handleSingleImageLayout(const QString& imagePath, DropAction action = DropAction::Replace, const QColor& backgroundColor = QColor());
+    void applyTransparencyToImage(QImage& image, const QColor& backgroundColor);
 
     /**
      * @brief Processes frames extracted to a temporary directory.
@@ -791,9 +802,11 @@ private:
      * 
      * @param tempPath Path to the temporary directory
      * @param sourcePath Original source path for reference
+     * @param action Action to take (Replace or Merge)
+     * @param backgroundColor Background color to make transparent (optional)
      * @return bool True if frames were found and processed
      */
-    bool processExtractedFrames(const QString& tempPath, const QString& sourcePath);
+    bool processExtractedFrames(const QString& tempPath, const QString& sourcePath, DropAction action = DropAction::Replace, const QColor& backgroundColor = QColor());
 
     // === UI Components ===
     QStackedWidget* m_mainStack;
@@ -862,16 +875,13 @@ private:
     bool m_cliReady = false;
     bool m_isLoading = false;
     QTimer* m_animTimer;
-    QTimer* m_loadingOverlayDelayTimer = nullptr;
     int m_animFrameIndex = 0;
     bool m_animPlaying = false;
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
-    bool m_forceImmediateLoadingOverlay = false;
     AppSettings m_settings;
     CliPaths m_cliPaths;
     SaveConfig m_lastSaveConfig;
-    QTemporaryDir* m_zipTempDir = nullptr;
     QWidget* m_cliInstallOverlay = nullptr;
     QLabel* m_cliInstallOverlayLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;

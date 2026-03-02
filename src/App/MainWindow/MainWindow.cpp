@@ -53,6 +53,7 @@ Q_LOGGING_CATEGORY(autosave, "autosave")
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_session = new ProjectSession(this);
     m_settings = CliToolsConfig::loadAppSettings();
+    m_cliPaths = CliToolsConfig::loadCliPaths();
     setupUi();
     setupCliInstallOverlay();
     setAcceptDrops(true);
@@ -69,24 +70,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
     QTimer::singleShot(100, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
-    m_loadingOverlayDelayTimer = new QTimer(this);
-    m_loadingOverlayDelayTimer->setSingleShot(true);
-
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
-    connect(m_loadingOverlayDelayTimer, &QTimer::timeout, this, [this]() {
-        if (!m_isLoading || m_cliInstallInProgress || !m_cliInstallOverlay || !m_cliInstallOverlayLabel) {
-            return;
-        }
-        m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
-        if (m_cliInstallProgress) {
-            m_cliInstallProgress->hide();
-        }
-        m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-        m_cliInstallOverlay->show();
-        m_cliInstallOverlay->raise();
-        m_loadingOverlayVisible = true;
-    });
-
+    
     // Autosave setup
     m_autosaveTimer = new QTimer(this);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
@@ -108,7 +93,6 @@ MainWindow::~MainWindow() {
         QFile::remove(m_session->frameListPath);
         m_session->frameListPath.clear();
     }
-    clearZipTempDir();
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
@@ -393,14 +377,9 @@ void MainWindow::onSettingsClicked() {
     connect(&dlg, &SettingsDialog::installCliToolsRequested, this, &MainWindow::installCliTools);
     if (dlg.exec() == QDialog::Accepted) {
         m_settings = dlg.getSettings();
+        m_cliPaths = dlg.getCliPaths();
         applySettings();
-        CliToolsConfig::saveAppSettings(m_settings);
-        CliPaths chosen = dlg.getCliPaths();
-    CliToolsConfig::saveOverride("cli/spratlayout", chosen.layoutBinary);
-    CliToolsConfig::saveOverride("cli/spratpack", chosen.packBinary);
-    CliToolsConfig::saveOverride("cli/spratconvert", chosen.convertBinary);
-    CliToolsConfig::saveOverride("cli/spratframes", chosen.framesBinary);
-    CliToolsConfig::saveOverride("cli/spratunpack", chosen.unpackBinary);
+        CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
         checkCliTools();
     }
 }

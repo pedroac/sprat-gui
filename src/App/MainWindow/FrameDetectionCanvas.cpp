@@ -6,12 +6,16 @@
 #include <QScrollBar>
 #include <QApplication>
 #include <QToolTip>
+#include <QPainter>
+#include "ViewUtils.h"
 
 FrameDetectionCanvas::FrameDetectionCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
     setMouseTracking(true);
-    setBackgroundBrush(QColor(90, 90, 90));
+    
+    setBackgroundBrush(QBrush(createCheckerboardPixmap()));
+    
     setZoomRange(0.1, 50.0);
 
     m_splitLineItem = new QGraphicsLineItem();
@@ -22,13 +26,45 @@ FrameDetectionCanvas::FrameDetectionCanvas(QWidget* parent) : ZoomableGraphicsVi
     m_scene->addItem(m_splitLineItem);
 }
 
+void FrameDetectionCanvas::setTransparentColor(const QColor& color) {
+    m_transparentColor = color;
+    if (!m_image.isNull()) {
+        setImage(m_image);
+    }
+}
+
 void FrameDetectionCanvas::setImage(const QPixmap& image) {
     m_image = image;
     if (m_imageItem) {
         m_scene->removeItem(m_imageItem);
         delete m_imageItem;
+        m_imageItem = nullptr;
     }
-    m_imageItem = m_scene->addPixmap(m_image);
+
+    QPixmap pixmap = m_image;
+    if (m_transparentColor.isValid()) {
+        QImage img = pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+        QRgb target = m_transparentColor.rgb();
+        int tr = qRed(target);
+        int tg = qGreen(target);
+        int tb = qBlue(target);
+        const int tolerance = 15; // Handle JPEG artifacts
+
+        for (int y = 0; y < img.height(); ++y) {
+            QRgb* scanLine = reinterpret_cast<QRgb*>(img.scanLine(y));
+            for (int x = 0; x < img.width(); ++x) {
+                QRgb pixel = scanLine[x];
+                if (qAbs(qRed(pixel) - tr) <= tolerance &&
+                    qAbs(qGreen(pixel) - tg) <= tolerance &&
+                    qAbs(qBlue(pixel) - tb) <= tolerance) {
+                    scanLine[x] = 0;
+                }
+            }
+        }
+        pixmap = QPixmap::fromImage(img);
+    }
+
+    m_imageItem = m_scene->addPixmap(pixmap);
     m_imageItem->setZValue(0);
     m_scene->setSceneRect(m_image.rect());
 }
@@ -68,10 +104,28 @@ void FrameDetectionCanvas::drawFrameRectangles() {
 
 void FrameDetectionCanvas::updateFrameVisuals() {
     for (int i = 0; i < m_frameItems.size(); ++i) {
-        QPen pen(m_selected[i] ? Qt::green : Qt::cyan, 2);
-        if (m_hovered[i]) pen.setStyle(Qt::DashLine);
+        QColor color = m_selected[i] ? m_settings.detectionSelectedColor : m_settings.borderColor;
+        Qt::PenStyle style = m_settings.borderStyle;
+        
+        // If hovered, toggle between solid and dashed (or just use dash if default is solid)
+        if (m_hovered[i]) {
+            style = (style == Qt::SolidLine) ? Qt::DashLine : Qt::SolidLine;
+        }
+        
+        QPen pen(color, 3, style);
+        pen.setCosmetic(true);
         m_frameItems[i]->setPen(pen);
     }
+}
+
+void FrameDetectionCanvas::setSettings(const AppSettings& settings) {
+    m_settings = settings;
+    if (m_settings.showCheckerboard) {
+        setBackgroundBrush(QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
+    } else {
+        setBackgroundBrush(m_settings.spriteFrameColor);
+    }
+    updateFrameVisuals();
 }
 
 void FrameDetectionCanvas::mousePressEvent(QMouseEvent* event) {

@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QFileDialog>
+#include <QCheckBox>
 
 SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent)
     : QDialog(parent), m_settings(settings), m_cliPaths(cliPaths) {
@@ -20,17 +21,25 @@ void SettingsDialog::setupUi() {
     QVBoxLayout* layout = new QVBoxLayout(this);
     QFormLayout* form = new QFormLayout();
 
-    m_canvasColorBtn = createColorButton(m_settings.canvasColor);
-    connect(m_canvasColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_canvasColorBtn, m_settings.canvasColor); });
-    form->addRow("Canvas Background:", m_canvasColorBtn);
+    m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
+    connect(m_canvasColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_canvasColorBtn, m_settings.workspaceColor); });
+    form->addRow("Workspace Background:", m_canvasColorBtn);
 
-    m_frameColorBtn = createColorButton(m_settings.frameColor);
-    connect(m_frameColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_frameColorBtn, m_settings.frameColor); });
-    form->addRow("Frame Background:", m_frameColorBtn);
+    m_frameColorBtn = createColorButton(m_settings.spriteFrameColor);
+    connect(m_frameColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_frameColorBtn, m_settings.spriteFrameColor); });
+    form->addRow("Sprite Frame Background:", m_frameColorBtn);
+
+    m_checkerboardCheck = new QCheckBox("Show Transparency Checkerboard", this);
+    m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
+    form->addRow("", m_checkerboardCheck);
 
     m_borderColorBtn = createColorButton(m_settings.borderColor);
     connect(m_borderColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_borderColorBtn, m_settings.borderColor); });
     form->addRow("Border Color:", m_borderColorBtn);
+
+    m_detectionSelectedColorBtn = createColorButton(m_settings.detectionSelectedColor);
+    connect(m_detectionSelectedColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor); });
+    form->addRow("Detection Selected Color:", m_detectionSelectedColorBtn);
 
     m_borderStyleCombo = new QComboBox(this);
     m_borderStyleCombo->addItem("None", (int)Qt::NoPen);
@@ -49,43 +58,31 @@ void SettingsDialog::setupUi() {
     layout->addLayout(form);
 
     QGroupBox* cliGroup = new QGroupBox("CLI Tools", this);
-    QVBoxLayout* cliGroupLayout = new QVBoxLayout(cliGroup);
-    QFormLayout* cliForm = new QFormLayout();
+    QFormLayout* cliForm = new QFormLayout(cliGroup);
+    
+    QHBoxLayout* baseDirLayout = new QHBoxLayout();
+    m_cliBaseDirEdit = new QLineEdit(m_cliPaths.baseDir, this);
+    m_cliBaseDirEdit->setReadOnly(true);
+    m_cliBaseDirBtn = new QPushButton("Change...", this);
+    connect(m_cliBaseDirBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
+    baseDirLayout->addWidget(m_cliBaseDirEdit);
+    baseDirLayout->addWidget(m_cliBaseDirBtn);
+    cliForm->addRow("Base Directory:", baseDirLayout);
 
-    m_layoutPathEdit = new QLineEdit(m_cliPaths.layoutBinary, this);
-    QPushButton* layoutBrowse = new QPushButton("Browse", this);
-    connect(layoutBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_layoutPathEdit); });
-    cliForm->addRow("spratlayout:", createCliPathWidget(m_layoutPathEdit, layoutBrowse));
-
-    m_packPathEdit = new QLineEdit(m_cliPaths.packBinary, this);
-    QPushButton* packBrowse = new QPushButton("Browse", this);
-    connect(packBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_packPathEdit); });
-    cliForm->addRow("spratpack:", createCliPathWidget(m_packPathEdit, packBrowse));
-
-    m_convertPathEdit = new QLineEdit(m_cliPaths.convertBinary, this);
-    QPushButton* convertBrowse = new QPushButton("Browse", this);
-    connect(convertBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_convertPathEdit); });
-    cliForm->addRow("spratconvert:", createCliPathWidget(m_convertPathEdit, convertBrowse));
-
-    m_framesPathEdit = new QLineEdit(m_cliPaths.framesBinary, this);
-    QPushButton* framesBrowse = new QPushButton("Browse", this);
-    connect(framesBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_framesPathEdit); });
-    cliForm->addRow("spratframes:", createCliPathWidget(m_framesPathEdit, framesBrowse));
-
-    m_unpackPathEdit = new QLineEdit(m_cliPaths.unpackBinary, this);
-    QPushButton* unpackBrowse = new QPushButton("Browse", this);
-    connect(unpackBrowse, &QPushButton::clicked, this, [this]() { browseCliBinary(m_unpackPathEdit); });
-    cliForm->addRow("spratunpack:", createCliPathWidget(m_unpackPathEdit, unpackBrowse));
-
-    cliGroupLayout->addLayout(cliForm);
     m_installCliBtn = new QPushButton("Install CLI Tools", this);
     connect(m_installCliBtn, &QPushButton::clicked, this, &SettingsDialog::installCliToolsRequested);
-    cliGroupLayout->addWidget(m_installCliBtn, 0, Qt::AlignLeft);
+    cliForm->addRow("", m_installCliBtn);
+    
     layout->addWidget(cliGroup);
 
+    updateCliUi();
+
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    QPushButton* resetBtn = buttons->addButton("Reset", QDialogButtonBox::ResetRole);
+
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(resetBtn, &QPushButton::clicked, this, &SettingsDialog::resetToDefaults);
     layout->addWidget(buttons);
 }
 
@@ -109,34 +106,48 @@ void SettingsDialog::pickColor(QPushButton* btn, QColor& color) {
     }
 }
 
+void SettingsDialog::pickCliBaseDir() {
+    QString dir = QFileDialog::getExistingDirectory(this, "Select CLI Tools Directory", m_cliPaths.baseDir);
+    if (!dir.isEmpty()) {
+        m_cliPaths.baseDir = dir;
+        m_cliBaseDirEdit->setText(dir);
+        updateCliUi();
+    }
+}
+
+void SettingsDialog::updateCliUi() {
+    // Check if tools are present (either in baseDir or PATH)
+    bool allFound = !m_cliPaths.layoutBinary.isEmpty() && 
+                    !m_cliPaths.packBinary.isEmpty() && 
+                    !m_cliPaths.framesBinary.isEmpty();
+    
+    if (allFound) {
+        m_installCliBtn->setText("Update CLI Tools");
+    } else {
+        m_installCliBtn->setText("Install CLI Tools");
+    }
+}
+
+void SettingsDialog::resetToDefaults() {
+    m_settings = AppSettings();
+    updateColorButton(m_canvasColorBtn, m_settings.workspaceColor);
+    updateColorButton(m_frameColorBtn, m_settings.spriteFrameColor);
+    updateColorButton(m_borderColorBtn, m_settings.borderColor);
+    updateColorButton(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor);
+    m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
+    int index = m_borderStyleCombo->findData((int)m_settings.borderStyle);
+    if (index >= 0) {
+        m_borderStyleCombo->setCurrentIndex(index);
+    }
+}
+
 AppSettings SettingsDialog::getSettings() const {
     AppSettings s = m_settings;
+    s.showCheckerboard = m_checkerboardCheck->isChecked();
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     return s;
 }
 
 CliPaths SettingsDialog::getCliPaths() const {
-    CliPaths paths;
-    paths.layoutBinary = m_layoutPathEdit->text().trimmed();
-    paths.packBinary = m_packPathEdit->text().trimmed();
-    paths.convertBinary = m_convertPathEdit->text().trimmed();
-    paths.framesBinary = m_framesPathEdit->text().trimmed();
-    paths.unpackBinary = m_unpackPathEdit->text().trimmed();
-    return paths;
-}
-
-QWidget* SettingsDialog::createCliPathWidget(QLineEdit* edit, QPushButton* btn) {
-    QWidget* container = new QWidget(this);
-    QHBoxLayout* layout = new QHBoxLayout(container);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(edit);
-    layout->addWidget(btn);
-    return container;
-}
-
-void SettingsDialog::browseCliBinary(QLineEdit* target) {
-    QString path = QFileDialog::getOpenFileName(this, "Select CLI Binary", QString(), "Executable Files (*)");
-    if (!path.isEmpty()) {
-        target->setText(path);
-    }
+    return m_cliPaths;
 }

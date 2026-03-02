@@ -28,60 +28,47 @@ void MainWindow::checkCliTools() {
 }
 
 bool MainWindow::resolveCliBinaries(QStringList& missing) {
-    QString binDir = CliToolsConfig::loadBinDir();
-    CliPaths overrides = CliToolsConfig::loadOverrides();
-
-    m_spratLayoutBin = CliToolsConfig::resolveBinary("spratlayout", overrides.layoutBinary, binDir);
-    if (m_spratLayoutBin.isEmpty()) {
+    m_cliPaths.layoutBinary = CliToolsConfig::resolveBinary("spratlayout", m_cliPaths.baseDir);
+    if (m_cliPaths.layoutBinary.isEmpty()) {
         missing << "spratlayout";
     }
 
-    m_spratPackBin = CliToolsConfig::resolveBinary("spratpack", overrides.packBinary, binDir);
-    if (m_spratPackBin.isEmpty()) {
+    m_cliPaths.packBinary = CliToolsConfig::resolveBinary("spratpack", m_cliPaths.baseDir);
+    if (m_cliPaths.packBinary.isEmpty()) {
         missing << "spratpack";
     }
 
-    m_spratConvertBin = CliToolsConfig::resolveBinary("spratconvert", overrides.convertBinary, binDir);
-    if (m_spratConvertBin.isEmpty()) {
+    m_cliPaths.convertBinary = CliToolsConfig::resolveBinary("spratconvert", m_cliPaths.baseDir);
+    if (m_cliPaths.convertBinary.isEmpty()) {
         missing << "spratconvert";
     }
 
-    m_spratFramesBin = CliToolsConfig::resolveBinary("spratframes", overrides.framesBinary, binDir);
-    if (m_spratFramesBin.isEmpty()) {
+    m_cliPaths.framesBinary = CliToolsConfig::resolveBinary("spratframes", m_cliPaths.baseDir);
+    if (m_cliPaths.framesBinary.isEmpty()) {
         missing << "spratframes";
     }
 
-    m_spratUnpackBin = CliToolsConfig::resolveBinary("spratunpack", overrides.unpackBinary, binDir);
-    if (m_spratUnpackBin.isEmpty()) {
+    m_cliPaths.unpackBinary = CliToolsConfig::resolveBinary("spratunpack", m_cliPaths.baseDir);
+    if (m_cliPaths.unpackBinary.isEmpty()) {
         missing << "spratunpack";
     }
 
-    m_cliPaths.layoutBinary = overrides.layoutBinary.isEmpty() ? m_spratLayoutBin : overrides.layoutBinary;
-    m_cliPaths.packBinary = overrides.packBinary.isEmpty() ? m_spratPackBin : overrides.packBinary;
-    m_cliPaths.convertBinary = overrides.convertBinary.isEmpty() ? m_spratConvertBin : overrides.convertBinary;
-    m_cliPaths.framesBinary = overrides.framesBinary.isEmpty() ? m_spratFramesBin : overrides.framesBinary;
-    m_cliPaths.unpackBinary = overrides.unpackBinary.isEmpty() ? m_spratUnpackBin : overrides.unpackBinary;
+    m_spratLayoutBin = m_cliPaths.layoutBinary;
+    m_spratPackBin = m_cliPaths.packBinary;
+    m_spratConvertBin = m_cliPaths.convertBinary;
+    m_spratFramesBin = m_cliPaths.framesBinary;
+    m_spratUnpackBin = m_cliPaths.unpackBinary;
 
-    return missing.isEmpty();
+    return !m_spratLayoutBin.isEmpty() && !m_spratPackBin.isEmpty() && !m_spratFramesBin.isEmpty();
 }
 
 void MainWindow::showMissingCliDialog(const QStringList& missing) {
     MissingCliAction action = CliToolsUi::askMissingCliAction(this, missing);
     if (action == MissingCliAction::Install) {
         installCliTools();
-    } else if (action == MissingCliAction::ProvidePath) {
-        openCliPathDialog();
     } else {
         m_statusLabel->setText(tr("CLI missing"));
         QApplication::quit();
-    }
-}
-
-void MainWindow::openCliPathDialog() {
-    QString dir = QFileDialog::getExistingDirectory(this, tr("Select folder containing sprat binaries"));
-    if (!dir.isEmpty()) {
-        CliToolsConfig::saveBinDir(dir);
-        checkCliTools();
     }
 }
 
@@ -93,7 +80,13 @@ void MainWindow::installCliTools() {
     m_cliToolInstaller->installCliTools();
 }
 
-void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
+void MainWindow::loadFolder(const QString& path, DropAction action) {
+    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+        return;
+    }
+    if (action == DropAction::Cancel) {
+        return;
+    }
     m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
     QString targetPath = path;
@@ -110,19 +103,26 @@ void MainWindow::loadFolder(const QString& path, bool confirmReplace) {
         QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
         return;
     }
-    m_session->currentFolder = targetPath;
-    m_folderLabel->setText(tr("Folder: ") + QDir(targetPath).absolutePath());
-    m_session->layoutSourcePath = QDir(targetPath).absolutePath();
-    m_session->layoutSourceIsList = false;
-    m_session->cachedLayoutOutput.clear();
-    m_session->cachedLayoutScale = 1.0;
+    
+    const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
+    if (action == DropAction::Merge) {
+        m_session->activeFramePaths.append(absolutePaths);
+    } else {
+        m_session->currentFolder = targetPath;
+        m_folderLabel->setText(tr("Folder: ") + QDir(targetPath).absolutePath());
+        m_session->layoutSourcePath = QDir(targetPath).absolutePath();
+        m_session->layoutSourceIsList = false;
+        m_session->cachedLayoutOutput.clear();
+        m_session->cachedLayoutScale = 1.0;
+        m_session->activeFramePaths = absolutePaths;
+    }
+    
     if (!m_session->frameListPath.isEmpty()) {
         QFile::remove(m_session->frameListPath);
         m_session->frameListPath.clear();
     }
-    const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
+    
     const int imageCount = absolutePaths.size();
-    m_session->activeFramePaths = absolutePaths;
     QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imageCount, this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(1000);
@@ -209,9 +209,6 @@ void MainWindow::showCliInstallOverlay() {
         return;
     }
     m_cliInstallInProgress = true;
-    if (m_loadingOverlayDelayTimer && m_loadingOverlayDelayTimer->isActive()) {
-        m_loadingOverlayDelayTimer->stop();
-    }
     if (m_cliInstallProgress) {
         m_cliInstallProgress->show();
     }

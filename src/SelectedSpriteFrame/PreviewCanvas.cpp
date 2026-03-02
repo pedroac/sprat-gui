@@ -5,11 +5,12 @@
 #include <QAction>
 #include <QClipboard>
 #include <QApplication>
+#include "ViewUtils.h"
 
 PreviewCanvas::PreviewCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
-    setBackgroundBrush(QColor(90, 90, 90));
+    setBackgroundBrush(m_settings.workspaceColor);
 
     m_overlay = new EditorOverlayItem();
     m_scene->addItem(m_overlay);
@@ -36,7 +37,11 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
             if (pix.isNull()) continue;
 
             auto* bgItem = new QGraphicsRectItem(pix.rect());
-            bgItem->setBrush(m_settings.frameColor);
+            if (m_settings.showCheckerboard) {
+                bgItem->setBrush(QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
+            } else {
+                bgItem->setBrush(m_settings.spriteFrameColor);
+            }
             bgItem->setPen(Qt::NoPen);
             bgItem->setZValue(-1);
             m_scene->addItem(bgItem);
@@ -132,11 +137,19 @@ void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
 
 void PreviewCanvas::setSettings(const AppSettings& settings) {
     m_settings = settings;
-    setBackgroundBrush(settings.canvasColor);
+    setBackgroundBrush(settings.workspaceColor);
+
     QPen borderPen(settings.borderColor, 2, settings.borderStyle);
     borderPen.setCosmetic(true);
     for (auto* item : m_borderItems) {
-        if (item->zValue() == -1) item->setBrush(settings.frameColor); 
-        else item->setPen(borderPen); 
+        if (item->zValue() == -1) {
+            if (settings.showCheckerboard) {
+                item->setBrush(QBrush(createCheckerboardPixmap(settings.spriteFrameColor)));
+            } else {
+                item->setBrush(settings.spriteFrameColor);
+            }
+        } else {
+            item->setPen(borderPen);
+        }
     }
 }

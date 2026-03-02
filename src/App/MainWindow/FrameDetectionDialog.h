@@ -10,7 +10,7 @@
 class FrameDetectionDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& initialFrames, QWidget* parent = nullptr);
+    explicit FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& initialFrames, const AppSettings& settings, const QColor& backgroundColor = QColor(), QWidget* parent = nullptr);
     ~FrameDetectionDialog() override;
 
     QVector<QRect> getSelectedFrames() const;

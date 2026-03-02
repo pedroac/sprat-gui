@@ -15,13 +15,18 @@
 #include <QPoint>
 #include <QDebug>
 #include <QCollator>
+#include <QRegularExpression>
 #include <algorithm>
 
 #include "MainWindow.h"
 #include "FrameDetectionDialog.h"
 
-void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool confirmReplace) {
-    if (confirmReplace && !confirmLayoutReplacement()) {
+void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
+    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+        return;
+    }
+    
+    if (action == DropAction::Cancel) {
         return;
     }
     
@@ -39,32 +44,38 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool conf
     setLoading(true);
     
     // Use spratframes to detect frames in the image
-    QVector<QRect> detectedFrames = detectFramesInImage(imagePath);
+    FrameDetectionResult detection = detectFramesInImage(imagePath);
+    setLoading(false);
     
-    if (detectedFrames.isEmpty()) {
+    if (detection.frames.isEmpty()) {
         // No frames detected by spratframes, use the image as a single frame
         m_statusLabel->setText(tr("No frames detected, using image as single frame"));
-        handleSingleImageLayout(imagePath);
+        handleSingleImageLayout(imagePath, action, detection.backgroundColor);
         return;
     }
     
     // Show modal dialog with detected frames
-    FrameDetectionDialog dialog(imagePath, detectedFrames, this);
+    FrameDetectionDialog dialog(imagePath, detection.frames, m_settings, detection.backgroundColor, this);
     if (dialog.exec() == QDialog::Accepted) {
         if (dialog.userAccepted()) {
-            // User accepted the detected frames, generate spratframes format and use spratunpack
+            m_loadingUiMessage = tr("Extracting frames...");
+            setLoading(true);
+            
+            // ... (keep the same)
             QVector<QRect> selectedFrames = dialog.getSelectedFrames();
             
-            // Use persistent temp dir (m_zipTempDir) instead of local one to ensure files persist
-            clearZipTempDir();
-            m_zipTempDir = new QTemporaryDir();
-            if (!m_zipTempDir->isValid()) {
+            // Use persistent temp dir in session to ensure files persist
+            if (action == DropAction::Replace) {
+                m_session->clearTempDirs();
+            }
+            auto tempDir = std::make_unique<QTemporaryDir>();
+            if (!tempDir->isValid()) {
                 m_statusLabel->setText(tr("Error: Could not create temporary directory"));
                 setLoading(false);
-                delete m_zipTempDir;
-                m_zipTempDir = nullptr;
                 return;
             }
+            QString tempPath = tempDir->path();
+            m_session->addTempDir(std::move(tempDir));
             
             // Generate spratframes format
             QString framesData = generateSpratFramesFormat(selectedFrames, imagePath);
@@ -73,7 +84,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool conf
             // spratunpack <input_image> --frames - --output <output_directory>
             QProcess unpackProcess;
             QStringList args;
-            args << imagePath << "--frames" << "-" << "--output" << m_zipTempDir->path();
+            args << imagePath << "--frames" << "-" << "--output" << tempPath;
             unpackProcess.start(m_spratUnpackBin, args);
             
             // Write frames data to stdin
@@ -83,7 +94,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool conf
             unpackProcess.waitForFinished();
             
             if (unpackProcess.exitCode() == 0) {
-                if (processExtractedFrames(m_zipTempDir->path(), imagePath)) {
+                if (processExtractedFrames(tempPath, imagePath, action, detection.backgroundColor)) {
                     onRunLayout();
                 }
             } else {
@@ -94,7 +105,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool conf
         } else {
             // User rejected, use image as single frame
             m_statusLabel->setText(tr("Using image as single frame"));
-            handleSingleImageLayout(imagePath);
+            handleSingleImageLayout(imagePath, action, detection.backgroundColor);
         }
     } else {
         // User cancelled the dialog
@@ -103,8 +114,12 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, bool conf
     }
 }
 
-void MainWindow::loadTarFile(const QString& tarPath, bool confirmReplace) {
-    if (confirmReplace && !confirmLayoutReplacement()) {
+void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
+    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+        return;
+    }
+    
+    if (action == DropAction::Cancel) {
         return;
     }
     
@@ -121,22 +136,24 @@ void MainWindow::loadTarFile(const QString& tarPath, bool confirmReplace) {
     m_loadingUiMessage = tr("Extracting frames from tar file...");
     setLoading(true);
     
-    // Use persistent temp dir (m_zipTempDir) to ensure files persist for spratlayout
-    clearZipTempDir();
-    m_zipTempDir = new QTemporaryDir();
-    if (!m_zipTempDir->isValid()) {
+    // Use persistent temp dir in session to ensure files persist
+    if (action == DropAction::Replace) {
+        m_session->clearTempDirs();
+    }
+    auto tempDir = std::make_unique<QTemporaryDir>();
+    if (!tempDir->isValid()) {
         m_statusLabel->setText(tr("Error: Could not create temporary directory"));
         setLoading(false);
-        delete m_zipTempDir;
-        m_zipTempDir = nullptr;
         return;
     }
+    QString tempPath = tempDir->path();
+    m_session->addTempDir(std::move(tempDir));
 
     // Use tar directly to extract the file
     // tar -xf <tarPath> -C <tempDir>
     QProcess tarProcess;
     tarProcess.setProgram("tar");
-    tarProcess.setArguments(QStringList() << "-xf" << tarPath << "-C" << m_zipTempDir->path());
+    tarProcess.setArguments(QStringList() << "-xf" << tarPath << "-C" << tempPath);
 
     tarProcess.start();
     bool finished = tarProcess.waitForFinished();
@@ -148,16 +165,16 @@ void MainWindow::loadTarFile(const QString& tarPath, bool confirmReplace) {
         return;
     }
     
-    if (processExtractedFrames(m_zipTempDir->path(), tarPath)) {
+    if (processExtractedFrames(tempPath, tarPath, action)) {
         onRunLayout();
     }
 }
 
-QVector<QRect> MainWindow::detectFramesInImage(const QString& imagePath) {
-    QVector<QRect> frames;
+MainWindow::FrameDetectionResult MainWindow::detectFramesInImage(const QString& imagePath) {
+    FrameDetectionResult result;
     
     if (m_spratFramesBin.isEmpty()) {
-        return frames;
+        return result;
     }
     
     QProcess framesProcess;
@@ -168,7 +185,7 @@ QVector<QRect> MainWindow::detectFramesInImage(const QString& imagePath) {
     if (framesProcess.exitCode() != 0) {
         QString error = QString::fromUtf8(framesProcess.readAllStandardError());
         qWarning() << "spratframes error:" << error;
-        return frames;
+        return result;
     }
     
     QString output = QString::fromUtf8(framesProcess.readAllStandardOutput());
@@ -176,6 +193,7 @@ QVector<QRect> MainWindow::detectFramesInImage(const QString& imagePath) {
     // Parse spratframes output to extract frame rectangles
     // Expected format:
     // path <filepath>
+    // background r,g,b
     // sprite x,y w,h
     // (possibly several sprite lines)
     QTextStream stream(&output);
@@ -186,8 +204,38 @@ QVector<QRect> MainWindow::detectFramesInImage(const QString& imagePath) {
             continue;
         }
         
-        // Skip path and background lines
-        if (line.startsWith("path ") || line.startsWith("background ")) {
+        // Skip path lines
+        if (line.startsWith("path ")) {
+            continue;
+        }
+
+        // Parse background lines: "background r,g,b", "background r g b", or "background hex"
+        if (line.startsWith("background")) {
+            QString bgColorStr = line.mid(10).trimmed();
+            if (bgColorStr.startsWith(":")) {
+                bgColorStr = bgColorStr.mid(1).trimmed();
+            }
+            
+            // Support hex colors (e.g., "b9fcc9" or "#b9fcc9")
+            if (bgColorStr.startsWith("#") || (bgColorStr.length() == 6 && QRegularExpression("^[0-9a-fA-F]{6}$").match(bgColorStr).hasMatch())) {
+                QString hexStr = bgColorStr.startsWith("#") ? bgColorStr : "#" + bgColorStr;
+                result.backgroundColor = QColor(hexStr);
+                if (result.backgroundColor.isValid()) {
+                    continue;
+                }
+            }
+
+            // Support both comma-separated and space-separated RGB values
+            QStringList parts = bgColorStr.split(QRegularExpression("[,\\s]+"), Qt::SkipEmptyParts);
+            if (parts.size() >= 3) {
+                bool rOk, gOk, bOk;
+                int r = parts[0].toInt(&rOk);
+                int g = parts[1].toInt(&gOk);
+                int b = parts[2].toInt(&bOk);
+                if (rOk && gOk && bOk) {
+                    result.backgroundColor = QColor(r, g, b);
+                }
+            }
             continue;
         }
         
@@ -211,13 +259,13 @@ QVector<QRect> MainWindow::detectFramesInImage(const QString& imagePath) {
                     int h = sizeParts[1].toInt(&ok);
                     if (!ok) continue;
                     
-                    frames.append(QRect(x, y, w, h));
+                    result.frames.append(QRect(x, y, w, h));
                 }
             }
         }
     }
     
-    return frames;
+    return result;
 }
 
 QString MainWindow::generateSpratFramesFormat(const QVector<QRect>& frames, const QString& imagePath) {
@@ -233,24 +281,80 @@ QString MainWindow::generateSpratFramesFormat(const QVector<QRect>& frames, cons
     return format;
 }
 
-void MainWindow::handleSingleImageLayout(const QString& imagePath) {
-    // For a single image, we need to create a simple layout model
-    // This simulates what spratlayout would do for a single image
+void MainWindow::applyTransparencyToImage(QImage& img, const QColor& backgroundColor) {
+    if (!backgroundColor.isValid()) return;
+
+    QRgb target = backgroundColor.rgb();
+    int tr = qRed(target);
+    int tg = qGreen(target);
+    int tb = qBlue(target);
+    const int tolerance = 15; // Handle JPEG artifacts
+
+    if (img.format() != QImage::Format_ARGB32) {
+        img = img.convertToFormat(QImage::Format_ARGB32);
+    }
+
+    for (int y = 0; y < img.height(); ++y) {
+        QRgb* scanLine = reinterpret_cast<QRgb*>(img.scanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            QRgb pixel = scanLine[x];
+            if (qAbs(qRed(pixel) - tr) <= tolerance &&
+                qAbs(qGreen(pixel) - tg) <= tolerance &&
+                qAbs(qBlue(pixel) - tb) <= tolerance) {
+                scanLine[x] = 0;
+            }
+        }
+    }
+}
+
+void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction action, const QColor& backgroundColor) {
+    QString finalPath = imagePath;
     
+    if (backgroundColor.isValid()) {
+        // Create a temporary directory and save the processed image there
+        auto tempDir = std::make_unique<QTemporaryDir>();
+        if (tempDir->isValid()) {
+            QString tempPath = tempDir->path();
+            QFileInfo info(imagePath);
+            QString fileName = info.fileName();
+            // Force PNG for transparency support if original might not support it well or is JPEG
+            if (!fileName.toLower().endsWith(".png")) {
+                fileName = info.baseName() + "_transparent.png";
+            }
+            QString outputPath = QDir(tempPath).absoluteFilePath(fileName);
+            
+            QImage img(imagePath);
+            if (!img.isNull()) {
+                applyTransparencyToImage(img, backgroundColor);
+                if (img.save(outputPath)) {
+                    finalPath = outputPath;
+                    m_session->addTempDir(std::move(tempDir));
+                }
+            }
+        }
+    }
+
+    if (action == DropAction::Merge) {
+        m_session->activeFramePaths.append(finalPath);
+        onRunLayout();
+        return;
+    }
+
+    // For a single image, we need to create a simple layout model
     LayoutModel singleImageModel;
     singleImageModel.scale = 1.0;
     
     // Create a sprite for the single image
     SpritePtr sprite = std::make_shared<Sprite>();
-    sprite->path = imagePath;
+    sprite->path = finalPath;
     sprite->name = QFileInfo(imagePath).baseName();
     
     // Get image dimensions
-    QPixmap pixmap(imagePath);
-    if (!pixmap.isNull()) {
-        sprite->rect = QRect(0, 0, pixmap.width(), pixmap.height());
-        sprite->pivotX = pixmap.width() / 2;
-        sprite->pivotY = pixmap.height() / 2;
+    QImage img(finalPath);
+    if (!img.isNull()) {
+        sprite->rect = QRect(0, 0, img.width(), img.height());
+        sprite->pivotX = img.width() / 2;
+        sprite->pivotY = img.height() / 2;
     } else {
         // Fallback dimensions if image can't be loaded
         sprite->rect = QRect(0, 0, 100, 100);
@@ -274,7 +378,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath) {
     setLoading(false);
 }
 
-bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& sourcePath) {
+bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& sourcePath, DropAction action, const QColor& backgroundColor) {
     QDir extractDir(tempPath);
     QStringList imageFiles = extractDir.entryList(QStringList() << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif" << "*.webp" << "*.tga" << "*.dds", QDir::Files);
     
@@ -282,6 +386,18 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         m_statusLabel->setText(tr("No image files found after extraction"));
         setLoading(false);
         return false;
+    }
+
+    // If a background color is provided, make it transparent in all extracted frames
+    if (backgroundColor.isValid()) {
+        for (const QString& fileName : imageFiles) {
+            QString filePath = extractDir.absoluteFilePath(fileName);
+            QImage img(filePath);
+            if (!img.isNull()) {
+                applyTransparencyToImage(img, backgroundColor);
+                img.save(filePath);
+            }
+        }
     }
 
     // Sort frames naturally (e.g. 1, 2, 10 instead of 1, 10, 2)
@@ -295,10 +411,14 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         framePaths.append(extractDir.absoluteFilePath(fileName));
     }
     
-    m_session->activeFramePaths = framePaths;
-    m_session->layoutSourcePath = tempPath;
-    m_session->layoutSourceIsList = false;
-    m_session->currentFolder = QFileInfo(sourcePath).absoluteDir().absolutePath();
+    if (action == DropAction::Merge) {
+        m_session->activeFramePaths.append(framePaths);
+    } else {
+        m_session->activeFramePaths = framePaths;
+        m_session->layoutSourcePath = tempPath;
+        m_session->layoutSourceIsList = false;
+        m_session->currentFolder = QFileInfo(sourcePath).absoluteDir().absolutePath();
+    }
     
     if (!m_session->frameListPath.isEmpty()) {
         QFile::remove(m_session->frameListPath);

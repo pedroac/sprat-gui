@@ -8,6 +8,6 @@ void SettingsCoordinator::apply(const AppSettings& settings, LayoutCanvas* canva
     canvas->setSettings(settings);
     previewView->setSettings(settings);
     if (animCanvas) {
-        animCanvas->setBackgroundBrush(settings.canvasColor);
+        animCanvas->setSettings(settings);
     }
 }

@@ -6,7 +6,7 @@ echo "Configuring..."
 cmake .
 
 echo "Building..."
-cmake --build . --parallel
+cmake --build . --parallel 2
 
 echo "Testing..."
 ctest --output-on-failure

@@ -314,18 +314,25 @@ struct SaveConfig {
  */
 struct AppSettings {
     /**
-     * @brief Background color of the canvas.
+     * @brief Background color of the workspace (outside the sprite area).
      * 
      * Default: QColor(90, 90, 90) - dark gray
      */
-    QColor canvasColor = QColor(90, 90, 90);
+    QColor workspaceColor = QColor(90, 90, 90);
 
     /**
-     * @brief Color of sprite frames.
+     * @brief Background color of the sprite frames.
      * 
-     * Default: QColor(240, 240, 240) - light gray
+     * Default: #ffffff - white
      */
-    QColor frameColor = QColor(240, 240, 240);
+    QColor spriteFrameColor = QColor("#ffffff");
+
+    /**
+     * @brief Whether to show checkerboard background for transparency.
+     * 
+     * Default: true
+     */
+    bool showCheckerboard = true;
 
     /**
      * @brief Whether to show borders around sprites.
@@ -342,11 +349,18 @@ struct AppSettings {
     QColor borderColor = QColor(86, 86, 86);
 
     /**
+     * @brief Color for selected frames in detection dialog.
+     * 
+     * Default: Qt::green
+     */
+    QColor detectionSelectedColor = Qt::green;
+
+    /**
      * @brief Style of borders around sprites.
      * 
-     * Default: Qt::SolidLine
+     * Default: Qt::DashLine
      */
-    Qt::PenStyle borderStyle = Qt::SolidLine;
+    Qt::PenStyle borderStyle = Qt::DashLine;
 };
 
 /**
@@ -357,6 +371,11 @@ struct AppSettings {
  * used by the application for layout generation and processing.
  */
 struct CliPaths {
+    /**
+     * @brief Base directory where CLI tools are located.
+     */
+    QString baseDir;
+
     /**
      * @brief Path to spratlayout binary.
      * 

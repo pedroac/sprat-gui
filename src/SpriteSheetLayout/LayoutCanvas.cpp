@@ -17,6 +17,7 @@
 #include <QSet>
 #include <QKeySequence>
 #include <limits>
+#include "ViewUtils.h"
 
 namespace {
     const QColor kSelectionColor(10, 125, 255);
@@ -220,7 +221,11 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
         ++it;
     }
     
-    m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.frameColor));
+    if (m_settings.showCheckerboard) {
+        m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
+    } else {
+        m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.spriteFrameColor));
+    }
     m_atlasBgItem->setZValue(-100);
 
     QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
@@ -330,9 +335,13 @@ void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString&
 
 void LayoutCanvas::setSettings(const AppSettings& settings) {
     m_settings = settings;
-    setBackgroundBrush(settings.canvasColor);
+    setBackgroundBrush(settings.workspaceColor);
     if (m_atlasBgItem) {
-        m_atlasBgItem->setBrush(settings.frameColor);
+        if (settings.showCheckerboard) {
+            m_atlasBgItem->setBrush(QBrush(createCheckerboardPixmap(settings.spriteFrameColor)));
+        } else {
+            m_atlasBgItem->setBrush(settings.spriteFrameColor);
+        }
     }
     updateBorderHighlights();
     update();

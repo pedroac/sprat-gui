@@ -12,103 +12,98 @@ QString CliToolsConfig::configPath() {
     return QDir::homePath() + "/.config/sprat/sprat.conf";
 }
 
-QString CliToolsConfig::loadBinDir() {
-    QSettings settings(configPath(), QSettings::IniFormat);
-    return settings.value("cli/bin_dir").toString();
-}
-
-CliPaths CliToolsConfig::loadOverrides() {
-    QSettings settings(configPath(), QSettings::IniFormat);
-    CliPaths paths;
-    paths.layoutBinary = settings.value("cli/spratlayout").toString();
-    paths.packBinary = settings.value("cli/spratpack").toString();
-    paths.convertBinary = settings.value("cli/spratconvert").toString();
-    paths.framesBinary = settings.value("cli/spratframes").toString();
-    paths.unpackBinary = settings.value("cli/spratunpack").toString();
-    return paths;
-}
-
 AppSettings CliToolsConfig::loadAppSettings() {
     QSettings settings(configPath(), QSettings::IniFormat);
     AppSettings out;
 
-    const QString canvasColor = settings.value("settings/canvas_color").toString();
-    if (!canvasColor.isEmpty()) {
-        out.canvasColor = QColor(canvasColor);
+    const QString workspaceColor = settings.value("settings/workspace_color", settings.value("settings/canvas_color")).toString();
+    if (!workspaceColor.isEmpty()) {
+        out.workspaceColor = QColor(workspaceColor);
     }
-    const QString frameColor = settings.value("settings/frame_color").toString();
-    if (!frameColor.isEmpty()) {
-        out.frameColor = QColor(frameColor);
+    const QString spriteFrameColor = settings.value("settings/sprite_frame_color", settings.value("settings/frame_color")).toString();
+    if (!spriteFrameColor.isEmpty()) {
+        out.spriteFrameColor = QColor(spriteFrameColor);
     }
+    out.showCheckerboard = settings.value("settings/show_checkerboard", out.showCheckerboard).toBool();
     out.showBorders = settings.value("settings/show_borders", out.showBorders).toBool();
 
     const QString borderColor = settings.value("settings/border_color").toString();
     if (!borderColor.isEmpty()) {
         out.borderColor = QColor(borderColor);
     }
+    const QString detectionSelectedColor = settings.value("settings/detection_selected_color").toString();
+    if (!detectionSelectedColor.isEmpty()) {
+        out.detectionSelectedColor = QColor(detectionSelectedColor);
+    }
     out.borderStyle = static_cast<Qt::PenStyle>(
         settings.value("settings/border_style", static_cast<int>(out.borderStyle)).toInt());
     return out;
 }
 
-void CliToolsConfig::saveBinDir(const QString& path) {
-    QString pathToConfig = configPath();
-    QDir().mkpath(QFileInfo(pathToConfig).path());
-    QSettings settings(pathToConfig, QSettings::IniFormat);
-    settings.setValue("cli/bin_dir", path);
+CliPaths CliToolsConfig::loadCliPaths() {
+    QSettings settings(configPath(), QSettings::IniFormat);
+    CliPaths out;
+    out.baseDir = settings.value("cli/base_dir").toString();
+    out.layoutBinary = resolveBinary("spratlayout", out.baseDir);
+    out.packBinary = resolveBinary("spratpack", out.baseDir);
+    out.convertBinary = resolveBinary("spratconvert", out.baseDir);
+    out.framesBinary = resolveBinary("spratframes", out.baseDir);
+    out.unpackBinary = resolveBinary("spratunpack", out.baseDir);
+    return out;
 }
 
-void CliToolsConfig::saveOverride(const QString& key, const QString& path) {
-    QString pathToConfig = configPath();
-    QDir().mkpath(QFileInfo(pathToConfig).path());
-    QSettings settings(pathToConfig, QSettings::IniFormat);
-    if (path.isEmpty()) {
-        settings.remove(key);
-    } else {
-        settings.setValue(key, path);
-    }
-}
-
-void CliToolsConfig::saveAppSettings(const AppSettings& settings) {
+void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths& cliPaths) {
     QString pathToConfig = configPath();
     QDir().mkpath(QFileInfo(pathToConfig).path());
     QSettings qsettings(pathToConfig, QSettings::IniFormat);
-    qsettings.setValue("settings/canvas_color", settings.canvasColor.name(QColor::HexArgb));
-    qsettings.setValue("settings/frame_color", settings.frameColor.name(QColor::HexArgb));
+    qsettings.setValue("settings/workspace_color", settings.workspaceColor.name(QColor::HexArgb));
+    qsettings.setValue("settings/sprite_frame_color", settings.spriteFrameColor.name(QColor::HexArgb));
+    qsettings.setValue("settings/show_checkerboard", settings.showCheckerboard);
     qsettings.setValue("settings/show_borders", settings.showBorders);
     qsettings.setValue("settings/border_color", settings.borderColor.name(QColor::HexArgb));
+    qsettings.setValue("settings/detection_selected_color", settings.detectionSelectedColor.name(QColor::HexArgb));
     qsettings.setValue("settings/border_style", static_cast<int>(settings.borderStyle));
+    qsettings.setValue("cli/base_dir", cliPaths.baseDir);
 }
 
-QString CliToolsConfig::resolveBinary(const QString& name, const QString& overridePath, const QString& binDir) {
-    if (!overridePath.isEmpty()) {
-        QFileInfo overrideInfo(overridePath);
-        if (overrideInfo.exists() && overrideInfo.isExecutable()) {
-            return overrideInfo.absoluteFilePath();
-        }
-    }
-
-    QString inPath = QStandardPaths::findExecutable(name);
-    if (!inPath.isEmpty()) {
-        return inPath;
-    }
-
-    if (!binDir.isEmpty()) {
-        QFileInfo fi(QDir(binDir).filePath(name));
+QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDir) {
+    // 1. Check provided baseDir
+    if (!baseDir.isEmpty()) {
+        QFileInfo fi(QDir(baseDir).filePath(name));
         if (fi.exists() && fi.isExecutable()) {
             return fi.absoluteFilePath();
         }
     }
 
+    // 2. Check current directory
+    QFileInfo localFi(QDir::current().filePath(name));
+    if (localFi.exists() && localFi.isExecutable()) {
+        return localFi.absoluteFilePath();
+    }
+
+    // 3. Check standard PATH
+    QString inPath = QStandardPaths::findExecutable(name);
+    if (!inPath.isEmpty()) {
+        return inPath;
+    }
+
+    // 4. Check sibling directories (development/relative paths)
     QString siblingBin = findSiblingSpratCliBinary(name);
     if (!siblingBin.isEmpty()) {
         return siblingBin;
     }
 
-    QString localBin = QDir::homePath() + "/.local/bin/" + name;
-    if (QFile::exists(localBin) && QFileInfo(localBin).isExecutable()) {
-        return localBin;
+    // 5. Check home config/bin locations
+    QStringList homeLocations;
+    homeLocations << QDir::homePath() + "/.local/bin/" + name;
+    homeLocations << QDir::homePath() + "/.config/sprat/bin/" + name;
+    
+    for (const QString& loc : homeLocations) {
+        if (QFile::exists(loc) && QFileInfo(loc).isExecutable()) {
+            return loc;
+        }
     }
 
     return QString();
 }
+

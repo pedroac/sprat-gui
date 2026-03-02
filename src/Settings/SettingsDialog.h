@@ -19,25 +19,26 @@ signals:
 
 private slots:
     void pickColor(QPushButton* btn, QColor& color);
+    void resetToDefaults();
+    void pickCliBaseDir();
 
 private:
-    QWidget* createCliPathWidget(QLineEdit* edit, QPushButton* btn);
-    void browseCliBinary(QLineEdit* target);
     void setupUi();
     QPushButton* createColorButton(const QColor& color);
     void updateColorButton(QPushButton* btn, const QColor& color);
+    void updateCliUi();
 
     AppSettings m_settings;
     CliPaths m_cliPaths;
     
     QPushButton* m_canvasColorBtn;
     QPushButton* m_frameColorBtn;
+    QCheckBox* m_checkerboardCheck;
     QPushButton* m_borderColorBtn;
+    QPushButton* m_detectionSelectedColorBtn;
     QComboBox* m_borderStyleCombo;
-    QLineEdit* m_layoutPathEdit;
-    QLineEdit* m_packPathEdit;
-    QLineEdit* m_convertPathEdit;
-    QLineEdit* m_framesPathEdit;
-    QLineEdit* m_unpackPathEdit;
+    
+    QLineEdit* m_cliBaseDirEdit;
+    QPushButton* m_cliBaseDirBtn;
     QPushButton* m_installCliBtn;
 };

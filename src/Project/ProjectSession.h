@@ -5,6 +5,8 @@
 #include <QStringList>
 #include <QVector>
 #include <QJsonObject>
+#include <QTemporaryDir>
+#include <memory>
 #include "models.h"
 
 /**
@@ -48,9 +50,24 @@ public:
     void clear();
     bool isEmpty() const;
 
+    /**
+     * @brief Adds a temporary directory to be managed by the session.
+     * 
+     * @param dir Pointer to the temporary directory. Ownership is transferred.
+     */
+    void addTempDir(std::unique_ptr<QTemporaryDir> dir);
+
+    /**
+     * @brief Clears all managed temporary directories.
+     */
+    void clearTempDirs();
+
 signals:
     void changed();
     void layoutChanged();
     void timelinesChanged();
     void selectionChanged();
+
+private:
+    std::vector<std::unique_ptr<QTemporaryDir>> m_tempDirs;
 };

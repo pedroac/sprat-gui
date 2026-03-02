@@ -3,6 +3,7 @@
 #include "ZoomableGraphicsView.h"
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include "models.h"
 
 /**
  * @class AnimationCanvas
@@ -23,7 +24,10 @@ public:
      */
     void centerContent();
 
+    void setSettings(const AppSettings& settings);
+
 private:
     QGraphicsScene* m_scene;
     QGraphicsPixmapItem* m_pixmapItem;
+    AppSettings m_settings;
 };
