@@ -3,9 +3,11 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QStandardPaths>
 
 QString AutosaveProjectStore::defaultPath() {
-    return QDir::homePath() + "/.config/sprat/gui_saved.json";
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    return QDir(configDir).filePath("sprat/gui_saved.json");
 }
 
 bool AutosaveProjectStore::load(const QString& path, QJsonObject& root, QString& error) {

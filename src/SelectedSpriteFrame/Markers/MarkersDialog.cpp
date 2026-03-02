@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QGroupBox>
 #include <QMessageBox>
+#include <QDialogButtonBox>
 
 namespace {
 QString normalizedMarkerName(QString name) {

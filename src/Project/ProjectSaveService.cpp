@@ -94,11 +94,22 @@ bool ProjectSaveService::save(
     }
 
     QString zipBin;
+    bool usePowerShell = false;
     if (isZip) {
         zipBin = QStandardPaths::findExecutable("zip");
         if (zipBin.isEmpty()) {
+#ifdef Q_OS_WIN
+            zipBin = QStandardPaths::findExecutable("powershell");
+            if (!zipBin.isEmpty()) {
+                usePowerShell = true;
+            } else {
+                QMessageBox::critical(parent, trPS("Error"), trPS("Neither 'zip' nor 'powershell' was found. Cannot create zip archive."));
+                return false;
+            }
+#else
             QMessageBox::critical(parent, trPS("Error"), trPS("The 'zip' command line tool is required to save .zip projects but was not found."));
             return false;
+#endif
         }
     }
 
@@ -504,8 +515,16 @@ bool ProjectSaveService::save(
         QString absDest = QFileInfo(config.destination).absoluteFilePath();
         QDir().mkpath(QFileInfo(absDest).path());
         QFile::remove(absDest);
-        if (!runProcess(zipProc, zipBin, QStringList() << "-r" << absDest << ".", trPS("Failed to create zip archive"))) {
-            return false;
+
+        if (usePowerShell) {
+            QString script = QString("Compress-Archive -Path * -DestinationPath '%1' -Force").arg(absDest);
+            if (!runProcess(zipProc, zipBin, QStringList() << "-Command" << script, trPS("Failed to create zip archive via PowerShell"))) {
+                return false;
+            }
+        } else {
+            if (!runProcess(zipProc, zipBin, QStringList() << "-r" << absDest << ".", trPS("Failed to create zip archive"))) {
+                return false;
+            }
         }
     }
 

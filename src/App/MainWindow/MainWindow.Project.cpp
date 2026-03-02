@@ -370,9 +370,20 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     }
 
     QString unzipBin = QStandardPaths::findExecutable("unzip");
+    bool usePowerShell = false;
     if (unzipBin.isEmpty()) {
+#ifdef Q_OS_WIN
+        unzipBin = QStandardPaths::findExecutable("powershell");
+        if (!unzipBin.isEmpty()) {
+            usePowerShell = true;
+        } else {
+            QMessageBox::warning(this, "Missing Tool", "Neither 'unzip' nor 'powershell' was found. Cannot load ZIP archives.");
+            return false;
+        }
+#else
         QMessageBox::warning(this, "Missing Tool", "Please install the 'unzip' utility to load ZIP archives.");
         return false;
+#endif
     }
 
     if (action == DropAction::Replace) {
@@ -387,9 +398,14 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     m_session->addTempDir(std::move(tempDir));
 
     QProcess unzip;
-    unzip.start(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
+    if (usePowerShell) {
+        QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(zipPath, tempPath);
+        unzip.start(unzipBin, QStringList() << "-Command" << script);
+    } else {
+        unzip.start(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
+    }
     unzip.waitForFinished();
-    if (unzip.exitCode() != 0) {
+    if (unzip.exitStatus() != QProcess::NormalExit || unzip.exitCode() != 0) {
         QMessageBox::warning(this, "Load Failed", "Could not extract ZIP archive.");
         return false;
     }

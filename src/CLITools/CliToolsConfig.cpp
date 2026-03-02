@@ -10,7 +10,8 @@
 #include <QStandardPaths>
 
 QString CliToolsConfig::configPath() {
-    return QDir::homePath() + "/.config/sprat/sprat.conf";
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    return QDir(configDir).filePath("sprat/sprat.conf");
 }
 
 AppSettings CliToolsConfig::loadAppSettings() {
