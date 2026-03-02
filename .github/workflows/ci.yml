@@ -15,7 +15,12 @@ jobs:
     steps:
       - id: set-matrix
         run: |
-          if [ "${{ github.ref }}" == "refs/heads/release" ]; then
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BRANCH="${{ github.base_ref }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+          if [ "$BRANCH" == "release" ]; then
             echo 'matrix=["ubuntu-latest", "windows-latest", "macos-latest"]' >> $GITHUB_OUTPUT
           else
             echo 'matrix=["ubuntu-latest"]' >> $GITHUB_OUTPUT
