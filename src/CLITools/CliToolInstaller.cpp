@@ -157,7 +157,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     // Use hdiutil to mount and cp
     QString script = QString(R"(
 MOUNT_POINT=$(hdiutil mount "%1" | grep -o '/Volumes/.*' | head -n 1)
-cp "$MOUNT_POINT"/* "%2/"
+cp "$MOUNT_POINT"/\* "%2/"
 hdiutil unmount "$MOUNT_POINT"
 )").arg(filePath, appDir);
     m_installProcess->start("bash", QStringList() << "-c" << script);
