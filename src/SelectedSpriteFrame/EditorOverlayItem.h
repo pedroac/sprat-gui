@@ -10,6 +10,13 @@ class QGraphicsSceneHoverEvent;
 class EditorOverlayItem : public QGraphicsObject {
     Q_OBJECT
 public:
+    enum ResizeHandle {
+        NoHandle,
+        TopLeft, Top, TopRight,
+        Left, Right,
+        BottomLeft, Bottom, BottomRight
+    };
+
     /**
      * @brief Constructs the EditorOverlayItem.
      * @param parent The parent graphics item.
@@ -67,9 +74,10 @@ private:
     DragMode m_dragMode = None;
     QString m_dragTargetName;
     int m_dragVertexIndex = -1;
-    QString m_dragHandle; // "nw", "e", etc for rect
+    ResizeHandle m_resizeHandle = NoHandle;
     QPointF m_dragStartPos;
     QPoint m_dragOriginalPos; // x,y or w,h depending on mode
+    QRect m_dragOriginalRect;
     int m_dragOriginalRadius = 0;
     QVector<QPoint> m_dragOriginalPoly;
     bool m_suppressNextViewContextMenu = false;
@@ -81,6 +89,8 @@ private:
     NamedPoint* getNamedPoint(const QString& name);
     double distancePointToSegment(const QPointF& p, const QPointF& a, const QPointF& b) const;
     int getPolygonHitEdge(const NamedPoint* p, const QPointF& pos) const;
+    ResizeHandle getResizeHandle(const QPointF& pos, const QRectF& rect) const;
+    void updateResizeCursor(ResizeHandle handle);
     Qt::CursorShape cursorForPosition(const QPointF& pos) const;
     void updateHoverCursor(const QPointF& pos);
     
@@ -95,6 +105,11 @@ public:
      * @return True if a vertex was removed.
      */
     bool removeSelectedVertex();
+    /**
+     * @brief Deletes the currently selected marker from all sprites.
+     * @return True if a marker was deleted.
+     */
+    bool deleteSelectedMarker();
     /**
      * @brief Forces a layout update and redraw.
      */

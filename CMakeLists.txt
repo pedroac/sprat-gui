@@ -31,6 +31,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.h
     src/App/MainWindow/FrameDetectionDialog.cpp
     src/App/MainWindow/FrameDetectionDialog.h
+    src/App/MainWindow/FrameDetectionCanvas.cpp
+    src/App/MainWindow/FrameDetectionCanvas.h
     src/SpriteSheetLayout/LayoutCanvas.cpp
     src/SpriteSheetLayout/LayoutCanvas.h
     src/SpriteSheetLayout/SpriteItem.cpp
@@ -104,6 +106,8 @@ set(PROJECT_SOURCES
     src/Profiles/ProfilesDialog.h
     src/Animation/Timelines/TimelineBuilder.cpp
     src/Animation/Timelines/TimelineBuilder.h
+    src/Core/ZoomableGraphicsView.cpp
+    src/Core/ZoomableGraphicsView.h
     src/Core/models.h
 )
 

@@ -16,6 +16,14 @@ SpriteItem::SpriteItem(SpritePtr data, QGraphicsItem* parent)
 void SpriteItem::setSelectedState(bool selected) {
     if (m_isSelected == selected) return;
     m_isSelected = selected;
+    if (!m_isSelected) m_isPrimary = false;
+    update();
+}
+
+void SpriteItem::setPrimaryState(bool primary) {
+    if (m_isPrimary == primary) return;
+    m_isPrimary = primary;
+    if (m_isPrimary) m_isSelected = true;
     update();
 }
 
@@ -76,20 +84,19 @@ void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
         painter->restore();
     }
 
-    if (m_isSelected) {
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(10, 125, 255, 64));
-        painter->drawRect(boundingRect());
-    }
-
     if (m_isContextTarget) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(255, 215, 0, 64));
         painter->drawRect(boundingRect());
     }
 
-    if (m_isMatch) {
-        // Search match highlight (green)
+    if (m_isPrimary) {
+        // Primary selection (blue)
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(10, 125, 255, 64));
+        painter->drawRect(boundingRect());
+    } else if (m_isSelected || m_isMatch) {
+        // Secondary selection or search match (green)
         QPen pen(QColor(44, 201, 97), 2);
         pen.setCosmetic(true);
         painter->setPen(pen);

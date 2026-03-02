@@ -1,52 +1,41 @@
 #pragma once
-#include <QGraphicsView>
+#include "ZoomableGraphicsView.h"
 #include "models.h"
 #include "EditorOverlayItem.h"
-
-class QFocusEvent;
 
 /**
  * @brief Widget for previewing and editing a single sprite.
  * 
  * Displays the sprite, pivot point, and markers. Handles zooming and panning.
  */
-class PreviewCanvas : public QGraphicsView {
+class PreviewCanvas : public ZoomableGraphicsView {
     Q_OBJECT
 public:
-    /**
-     * @brief Constructs the PreviewCanvas.
-     * @param parent The parent widget.
-     */
     explicit PreviewCanvas(QWidget* parent = nullptr);
+
     /**
      * @brief Sets the sprites to display (usually just one).
-     * @param sprites List of sprites.
      */
     void setSprites(const QList<SpritePtr>& sprites);
-    /**
-     * @brief Sets the zoom level.
-     * @param zoom The zoom factor.
-     */
-    void setZoom(double zoom);
-    bool isZoomManual() const { return m_isZoomManual; }
-    void setZoomManual(bool manual) { m_isZoomManual = manual; }
+
     /**
      * @brief Centers the content in the view.
      */
     void centerContent();
-    /**
-     * @brief Centers the content in the view, fitting it if it's larger than the viewport.
-     */
-    void initialFit();
+
+    void setZoom(double zoom) override;
+    void initialFit() override;
+
     /**
      * @brief Gets the center of the viewport in scene coordinates.
      */
     QPointF viewportCenterInScene() const;
+
     /**
      * @brief Updates visual settings.
-     * @param settings The application settings.
      */
     void setSettings(const AppSettings& settings);
+
     EditorOverlayItem* overlay() const { return m_overlay; }
     
 signals:
@@ -54,23 +43,12 @@ signals:
      * @brief Emitted when the pivot position changes.
      */
     void pivotChanged(int x, int y);
-    /**
-     * @brief Emitted when the zoom level changes via mouse wheel.
-     */
-    void zoomChanged(double zoom);
     void applyPivotToSelectedFramesRequested();
     void applyMarkerToSelectedFramesRequested(const QString& markerName);
 
 protected:
-    void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
-    void keyReleaseEvent(QKeyEvent* event) override;
-    void focusOutEvent(QFocusEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
-    void resizeEvent(QResizeEvent* event) override;
 
 private:
     QGraphicsScene* m_scene;
@@ -78,10 +56,5 @@ private:
     QList<QGraphicsRectItem*> m_borderItems;
     EditorOverlayItem* m_overlay;
     QList<SpritePtr> m_sprites;
-
-    bool m_isPanning = false;
-    QPoint m_lastMousePos;
-    bool m_spacePressed = false;
-    bool m_isZoomManual = false;
     AppSettings m_settings;
 };

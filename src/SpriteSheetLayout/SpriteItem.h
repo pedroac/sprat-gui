@@ -43,6 +43,18 @@ public:
     void setSelectedState(bool selected);
 
     /**
+     * @brief Sets if this item is the primary selection.
+     * 
+     * @param primary True if primary selection
+     */
+    void setPrimaryState(bool primary);
+
+    /**
+     * @brief Checks if this item is the primary selection.
+     */
+    bool isPrimaryState() const { return m_isPrimary; }
+
+    /**
      * @brief Sets the context target state of this item.
      * 
      * Context target state is used to highlight the item when
@@ -62,6 +74,11 @@ public:
      */
     void setSearchMatch(bool match);
 
+    /**
+     * @brief Checks if this item matches the current search.
+     */
+    bool isSearchMatch() const { return m_isMatch; }
+
 protected:
     /**
      * @brief Custom paint implementation for the sprite item.
@@ -79,6 +96,7 @@ protected:
 private:
     SpritePtr m_data;                    ///< Sprite data associated with this item
     bool m_isSelected = false;           ///< Whether this item is selected
+    bool m_isPrimary = false;            ///< Whether this item is the primary selection
     bool m_isContextTarget = false;      ///< Whether this item is the context target
     bool m_isMatch = false;              ///< Whether this item matches the current search
 };

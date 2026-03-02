@@ -160,18 +160,12 @@ int findRowEdgeIndex(const QVector<SpriteItem*>& items, int currentIndex, bool e
 
 /**
  * @brief Constructs the LayoutCanvas.
- * 
- * Initializes the scene and sets up rendering hints.
  */
-LayoutCanvas::LayoutCanvas(QWidget* parent) : QGraphicsView(parent) {
+LayoutCanvas::LayoutCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
     setAcceptDrops(true);
-    setFocusPolicy(Qt::StrongFocus);
-    setRenderHint(QPainter::Antialiasing, false);
-    setRenderHint(QPainter::SmoothPixmapTransform, false);
-    setDragMode(QGraphicsView::NoDrag);
-    setBackgroundBrush(QColor(90, 90, 90));
+    setZoomRange(0.1, 8.0);
 }
 
 void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
@@ -187,7 +181,7 @@ void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
             }
         }
     }
-    QGraphicsView::dragEnterEvent(event);
+    ZoomableGraphicsView::dragEnterEvent(event);
 }
 
 void LayoutCanvas::dropEvent(QDropEvent* event) {
@@ -199,25 +193,20 @@ void LayoutCanvas::dropEvent(QDropEvent* event) {
             return;
         }
     }
-    QGraphicsView::dropEvent(event);
+    ZoomableGraphicsView::dropEvent(event);
 }
 
-/**
- * @brief Sets the layout model to display.
- * 
- * Clears the current scene and populates it with sprites from the model.
- */
 void LayoutCanvas::setModel(const LayoutModel& model) {
     clearCanvas();
     m_model = model;
     m_items.clear();
+    m_baseSelectionPaths.clear();
     m_lastSelectedIndex = -1;
     m_pendingDeselect = false;
     m_atlasBgItem = nullptr;
     m_borderItems.clear();
     m_scene->setSceneRect(0, 0, model.atlasWidth, model.atlasHeight);
 
-    // Keep only pixmaps that are still relevant to the incoming model.
     QSet<QString> activePaths;
     activePaths.reserve(model.sprites.size());
     for (const auto& sprite : model.sprites) {
@@ -231,14 +220,12 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
         ++it;
     }
     
-    // Background for the atlas area
     m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.frameColor));
     m_atlasBgItem->setZValue(-100);
 
     QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
     borderPen.setCosmetic(true);
 
-    // Load sprites into scene
     for (const auto& sprite : model.sprites) {
         QPixmap sourcePixmap = m_sourcePixmaps.value(sprite->path);
         if (sourcePixmap.isNull()) {
@@ -257,7 +244,6 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
         }
         QPixmap pixmap = sourcePixmap;
 
-        // Handle trim logic if necessary (cropping pixmap)
         if (sprite->trimmed) {
              int l = sprite->trimRect.x();
              int t = sprite->trimRect.y();
@@ -268,14 +254,12 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
              }
         }
 
-        // Handle rotation if necessary
         if (sprite->rotated) {
             QTransform trans;
             trans.rotate(90);
             pixmap = pixmap.transformed(trans, Qt::SmoothTransformation);
         }
 
-        // spratlayout scale changes sprite rect dimensions; match rendered frame size to rect.
         const QSize targetSize = sprite->rect.size();
         if (targetSize.width() > 0 &&
             targetSize.height() > 0 &&
@@ -291,12 +275,10 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
 
         QPainterPath path;
         QRectF r = sprite->rect;
-        // Draw 4 separate lines to ensure consistent direction (Left->Right, Top->Bottom)
-        // This prevents overlapping dashed lines from cancelling each other out
-        path.moveTo(r.topLeft()); path.lineTo(r.topRight());       // Top
-        path.moveTo(r.bottomLeft()); path.lineTo(r.bottomRight()); // Bottom
-        path.moveTo(r.topLeft()); path.lineTo(r.bottomLeft());     // Left
-        path.moveTo(r.topRight()); path.lineTo(r.bottomRight());   // Right
+        path.moveTo(r.topLeft()); path.lineTo(r.topRight());
+        path.moveTo(r.bottomLeft()); path.lineTo(r.bottomRight());
+        path.moveTo(r.topLeft()); path.lineTo(r.bottomLeft());
+        path.moveTo(r.topRight()); path.lineTo(r.bottomRight());
 
         auto* border = m_scene->addPath(path, borderPen);
         border->setZValue(item->zValue() + 0.1);
@@ -304,118 +286,37 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
     }
 }
 
-/**
- * @brief Clears the canvas scene.
- */
 void LayoutCanvas::clearCanvas() {
     m_scene->clear();
 }
 
-/**
- * @brief Handles mouse wheel events for zooming (Ctrl + Wheel).
- */
-void LayoutCanvas::wheelEvent(QWheelEvent* event) {
-    if (event->modifiers() & Qt::ControlModifier) {
-        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-        m_isZoomManual = true;
-        
-        double oldZoom = m_zoomLevel;
-        const double scaleFactor = 1.15;
-        if (event->angleDelta().y() > 0) {
-            m_zoomLevel *= scaleFactor;
-        } else {
-            m_zoomLevel /= scaleFactor;
-        }
-        
-        if (m_zoomLevel < 0.1) m_zoomLevel = 0.1;
-        if (m_zoomLevel > 8.0) m_zoomLevel = 8.0;
-
-        double relativeScale = m_zoomLevel / oldZoom;
-        scale(relativeScale, relativeScale);
-        
-        emit zoomChanged(m_zoomLevel);
-        event->accept();
-    } else {
-        QGraphicsView::wheelEvent(event);
-    }
-}
-
-/**
- * @brief Sets the zoom level of the view.
- */
-void LayoutCanvas::setZoom(double zoom) {
-    m_zoomLevel = zoom;
-    resetTransform();
-    scale(m_zoomLevel, m_zoomLevel);
-}
-
-/**
- * @brief Centers the layout in the view, fitting it if it's larger than the viewport.
- */
-void LayoutCanvas::initialFit() {
-    QRectF sceneRect = m_scene->sceneRect();
-    if (sceneRect.isEmpty()) {
-        return;
-    }
-    const QRect viewportRect = viewport()->rect();
-    if (viewportRect.isEmpty()) {
-        return;
-    }
-    
-    bool isLarger = sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height();
-    
-    if (isLarger) {
-        if (sceneRect.height() > sceneRect.width()) {
-            // Portrait: fit width to viewport, allow vertical scrolling
-            m_zoomLevel = (double)viewportRect.width() / sceneRect.width();
-        } else {
-            // Landscape or Square: fit height to viewport, allow horizontal scrolling
-            m_zoomLevel = (double)viewportRect.height() / sceneRect.height();
-        }
-    } else {
-        // Scene fits in viewport: fit it as large as possible without scrolling
-        fitInView(sceneRect, Qt::KeepAspectRatio);
-        m_zoomLevel = transform().m11();
-    }
-    
-    // Clamp zoom level to supported range [0.1, 8.0]
-    if (m_zoomLevel < 0.1) {
-        m_zoomLevel = 0.1;
-    } else if (m_zoomLevel > 8.0) {
-        m_zoomLevel = 8.0;
-    }
-    
-    setZoom(m_zoomLevel);
-    centerOn(sceneRect.center());
-    emit zoomChanged(m_zoomLevel);
-}
-
-/**
- * @brief Selects a sprite by its file path.
- */
 void LayoutCanvas::selectSpriteByPath(const QString& path) {
     for (auto* item : m_items) {
         if (item->getData()->path == path) {
             for (auto* si : m_items) {
-                si->setSelectedState(false);
+                if (!si->isSearchMatch()) {
+                    si->setSelectedState(false);
+                }
             }
             item->setSelectedState(true);
             m_lastSelectedIndex = m_items.indexOf(item);
-            emitSelectionChanged();
+            finalizeSearchSelection();
             return;
         }
     }
 }
 
-/**
- * @brief Selects multiple sprites by their file paths.
- */
 void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString& primaryPath) {
     const QSet<QString> pathSet(paths.begin(), paths.end());
     int primaryIndex = -1;
     for (int i = 0; i < m_items.size(); ++i) {
         auto* item = m_items[i];
-        const bool select = pathSet.contains(item->getData()->path);
+        bool select = pathSet.contains(item->getData()->path);
+        // If search is active, we should probably merge? 
+        // But usually these calls come from clicking a timeline or loading a project.
+        // Let's keep matches if search is active.
+        if (item->isSearchMatch()) select = true;
+
         item->setSelectedState(select);
         if (select && !primaryPath.isEmpty() && item->getData()->path == primaryPath) {
             primaryIndex = i;
@@ -424,12 +325,9 @@ void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString&
     if (primaryIndex != -1) {
         m_lastSelectedIndex = primaryIndex;
     }
-    emitSelectionChanged();
+    finalizeSearchSelection();
 }
 
-/**
- * @brief Updates the visual settings (colors, borders) of the canvas.
- */
 void LayoutCanvas::setSettings(const AppSettings& settings) {
     m_settings = settings;
     setBackgroundBrush(settings.canvasColor);
@@ -440,9 +338,6 @@ void LayoutCanvas::setSettings(const AppSettings& settings) {
     update();
 }
 
-/**
- * @brief Handles mouse press events for selection and panning.
- */
 void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
     if (!m_searchQuery.isEmpty() && m_searchCloseRect.contains(event->pos())) {
         m_searchQuery.clear();
@@ -450,22 +345,17 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
         event->accept();
         return;
     }
-    m_lastMousePos = event->pos();
-    m_pendingDeselect = false;
-    // Pan logic
-    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && m_spacePressed)) {
-        m_isPanning = true;
-        setCursor(Qt::ClosedHandCursor);
-        event->accept();
+
+    ZoomableGraphicsView::mousePressEvent(event);
+    if (m_isPanning) {
+        m_pendingDeselect = false;
         return;
     }
+
     if (event->button() != Qt::LeftButton) {
-        QGraphicsView::mousePressEvent(event);
         return;
     }
-    QGraphicsView::mousePressEvent(event);
     
-    // Selection logic
     SpriteItem* spriteItem = nullptr;
     QList<QGraphicsItem*> itemsAtPos = items(event->pos());
     for (auto* it : itemsAtPos) {
@@ -478,11 +368,12 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
     if (spriteItem) {
         int clickedIndex = m_items.indexOf(spriteItem);
 
-        // Shift+Click: Range Selection
         if ((event->modifiers() & Qt::ShiftModifier) && m_lastSelectedIndex != -1) {
             if (!(event->modifiers() & Qt::ControlModifier)) {
                 for (auto* si : m_items) {
-                    si->setSelectedState(false);
+                    if (!si->isSearchMatch()) {
+                        si->setSelectedState(false);
+                    }
                 }
             }
             int start = qMin(m_lastSelectedIndex, clickedIndex);
@@ -490,16 +381,17 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
             for (int i = start; i <= end; ++i) {
                 m_items[i]->setSelectedState(true);
             }
-            emitSelectionChanged();
+
+            finalizeSearchSelection();
             return;
         }
 
-        // Ctrl+Click: Toggle Selection
         if (event->modifiers() & Qt::ControlModifier) {
             bool newState = !spriteItem->isSelectedState();
             spriteItem->setSelectedState(newState);
             m_lastSelectedIndex = clickedIndex;
-            emitSelectionChanged();
+
+            finalizeSearchSelection();
             return;
         }
 
@@ -509,31 +401,28 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
         }
 
         for (auto* si : m_items) {
-            si->setSelectedState(false);
+            if (!si->isSearchMatch()) {
+                si->setSelectedState(false);
+            }
         }
         spriteItem->setSelectedState(true);
         m_lastSelectedIndex = clickedIndex;
-        emitSelectionChanged();
+
+        finalizeSearchSelection();
     } else if (!(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
         for (auto* si : m_items) {
             si->setSelectedState(false);
         }
         m_lastSelectedIndex = -1;
-        emitSelectionChanged();
+
+        finalizeSearchSelection();
     }
 }
 
-/**
- * @brief Handles mouse move events for panning and drag-and-drop initiation.
- */
 void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
+    ZoomableGraphicsView::mouseMoveEvent(event);
     if (m_isPanning) {
         m_pendingDeselect = false;
-        QPoint delta = event->pos() - m_lastMousePos;
-        m_lastMousePos = event->pos();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
-        event->accept();
         return;
     }
     
@@ -555,7 +444,6 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                     paths << item->getData()->path;
                 }
             } else if (!m_searchQuery.isEmpty()) {
-                // Drag all search matches
                 for (auto* item : m_scene->items()) {
                     if (auto* si = dynamic_cast<SpriteItem*>(item)) {
                         if (si->getData()->name.contains(m_searchQuery, Qt::CaseInsensitive)) {
@@ -564,7 +452,6 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                     }
                 }
             } else {
-                // Drag single item under cursor
                 QList<QGraphicsItem*> itemsAtPos = items(m_lastMousePos);
                 for (auto* it : itemsAtPos) {
                     if (auto* si = dynamic_cast<SpriteItem*>(it)) {
@@ -614,12 +501,8 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
             }
         }
     }
-    QGraphicsView::mouseMoveEvent(event);
 }
 
-/**
- * @brief Handles mouse release events to finalize selection logic.
- */
 void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (m_pendingDeselect) {
         SpriteItem* spriteItem = nullptr;
@@ -632,26 +515,19 @@ void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
         }
         if (spriteItem) {
             for (auto* si : m_items) {
-                si->setSelectedState(false);
+                if (!si->isSearchMatch()) {
+                    si->setSelectedState(false);
+                }
             }
             spriteItem->setSelectedState(true);
             m_lastSelectedIndex = m_items.indexOf(spriteItem);
-            emitSelectionChanged();
+            finalizeSearchSelection();
         }
         m_pendingDeselect = false;
     }
-    if (m_isPanning) {
-        m_isPanning = false;
-        setCursor(Qt::ArrowCursor);
-        event->accept();
-        return;
-    }
-    QGraphicsView::mouseReleaseEvent(event);
+    ZoomableGraphicsView::mouseReleaseEvent(event);
 }
 
-/**
- * @brief Handles key press events for search typing and panning (Space).
- */
 void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
     if (event->matches(QKeySequence::SelectAll)) {
         if (!m_items.isEmpty()) {
@@ -661,7 +537,8 @@ void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
             if (m_lastSelectedIndex < 0 || m_lastSelectedIndex >= m_items.size()) {
                 m_lastSelectedIndex = 0;
             }
-            emitSelectionChanged();
+
+            finalizeSearchSelection();
         }
         event->accept();
         return;
@@ -715,13 +592,16 @@ void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
 
         if (!(event->modifiers() & Qt::ShiftModifier)) {
             for (auto* item : m_items) {
-                item->setSelectedState(false);
+                if (!item->isSearchMatch()) {
+                    item->setSelectedState(false);
+                }
             }
         }
         m_items[nextIndex]->setSelectedState(true);
         m_lastSelectedIndex = nextIndex;
         ensureVisible(m_items[nextIndex]);
-        emitSelectionChanged();
+        
+        finalizeSearchSelection();
         event->accept();
         return;
     }
@@ -734,11 +614,7 @@ void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
                 event->accept();
                 return;
             }
-            if (!event->isAutoRepeat()) {
-                m_spacePressed = true;
-            }
-            event->accept();
-            return;
+            break;
         case Qt::Key_Escape:
             m_searchQuery.clear();
             updateSearch();
@@ -748,255 +624,191 @@ void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
             if (!m_searchQuery.isEmpty()) {
                 m_searchQuery.chop(1);
                 updateSearch();
+                event->accept();
+                return;
             }
-            event->accept();
-            return;
+            break;
     }
-    if (!event->text().isEmpty() && event->text()[0].isPrint()) {
+
+    if (!event->text().isEmpty() && event->text().at(0).isPrint()) {
         m_searchQuery += event->text();
         updateSearch();
         event->accept();
         return;
     }
-    QGraphicsView::keyPressEvent(event);
+
+    ZoomableGraphicsView::keyPressEvent(event);
 }
 
-/**
- * @brief Handles key release events.
- */
 void LayoutCanvas::keyReleaseEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        m_spacePressed = false;
-    }
-    QGraphicsView::keyReleaseEvent(event);
-}
-
-void LayoutCanvas::focusOutEvent(QFocusEvent* event) {
-    m_spacePressed = false;
-    m_isPanning = false;
-    setCursor(Qt::ArrowCursor);
-    QGraphicsView::focusOutEvent(event);
+    ZoomableGraphicsView::keyReleaseEvent(event);
 }
 
 void LayoutCanvas::resizeEvent(QResizeEvent* event) {
-    QGraphicsView::resizeEvent(event);
-    if (!m_isZoomManual) {
-        initialFit();
+    ZoomableGraphicsView::resizeEvent(event);
+}
+
+void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
+    if (m_searchQuery.isEmpty()) {
+        return;
+    }
+
+    painter->save();
+    painter->setWorldMatrixEnabled(false);
+
+    const int padding = 10;
+    const int margin = 20;
+    const QString text = tr("Search: ") + m_searchQuery;
+    const QFont font("Monospace", 12, QFont::Bold);
+    painter->setFont(font);
+    const QFontMetrics fm(font);
+    const int textWidth = fm.horizontalAdvance(text);
+    const int textHeight = fm.height();
+
+    const int closeSize = 16;
+    const int boxWidth = textWidth + (padding * 5) + closeSize + 20;
+    const int boxHeight = textHeight + padding * 2;
+    const QRect boxRect(viewport()->width() - boxWidth - margin, margin, boxWidth, boxHeight);
+
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 180));
+    painter->drawRoundedRect(boxRect, 5, 5);
+
+    painter->setPen(Qt::white);
+    QRect textRect = boxRect.adjusted(padding * 2, 0, -(padding * 2 + closeSize), 0);
+    painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, text);
+
+    m_searchCloseRect = QRect(boxRect.right() - padding - closeSize, boxRect.center().y() - closeSize / 2, closeSize, closeSize);
+    painter->setPen(QPen(Qt::white, 2));
+    painter->drawLine(m_searchCloseRect.topLeft(), m_searchCloseRect.bottomRight());
+    painter->drawLine(m_searchCloseRect.topRight(), m_searchCloseRect.bottomLeft());
+
+    painter->restore();
+    
+    // Ensure viewport-level update for immediate visual feedback of the search text
+    viewport()->update();
+}
+
+void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
+    SpriteItem* target = nullptr;
+    QList<QGraphicsItem*> itemsAtPos = items(event->pos());
+    for (auto* it : itemsAtPos) {
+        if (auto* si = dynamic_cast<SpriteItem*>(it)) {
+            target = si;
+            break;
+        }
+    }
+
+    QMenu menu(this);
+    QAction* addFramesAction = menu.addAction(tr("Add Frames..."));
+    connect(addFramesAction, &QAction::triggered, this, &LayoutCanvas::addFramesRequested);
+
+    QAction* genTimelineAction = menu.addAction(tr("Auto-create Timelines"));
+    connect(genTimelineAction, &QAction::triggered, this, &LayoutCanvas::requestTimelineGeneration);
+
+    menu.addSeparator();
+
+    QList<SpriteItem*> selectedItems;
+    for (auto* item : m_items) {
+        if (item->isSelectedState()) {
+            selectedItems.append(item);
+        }
+    }
+
+    QAction* removeFramesAction = menu.addAction(tr("Remove Selected Frames"));
+    removeFramesAction->setEnabled(!selectedItems.isEmpty());
+    connect(removeFramesAction, &QAction::triggered, this, [this, selectedItems]() {
+        QStringList paths;
+        for (auto* it : selectedItems) paths << it->getData()->path;
+        emit removeFramesRequested(paths);
+    });
+
+    if (target) {
+        menu.addSeparator();
+        m_contextMenuTargetPath = target->getData()->path;
+        QAction* copyPathAction = menu.addAction(tr("Copy Path"));
+        connect(copyPathAction, &QAction::triggered, this, [this]() {
+            QApplication::clipboard()->setText(m_contextMenuTargetPath);
+        });
+        QAction* copyImageAction = menu.addAction(tr("Copy Image"));
+        connect(copyImageAction, &QAction::triggered, this, [this]() {
+            QApplication::clipboard()->setImage(QImage(m_contextMenuTargetPath));
+        });
+    }
+
+    menu.exec(event->globalPos());
+}
+
+void LayoutCanvas::updateSearch() {
+    const bool hasQuery = !m_searchQuery.isEmpty();
+    bool selectionChangedOccurred = false;
+    for (auto* item : m_items) {
+        const bool match = hasQuery && item->getData()->name.contains(m_searchQuery, Qt::CaseInsensitive);
+        item->setSearchMatch(match);
+        
+        const bool shouldBeSelected = match || m_baseSelectionPaths.contains(item->getData()->path);
+        if (item->isSelectedState() != shouldBeSelected) {
+            item->setSelectedState(shouldBeSelected);
+            selectionChangedOccurred = true;
+        }
+    }
+    if (selectionChangedOccurred) {
+        emitSelectionChanged();
+    }
+    viewport()->update();
+    update();
+}
+
+void LayoutCanvas::finalizeSearchSelection() {
+    if (!m_searchQuery.isEmpty()) {
+        for (auto* item : m_items) {
+            if (item->isSearchMatch()) {
+                m_baseSelectionPaths.insert(item->getData()->path);
+            }
+        }
+        m_searchQuery.clear();
+        updateSearch();
+    } else {
+        // When no search is active, ensure our manual selection is reflected in m_baseSelectionPaths
+        m_baseSelectionPaths.clear();
+        for (auto* item : m_items) {
+            if (item->isSelectedState()) {
+                m_baseSelectionPaths.insert(item->getData()->path);
+            }
+        }
+        emitSelectionChanged();
     }
 }
 
-/**
- * @brief Updates the visibility and selection state of sprites based on the search query.
- */
-void LayoutCanvas::updateSearch() {
-    m_lastSelectedIndex = -1;
-    bool foundFirst = false;
+void LayoutCanvas::emitSelectionChanged() {
+    QList<SpritePtr> selection;
+    SpritePtr primary;
     for (int i = 0; i < m_items.size(); ++i) {
-        auto* si = m_items[i];
-        if (m_searchQuery.isEmpty()) {
-            si->setSearchMatch(false);
-            si->setOpacity(1.0);
-            si->setSelectedState(false);
-        } else {
-            bool match = si->getData()->name.contains(m_searchQuery, Qt::CaseInsensitive);
-            si->setSearchMatch(match);
-            si->setSelectedState(match);
-            si->setOpacity(match ? 1.0 : 0.3);
-            if (match && !foundFirst) {
-                m_lastSelectedIndex = i;
-                foundFirst = true;
+        bool isPrimary = (i == m_lastSelectedIndex && m_items[i]->isSelectedState());
+        m_items[i]->setPrimaryState(isPrimary);
+
+        if (m_items[i]->isSelectedState()) {
+            selection.append(m_items[i]->getData());
+            if (isPrimary) {
+                primary = m_items[i]->getData();
             }
         }
     }
 
-    setViewportUpdateMode(m_searchQuery.isEmpty() ? QGraphicsView::MinimalViewportUpdate : QGraphicsView::FullViewportUpdate);
-
-    m_scene->update();
-    viewport()->update();
-
-    emitSelectionChanged();
-}
-
-/**
- * @brief Draws the search bar overlay in the foreground.
- */
-void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
-    if (m_searchQuery.isEmpty()) {
-        m_searchCloseRect = QRect();
-        return;
-    }
-    
-    painter->save();
-    painter->resetTransform(); // Draw in window coordinates
-    
-    QString text = tr("Search: %1").arg(m_searchQuery);
-    QFont font = painter->font();
-    font.setPixelSize(14);
-    font.setBold(true);
-    QFontMetrics fm(font);
-    
-    int textW = fm.horizontalAdvance(text);
-    int closeBtnW = 24;
-    int padding = 8;
-    int h = fm.height() + 12;
-    int w = textW + closeBtnW + (padding * 3);
-    
-    QRect box(10, 10, w, h);
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(0, 0, 0, 200));
-    painter->drawRoundedRect(box, 6, 6);
-    
-    painter->setPen(Qt::white);
-    painter->setFont(font);
-    QRect textRect = box.adjusted(padding, 0, -closeBtnW - padding, 0);
-    painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, text);
-    
-    // Close Button Area
-    QRect closeRect(box.right() - closeBtnW - padding, box.top(), closeBtnW + padding, box.height());
-    m_searchCloseRect = closeRect;
-    
-    // Draw X
-    QPen pen(Qt::white, 2);
-    painter->setPen(pen);
-    int cx = closeRect.center().x() - (padding / 2);
-    int cy = closeRect.center().y();
-    int r = 4;
-    painter->drawLine(cx - r, cy - r, cx + r, cy + r);
-    painter->drawLine(cx + r, cy - r, cx - r, cy + r);
-    
-    painter->restore();
-}
-
-/**
- * @brief Emits signals when the selection changes and updates visual highlights.
- */
-void LayoutCanvas::emitSelectionChanged() {
-    QList<SpritePtr> selection;
-
-    for (int i = 0; i < m_items.size(); ++i) {
-        auto* item = m_items[i];
-        bool selected = item->isSelectedState();
-        if (selected) {
-            selection.append(item->getData());
-        }
-    }
-    updateBorderHighlights();
     emit selectionChanged(selection);
-
-    SpritePtr primary = nullptr;
-    if (!selection.isEmpty()) {
-        primary = (m_lastSelectedIndex >= 0 && m_lastSelectedIndex < m_items.size() && m_items[m_lastSelectedIndex]->isSelectedState())
-            ? m_items[m_lastSelectedIndex]->getData()
-            : selection.last();
+    if (primary) {
+        emit spriteSelected(primary);
+    } else if (!selection.isEmpty()) {
+        emit spriteSelected(selection.first());
+    } else {
+        emit spriteSelected(SpritePtr());
     }
-    emit spriteSelected(primary);
 }
 
 void LayoutCanvas::updateBorderHighlights() {
     QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
     borderPen.setCosmetic(true);
-
-    QPen selectedPen(kSelectionColor, 2, Qt::SolidLine);
-    selectedPen.setCosmetic(true);
-
-    QPen contextPen(kContextTargetColor, 2, Qt::SolidLine);
-    contextPen.setCosmetic(true);
-
-    for (int i = 0; i < m_items.size(); ++i) {
-        if (i >= m_borderItems.size()) {
-            continue;
-        }
-        SpriteItem* item = m_items[i];
-        const bool isContextTarget = !m_contextMenuTargetPath.isEmpty() &&
-            item &&
-            item->getData() &&
-            item->getData()->path == m_contextMenuTargetPath;
-        const bool isSelected = item->isSelectedState();
-        item->setContextTargetState(isContextTarget);
-
-        if (isContextTarget) {
-            m_borderItems[i]->setPen(contextPen);
-            m_borderItems[i]->setZValue(item->zValue() + 0.3);
-        } else if (isSelected) {
-            m_borderItems[i]->setPen(selectedPen);
-            m_borderItems[i]->setZValue(item->zValue() + 0.2);
-        } else {
-            m_borderItems[i]->setPen(borderPen);
-            m_borderItems[i]->setZValue(item->zValue() + 0.1);
-        }
-    }
-}
-
-/**
- * @brief Shows a context menu (e.g., to copy the spritesheet image).
- */
-void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
-    QStringList selectedPaths;
-    for (auto* item : m_items) {
-        if (item->isSelectedState()) {
-            selectedPaths.append(item->getData()->path);
-        }
-    }
-    SpriteItem* spriteUnderCursor = nullptr;
-    for (auto* it : items(event->pos())) {
-        if (auto* si = dynamic_cast<SpriteItem*>(it)) {
-            spriteUnderCursor = si;
-            break;
-        }
-    }
-    QStringList actionPaths = selectedPaths;
-    if (spriteUnderCursor && spriteUnderCursor->getData()) {
-        actionPaths = QStringList{spriteUnderCursor->getData()->path};
-    }
-
-    m_contextMenuTargetPath = spriteUnderCursor && spriteUnderCursor->getData()
-        ? spriteUnderCursor->getData()->path
-        : QString();
-    updateBorderHighlights();
-    viewport()->update();
-
-    QMenu menu(this);
-    QAction* addFramesAction = menu.addAction(tr("Add Frames..."));
-    QAction* removeFramesAction = nullptr;
-    if (!actionPaths.isEmpty()) {
-        QString label = actionPaths.size() > 1 ? tr("Remove Frames") : tr("Remove Frame");
-        removeFramesAction = menu.addAction(label);
-    }
-    menu.addSeparator();
-    QAction* autoTimelineAction = menu.addAction(tr("Auto-create Timelines"));
-    QAction* copyLayoutAction = menu.addAction(tr("Copy Spritesheet"));
-
-    QAction* selectedAction = menu.exec(event->globalPos());
-    m_contextMenuTargetPath.clear();
-    updateBorderHighlights();
-    viewport()->update();
-    if (selectedAction == addFramesAction) {
-        emit addFramesRequested();
-        return;
-    }
-    if (selectedAction == removeFramesAction) {
-        emit removeFramesRequested(actionPaths);
-        return;
-    }
-    if (selectedAction == autoTimelineAction) {
-        emit requestTimelineGeneration();
-        return;
-    }
-
-    if (selectedAction == copyLayoutAction) {
-        if (m_model.atlasWidth <= 0 || m_model.atlasHeight <= 0) {
-            return;
-        }
-        
-        QImage image(m_model.atlasWidth, m_model.atlasHeight, QImage::Format_ARGB32);
-        image.fill(Qt::transparent);
-        QPainter painter(&image);
-        
-        for (auto* item : m_items) {
-            // Use the already loaded and trimmed pixmaps from the scene items
-            painter.drawPixmap(item->pos(), item->pixmap());
-        }
-        painter.end();
-        QApplication::clipboard()->setImage(image);
+    for (auto* border : m_borderItems) {
+        border->setPen(borderPen);
     }
 }

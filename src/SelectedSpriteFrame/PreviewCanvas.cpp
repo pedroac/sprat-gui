@@ -1,21 +1,14 @@
 #include "PreviewCanvas.h"
 #include <QGraphicsPixmapItem>
-#include <QWheelEvent>
-#include <QKeyEvent>
-#include <QScrollBar>
 #include <QGraphicsRectItem>
 #include <QMenu>
 #include <QAction>
 #include <QClipboard>
 #include <QApplication>
-#include <QFocusEvent>
 
-PreviewCanvas::PreviewCanvas(QWidget* parent) : QGraphicsView(parent) {
+PreviewCanvas::PreviewCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
-    setRenderHint(QPainter::Antialiasing, false);
-    setRenderHint(QPainter::SmoothPixmapTransform, false);
-    setDragMode(QGraphicsView::NoDrag);
     setBackgroundBrush(QColor(90, 90, 90));
 
     m_overlay = new EditorOverlayItem();
@@ -28,7 +21,6 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
     m_sprites = sprites;
     m_overlay->setSprites(sprites);
     
-    // Clear old items
     for (auto* item : m_imageItems) delete item;
     m_imageItems.clear();
     for (auto* item : m_borderItems) delete item;
@@ -38,9 +30,11 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
         QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
         borderPen.setCosmetic(true);
 
+        QRectF totalRect;
         for (const auto& sprite : sprites) {
             QPixmap pix(sprite->path);
-            
+            if (pix.isNull()) continue;
+
             auto* bgItem = new QGraphicsRectItem(pix.rect());
             bgItem->setBrush(m_settings.frameColor);
             bgItem->setPen(Qt::NoPen);
@@ -56,11 +50,12 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
             borderItem->setPen(borderPen);
             m_scene->addItem(borderItem);
             m_borderItems.append(borderItem);
+
+            totalRect = totalRect.united(pix.rect());
         }
-        // Expand scene rect to allow markers outside image are visible/reachable
-        m_scene->setSceneRect(QRectF()); // Reset to auto-calculate based on items
-        // Use size of the first sprite for overlay scene size reference if needed, 
-        // but EditorOverlayItem now calculates bounds dynamically.
+        
+        m_scene->setSceneRect(totalRect);
+        
         if (!sprites.isEmpty()) {
              QPixmap pix(sprites.first()->path);
              m_overlay->setSceneSize(pix.size());
@@ -71,11 +66,7 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
 }
 
 void PreviewCanvas::setZoom(double zoom) {
-    QPointF center = mapToScene(viewport()->rect().center());
-    resetTransform();
-    scale(zoom, zoom);
-    centerOn(center);
-    // Trigger redraw of overlay to adjust cosmetic pens if needed
+    ZoomableGraphicsView::setZoom(zoom);
     m_overlay->update(); 
 }
 
@@ -86,24 +77,7 @@ void PreviewCanvas::centerContent() {
 }
 
 void PreviewCanvas::initialFit() {
-    QRectF sceneRect = m_scene->sceneRect();
-    if (sceneRect.isEmpty()) {
-        return;
-    }
-    const QRect viewportRect = viewport()->rect();
-    if (viewportRect.isEmpty()) {
-        return;
-    }
-    
-    if (sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height()) {
-        fitInView(sceneRect, Qt::KeepAspectRatio);
-        double zoom = transform().m11();
-        emit zoomChanged(zoom);
-    } else {
-        resetTransform();
-        emit zoomChanged(1.0);
-        centerOn(sceneRect.center());
-    }
+    ZoomableGraphicsView::initialFit();
     m_overlay->update();
 }
 
@@ -111,114 +85,27 @@ QPointF PreviewCanvas::viewportCenterInScene() const {
     return mapToScene(viewport()->rect().center());
 }
 
-void PreviewCanvas::wheelEvent(QWheelEvent* event) {
-    if (event->modifiers() & Qt::ControlModifier) {
-        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-        m_isZoomManual = true;
-        double oldZoom = transform().m11();
-        double zoom = oldZoom;
-        const double scaleFactor = 1.15;
-        if (event->angleDelta().y() > 0) {
-            zoom *= scaleFactor;
-        } else {
-            zoom /= scaleFactor;
-        }
-        if (zoom < 0.1) zoom = 0.1;
-        if (zoom > 16.0) zoom = 16.0;
-
-        double relativeScale = zoom / oldZoom;
-        scale(relativeScale, relativeScale);
-        
-        emit zoomChanged(zoom);
-        event->accept();
-    } else {
-        QGraphicsView::wheelEvent(event);
-    }
-}
-
 void PreviewCanvas::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        m_spacePressed = true;
-        setCursor(Qt::OpenHandCursor);
-        event->accept();
-        return;
-    }
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         if (m_overlay->removeSelectedVertex()) {
             event->accept();
             return;
         }
+        if (m_overlay->deleteSelectedMarker()) {
+            event->accept();
+            return;
+        }
     }
-    QGraphicsView::keyPressEvent(event);
-}
-
-void PreviewCanvas::keyReleaseEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        m_spacePressed = false;
-        if (!m_isPanning) setCursor(Qt::ArrowCursor);
-        event->accept();
-        return;
-    }
-    QGraphicsView::keyReleaseEvent(event);
-}
-
-void PreviewCanvas::focusOutEvent(QFocusEvent* event) {
-    m_spacePressed = false;
-    m_isPanning = false;
-    setCursor(Qt::ArrowCursor);
-    QGraphicsView::focusOutEvent(event);
-}
-
-void PreviewCanvas::mousePressEvent(QMouseEvent* event) {
-    m_lastMousePos = event->pos();
-    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && m_spacePressed)) {
-        m_isPanning = true;
-        setCursor(Qt::ClosedHandCursor);
-        event->accept();
-        return;
-    }
-    QGraphicsView::mousePressEvent(event);
-}
-
-void PreviewCanvas::mouseMoveEvent(QMouseEvent* event) {
-    if (m_isPanning) {
-        QPoint delta = event->pos() - m_lastMousePos;
-        m_lastMousePos = event->pos();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
-        event->accept();
-        return;
-    }
-    QGraphicsView::mouseMoveEvent(event);
-}
-
-void PreviewCanvas::mouseReleaseEvent(QMouseEvent* event) {
-    if (m_isPanning) {
-        m_isPanning = false;
-        setCursor(m_spacePressed ? Qt::OpenHandCursor : Qt::ArrowCursor);
-        event->accept();
-        return;
-    }
-    QGraphicsView::mouseReleaseEvent(event);
-}
-
-void PreviewCanvas::resizeEvent(QResizeEvent* event) {
-    QGraphicsView::resizeEvent(event);
-    if (!m_isZoomManual) {
-        initialFit();
-    }
+    ZoomableGraphicsView::keyPressEvent(event);
 }
 
 void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
-    if (m_sprites.isEmpty()) {
-        return;
-    }
+    if (m_sprites.isEmpty()) return;
     if (m_overlay && m_overlay->consumeSuppressedViewContextMenu()) {
         event->accept();
         return;
     }
     if (m_overlay && m_overlay->hasContextMenuTargetAt(mapToScene(event->pos()))) {
-        // Let the overlay own marker/pivot context menus without showing a second menu here.
         event->accept();
         return;
     }
@@ -246,12 +133,10 @@ void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
 void PreviewCanvas::setSettings(const AppSettings& settings) {
     m_settings = settings;
     setBackgroundBrush(settings.canvasColor);
-    
     QPen borderPen(settings.borderColor, 2, settings.borderStyle);
     borderPen.setCosmetic(true);
-
     for (auto* item : m_borderItems) {
-        if (item->zValue() == -1) item->setBrush(settings.frameColor); // bg item
-        else item->setPen(borderPen); // border item
+        if (item->zValue() == -1) item->setBrush(settings.frameColor); 
+        else item->setPen(borderPen); 
     }
 }

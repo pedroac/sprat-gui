@@ -1,12 +1,15 @@
 #include "MainWindow.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
+#include "ResolutionUtils.h"
 #include "AnimationCanvas.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QScreen>
+#include <QGuiApplication>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -100,6 +103,26 @@ void MainWindow::setupUi() {
     if (m_sourceResolutionCombo->count() == 0) {
         m_sourceResolutionCombo->addItem("1024x768");
     }
+
+    // Set default resolution based on actual screen size
+    if (QScreen* screen = QGuiApplication::primaryScreen()) {
+        const QSize screenSize = screen->size();
+        int bestIndex = 0;
+        int minDistance = std::numeric_limits<int>::max();
+        for (int i = 0; i < m_sourceResolutionCombo->count(); ++i) {
+            int w, h;
+            if (parseResolutionText(m_sourceResolutionCombo->itemText(i), w, h)) {
+                // Manhatan distance for simple closeness
+                int distance = qAbs(w - screenSize.width()) + qAbs(h - screenSize.height());
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    bestIndex = i;
+                }
+            }
+        }
+        m_sourceResolutionCombo->setCurrentIndex(bestIndex);
+    }
+
     canvasControls->addWidget(m_sourceResolutionCombo);
     if (!m_sourceResolutionDebounceTimer) {
         m_sourceResolutionDebounceTimer = new QTimer(this);
