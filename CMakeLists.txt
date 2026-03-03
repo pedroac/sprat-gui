@@ -172,15 +172,27 @@ endif()
 set(BUILD_TESTING ON CACHE BOOL "Enable testing" FORCE)
 
 if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
     add_executable(sprat-gui-tests
         tests/TestMain.cpp
+        tests/LayoutTests.cpp
+        tests/AnimationTests.cpp
+        tests/ProjectTests.cpp
+        tests/CoreTests.cpp
+        tests/ImageDiscoveryTests.cpp
+        tests/ProjectSessionTests.cpp
         src/Animation/AnimationPreviewService.cpp
         src/Animation/Timelines/TimelineBuilder.cpp
+        src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp
+        src/Project/ProjectFileLoader.cpp
+        src/Project/ProjectSession.cpp
+        src/Project/ImageDiscoveryService.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
     )
 
     target_include_directories(sprat-gui-tests PRIVATE
+        tests
         src
         src/Animation
         src/Animation/Timelines
@@ -194,6 +206,7 @@ if(BUILD_TESTING)
         Qt6::Gui
         Qt6::Widgets
         Qt6::Network
+        Qt6::Test
     )
 
     add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)
