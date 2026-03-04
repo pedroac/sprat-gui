@@ -131,7 +131,11 @@ void MainWindow::loadAutosavedProject() {
 }
 
 void MainWindow::onLoadProject() {
-    QString file = QFileDialog::getOpenFileName(this, tr("Load Project"), "", tr("Project Files (*.json *.zip)"));
+    QString filter = tr("All Supported Files (*.json *.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz *.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds);;"
+                        "Project Files (*.json);;"
+                        "Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz);;"
+                        "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+    QString file = QFileDialog::getOpenFileName(this, tr("Load File"), "", filter);
     if (!file.isEmpty()) {
         loadProject(file);
     }
@@ -274,11 +278,25 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
     if (m_canvas) m_canvas->setZoomManual(false);
     if (m_previewView) m_previewView->setZoomManual(false);
+
+    QFileInfo info(path);
+    const QString ext = info.suffix().toLower();
+    
+    // Delegate to specific loaders based on extension
+    if (ext == "tar" || ext == "gz" || ext == "bz2" || ext == "xz") {
+        loadTarFile(path, action);
+        return;
+    }
+    
+    if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds") {
+        loadImageWithFrameDetection(path, action);
+        return;
+    }
+
     QJsonObject root;
     QString error;
     if (!ProjectFileLoader::load(path, root, error)) {
-        if (path.endsWith(".zip", Qt::CaseInsensitive) && error.contains("project.spart.json")) {
-            // Fallback: ZIP can still be useful when it only contains image frames.
+        if (path.endsWith(".zip", Qt::CaseInsensitive)) {
             loadImagesFromZip(path, action);
             return;
         }
