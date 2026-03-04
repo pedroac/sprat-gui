@@ -13,10 +13,11 @@ else
 fi
 
 echo "Configuring..."
-cmake .
+mkdir -p build
+cmake -B build -S .
 
 echo "Building..."
-cmake --build . --parallel 2
+cmake --build build --parallel 2
 
 echo "Testing..."
-ctest --output-on-failure
+ctest --test-dir build --output-on-failure
