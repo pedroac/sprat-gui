@@ -14,28 +14,40 @@ QString CliToolsConfig::configPath() {
     return QDir(configDir).filePath("sprat/sprat.conf");
 }
 
+QString CliToolsConfig::defaultInstallDir() {
+#ifdef Q_OS_WIN
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath("bin");
+#else
+    return QDir::homePath() + "/.local/bin";
+#endif
+}
+
+void CliToolsConfig::ensureConfigExists() {
+    QString path = configPath();
+    if (!QFile::exists(path)) {
+        QDir().mkpath(QFileInfo(path).path());
+        saveAppSettings(loadAppSettings(), loadCliPaths());
+    }
+}
+
 AppSettings CliToolsConfig::loadAppSettings() {
     QSettings settings(configPath(), QSettings::IniFormat);
     AppSettings out;
 
-    const QString workspaceColor = settings.value("settings/workspace_color", settings.value("settings/canvas_color")).toString();
-    if (!workspaceColor.isEmpty()) {
-        out.workspaceColor = QColor(workspaceColor);
+    if (settings.contains("settings/workspace_color")) {
+        out.workspaceColor = QColor(settings.value("settings/workspace_color").toString());
     }
-    const QString spriteFrameColor = settings.value("settings/sprite_frame_color", settings.value("settings/frame_color")).toString();
-    if (!spriteFrameColor.isEmpty()) {
-        out.spriteFrameColor = QColor(spriteFrameColor);
+    if (settings.contains("settings/sprite_frame_color")) {
+        out.spriteFrameColor = QColor(settings.value("settings/sprite_frame_color").toString());
     }
     out.showCheckerboard = settings.value("settings/show_checkerboard", out.showCheckerboard).toBool();
     out.showBorders = settings.value("settings/show_borders", out.showBorders).toBool();
 
-    const QString borderColor = settings.value("settings/border_color").toString();
-    if (!borderColor.isEmpty()) {
-        out.borderColor = QColor(borderColor);
+    if (settings.contains("settings/border_color")) {
+        out.borderColor = QColor(settings.value("settings/border_color").toString());
     }
-    const QString detectionSelectedColor = settings.value("settings/detection_selected_color").toString();
-    if (!detectionSelectedColor.isEmpty()) {
-        out.detectionSelectedColor = QColor(detectionSelectedColor);
+    if (settings.contains("settings/detection_selected_color")) {
+        out.detectionSelectedColor = QColor(settings.value("settings/detection_selected_color").toString());
     }
     out.borderStyle = static_cast<Qt::PenStyle>(
         settings.value("settings/border_style", static_cast<int>(out.borderStyle)).toInt());
@@ -45,7 +57,7 @@ AppSettings CliToolsConfig::loadAppSettings() {
 CliPaths CliToolsConfig::loadCliPaths() {
     QSettings settings(configPath(), QSettings::IniFormat);
     CliPaths out;
-    out.baseDir = settings.value("cli/base_dir").toString();
+    out.baseDir = settings.value("cli/base_dir", defaultInstallDir()).toString();
     out.layoutBinary = resolveBinary("spratlayout", out.baseDir);
     out.packBinary = resolveBinary("spratpack", out.baseDir);
     out.convertBinary = resolveBinary("spratconvert", out.baseDir);
@@ -141,4 +153,3 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
 
     return QString();
 }
-

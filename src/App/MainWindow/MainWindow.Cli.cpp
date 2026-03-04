@@ -19,9 +19,9 @@
 
 void MainWindow::checkCliTools() {
     QStringList missing;
-    m_cliReady = resolveCliBinaries(missing);
+    bool allFound = resolveCliBinaries(missing);
     
-    if (m_cliReady) {
+    if (allFound) {
         QString currentVersion = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
         QString requiredVersion = SPRAT_CLI_VERSION;
         if (!currentVersion.isEmpty() && currentVersion != requiredVersion) {
@@ -30,8 +30,10 @@ void MainWindow::checkCliTools() {
                 return;
             }
         }
+        m_cliReady = true;
         m_statusLabel->setText(tr("CLI ready (%1)").arg(currentVersion));
     } else {
+        m_cliReady = false;
         m_statusLabel->setText(tr("CLI missing"));
         showMissingCliDialog(missing);
     }
@@ -70,7 +72,7 @@ bool MainWindow::resolveCliBinaries(QStringList& missing) {
     m_spratFramesBin = m_cliPaths.framesBinary;
     m_spratUnpackBin = m_cliPaths.unpackBinary;
 
-    return !m_spratLayoutBin.isEmpty() && !m_spratPackBin.isEmpty() && !m_spratFramesBin.isEmpty();
+    return missing.isEmpty();
 }
 
 void MainWindow::showMissingCliDialog(const QStringList& missing) {

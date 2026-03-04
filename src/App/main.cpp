@@ -4,6 +4,7 @@
 #include <QLocale>
 #include <QTranslator>
 #include "MainWindow.h"
+#include "CliToolsConfig.h"
 
 /**
  * @brief Main entry point for the sprat-gui application.
@@ -17,6 +18,9 @@
  */
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+
+    // Initialize CLI tools configuration
+    CliToolsConfig::ensureConfigExists();
 
     // Set up internationalization
     QTranslator translator;
