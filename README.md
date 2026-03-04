@@ -4,17 +4,21 @@ Sprat-cli frontend, to generate spritesheets and related metadata (ex: animation
 
 Use this app if you need to:
 
-1. Build sprite sheet layouts from a folder of images.
-2. Edit pivots and markers per sprite visually.
-3. Create animation timelines quickly from frame naming patterns.
-4. Preview and export animations (GIF/video) without manual scripting.
-5. Save/load complete project state (`.json` or `.zip`).
+1. Detect individual frames in a single image automatically or manually.
+2. Build sprite sheet layouts from a folder of images.
+3. Edit pivots and markers per sprite visually.
+4. Create animation timelines quickly from frame naming patterns.
+5. Preview and export animations (GIF/video) without manual scripting.
+6. Save/load complete project state (`.json` or `.zip`).
 
 If your workflow is already fully automated by scripts and CI, this may be unnecessary. If you need fast visual iteration for game/UI assets, this is likely useful.
 
 ![Sprat GUI](README_assets/sprat-gui.png)
 
 ## What it does (and why you might need it)
+
+- **Frame detection (spratframes integration)**  
+  Automatically identifies individual frames in a sprite sheet or strip when you load a single image, with support for manual splitting and selection.
 
 - **Layout generation (spratlayout integration)**  
   Generates atlas layout data from your image folder, so you avoid hand-maintained packing metadata.
@@ -109,6 +113,17 @@ Binary output:
   - ![Filter by name](README_assets/layout_filter_by_name.png)
   - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
   - ![Loaded frames](README_assets/loaded_frames.png)
+
+- **Frames detection**
+  - When you drag and drop a single image file (like a sprite sheet or a strip), the app automatically runs `spratframes` to detect individual frames.
+  - A dedicated dialog opens showing the identified frames. You can select exactly which ones to import.
+  - ![Frames detector](README_assets/frames_detector.png)
+  - **Splitting frames**: If the automatic detection merges two or more frames, use the **Split Mode** (right-click a frame or use the toolbar in the detection dialog) to manually divide them.
+  - ![Split mode](README_assets/split_mode.png)
+  - Click on a frame to place a splitting line; the view supports zoom for exact placement (CTRL + mouse wheel).
+  - ![Splitting](README_assets/splitting.png)
+  - Once satisfied, accept the detection to extract and load the frames into your project.
+  - ![Splitted accepted frames](README_assets/splitted_accepted_frames.png)
 
 - **Sprite sheet layout editing**
   - Select a sprite to see its preview details; use zoom/scroll controls inside the preview canvas.
