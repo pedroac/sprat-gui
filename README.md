@@ -1,6 +1,6 @@
 # Sprat-gui
 
-Sprat-cli frontend, to generate spritesheets and related metadata (ex: animations and hitboxes).
+GUI frontend for `sprat-cli` to generate spritesheets and related metadata (for example animations and hitboxes).
 
 Use this app if you need to:
 
@@ -47,11 +47,12 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - CMake >= 3.16
 - C++17 compiler
 - Sprat CLI tools:
+  - `spratframes`
   - `spratlayout`
   - `spratpack`
   - `spratconvert` (optional for format transforms)
   *(If the app detects them missing it can run the bundled installer and drop binaries into `~/.local/bin`.)*
-  - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratlayout`, `spratpack`, and `spratconvert` from it or let you point Settings directly at those binaries.
+  - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratframes`, `spratlayout`, `spratpack`, and `spratconvert` from it, or let you point Settings directly at those binaries.
 - Optional export tools:
   - ImageMagick (`magick` or `convert`) for GIF
   - FFmpeg (`ffmpeg`) for video
@@ -59,11 +60,11 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   - `zip` (save `.zip` projects)
   - `unzip` (load `.zip` projects)
 
-When the installer downloads the CLI tools for you, it clones the latest `main` version of `sprat-cli` (`git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git`) before building them, ensuring you always get the up-to-date release branch.
+When the installer downloads the CLI tools for you, it clones the latest `main` branch of `sprat-cli` (`git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git`) before building.
 
 ## Local CLI development
 
-Place the `sprat-cli` repository beside this project (for example, at `../sprat-cli`) so the GUI can work with the same source tree. After building that repo (e.g., `cmake -S ../sprat-cli -B ../sprat-cli/build && cmake --build ../sprat-cli/build`), Sprat GUI auto-detects the generated `spratlayout`, `spratpack`, and `spratconvert` binaries, or you can point the Settings dialog at the directory. If you clone manually (or let the installer do it for you), make sure to pull the latest `main` branch before building so the GUI uses the most current CLI behavior.
+Place the `sprat-cli` repository beside this project (for example, at `../sprat-cli`) so the GUI can work with the same source tree. After building that repo (for example `cmake -S ../sprat-cli -B ../sprat-cli/build && cmake --build ../sprat-cli/build`), Sprat GUI auto-detects the generated `spratframes`, `spratlayout`, `spratpack`, and `spratconvert` binaries, or you can point the Settings dialog at the directory.
 
 ## Manual frame editing
 
@@ -71,16 +72,30 @@ Use the layout canvas context menu to manage individual frames without reloading
 
 ## Build
 
+Default build (updates `DEPENDENCIES` from remote tags, configures, builds, then runs tests):
+
 ```bash
 sh build.sh
 ```
 
-`build.sh` runs configure (`cmake .`), build (`make`), and tests (`ctest`) in sequence.
+`build.sh` behavior:
+- Updates `DEPENDENCIES` to the newest `sprat-cli` semver tag if network access is available.
+- Configures with `cmake -B build -S .`.
+- Builds with `cmake --build build`.
+- Runs tests with `ctest --test-dir build --output-on-failure`.
 
-Binary output:
+Manual build (does not modify `DEPENDENCIES`):
 
 ```bash
-./sprat-gui
+cmake -S . -B build
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+Run:
+
+```bash
+./build/sprat-gui
 ```
 
 ## Quick start
@@ -97,7 +112,7 @@ Binary output:
 ## UI workflow
 
 - **CLI Tools / Settings**
-  - On first launch the toolbar shows “CLI missing”; click Settings to point to `spratlayout`, `spratpack`, and optionally `spratconvert`, or use the “Install CLI Tools” button to download/build into `~/.local/bin`.
+  - On first launch the toolbar shows “CLI missing”; click Settings to point to `spratframes`, `spratlayout`, `spratpack`, and optionally `spratconvert`, or use the “Install CLI Tools” button to download/build into `~/.local/bin`.
   - Settings also exposes canvas/marker colors and border styles that apply immediately and persist.
   - ![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
 
@@ -216,13 +231,16 @@ Generation behavior:
 ## Troubleshooting
 
 - **“CLI missing” at startup**  
-  Open Settings and set absolute paths for Sprat binaries, or install them from the app.
+  Open Settings and set absolute paths for Sprat binaries (`spratframes`, `spratlayout`, `spratpack`, optional `spratconvert`), or install them from the app.
 
 - **Cannot save/load `.zip` project**  
   Ensure `zip`/`unzip` are installed and available in `PATH`.
 
 - **Animation export disabled or failing**  
   Install ImageMagick and/or FFmpeg, then restart the app.
+
+- **Translations are not generated during build**  
+  Install `Qt6 LinguistTools`. Without it, the app still builds, but automatic `.ts/.qm` generation is skipped.
 
 ## Contributing
 
