@@ -18,8 +18,10 @@ jobs:
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             BRANCH="${{ github.base_ref }}"
           else
-            BRANCH="${{ github.ref_name }}"
+            # Extracts 'release' from 'refs/heads/release'
+            BRANCH=$(echo "${{ github.ref }}" | sed 's|refs/heads/||')
           fi
+          echo "Detected branch: $BRANCH"
           if [ "$BRANCH" == "release" ]; then
             echo 'matrix=["ubuntu-latest", "windows-latest", "macos-latest"]' >> $GITHUB_OUTPUT
           else
@@ -108,6 +110,7 @@ jobs:
           cli_version=$(cat DEPENDENCIES | xargs)
           curl -L -o cli.dmg "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-macos-x64.dmg"
           MOUNT_POINT=$(hdiutil mount cli.dmg | grep -o '/Volumes/.*' | head -n 1)
+          if [ -z "$MOUNT_POINT" ]; then echo "Failed to mount DMG"; exit 1; fi
           cp "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/MacOS/
           hdiutil unmount "$MOUNT_POINT"
           # Package DMG
