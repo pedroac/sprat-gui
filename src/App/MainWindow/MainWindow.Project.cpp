@@ -8,6 +8,7 @@
 #include "ProjectPayloadCodec.h"
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
+#include "ResolutionUtils.h"
 
 #include <QComboBox>
 #include <QDir>
@@ -31,33 +32,11 @@
 #include <algorithm>
 
 namespace {
-bool parseResolution(const QString& value, int& width, int& height) {
-    const QString normalized = value.trimmed().toLower();
-    const QStringList parts = normalized.split('x', Qt::SkipEmptyParts);
-    if (parts.size() != 2) {
-        return false;
-    }
-    bool okW = false;
-    bool okH = false;
-    const int parsedWidth = parts[0].trimmed().toInt(&okW);
-    const int parsedHeight = parts[1].trimmed().toInt(&okH);
-    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-        return false;
-    }
-    width = parsedWidth;
-    height = parsedHeight;
-    return true;
-}
-
-QString formatResolution(int width, int height) {
-    return QString("%1x%2").arg(width).arg(height);
-}
-
 void syncSourceResolutionPresetSelection(QComboBox* combo, int width, int height) {
     if (!combo) {
         return;
     }
-    const int presetIndex = combo->findText(formatResolution(width, height), Qt::MatchFixedString);
+    const int presetIndex = combo->findText(formatResolutionText(width, height), Qt::MatchFixedString);
     const bool blocked = combo->blockSignals(true);
     combo->setCurrentIndex(presetIndex >= 0 ? presetIndex : 0);
     combo->blockSignals(blocked);
@@ -78,7 +57,7 @@ void MainWindow::loadAutosavedProject() {
     QJsonObject layoutOpts = root["layout_options"].toObject();
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
-    const bool hasSourceResolution = parseResolution(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
+    const bool hasSourceResolution = parseResolutionText(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
         hasSourceResolution ? sourceResolutionWidth : 1024,
@@ -230,7 +209,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.trimTransparent = hasSelectedProfile ? selectedProfile.trimTransparent : false;
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
-    if (m_sourceResolutionCombo && parseResolution(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight)) {
+    if (m_sourceResolutionCombo && parseResolutionText(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight)) {
         input.sourceResolutionWidth = sourceResolutionWidth;
         input.sourceResolutionHeight = sourceResolutionHeight;
     }
@@ -338,7 +317,7 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     }
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
-    const bool hasSourceResolution = parseResolution(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
+    const bool hasSourceResolution = parseResolutionText(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
         hasSourceResolution ? sourceResolutionWidth : 1024,

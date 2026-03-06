@@ -1,4 +1,5 @@
 #include "LayoutRunner.h"
+#include "ResolutionUtils.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>
@@ -6,10 +7,6 @@
 namespace {
     bool isCompactMode(const QString& mode) {
         return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
-    }
-
-    QString resolutionArg(int width, int height) {
-        return QString("%1x%2").arg(width).arg(height);
     }
 }
 
@@ -91,8 +88,8 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
         const int targetW = p.targetResolutionUseSource ? config.sourceResolutionWidth : p.targetResolutionWidth;
         const int targetH = p.targetResolutionUseSource ? config.sourceResolutionHeight : p.targetResolutionHeight;
         
-        args << "--source-resolution" << resolutionArg(config.sourceResolutionWidth, config.sourceResolutionHeight);
-        args << "--target-resolution" << resolutionArg(targetW, targetH);
+        args << "--source-resolution" << formatResolutionText(config.sourceResolutionWidth, config.sourceResolutionHeight);
+        args << "--target-resolution" << formatResolutionText(targetW, targetH);
         
         if (!p.resolutionReference.trimmed().isEmpty()) {
             args << "--resolution-reference" << p.resolutionReference.trimmed();

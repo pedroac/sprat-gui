@@ -1,4 +1,5 @@
 #include "SpratProfilesConfig.h"
+#include "ResolutionUtils.h"
 
 #include <QDir>
 #include <QFile>
@@ -59,24 +60,6 @@ bool toBool(const QString& value, bool fallback) {
         return false;
     }
     return fallback;
-}
-
-bool parseResolution(const QString& value, int& width, int& height) {
-    const QString normalized = value.trimmed().toLower();
-    const QStringList parts = normalized.split('x', Qt::SkipEmptyParts);
-    if (parts.size() != 2) {
-        return false;
-    }
-    bool okW = false;
-    bool okH = false;
-    const int parsedWidth = parts[0].trimmed().toInt(&okW);
-    const int parsedHeight = parts[1].trimmed().toInt(&okH);
-    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-        return false;
-    }
-    width = parsedWidth;
-    height = parsedHeight;
-    return true;
 }
 
 QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
@@ -256,7 +239,7 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
                 normalized == "same-as-source" ||
                 normalized == "same_as_source") {
                 current.targetResolutionUseSource = true;
-            } else if (parseResolution(value, width, height)) {
+            } else if (parseResolutionText(value, width, height)) {
                 current.targetResolutionWidth = width;
                 current.targetResolutionHeight = height;
                 current.targetResolutionUseSource = false;

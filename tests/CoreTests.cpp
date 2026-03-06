@@ -1,4 +1,5 @@
 #include "CoreTests.h"
+#include "MarkerUtils.h"
 #include "models.h"
 
 void CoreTests::testMarkerKindConversions() {
@@ -12,6 +13,13 @@ void CoreTests::testMarkerKindConversions() {
     QCOMPARE(markerKindFromString(QStringView(u"rectangle")), MarkerKind::Rectangle);
     QCOMPARE(markerKindFromString(QStringView(u"polygon")), MarkerKind::Polygon);
     QCOMPARE(markerKindFromString(QStringView(u"unknown")), MarkerKind::Point); // Fallback
+}
+
+void CoreTests::testMarkerNameNormalization() {
+    QCOMPARE(normalizeMarkerName("pivot"), QString("pivot"));
+    QCOMPARE(normalizeMarkerName("PIVOT"), QString("pivot"));
+    QCOMPARE(normalizeMarkerName("  Pivot  "), QString("pivot"));
+    QCOMPARE(normalizeMarkerName("  hand_left "), QString("hand_left"));
 }
 
 #include "ResolutionUtils.h"

@@ -1,5 +1,6 @@
 #include "ProfilesDialog.h"
 #include "ResolutionsConfig.h"
+#include "ResolutionUtils.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -48,26 +49,6 @@ bool isCompactMode(const QString& mode) {
     return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
 }
 
-bool parseResolution(const QString& text, int& width, int& height) {
-    const QStringList parts = text.trimmed().toLower().split('x', Qt::SkipEmptyParts);
-    if (parts.size() != 2) {
-        return false;
-    }
-    bool okW = false;
-    bool okH = false;
-    const int parsedWidth = parts[0].trimmed().toInt(&okW);
-    const int parsedHeight = parts[1].trimmed().toInt(&okH);
-    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-        return false;
-    }
-    width = parsedWidth;
-    height = parsedHeight;
-    return true;
-}
-
-QString formatResolution(int width, int height) {
-    return QString("%1x%2").arg(width).arg(height);
-}
 }
 
 ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* parent)
@@ -344,7 +325,7 @@ void ProfilesDialog::saveEditorsToProfile(int row) {
     if (m_targetResolutionCombo && m_targetResolutionCombo->currentData().toString() == QLatin1String(kTargetSameAsSourceValue)) {
         p.targetResolutionUseSource = true;
     } else if (m_targetResolutionCombo) {
-        parseResolution(m_targetResolutionCombo->currentText(), targetWidth, targetHeight);
+        parseResolutionText(m_targetResolutionCombo->currentText(), targetWidth, targetHeight);
     }
     p.targetResolutionWidth = targetWidth;
     p.targetResolutionHeight = targetHeight;
@@ -434,7 +415,7 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
         if (p.targetResolutionUseSource) {
             m_targetResolutionCombo->setCurrentIndex(0);
         } else {
-            const QString targetResolution = formatResolution(
+            const QString targetResolution = formatResolutionText(
                 p.targetResolutionWidth > 0 ? p.targetResolutionWidth : 1024,
                 p.targetResolutionHeight > 0 ? p.targetResolutionHeight : 768);
             const int targetIndex = m_targetResolutionCombo->findText(targetResolution, Qt::MatchFixedString);

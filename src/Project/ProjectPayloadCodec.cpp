@@ -1,20 +1,13 @@
 #include "ProjectPayloadCodec.h"
+#include "MarkerUtils.h"
+#include "ResolutionUtils.h"
 
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QColor>
-#include <QStringList>
 
 namespace {
-QString normalizedMarkerName(QString name) {
-    name = name.trimmed();
-    if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
-        return "pivot";
-    }
-    return name;
-}
-
 QJsonArray toJsonArray(const QVector<int>& values) {
     QJsonArray arr;
     for (int value : values) {
@@ -33,27 +26,6 @@ QVector<int> fromJsonArray(const QJsonValue& value) {
     return out;
 }
 
-QString formatResolution(int width, int height) {
-    return QString("%1x%2").arg(width).arg(height);
-}
-
-bool parseResolution(const QString& value, int& width, int& height) {
-    const QString normalized = value.trimmed().toLower();
-    const QStringList parts = normalized.split('x', Qt::SkipEmptyParts);
-    if (parts.size() != 2) {
-        return false;
-    }
-    bool okW = false;
-    bool okH = false;
-    const int parsedWidth = parts[0].trimmed().toInt(&okW);
-    const int parsedHeight = parts[1].trimmed().toInt(&okH);
-    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-        return false;
-    }
-    width = parsedWidth;
-    height = parsedHeight;
-    return true;
-}
 }
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
@@ -65,7 +37,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     layoutOpts["padding"] = input.padding;
     layoutOpts["trim_transparent"] = input.trimTransparent;
     if (input.sourceResolutionWidth > 0 && input.sourceResolutionHeight > 0) {
-        layoutOpts["source_resolution"] = formatResolution(input.sourceResolutionWidth, input.sourceResolutionHeight);
+        layoutOpts["source_resolution"] = formatResolutionText(input.sourceResolutionWidth, input.sourceResolutionHeight);
     }
     root["layout_options"] = layoutOpts;
 
@@ -121,7 +93,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             for (const auto& p : s->points) {
                 QJsonObject mObj;
                 const QString kind = markerKindToString(p.kind);
-                mObj["name"] = normalizedMarkerName(p.name);
+                mObj["name"] = normalizeMarkerName(p.name);
                 mObj["x"] = p.x;
                 mObj["y"] = p.y;
                 // Keep GUI field and include CLI-compatible field for spratconvert.
@@ -245,7 +217,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             for (const auto& mVal : markersArr) {
                 QJsonObject mObj = mVal.toObject();
                 NamedPoint p;
-                p.name = normalizedMarkerName(mObj["name"].toString());
+                p.name = normalizeMarkerName(mObj["name"].toString());
                 p.x = mObj["x"].toInt();
                 p.y = mObj["y"].toInt();
                 QString kind = mObj["kind"].toString();
@@ -314,7 +286,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         const QJsonObject layoutOpts = root["layout_options"].toObject();
         int sourceWidth = 0;
         int sourceHeight = 0;
-        if (parseResolution(layoutOpts["source_resolution"].toString(), sourceWidth, sourceHeight)) {
+        if (parseResolutionText(layoutOpts["source_resolution"].toString(), sourceWidth, sourceHeight)) {
             out.sourceResolutionWidth = sourceWidth;
             out.sourceResolutionHeight = sourceHeight;
         }

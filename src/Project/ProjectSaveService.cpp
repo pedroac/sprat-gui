@@ -1,4 +1,6 @@
 #include "ProjectSaveService.h"
+#include "MarkerUtils.h"
+#include "ResolutionUtils.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -13,7 +15,6 @@
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QTextStream>
-#include <QStringList>
 #include <QtGlobal>
 
 namespace {
@@ -21,37 +22,8 @@ namespace {
         return QCoreApplication::translate("ProjectSaveService", text);
     }
 
-    QString normalizedMarkerName(QString name) {
-        name = name.trimmed();
-        if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
-            return "pivot";
-        }
-        return name;
-    }
-
     bool isCompactMode(const QString& mode) {
         return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
-    }
-
-    QString resolutionArg(int width, int height) {
-        return QString("%1x%2").arg(width).arg(height);
-    }
-
-    bool parseResolution(const QString& value, int& width, int& height) {
-        const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
-        if (parts.size() != 2) {
-            return false;
-        }
-        bool okW = false;
-        bool okH = false;
-        const int parsedWidth = parts[0].trimmed().toInt(&okW);
-        const int parsedHeight = parts[1].trimmed().toInt(&okH);
-        if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-            return false;
-        }
-        width = parsedWidth;
-        height = parsedHeight;
-        return true;
     }
 }
 
@@ -160,7 +132,7 @@ bool ProjectSaveService::save(
     const double layoutOptionScale = 1.0;
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
-    const bool hasSourceResolution = parseResolution(
+    const bool hasSourceResolution = parseResolutionText(
         layoutOptions["source_resolution"].toString(),
         sourceResolutionWidth,
         sourceResolutionHeight);
@@ -181,7 +153,7 @@ bool ProjectSaveService::save(
 
         for (auto markerIt = markersArr.begin(); markerIt != markersArr.end(); ++markerIt) {
             QJsonObject markerObj = markerIt->toObject();
-            const QString markerName = normalizedMarkerName(markerObj["name"].toString());
+            const QString markerName = normalizeMarkerName(markerObj["name"].toString());
             QString markerKindStr = markerObj["kind"].toString();
             if (markerKindStr.isEmpty()) {
                 markerKindStr = markerObj["type"].toString();
@@ -405,8 +377,8 @@ bool ProjectSaveService::save(
                 const int targetResolutionHeight = effectiveProfile.targetResolutionUseSource
                     ? sourceResolutionHeight
                     : effectiveProfile.targetResolutionHeight;
-                layoutArgs << "--source-resolution" << resolutionArg(sourceResolutionWidth, sourceResolutionHeight);
-                layoutArgs << "--target-resolution" << resolutionArg(targetResolutionWidth, targetResolutionHeight);
+                layoutArgs << "--source-resolution" << formatResolutionText(sourceResolutionWidth, sourceResolutionHeight);
+                layoutArgs << "--target-resolution" << formatResolutionText(targetResolutionWidth, targetResolutionHeight);
                 if (!effectiveProfile.resolutionReference.trimmed().isEmpty()) {
                     layoutArgs << "--resolution-reference" << effectiveProfile.resolutionReference.trimmed();
                 }

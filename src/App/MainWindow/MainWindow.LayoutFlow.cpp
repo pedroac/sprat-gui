@@ -3,6 +3,7 @@
 #include "SpriteSelectionPresenter.h"
 #include "LayoutRunner.h"
 #include "LayoutParser.h"
+#include "ResolutionUtils.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -22,23 +23,6 @@ int legacyDefaultPivotX(const SpritePtr& sprite) {
 
 int legacyDefaultPivotY(const SpritePtr& sprite) {
     return sprite ? (sprite->rect.height() / 2) : 0;
-}
-
-bool parseResolutionArg(const QString& value, int& width, int& height) {
-    const QStringList parts = value.trimmed().toLower().split('x', Qt::SkipEmptyParts);
-    if (parts.size() != 2) {
-        return false;
-    }
-    bool okW = false;
-    bool okH = false;
-    const int parsedWidth = parts[0].trimmed().toInt(&okW);
-    const int parsedHeight = parts[1].trimmed().toInt(&okH);
-    if (!okW || !okH || parsedWidth <= 0 || parsedHeight <= 0) {
-        return false;
-    }
-    width = parsedWidth;
-    height = parsedHeight;
-    return true;
 }
 }
 
@@ -71,7 +55,7 @@ void MainWindow::onRunLayout() {
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     if (m_sourceResolutionCombo) {
-        parseResolutionArg(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight);
+        parseResolutionText(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight);
     }
     config.sourceResolutionWidth = sourceResolutionWidth;
     config.sourceResolutionHeight = sourceResolutionHeight;

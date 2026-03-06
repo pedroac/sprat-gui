@@ -1,4 +1,5 @@
 #include "MarkersDialog.h"
+#include "MarkerUtils.h"
 #include <QCoreApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -13,14 +14,6 @@
 #include <QDialogButtonBox>
 
 namespace {
-QString normalizedMarkerName(QString name) {
-    name = name.trimmed();
-    if (name.compare("pivot", Qt::CaseInsensitive) == 0) {
-        return "pivot";
-    }
-    return name;
-}
-
 void populateKindCombo(QComboBox* combo) {
     combo->clear();
     combo->addItem(QCoreApplication::translate("MarkersDialog", "point"), static_cast<int>(MarkerKind::Point));
@@ -191,7 +184,7 @@ void MarkersDialog::onAddClicked() {
     if (name.isEmpty()) {
         name = QString("point%1").arg(m_sprite->points.size() + 1);
     }
-    name = normalizedMarkerName(name);
+    name = normalizeMarkerName(name);
     
     // Check duplicate
     for (const auto& p : m_sprite->points) {
@@ -299,7 +292,7 @@ void MarkersDialog::onFieldChanged() {
     }
 
     auto& p = m_sprite->points[row];
-    p.name = normalizedMarkerName(m_nameEdit->text());
+    p.name = normalizeMarkerName(m_nameEdit->text());
     if (m_nameEdit->text() != p.name) {
         m_updating = true;
         m_nameEdit->setText(p.name);
