@@ -2,6 +2,7 @@
 
 #include "SpriteSelectionPresenter.h"
 #include "LayoutRunner.h"
+#include "LayoutParser.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -50,8 +51,7 @@ void MainWindow::onRunLayout() {
         return;
     }
     if (m_layoutRunner && m_layoutRunner->isRunning()) {
-        m_layoutRunPending = true;
-        return;
+        m_layoutRunner->stop();
     }
 
     const QString requestedProfile = m_profileCombo->currentText().trimmed();
@@ -110,9 +110,13 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         m_statusLabel->setText(tr("Error running layout"));
         qCritical() << "spratlayout process failed. Exit code:" << result.exitCode << "Error:" << result.error << "Output:" << result.output;
 
-        if (!m_layoutFailureDialogShown) {
-            QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + details);
-            m_layoutFailureDialogShown = true;
+        // Don't show error dialog if it was retrying or if it was explicitly stopped (which often results in non-zero exit code but we don't want a dialog)
+        if (!m_layoutFailureDialogShown && !result.error.contains("stopped", Qt::CaseInsensitive)) {
+            // Check if it was killed by us (no output and no error usually means killed)
+            if (!result.output.isEmpty() || !result.error.isEmpty()) {
+                QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + details);
+                m_layoutFailureDialogShown = true;
+            }
         }
         
         m_retryWithoutTrimOnFailure = false;
@@ -127,29 +131,38 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     m_retryWithoutTrimOnFailure = false;
 
     const QString layoutText = result.output;
-    LayoutModel newModel = parseLayoutOutput(layoutText, layoutParserFolder());
+    QVector<LayoutModel> newModels = LayoutParser::parse(layoutText, layoutParserFolder());
+    if (newModels.isEmpty()) {
+        newModels.append(LayoutModel());
+    }
+
     m_session->cachedLayoutOutput = layoutText;
-    m_session->cachedLayoutScale = newModel.scale;
+    m_session->cachedLayoutScale = newModels.first().scale;
+
     if (m_session->pendingProjectPayload.isEmpty()) {
         QMap<QString, SpritePtr> oldSprites;
-        for (const auto& s : m_session->layoutModel.sprites) {
-            oldSprites[s->path] = s;
+        for (const auto& model : m_session->layoutModels) {
+            for (const auto& s : model.sprites) {
+                oldSprites[s->path] = s;
+            }
         }
-        for (auto& s : newModel.sprites) {
-            if (!oldSprites.contains(s->path)) {
-                continue;
+        for (auto& model : newModels) {
+            for (auto& s : model.sprites) {
+                if (!oldSprites.contains(s->path)) {
+                    continue;
+                }
+                auto oldS = oldSprites[s->path];
+                s->name = oldS->name;
+                const bool oldPivotIsLegacyDefault =
+                    oldS->pivotX == legacyDefaultPivotX(oldS) &&
+                    oldS->pivotY == legacyDefaultPivotY(oldS);
+                // Preserve user-edited pivots; let legacy auto pivots upgrade to the new default.
+                if (!oldPivotIsLegacyDefault) {
+                    s->pivotX = oldS->pivotX;
+                    s->pivotY = oldS->pivotY;
+                }
+                s->points = oldS->points;
             }
-            auto oldS = oldSprites[s->path];
-            s->name = oldS->name;
-            const bool oldPivotIsLegacyDefault =
-                oldS->pivotX == legacyDefaultPivotX(oldS) &&
-                oldS->pivotY == legacyDefaultPivotY(oldS);
-            // Preserve user-edited pivots; let legacy auto pivots upgrade to the new default.
-            if (!oldPivotIsLegacyDefault) {
-                s->pivotX = oldS->pivotX;
-                s->pivotY = oldS->pivotY;
-            }
-            s->points = oldS->points;
         }
     }
 
@@ -159,11 +172,15 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     }
     const QString primaryPath = m_session->selectedSprite ? m_session->selectedSprite->path : QString();
 
-    m_session->layoutModel = newModel;
-    m_canvas->setModel(m_session->layoutModel);
+    m_session->layoutModels = newModels;
+
+    m_canvas->setModels(m_session->layoutModels);
     m_canvas->setZoomManual(false);
     QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
-    m_statusLabel->setText(QString(tr("Loaded %1 sprites")).arg(m_session->layoutModel.sprites.size()));
+
+    m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
+        .arg(m_session->activeFramePaths.size())
+        .arg(newModels.size()));
 
     populateActiveFrameListFromModel();
     if (m_session->layoutSourceIsList) {
@@ -278,10 +295,10 @@ void MainWindow::setLoading(bool loading) {
         m_loadingOverlayVisible = true;
     };
     if (loading) {
-        if (m_welcomeLabel && m_session->layoutModel.sprites.isEmpty()) {
+        if (m_welcomeLabel && (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty())) {
             m_welcomeLabel->setText(m_loadingUiMessage);
         }
-        if (m_mainStack && m_welcomePage && m_session->layoutModel.sprites.isEmpty()) {
+        if (m_mainStack && m_welcomePage && (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty())) {
             m_mainStack->setCurrentWidget(m_welcomePage);
         }
         if (!m_cliInstallInProgress) {
@@ -329,8 +346,10 @@ void MainWindow::onProfileChanged() {
 }
 
 void MainWindow::onLayoutZoomChanged(double value) {
-    if (!m_layoutZoomSpin->signalsBlocked()) {
+    if (m_canvas && !m_layoutZoomSpin->signalsBlocked()) {
         m_canvas->setZoomManual(true);
     }
-    m_canvas->setZoom(value / 100.0);
+    if (m_canvas) {
+        m_canvas->setZoom(value / 100.0);
+    }
 }

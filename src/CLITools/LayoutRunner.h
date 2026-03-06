@@ -31,6 +31,7 @@ public:
     ~LayoutRunner() override;
 
     void run(const LayoutRunConfig& config);
+    void stop();
     bool isRunning() const;
 
 signals:

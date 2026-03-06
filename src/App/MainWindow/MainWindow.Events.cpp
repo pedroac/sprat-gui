@@ -76,7 +76,7 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
 }
 
 MainWindow::DropAction MainWindow::confirmDropAction(const QString& path) {
-    if (m_session->layoutModel.sprites.isEmpty()) {
+    if (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty()) {
         return DropAction::Replace;
     }
 

@@ -11,10 +11,7 @@ void ProjectSession::clear() {
     activeFramePaths.clear();
     frameListPath.clear();
 
-    layoutModel.sprites.clear();
-    layoutModel.atlasWidth = 0;
-    layoutModel.atlasHeight = 0;
-    layoutModel.scale = 1.0;
+    layoutModels.clear();
     cachedLayoutOutput.clear();
     cachedLayoutScale = 1.0;
     lastSuccessfulProfile.clear();
@@ -33,7 +30,7 @@ void ProjectSession::clear() {
 }
 
 bool ProjectSession::isEmpty() const {
-    return activeFramePaths.isEmpty() && layoutModel.sprites.isEmpty();
+    return activeFramePaths.isEmpty() && layoutModels.isEmpty();
 }
 
 void ProjectSession::addTempDir(std::unique_ptr<QTemporaryDir> dir) {

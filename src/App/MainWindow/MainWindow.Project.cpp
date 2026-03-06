@@ -220,7 +220,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     }
     input.primarySelectedSpritePath = session->selectedSprite ? session->selectedSprite->path : QString();
     input.selectedPointName = session->selectedPointName;
-    input.layoutModel = session->layoutModel;
+    input.layoutModels = session->layoutModels;
     input.layoutOutput = session->cachedLayoutOutput;
     input.layoutScale = session->cachedLayoutScale;
     input.profile = m_profileCombo->currentText();
@@ -475,7 +475,7 @@ void MainWindow::applyProjectPayload() {
     m_isRestoringProject = true;
     QJsonObject root = m_session->pendingProjectPayload;
     m_session->pendingProjectPayload = QJsonObject();
-    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->layoutModel);
+    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->layoutModels);
 
     if (m_layoutZoomSpin) {
         m_layoutZoomSpin->setValue(applied.layoutZoom * 100.0);
@@ -540,7 +540,9 @@ void MainWindow::applyProjectPayload() {
         primaryPath = applied.selectedSpritePath;
     }
     if (!selectedPaths.isEmpty()) {
-        m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
+        if (m_canvas) {
+            m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
+        }
     }
 
     m_animFrameIndex = qMax(0, applied.animationFrameIndex);

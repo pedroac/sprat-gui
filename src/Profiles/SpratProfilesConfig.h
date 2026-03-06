@@ -15,10 +15,14 @@ struct SpratProfile {
     bool targetResolutionUseSource = false;
     QString resolutionReference = "largest";
     int padding = 0;
+    int extrude = 0;
     int maxCombinations = 0;
     int threads = 0;
     bool trimTransparent = true;
     bool allowRotation = false;
+    double scale = 1.0;
+    bool multipack = false;
+    QString sort = "name";
 };
 
 class SpratProfilesConfig {

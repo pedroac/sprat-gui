@@ -26,6 +26,12 @@ LayoutRunner::~LayoutRunner() {
     }
 }
 
+void LayoutRunner::stop() {
+    if (m_process->state() != QProcess::NotRunning) {
+        m_process->kill();
+    }
+}
+
 bool LayoutRunner::isRunning() const {
     return m_process->state() != QProcess::NotRunning;
 }
@@ -70,7 +76,11 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
     }
 
     // Scale
-    args << "--scale" << QString::number(config.scale, 'g', 12);
+    double effectiveScale = config.scale;
+    if (std::abs(effectiveScale - 1.0) < 1e-6 && p.scale > 0) {
+        effectiveScale = p.scale;
+    }
+    args << "--scale" << QString::number(effectiveScale, 'g', 12);
 
     // Resolution
     const bool hasSourceResolution = config.sourceResolutionWidth > 0 && config.sourceResolutionHeight > 0;
@@ -89,14 +99,23 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
         }
     }
 
-    // Padding & Trim & Rotate
+    // Padding & Extrude & Trim & Rotate
     args << "--padding" << QString::number(p.padding);
+    if (p.extrude > 0) {
+        args << "--extrude" << QString::number(p.extrude);
+    }
     
     if (p.trimTransparent && !config.retryWithoutTrim) {
         args << "--trim-transparent";
     }
     if (p.allowRotation) {
         args << "--rotate";
+    }
+    if (p.multipack) {
+        args << "--multipack";
+    }
+    if (!p.sort.trimmed().isEmpty()) {
+        args << "--sort" << p.sort.trimmed();
     }
 
     return args;

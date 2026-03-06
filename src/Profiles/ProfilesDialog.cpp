@@ -11,8 +11,10 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QStringList>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QCheckBox>
 #include <QVBoxLayout>
 
@@ -31,10 +33,14 @@ SpratProfile makeDefaultProfile(const QString& name) {
     p.targetResolutionUseSource = false;
     p.resolutionReference = "largest";
     p.padding = 0;
+    p.extrude = 0;
     p.maxCombinations = 0;
     p.threads = 0;
     p.trimTransparent = true;
     p.allowRotation = false;
+    p.scale = 1.0;
+    p.multipack = false;
+    p.sort = "name";
     return p;
 }
 
@@ -68,7 +74,7 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     : QDialog(parent),
       m_profiles(profiles) {
     setWindowTitle(tr("Manage Profiles"));
-    resize(760, 420);
+    resize(850, 550);
 
     QVBoxLayout* rootLayout = new QVBoxLayout(this);
     QHBoxLayout* contentLayout = new QHBoxLayout();
@@ -91,21 +97,47 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
 
     contentLayout->addLayout(listLayout, 1);
 
-    QGroupBox* detailsGroup = new QGroupBox(tr("Profile Rules"), this);
-    QFormLayout* detailsLayout = new QFormLayout(detailsGroup);
+    QScrollArea* scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+
+    QWidget* detailsWidget = new QWidget(this);
+    QVBoxLayout* detailsScrollLayout = new QVBoxLayout(detailsWidget);
+    detailsScrollLayout->setContentsMargins(0, 0, 5, 0);
+
+    // === Group 1: General ===
+    QGroupBox* generalGroup = new QGroupBox(tr("General"), this);
+    QFormLayout* generalLayout = new QFormLayout(generalGroup);
 
     m_nameEdit = new QLineEdit(this);
-    detailsLayout->addRow(tr("Name:"), m_nameEdit);
+    generalLayout->addRow(tr("Name:"), m_nameEdit);
 
     m_modeCombo = new QComboBox(this);
     m_modeCombo->setEditable(true);
     m_modeCombo->addItems({"compact", "pot", "fast"});
-    detailsLayout->addRow(tr("Mode:"), m_modeCombo);
+    generalLayout->addRow(tr("Mode:"), m_modeCombo);
 
     m_optimizeCombo = new QComboBox(this);
     m_optimizeCombo->setEditable(true);
     m_optimizeCombo->addItems({"gpu", "space"});
-    detailsLayout->addRow(tr("Optimize:"), m_optimizeCombo);
+    generalLayout->addRow(tr("Optimize:"), m_optimizeCombo);
+
+    m_scaleSpin = new QDoubleSpinBox(this);
+    m_scaleSpin->setRange(0.01, 1.0);
+    m_scaleSpin->setSingleStep(0.05);
+    m_scaleSpin->setValue(1.0);
+    generalLayout->addRow(tr("Scale:"), m_scaleSpin);
+
+    m_sortCombo = new QComboBox(this);
+    m_sortCombo->addItem(tr("By filename"), "name");
+    m_sortCombo->addItem(tr("None"), "none");
+    generalLayout->addRow(tr("Sort:"), m_sortCombo);
+
+    detailsScrollLayout->addWidget(generalGroup);
+
+    // === Group 2: Layout & Geometry ===
+    QGroupBox* layoutGroup = new QGroupBox(tr("Layout & Geometry"), this);
+    QFormLayout* layoutLayout = new QFormLayout(layoutGroup);
 
     QHBoxLayout* maxWidthLayout = new QHBoxLayout();
     m_useMaxWidthCheck = new QCheckBox(tr("Enable"), this);
@@ -114,7 +146,7 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     maxWidthLayout->addWidget(m_useMaxWidthCheck);
     maxWidthLayout->addWidget(m_maxWidthSpin);
     maxWidthLayout->addStretch();
-    detailsLayout->addRow(tr("Max width:"), maxWidthLayout);
+    layoutLayout->addRow(tr("Max width:"), maxWidthLayout);
 
     QHBoxLayout* maxHeightLayout = new QHBoxLayout();
     m_useMaxHeightCheck = new QCheckBox(tr("Enable"), this);
@@ -123,7 +155,7 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     maxHeightLayout->addWidget(m_useMaxHeightCheck);
     maxHeightLayout->addWidget(m_maxHeightSpin);
     maxHeightLayout->addStretch();
-    detailsLayout->addRow(tr("Max height:"), maxHeightLayout);
+    layoutLayout->addRow(tr("Max height:"), maxHeightLayout);
 
     QHBoxLayout* targetResolutionLayout = new QHBoxLayout();
     m_targetResolutionCombo = new QComboBox(this);
@@ -134,19 +166,38 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     }
     targetResolutionLayout->addWidget(m_targetResolutionCombo);
     targetResolutionLayout->addStretch();
-    detailsLayout->addRow(tr("Target resolution:"), targetResolutionLayout);
+    layoutLayout->addRow(tr("Target resolution:"), targetResolutionLayout);
 
     m_resolutionReferenceCombo = new QComboBox(this);
     m_resolutionReferenceCombo->addItems({"largest", "smallest"});
-    detailsLayout->addRow(tr("Resolution reference:"), m_resolutionReferenceCombo);
+    layoutLayout->addRow(tr("Resolution reference:"), m_resolutionReferenceCombo);
 
     m_paddingSpin = new QSpinBox(this);
     m_paddingSpin->setRange(0, 1024);
-    detailsLayout->addRow(tr("Padding:"), m_paddingSpin);
+    layoutLayout->addRow(tr("Padding:"), m_paddingSpin);
+
+    m_extrudeSpin = new QSpinBox(this);
+    m_extrudeSpin->setRange(0, 512);
+    layoutLayout->addRow(tr("Extrude:"), m_extrudeSpin);
+
+    m_trimTransparentCheck = new QCheckBox(tr("Enabled"), this);
+    layoutLayout->addRow(tr("Trim transparent:"), m_trimTransparentCheck);
+
+    m_allowRotationCheck = new QCheckBox(tr("Enabled"), this);
+    layoutLayout->addRow(tr("Allow rotation:"), m_allowRotationCheck);
+
+    m_multipackCheck = new QCheckBox(tr("Enabled"), this);
+    layoutLayout->addRow(tr("Multipack:"), m_multipackCheck);
+
+    detailsScrollLayout->addWidget(layoutGroup);
+
+    // === Group 3: Advanced ===
+    QGroupBox* advancedGroup = new QGroupBox(tr("Advanced"), this);
+    QFormLayout* advancedLayout = new QFormLayout(advancedGroup);
 
     m_maxCombinationsSpin = new QSpinBox(this);
     m_maxCombinationsSpin->setRange(0, 10000000);
-    detailsLayout->addRow(tr("Max combinations:"), m_maxCombinationsSpin);
+    advancedLayout->addRow(tr("Max combinations:"), m_maxCombinationsSpin);
 
     QHBoxLayout* threadsLayout = new QHBoxLayout();
     m_useThreadsCheck = new QCheckBox(tr("Enable"), this);
@@ -155,15 +206,13 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     threadsLayout->addWidget(m_useThreadsCheck);
     threadsLayout->addWidget(m_threadsSpin);
     threadsLayout->addStretch();
-    detailsLayout->addRow(tr("Threads:"), threadsLayout);
+    advancedLayout->addRow(tr("Threads:"), threadsLayout);
 
-    m_trimTransparentCheck = new QCheckBox(tr("Enabled"), this);
-    detailsLayout->addRow(tr("Trim transparent:"), m_trimTransparentCheck);
+    detailsScrollLayout->addWidget(advancedGroup);
+    detailsScrollLayout->addStretch();
 
-    m_allowRotationCheck = new QCheckBox(tr("Enabled"), this);
-    detailsLayout->addRow(tr("Allow rotation:"), m_allowRotationCheck);
-
-    contentLayout->addWidget(detailsGroup, 2);
+    scrollArea->setWidget(detailsWidget);
+    contentLayout->addWidget(scrollArea, 2);
 
     rootLayout->addLayout(contentLayout);
 
@@ -301,10 +350,14 @@ void ProfilesDialog::saveEditorsToProfile(int row) {
     p.targetResolutionHeight = targetHeight;
     p.resolutionReference = m_resolutionReferenceCombo->currentText().trimmed();
     p.padding = m_paddingSpin->value();
+    p.extrude = m_extrudeSpin->value();
     p.maxCombinations = m_maxCombinationsSpin->value();
     p.threads = m_useThreadsCheck->isChecked() ? m_threadsSpin->value() : 0;
     p.trimTransparent = m_trimTransparentCheck->isChecked();
     p.allowRotation = m_allowRotationCheck->isChecked();
+    p.scale = m_scaleSpin->value();
+    p.multipack = m_multipackCheck->isChecked();
+    p.sort = m_sortCombo->currentData().toString();
 
     const QString displayName = p.name.isEmpty() ? tr("<unnamed>") : p.name;
     if (QListWidgetItem* item = m_listWidget->item(row)) {
@@ -326,11 +379,15 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_targetResolutionCombo->setEnabled(valid);
     m_resolutionReferenceCombo->setEnabled(valid);
     m_paddingSpin->setEnabled(valid);
+    m_extrudeSpin->setEnabled(valid);
     m_maxCombinationsSpin->setEnabled(valid);
     m_useThreadsCheck->setEnabled(valid);
     m_threadsSpin->setEnabled(valid && m_useThreadsCheck->isChecked());
     m_trimTransparentCheck->setEnabled(valid);
     m_allowRotationCheck->setEnabled(valid);
+    m_scaleSpin->setEnabled(valid);
+    m_multipackCheck->setEnabled(valid);
+    m_sortCombo->setEnabled(valid);
 
     if (!valid) {
         m_nameEdit->clear();
@@ -345,11 +402,15 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
         }
         m_resolutionReferenceCombo->setCurrentText("largest");
         m_paddingSpin->setValue(0);
+        m_extrudeSpin->setValue(0);
         m_maxCombinationsSpin->setValue(0);
         m_useThreadsCheck->setChecked(false);
         m_threadsSpin->setValue(4);
         m_trimTransparentCheck->setChecked(true);
         m_allowRotationCheck->setChecked(false);
+        m_scaleSpin->setValue(1.0);
+        m_multipackCheck->setChecked(false);
+        m_sortCombo->setCurrentIndex(0);
         m_updatingEditors = false;
         return;
     }
@@ -385,6 +446,7 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_resolutionReferenceCombo->setEnabled(valid);
 
     m_paddingSpin->setValue(p.padding);
+    m_extrudeSpin->setValue(p.extrude);
     m_maxCombinationsSpin->setValue(p.maxCombinations);
     const bool hasThreads = p.threads > 0;
     m_useThreadsCheck->setChecked(hasThreads);
@@ -392,6 +454,10 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_threadsSpin->setEnabled(hasThreads);
     m_trimTransparentCheck->setChecked(p.trimTransparent);
     m_allowRotationCheck->setChecked(p.allowRotation);
+    m_scaleSpin->setValue(p.scale);
+    m_multipackCheck->setChecked(p.multipack);
+    const int sortIndex = m_sortCombo->findData(p.sort);
+    m_sortCombo->setCurrentIndex(sortIndex >= 0 ? sortIndex : 0);
 
     m_updatingEditors = false;
     refreshMaxCombinationsEnabledState();

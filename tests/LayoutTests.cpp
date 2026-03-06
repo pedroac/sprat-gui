@@ -10,7 +10,9 @@ scale 1.0
 sprite "path/with/\"quotes\".png" 0,0 10,10
 )");
     
-    LayoutModel model = LayoutParser::parse(output, "/tmp");
+    QVector<LayoutModel> models = LayoutParser::parse(output, "/tmp");
+    QCOMPARE(models.size(), 1);
+    LayoutModel model = models.first();
     QCOMPARE(model.sprites.size(), 1);
     
     QString expectedPath = QDir("/tmp").absoluteFilePath("path/with/\"quotes\".png");

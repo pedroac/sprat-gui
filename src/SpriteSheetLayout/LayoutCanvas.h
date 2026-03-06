@@ -18,9 +18,9 @@ public:
     explicit LayoutCanvas(QWidget* parent = nullptr);
 
     /**
-     * @brief Sets the layout model to display.
+     * @brief Sets the layout models to display.
      */
-    void setModel(const LayoutModel& model);
+    void setModels(const QVector<LayoutModel>& models);
 
     /**
      * @brief Clears all sprites from the canvas.
@@ -95,7 +95,8 @@ private:
     QString m_searchQuery;
     QRect m_searchCloseRect;
 
-    LayoutModel m_model;
+    QVector<LayoutModel> m_models;
+    QVector<QPoint> m_modelOffsets;
     QVector<SpriteItem*> m_items;
     QSet<QString> m_baseSelectionPaths;
     int m_lastSelectedIndex = -1;

@@ -120,7 +120,7 @@ void MainWindow::onTimelineFrameSelectionChanged() {
 }
 
 void MainWindow::onGenerateTimelinesFromFrames() {
-    if (m_session->layoutModel.sprites.isEmpty()) {
+    if (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty()) {
         QMessageBox::information(this, tr("Generate Timelines"), tr("Load or generate a layout before creating timelines."));
         return;
     }
@@ -128,7 +128,7 @@ void MainWindow::onGenerateTimelinesFromFrames() {
     int focusIndex = -1;
     QString status;
     bool changed = TimelineGenerationService::generateFromLayout(
-        m_session->layoutModel,
+        m_session->layoutModels,
         m_session->timelines,
         focusIndex,
         [this](const QString& timelineName) {
@@ -207,7 +207,7 @@ bool MainWindow::exportAnimation(const QString& outPath) {
         this,
         m_session->timelines,
         m_session->selectedTimelineIndex,
-        m_session->layoutModel,
+        m_session->layoutModels,
         selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex),
         outPath,
         [this](bool loading) { setLoading(loading); },
@@ -231,7 +231,7 @@ void MainWindow::refreshAnimationTest() {
         m_session->timelines,
         m_session->selectedTimelineIndex,
         m_animFrameIndex,
-        m_session->layoutModel,
+        m_session->layoutModels,
         statusText,
         hasFrames,
         playing,

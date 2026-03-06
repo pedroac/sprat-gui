@@ -10,10 +10,12 @@
 #include <algorithm>
 
 namespace {
-SpritePtr spriteByPath(const LayoutModel& model, const QString& path) {
-    for (const auto& sprite : model.sprites) {
-        if (sprite && sprite->path == path) {
-            return sprite;
+SpritePtr spriteByPath(const QVector<LayoutModel>& models, const QString& path) {
+    for (const auto& model : models) {
+        for (const auto& sprite : model.sprites) {
+            if (sprite && sprite->path == path) {
+                return sprite;
+            }
         }
     }
     return SpritePtr();
@@ -158,7 +160,7 @@ void MainWindow::onApplyPivotToSelectedTimelineFrames() {
 
     int updated = 0;
     for (const QString& path : targetPaths) {
-        SpritePtr target = spriteByPath(m_session->layoutModel, path);
+        SpritePtr target = spriteByPath(m_session->layoutModels, path);
         if (!target) {
             continue;
         }
@@ -176,7 +178,9 @@ void MainWindow::onApplyPivotToSelectedTimelineFrames() {
         onCanvasPivotChanged(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY);
     }
     m_previewView->overlay()->updateLayout();
-    m_canvas->update();
+    if (m_canvas) {
+        m_canvas->update();
+    }
     refreshAnimationTest();
     m_statusLabel->setText(tr("Applied pivot to %1 sprite(s).").arg(updated));
 }
@@ -215,7 +219,7 @@ void MainWindow::onApplyMarkerToSelectedTimelineFrames(const QString& markerName
 
     int updated = 0;
     for (const QString& path : targetPaths) {
-        SpritePtr target = spriteByPath(m_session->layoutModel, path);
+        SpritePtr target = spriteByPath(m_session->layoutModels, path);
         if (!target) {
             continue;
         }

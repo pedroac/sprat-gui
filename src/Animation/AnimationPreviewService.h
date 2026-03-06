@@ -14,7 +14,7 @@ public:
         const QVector<AnimationTimeline>& timelines,
         int selectedTimelineIndex,
         int& frameIndex,
-        const LayoutModel& layoutModel,
+        const QVector<LayoutModel>& layoutModels,
         QString& statusText,
         bool& hasFrames,
         bool& playing,
@@ -23,7 +23,7 @@ public:
     static QSize calculateAnimationSize(
         const QVector<AnimationTimeline>& timelines,
         int selectedTimelineIndex,
-        const LayoutModel& layoutModel,
+        const QVector<LayoutModel>& layoutModels,
         double zoom,
         int previewPadding);
 };

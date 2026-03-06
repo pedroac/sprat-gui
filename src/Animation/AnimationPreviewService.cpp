@@ -19,7 +19,7 @@ QPixmap AnimationPreviewService::refresh(
     const QVector<AnimationTimeline>& timelines,
     int selectedTimelineIndex,
     int& frameIndex,
-    const LayoutModel& layoutModel,
+    const QVector<LayoutModel>& layoutModels,
     QString& statusText,
     bool& hasFrames,
     bool& playing,
@@ -44,12 +44,15 @@ QPixmap AnimationPreviewService::refresh(
     QString path = frames[frameIndex];
     QString spriteName = QFileInfo(path).baseName();
     SpritePtr currentSprite = nullptr;
-    for (const auto& s : layoutModel.sprites) {
-        if (s->path == path) {
-            spriteName = s->name;
-            currentSprite = s;
-            break;
+    for (const auto& model : layoutModels) {
+        for (const auto& s : model.sprites) {
+            if (s->path == path) {
+                spriteName = s->name;
+                currentSprite = s;
+                break;
+            }
         }
+        if (currentSprite) break;
     }
 
     statusText = QString("%1 | frame %2/%3 | %4")
@@ -90,11 +93,13 @@ QPixmap AnimationPreviewService::refresh(
 
         int framePivotX = frameSize.width() / 2;
         int framePivotY = frameSize.height() / 2;
-        for (const auto& sprite : layoutModel.sprites) {
-            if (sprite->path == framePath) {
-                framePivotX = qBound(0, sprite->pivotX, frameSize.width());
-                framePivotY = qBound(0, sprite->pivotY, frameSize.height());
-                break;
+        for (const auto& model : layoutModels) {
+            for (const auto& sprite : model.sprites) {
+                if (sprite->path == framePath) {
+                    framePivotX = qBound(0, sprite->pivotX, frameSize.width());
+                    framePivotY = qBound(0, sprite->pivotY, frameSize.height());
+                    break;
+                }
             }
         }
 
@@ -135,7 +140,7 @@ QPixmap AnimationPreviewService::refresh(
 QSize AnimationPreviewService::calculateAnimationSize(
     const QVector<AnimationTimeline>& timelines,
     int selectedTimelineIndex,
-    const LayoutModel& layoutModel,
+    const QVector<LayoutModel>& layoutModels,
     double zoom,
     int previewPadding) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size() || timelines[selectedTimelineIndex].frames.isEmpty()) {
@@ -166,11 +171,13 @@ QSize AnimationPreviewService::calculateAnimationSize(
 
         int framePivotX = frameSize.width() / 2;
         int framePivotY = frameSize.height() / 2;
-        for (const auto& sprite : layoutModel.sprites) {
-            if (sprite->path == framePath) {
-                framePivotX = qBound(0, sprite->pivotX, frameSize.width());
-                framePivotY = qBound(0, sprite->pivotY, frameSize.height());
-                break;
+        for (const auto& model : layoutModels) {
+            for (const auto& sprite : model.sprites) {
+                if (sprite->path == framePath) {
+                    framePivotX = qBound(0, sprite->pivotX, frameSize.width());
+                    framePivotY = qBound(0, sprite->pivotY, frameSize.height());
+                    break;
+                }
             }
         }
 

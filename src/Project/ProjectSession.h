@@ -29,7 +29,7 @@ public:
     QString frameListPath; // Temporary file path for frame list
 
     // --- Layout Model ---
-    LayoutModel layoutModel;
+    QVector<LayoutModel> layoutModels;
     QString cachedLayoutOutput;
     double cachedLayoutScale = 1.0;
     QString lastSuccessfulProfile;

@@ -161,7 +161,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
 }
 
 bool MainWindow::confirmLayoutReplacement() {
-    bool hasLayout = m_session->layoutModel.sprites.size() > 0;
+    bool hasLayout = !m_session->layoutModels.isEmpty() && m_session->layoutModels.first().sprites.size() > 0;
     if (!hasLayout) {
         return true;
     }

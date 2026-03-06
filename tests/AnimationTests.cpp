@@ -53,7 +53,7 @@ void AnimationTests::testAnimationPreviewUsesTimelineBounds() {
         timelines,
         0,
         frameIndex,
-        model,
+        {model},
         statusText,
         hasFrames,
         playing,
@@ -84,7 +84,7 @@ void AnimationTests::testTimelineGenerationFromLayout() {
     
     auto resolver = [](const QString&) { return TimelineGenerationService::ConflictResolution::Replace; };
 
-    bool result = TimelineGenerationService::generateFromLayout(model, timelines, focusIndex, resolver, status);
+    bool result = TimelineGenerationService::generateFromLayout({model}, timelines, focusIndex, resolver, status);
     
     QVERIFY(result);
     QCOMPARE(timelines.size(), 1);

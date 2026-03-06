@@ -197,22 +197,33 @@ void LayoutCanvas::dropEvent(QDropEvent* event) {
     ZoomableGraphicsView::dropEvent(event);
 }
 
-void LayoutCanvas::setModel(const LayoutModel& model) {
+void LayoutCanvas::setModels(const QVector<LayoutModel>& models) {
     clearCanvas();
-    m_model = model;
+    m_models = models;
     m_items.clear();
     m_baseSelectionPaths.clear();
     m_lastSelectedIndex = -1;
     m_pendingDeselect = false;
-    m_atlasBgItem = nullptr;
     m_borderItems.clear();
-    m_scene->setSceneRect(0, 0, model.atlasWidth, model.atlasHeight);
+    m_modelOffsets.clear();
+
+    if (models.isEmpty()) {
+        m_scene->setSceneRect(0, 0, 0, 0);
+        return;
+    }
+
+    int currentY = 0;
+    const int margin = 100;
+    int maxW = 0;
 
     QSet<QString> activePaths;
-    activePaths.reserve(model.sprites.size());
-    for (const auto& sprite : model.sprites) {
-        activePaths.insert(sprite->path);
+    for (const auto& model : models) {
+        maxW = qMax(maxW, model.atlasWidth);
+        for (const auto& sprite : model.sprites) {
+            activePaths.insert(sprite->path);
+        }
     }
+
     for (auto it = m_sourcePixmaps.begin(); it != m_sourcePixmaps.end();) {
         if (!activePaths.contains(it.key())) {
             it = m_sourcePixmaps.erase(it);
@@ -220,79 +231,90 @@ void LayoutCanvas::setModel(const LayoutModel& model) {
         }
         ++it;
     }
-    
-    if (m_settings.showCheckerboard) {
-        m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
-    } else {
-        m_atlasBgItem = m_scene->addRect(0, 0, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.spriteFrameColor));
-    }
-    m_atlasBgItem->setZValue(-100);
 
     QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
     borderPen.setCosmetic(true);
 
-    for (const auto& sprite : model.sprites) {
-        QPixmap sourcePixmap = m_sourcePixmaps.value(sprite->path);
-        if (sourcePixmap.isNull()) {
-            if (!QPixmapCache::find(sprite->path, &sourcePixmap)) {
-                sourcePixmap.load(sprite->path);
+    for (int i = 0; i < models.size(); ++i) {
+        const auto& model = models[i];
+        m_modelOffsets.append(QPoint(0, currentY));
+
+        QGraphicsRectItem* bg;
+        if (m_settings.showCheckerboard) {
+            bg = m_scene->addRect(0, currentY, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
+        } else {
+            bg = m_scene->addRect(0, currentY, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.spriteFrameColor));
+        }
+        bg->setZValue(-100);
+
+        for (const auto& sprite : model.sprites) {
+            QPixmap sourcePixmap = m_sourcePixmaps.value(sprite->path);
+            if (sourcePixmap.isNull()) {
+                if (!QPixmapCache::find(sprite->path, &sourcePixmap)) {
+                    sourcePixmap.load(sprite->path);
+                    if (!sourcePixmap.isNull()) {
+                        QPixmapCache::insert(sprite->path, sourcePixmap);
+                    }
+                }
                 if (!sourcePixmap.isNull()) {
-                    QPixmapCache::insert(sprite->path, sourcePixmap);
+                    m_sourcePixmaps.insert(sprite->path, sourcePixmap);
                 }
             }
-            if (!sourcePixmap.isNull()) {
-                m_sourcePixmaps.insert(sprite->path, sourcePixmap);
+            if (sourcePixmap.isNull()) {
+                continue;
             }
+            QPixmap pixmap = sourcePixmap;
+
+            if (sprite->trimmed) {
+                 int l = sprite->trimRect.x();
+                 int t = sprite->trimRect.y();
+                 int r = sprite->trimRect.width();
+                 int b = sprite->trimRect.height();
+                 if (pixmap.width() > l + r && pixmap.height() > t + b) {
+                     pixmap = pixmap.copy(l, t, pixmap.width() - l - r, pixmap.height() - t - b);
+                 }
+            }
+
+            if (sprite->rotated) {
+                QTransform trans;
+                trans.rotate(90);
+                pixmap = pixmap.transformed(trans, Qt::SmoothTransformation);
+            }
+
+            const QSize targetSize = sprite->rect.size();
+            if (targetSize.width() > 0 &&
+                targetSize.height() > 0 &&
+                (pixmap.size() != targetSize)) {
+                pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+            }
+
+            auto* item = new SpriteItem(sprite);
+            item->setPixmap(pixmap);
+            item->setPos(sprite->rect.x(), currentY + sprite->rect.y());
+            m_scene->addItem(item);
+            m_items.append(item);
+
+            QPainterPath path;
+            QRectF r = sprite->rect;
+            r.translate(0, currentY);
+            path.moveTo(r.topLeft()); path.lineTo(r.topRight());
+            path.moveTo(r.bottomLeft()); path.lineTo(r.bottomRight());
+            path.moveTo(r.topLeft()); path.lineTo(r.bottomLeft());
+            path.moveTo(r.topRight()); path.lineTo(r.bottomRight());
+
+            auto* border = m_scene->addPath(path, borderPen);
+            border->setZValue(item->zValue() + 0.1);
+            m_borderItems.append(border);
         }
-        if (sourcePixmap.isNull()) {
-            continue;
-        }
-        QPixmap pixmap = sourcePixmap;
 
-        if (sprite->trimmed) {
-             int l = sprite->trimRect.x();
-             int t = sprite->trimRect.y();
-             int r = sprite->trimRect.width();
-             int b = sprite->trimRect.height();
-             if (pixmap.width() > l + r && pixmap.height() > t + b) {
-                 pixmap = pixmap.copy(l, t, pixmap.width() - l - r, pixmap.height() - t - b);
-             }
-        }
-
-        if (sprite->rotated) {
-            QTransform trans;
-            trans.rotate(90);
-            pixmap = pixmap.transformed(trans, Qt::SmoothTransformation);
-        }
-
-        const QSize targetSize = sprite->rect.size();
-        if (targetSize.width() > 0 &&
-            targetSize.height() > 0 &&
-            (pixmap.size() != targetSize)) {
-            pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
-        }
-
-        auto* item = new SpriteItem(sprite);
-        item->setPixmap(pixmap);
-        item->setPos(sprite->rect.x(), sprite->rect.y());
-        m_scene->addItem(item);
-        m_items.append(item);
-
-        QPainterPath path;
-        QRectF r = sprite->rect;
-        path.moveTo(r.topLeft()); path.lineTo(r.topRight());
-        path.moveTo(r.bottomLeft()); path.lineTo(r.bottomRight());
-        path.moveTo(r.topLeft()); path.lineTo(r.bottomLeft());
-        path.moveTo(r.topRight()); path.lineTo(r.bottomRight());
-
-        auto* border = m_scene->addPath(path, borderPen);
-        border->setZValue(item->zValue() + 0.1);
-        m_borderItems.append(border);
+        currentY += model.atlasHeight + margin;
     }
+    m_scene->setSceneRect(0, 0, maxW, currentY - margin);
 }
 
 void LayoutCanvas::clearCanvas() {
     m_scene->clear();
+    m_items.clear();
 }
 
 void LayoutCanvas::selectSpriteByPath(const QString& path) {
@@ -336,15 +358,11 @@ void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString&
 void LayoutCanvas::setSettings(const AppSettings& settings) {
     m_settings = settings;
     setBackgroundBrush(settings.workspaceColor);
-    if (m_atlasBgItem) {
-        if (settings.showCheckerboard) {
-            m_atlasBgItem->setBrush(QBrush(createCheckerboardPixmap(settings.spriteFrameColor)));
-        } else {
-            m_atlasBgItem->setBrush(settings.spriteFrameColor);
-        }
+    
+    // Refresh the models to redraw everything with new settings (backgrounds, borders)
+    if (!m_models.isEmpty()) {
+        setModels(m_models);
     }
-    updateBorderHighlights();
-    update();
 }
 
 void LayoutCanvas::mousePressEvent(QMouseEvent* event) {

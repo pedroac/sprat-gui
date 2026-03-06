@@ -11,6 +11,7 @@ class QDialogButtonBox;
 class QLineEdit;
 class QComboBox;
 class QSpinBox;
+class QDoubleSpinBox;
 class QCheckBox;
 
 class ProfilesDialog : public QDialog {
@@ -47,11 +48,15 @@ private:
     QComboBox* m_targetResolutionCombo = nullptr;
     QComboBox* m_resolutionReferenceCombo = nullptr;
     QSpinBox* m_paddingSpin = nullptr;
+    QSpinBox* m_extrudeSpin = nullptr;
     QSpinBox* m_maxCombinationsSpin = nullptr;
     QCheckBox* m_useThreadsCheck = nullptr;
     QSpinBox* m_threadsSpin = nullptr;
     QCheckBox* m_trimTransparentCheck = nullptr;
     QCheckBox* m_allowRotationCheck = nullptr;
+    QDoubleSpinBox* m_scaleSpin = nullptr;
+    QCheckBox* m_multipackCheck = nullptr;
+    QComboBox* m_sortCombo = nullptr;
 
     QVector<SpratProfile> m_profiles;
     int m_currentRow = -1;

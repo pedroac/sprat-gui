@@ -111,52 +111,54 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
 
     QJsonObject markersInfo;
     QJsonObject spritesState;
-    for (const auto& s : input.layoutModel.sprites) {
-        QJsonObject sObj;
-        sObj["name"] = s->name;
-        sObj["pivot_x"] = s->pivotX;
-        sObj["pivot_y"] = s->pivotY;
-        QJsonArray markersArr;
-        for (const auto& p : s->points) {
-            QJsonObject mObj;
-            const QString kind = markerKindToString(p.kind);
-            mObj["name"] = normalizedMarkerName(p.name);
-            mObj["x"] = p.x;
-            mObj["y"] = p.y;
-            // Keep GUI field and include CLI-compatible field for spratconvert.
-            mObj["kind"] = kind;
-            mObj["type"] = kind;
-            mObj["radius"] = p.radius;
-            mObj["w"] = p.w;
-            mObj["h"] = p.h;
-            if (!p.polygonPoints.isEmpty()) {
-                QJsonArray polyArr;
-                QJsonArray verticesArr;
-                for (const auto& pt : p.polygonPoints) {
-                    QJsonArray ptPair;
-                    ptPair.append(pt.x());
-                    ptPair.append(pt.y());
-                    polyArr.append(ptPair);
+    for (const auto& model : input.layoutModels) {
+        for (const auto& s : model.sprites) {
+            QJsonObject sObj;
+            sObj["name"] = s->name;
+            sObj["pivot_x"] = s->pivotX;
+            sObj["pivot_y"] = s->pivotY;
+            QJsonArray markersArr;
+            for (const auto& p : s->points) {
+                QJsonObject mObj;
+                const QString kind = markerKindToString(p.kind);
+                mObj["name"] = normalizedMarkerName(p.name);
+                mObj["x"] = p.x;
+                mObj["y"] = p.y;
+                // Keep GUI field and include CLI-compatible field for spratconvert.
+                mObj["kind"] = kind;
+                mObj["type"] = kind;
+                mObj["radius"] = p.radius;
+                mObj["w"] = p.w;
+                mObj["h"] = p.h;
+                if (!p.polygonPoints.isEmpty()) {
+                    QJsonArray polyArr;
+                    QJsonArray verticesArr;
+                    for (const auto& pt : p.polygonPoints) {
+                        QJsonArray ptPair;
+                        ptPair.append(pt.x());
+                        ptPair.append(pt.y());
+                        polyArr.append(ptPair);
 
-                    QJsonObject vertex;
-                    vertex["x"] = pt.x();
-                    vertex["y"] = pt.y();
-                    verticesArr.append(vertex);
+                        QJsonObject vertex;
+                        vertex["x"] = pt.x();
+                        vertex["y"] = pt.y();
+                        verticesArr.append(vertex);
+                    }
+                    // GUI legacy format.
+                    mObj["polygon_points"] = polyArr;
+                    // CLI format expected by spratconvert.
+                    mObj["vertices"] = verticesArr;
                 }
-                // GUI legacy format.
-                mObj["polygon_points"] = polyArr;
-                // CLI format expected by spratconvert.
-                mObj["vertices"] = verticesArr;
+                markersArr.append(mObj);
             }
-            markersArr.append(mObj);
-        }
-        sObj["markers"] = markersArr;
+            sObj["markers"] = markersArr;
 
-        QString key = QDir(input.currentFolder).relativeFilePath(s->path);
-        if (key.isEmpty()) {
-            key = QFileInfo(s->path).fileName();
+            QString key = QDir(input.currentFolder).relativeFilePath(s->path);
+            if (key.isEmpty()) {
+                key = QFileInfo(s->path).fileName();
+            }
+            spritesState[key] = sObj;
         }
-        spritesState[key] = sObj;
     }
     markersInfo["sprites"] = spritesState;
     if (input.selectedSprite) {
@@ -211,66 +213,68 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     return root;
 }
 
-ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& root, const QString& currentFolder, LayoutModel& layoutModel) {
+ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& root, const QString& currentFolder, QVector<LayoutModel>& layoutModels) {
     ProjectPayloadApplyResult out;
 
     QJsonObject markersInfo = root["spritemarkers"].toObject();
     QJsonObject spritesState = markersInfo["sprites"].toObject();
-    for (auto& sprite : layoutModel.sprites) {
-        QString key = QDir(currentFolder).relativeFilePath(sprite->path);
-        if (!spritesState.contains(key)) {
-            key = QFileInfo(sprite->path).fileName();
-        }
-        if (!spritesState.contains(key)) {
-            continue;
-        }
-        QJsonObject state = spritesState[key].toObject();
-        if (state.contains("name")) {
-            sprite->name = state["name"].toString();
-        }
-        if (state.contains("pivot_x")) {
-            sprite->pivotX = state["pivot_x"].toInt();
-        }
-        if (state.contains("pivot_y")) {
-            sprite->pivotY = state["pivot_y"].toInt();
-        }
-        if (!state.contains("markers")) {
-            continue;
-        }
-        sprite->points.clear();
-        QJsonArray markersArr = state["markers"].toArray();
-        for (const auto& mVal : markersArr) {
-            QJsonObject mObj = mVal.toObject();
-            NamedPoint p;
-            p.name = normalizedMarkerName(mObj["name"].toString());
-            p.x = mObj["x"].toInt();
-            p.y = mObj["y"].toInt();
-            QString kind = mObj["kind"].toString();
-            if (kind.isEmpty()) {
-                kind = mObj["type"].toString();
+    for (auto& model : layoutModels) {
+        for (auto& sprite : model.sprites) {
+            QString key = QDir(currentFolder).relativeFilePath(sprite->path);
+            if (!spritesState.contains(key)) {
+                key = QFileInfo(sprite->path).fileName();
             }
-            p.kind = markerKindFromString(kind);
-            p.radius = mObj["radius"].toInt(8);
-            p.w = mObj["w"].toInt(16);
-            p.h = mObj["h"].toInt(16);
-            if (mObj.contains("polygon_points")) {
-                QJsonArray polyArr = mObj["polygon_points"].toArray();
-                for (const auto& ptVal : polyArr) {
-                    QJsonArray ptPair = ptVal.toArray();
-                    if (ptPair.size() == 2) {
-                        p.polygonPoints.append(QPoint(ptPair[0].toInt(), ptPair[1].toInt()));
+            if (!spritesState.contains(key)) {
+                continue;
+            }
+            QJsonObject state = spritesState[key].toObject();
+            if (state.contains("name")) {
+                sprite->name = state["name"].toString();
+            }
+            if (state.contains("pivot_x")) {
+                sprite->pivotX = state["pivot_x"].toInt();
+            }
+            if (state.contains("pivot_y")) {
+                sprite->pivotY = state["pivot_y"].toInt();
+            }
+            if (!state.contains("markers")) {
+                continue;
+            }
+            sprite->points.clear();
+            QJsonArray markersArr = state["markers"].toArray();
+            for (const auto& mVal : markersArr) {
+                QJsonObject mObj = mVal.toObject();
+                NamedPoint p;
+                p.name = normalizedMarkerName(mObj["name"].toString());
+                p.x = mObj["x"].toInt();
+                p.y = mObj["y"].toInt();
+                QString kind = mObj["kind"].toString();
+                if (kind.isEmpty()) {
+                    kind = mObj["type"].toString();
+                }
+                p.kind = markerKindFromString(kind);
+                p.radius = mObj["radius"].toInt(8);
+                p.w = mObj["w"].toInt(16);
+                p.h = mObj["h"].toInt(16);
+                if (mObj.contains("polygon_points")) {
+                    QJsonArray polyArr = mObj["polygon_points"].toArray();
+                    for (const auto& ptVal : polyArr) {
+                        QJsonArray ptPair = ptVal.toArray();
+                        if (ptPair.size() == 2) {
+                            p.polygonPoints.append(QPoint(ptPair[0].toInt(), ptPair[1].toInt()));
+                        }
+                    }
+                } else if (mObj.contains("vertices")) {
+                    QJsonArray verticesArr = mObj["vertices"].toArray();
+                    for (const auto& vertexVal : verticesArr) {
+                        QJsonObject vertex = vertexVal.toObject();
+                        if (vertex.contains("x") && vertex.contains("y")) {
+                            p.polygonPoints.append(QPoint(vertex["x"].toInt(), vertex["y"].toInt()));
+                        }
                     }
                 }
-            } else if (mObj.contains("vertices")) {
-                QJsonArray verticesArr = mObj["vertices"].toArray();
-                for (const auto& vertexVal : verticesArr) {
-                    QJsonObject vertex = vertexVal.toObject();
-                    if (vertex.contains("x") && vertex.contains("y")) {
-                        p.polygonPoints.append(QPoint(vertex["x"].toInt(), vertex["y"].toInt()));
-                    }
-                }
+                sprite->points.append(p);
             }
-            sprite->points.append(p);
         }
     }
 

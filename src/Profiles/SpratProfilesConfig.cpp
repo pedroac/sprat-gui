@@ -18,9 +18,13 @@ SpratProfile makeProfile(const QString& name,
                          bool targetResolutionUseSource,
                          const QString& resolutionReference,
                          int padding,
+                         int extrude,
                          int maxCombinations,
                          int threads,
-                         bool trimTransparent) {
+                         bool trimTransparent,
+                         double scale,
+                         bool multipack,
+                         const QString& sort) {
     SpratProfile p;
     p.name = name;
     p.mode = mode;
@@ -32,14 +36,18 @@ SpratProfile makeProfile(const QString& name,
     p.targetResolutionUseSource = targetResolutionUseSource;
     p.resolutionReference = resolutionReference;
     p.padding = padding;
+    p.extrude = extrude;
     p.maxCombinations = maxCombinations;
     p.threads = threads;
     p.trimTransparent = trimTransparent;
+    p.scale = scale;
+    p.multipack = multipack;
+    p.sort = sort;
     return p;
 }
 
 SpratProfile genericDefaultProfile(const QString& name = QString()) {
-    return makeProfile(name, "compact", "gpu", -1, -1, 1024, 1024, false, "largest", 0, 0, 0, true);
+    return makeProfile(name, "compact", "gpu", -1, -1, 1024, 1024, false, "largest", 0, 0, 0, 0, true, 1.0, false, "name");
 }
 
 bool toBool(const QString& value, bool fallback) {
@@ -105,11 +113,21 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
         if (p.padding < 0) {
             p.padding = 0;
         }
+        if (p.extrude < 0) {
+            p.extrude = 0;
+        }
         if (p.maxCombinations < 0) {
             p.maxCombinations = 0;
         }
         if (p.threads < 1) {
             p.threads = 0;
+        }
+        if (p.scale <= 0 || p.scale > 1.0) {
+            p.scale = 1.0;
+        }
+        p.sort = p.sort.trimmed().toLower();
+        if (p.sort != "name" && p.sort != "none") {
+            p.sort = "name";
         }
         seen.append(p.name);
         cleaned.append(p);
@@ -224,6 +242,12 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             if (ok) {
                 current.padding = n;
             }
+        } else if (key == "extrude") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.extrude = n;
+            }
         } else if (key == "target_resolution") {
             int width = 0;
             int height = 0;
@@ -269,6 +293,16 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             current.trimTransparent = toBool(value, current.trimTransparent);
         } else if (key == "rotate") {
             current.allowRotation = toBool(value, current.allowRotation);
+        } else if (key == "scale") {
+            bool ok = false;
+            double d = value.toDouble(&ok);
+            if (ok) {
+                current.scale = d;
+            }
+        } else if (key == "multipack") {
+            current.multipack = toBool(value, current.multipack);
+        } else if (key == "sort") {
+            current.sort = value;
         }
     }
 
@@ -325,12 +359,16 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         }
         out << "resolution_reference=" << p.resolutionReference << "\n";
         out << "padding=" << p.padding << "\n";
+        out << "extrude=" << p.extrude << "\n";
         out << "max_combinations=" << p.maxCombinations << "\n";
         if (p.threads > 0) {
             out << "threads=" << p.threads << "\n";
         }
         out << "trim_transparent=" << (p.trimTransparent ? "true" : "false") << "\n";
         out << "rotate=" << (p.allowRotation ? "true" : "false") << "\n";
+        out << "scale=" << p.scale << "\n";
+        out << "multipack=" << (p.multipack ? "true" : "false") << "\n";
+        out << "sort=" << p.sort << "\n";
     }
 
     out.flush();

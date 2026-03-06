@@ -350,6 +350,8 @@ bool ProjectSaveService::save(
             effectiveProfile.trimTransparent = false;
         }
         const int profilePadding = qMax(0, effectiveProfile.padding);
+        const int profileExtrude = qMax(0, effectiveProfile.extrude);
+        const double profileScale = qBound(0.01, effectiveProfile.scale, 1.0);
         const bool profileTrimTransparent = effectiveProfile.trimTransparent;
 
         QDir profileDir(destDir.filePath(profileName));
@@ -364,9 +366,9 @@ bool ProjectSaveService::save(
         bool usingCachedLayout = false;
         if (!cachedLayoutData.isEmpty() &&
             profileName == selectedProfileName &&
-            std::abs(cachedLayoutScale - layoutOptionScale) < kScaleMatchTolerance) {
+            std::abs(cachedLayoutScale - profileScale) < kScaleMatchTolerance) {
             layoutData = cachedLayoutData.toUtf8();
-            if (layoutData.startsWith("atlas ")) {
+            if (layoutData.contains("atlas ")) {
                 usingCachedLayout = true;
             } else {
                 layoutData.clear();
@@ -410,18 +412,56 @@ bool ProjectSaveService::save(
                 }
             }
             layoutArgs << "--padding" << QString::number(profilePadding);
-            layoutArgs << "--scale" << QString::number(layoutOptionScale);
+            if (profileExtrude > 0) {
+                layoutArgs << "--extrude" << QString::number(profileExtrude);
+            }
+            layoutArgs << "--scale" << QString::number(profileScale);
             if (profileTrimTransparent) {
                 layoutArgs << "--trim-transparent";
             }
             if (effectiveProfile.allowRotation) {
                 layoutArgs << "--rotate";
             }
-            if (!runProcess(layoutProc, spratLayoutBin, layoutArgs, QString("Layout generation failed for profile '%1'").arg(profileName))) {
-                return false;
+            if (effectiveProfile.multipack) {
+                layoutArgs << "--multipack";
+            }
+            if (!effectiveProfile.sort.trimmed().isEmpty()) {
+                layoutArgs << "--sort" << effectiveProfile.sort.trimmed();
+            }
+
+            bool layoutSuccess = false;
+            while (!layoutSuccess) {
+                if (layoutProc.state() != QProcess::NotRunning) {
+                    layoutProc.kill();
+                    layoutProc.waitForFinished();
+                }
+                layoutProc.start(spratLayoutBin, layoutArgs);
+                if (!layoutProc.waitForStarted()) {
+                    QMessageBox::critical(parent, trPS("Error"), QString(trPS("Layout generation failed for profile '%1': could not start spratlayout.")).arg(profileName));
+                    return false;
+                }
+                if (!layoutProc.waitForFinished(kProcessTimeoutMs)) {
+                    layoutProc.kill();
+                    layoutProc.waitForFinished();
+                    QMessageBox::critical(parent, trPS("Error"), QString(trPS("Layout generation timed out for profile '%1'.")).arg(profileName));
+                    return false;
+                }
+                if (layoutProc.exitStatus() != QProcess::NormalExit || layoutProc.exitCode() != 0) {
+                    const QString err = readStdErr(layoutProc);
+                    const QString combined = (err + "\n" + QString::fromUtf8(layoutProc.readAllStandardOutput())).toLower();
+                    if (layoutArgs.contains("--trim-transparent") && combined.contains("failed to compute compact layout")) {
+                        layoutArgs.removeAll("--trim-transparent");
+                        continue;
+                    }
+                    QMessageBox::critical(parent, trPS("Error"), err.isEmpty()
+                                                              ? QString(trPS("Layout generation failed for profile '%1'.")).arg(profileName)
+                                                              : QString(trPS("Layout generation failed for profile '%1':\n%2")).arg(profileName, err));
+                    return false;
+                }
+                layoutSuccess = true;
             }
             layoutData = layoutProc.readAllStandardOutput();
-            if (!layoutData.startsWith("atlas ")) {
+            if (!layoutData.contains("atlas ")) {
                 const QString preview = QString::fromUtf8(layoutData.left(200)).trimmed();
                 QMessageBox::critical(parent,
                                       trPS("Error"),
@@ -452,13 +492,47 @@ bool ProjectSaveService::save(
             return false;
         }
         QByteArray imageData = packProc.readAllStandardOutput();
+        const bool isMultipack = layoutData.contains("multipack true") || layoutData.count("atlas ") > 1;
 
-        QFile imgFile(profileDir.filePath("spritesheet.png"));
-        if (!imgFile.open(QIODevice::WriteOnly) || imgFile.write(imageData) < 0) {
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write spritesheet for profile '%1'.")).arg(profileName));
-            return false;
+        if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")) {
+            QString tarBin = QStandardPaths::findExecutable("tar");
+            bool extracted = false;
+            if (!tarBin.isEmpty()) {
+                QProcess tarProc;
+                tarProc.setWorkingDirectory(profileDir.absolutePath());
+                tarProc.start(tarBin, QStringList() << "-xf" << "-");
+                if (tarProc.waitForStarted()) {
+                    tarProc.write(imageData);
+                    tarProc.closeWriteChannel();
+                    if (tarProc.waitForFinished(30000) && tarProc.exitStatus() == QProcess::NormalExit && tarProc.exitCode() == 0) {
+                        extracted = true;
+                    }
+                }
+            }
+            if (extracted) {
+                QFile::remove(profileDir.filePath("spritesheet.png"));
+            } else {
+                // If tar failed or was missing, save the tar as .tar instead of .png to at least not lose it
+                QFile imgFile(profileDir.filePath("spritesheet.tar"));
+                if (imgFile.open(QIODevice::WriteOnly)) {
+                    imgFile.write(imageData);
+                    imgFile.close();
+                }
+                QFile::remove(profileDir.filePath("spritesheet.png"));
+                if (tarBin.isEmpty()) {
+                    QMessageBox::warning(parent, trPS("Warning"), trPS("The 'tar' command line tool is required to extract multipack atlases but was not found. The archive was saved as 'spritesheet.tar'."));
+                } else {
+                    QMessageBox::warning(parent, trPS("Warning"), trPS("Failed to extract multipack atlases. The archive was saved as 'spritesheet.tar'."));
+                }
+            }
+        } else {
+            QFile imgFile(profileDir.filePath("spritesheet.png"));
+            if (!imgFile.open(QIODevice::WriteOnly) || imgFile.write(imageData) < 0) {
+                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Could not write spritesheet for profile '%1'.")).arg(profileName));
+                return false;
+            }
+            imgFile.close();
         }
-        imgFile.close();
 
         // Save combined layout, markers and animations to a file that can be used for future transformations
         QByteArray combinedInput = layoutData;
@@ -477,6 +551,11 @@ bool ProjectSaveService::save(
             QProcess convProc;
             QStringList convArgs;
             convArgs << "--transform" << config.transform;
+            if (isMultipack) {
+                convArgs << "--output" << "atlas_%d.png";
+            } else {
+                convArgs << "--output" << "spritesheet.png";
+            }
             // No need for --markers and --animations as they are now in stdin
             convProc.start(spratConvertBin, convArgs);
             if (!convProc.waitForStarted()) {

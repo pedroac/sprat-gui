@@ -245,18 +245,12 @@ private slots:
      * @brief Handles changes to profile selection.
      */
     void onProfileChanged();
+    void onLayoutZoomChanged(double value);
 
     /**
      * @brief Handles request to manage profiles.
      */
     void onManageProfiles();
-
-    /**
-     * @brief Handles changes to layout zoom level.
-     * 
-     * @param value New zoom level
-     */
-    void onLayoutZoomChanged(double value);
 
     // === Timeline Management Events ===
     /**
@@ -395,8 +389,6 @@ private:
     // === Helper Methods ===
     /**
      * @brief Gets the layout parser folder path.
-     * 
-     * @return QString Layout parser folder path
      */
     QString layoutParserFolder() const;
 
@@ -826,7 +818,7 @@ private:
     bool m_syncingSplitters = false;
 
     // Layout Canvas Area
-    LayoutCanvas* m_canvas;
+    LayoutCanvas* m_canvas = nullptr;
     QStackedWidget* m_profileSelectorStack = nullptr;
     QComboBox* m_profileCombo = nullptr;
     QPushButton* m_addProfilesBtn = nullptr;

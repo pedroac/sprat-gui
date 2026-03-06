@@ -458,7 +458,7 @@ void MainWindow::updateUiState() {
     MainWindowUiState::apply(
         m_cliReady,
         m_isLoading,
-        m_session && !m_session->layoutModel.sprites.isEmpty(),
+        m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty(),
         m_loadAction,
         m_profileCombo,
         m_saveAction);
@@ -474,6 +474,6 @@ void MainWindow::updateUiState() {
 }
 
 void MainWindow::updateMainContentView() {
-    bool hasLayout = m_canvas->scene() && !m_canvas->scene()->items().isEmpty();
+    bool hasLayout = m_canvas && m_canvas->scene() && !m_canvas->scene()->items().isEmpty();
     m_mainStack->setCurrentWidget(hasLayout ? m_editorPage : m_welcomePage);
 }

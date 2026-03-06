@@ -13,7 +13,7 @@ public:
         QWidget* parent,
         const QVector<AnimationTimeline>& timelines,
         int selectedTimelineIndex,
-        const LayoutModel& layoutModel,
+        const QVector<LayoutModel>& layoutModels,
         int fps,
         const QString& outPath,
         const std::function<void(bool)>& setLoading,

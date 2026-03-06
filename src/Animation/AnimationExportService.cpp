@@ -35,7 +35,7 @@ bool AnimationExportService::exportAnimation(
     QWidget* parent,
     const QVector<AnimationTimeline>& timelines,
     int selectedTimelineIndex,
-    const LayoutModel& layoutModel,
+    const QVector<LayoutModel>& layoutModels,
     int fps,
     const QString& outPath,
     const std::function<void(bool)>& setLoading,
@@ -95,11 +95,13 @@ bool AnimationExportService::exportAnimation(
         if (pm.isNull()) {
             continue;
         }
-        for (const auto& s : layoutModel.sprites) {
-            if (s->path == path) {
-                px = s->pivotX;
-                py = s->pivotY;
-                break;
+        for (const auto& model : layoutModels) {
+            for (const auto& s : model.sprites) {
+                if (s->path == path) {
+                    px = s->pivotX;
+                    py = s->pivotY;
+                    break;
+                }
             }
         }
         if (px == 0 && py == 0 && (pm.width() > 0 || pm.height() > 0)) {

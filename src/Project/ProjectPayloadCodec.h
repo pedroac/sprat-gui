@@ -16,7 +16,7 @@ struct ProjectPayloadBuildInput {
     QStringList selectedSpritePaths;
     QString primarySelectedSpritePath;
     QString selectedPointName;
-    LayoutModel layoutModel;
+    QVector<LayoutModel> layoutModels;
     QString layoutOutput;
     double layoutScale = 1.0;
     QString profile;
@@ -59,5 +59,5 @@ struct ProjectPayloadApplyResult {
 class ProjectPayloadCodec {
 public:
     static QJsonObject build(const ProjectPayloadBuildInput& input);
-    static ProjectPayloadApplyResult applyToLayout(const QJsonObject& root, const QString& currentFolder, LayoutModel& layoutModel);
+    static ProjectPayloadApplyResult applyToLayout(const QJsonObject& root, const QString& currentFolder, QVector<LayoutModel>& layoutModels);
 };

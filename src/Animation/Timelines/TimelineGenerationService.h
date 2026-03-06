@@ -9,7 +9,7 @@ public:
     using ConflictResolver = std::function<ConflictResolution(const QString&)>;
 
     static bool generateFromLayout(
-        const LayoutModel& layoutModel,
+        const QVector<LayoutModel>& layoutModels,
         QVector<AnimationTimeline>& timelines,
         int& focusIndex,
         const ConflictResolver& resolveConflict,

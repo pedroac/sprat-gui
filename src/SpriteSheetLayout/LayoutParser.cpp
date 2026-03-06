@@ -6,8 +6,9 @@
 #include <QRegularExpression>
 #include <QHash>
 
-LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath) {
-    LayoutModel model;
+QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& folderPath) {
+    QVector<LayoutModel> models;
+    double commonScale = 1.0;
     QDir dir(folderPath);
     static QHash<QString, QSize> sourceSizeCache;
     if (sourceSizeCache.size() > 16384) {
@@ -19,15 +20,25 @@ LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath
     for (const QString& line : lines) {
         QString trimmed = line.trimmed();
         if (trimmed.startsWith("atlas ")) {
+            LayoutModel model;
+            model.scale = commonScale;
             QString dims = trimmed.mid(6);
             QStringList parts = dims.split(',');
             if (parts.size() == 2) {
                 model.atlasWidth = parts[0].toInt();
                 model.atlasHeight = parts[1].toInt();
             }
+            models.append(model);
         } else if (trimmed.startsWith("scale ")) {
-            model.scale = trimmed.mid(6).toDouble();
+            commonScale = trimmed.mid(6).toDouble();
+            for (auto& model : models) {
+                model.scale = commonScale;
+            }
         } else {
+            if (models.isEmpty()) {
+                continue;
+            }
+            LayoutModel& model = models.last();
             QRegularExpressionMatch match = spriteRe.match(trimmed);
             if (!match.hasMatch()) {
                 continue;
@@ -69,5 +80,5 @@ LayoutModel LayoutParser::parse(const QString& output, const QString& folderPath
             model.sprites.append(s);
         }
     }
-    return model;
+    return models;
 }

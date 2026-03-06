@@ -3,12 +3,16 @@
 #include "TimelineBuilder.h"
 
 bool TimelineGenerationService::generateFromLayout(
-    const LayoutModel& layoutModel,
+    const QVector<LayoutModel>& layoutModels,
     QVector<AnimationTimeline>& timelines,
     int& focusIndex,
     const ConflictResolver& resolveConflict,
     QString& statusMessage) {
-    QVector<TimelineSeed> generated = TimelineBuilder::buildFromSprites(layoutModel.sprites);
+    QVector<SpritePtr> allSprites;
+    for (const auto& model : layoutModels) {
+        allSprites.append(model.sprites);
+    }
+    QVector<TimelineSeed> generated = TimelineBuilder::buildFromSprites(allSprites);
     if (generated.isEmpty()) {
         statusMessage = "No frame names match the supported timeline patterns.";
         return false;

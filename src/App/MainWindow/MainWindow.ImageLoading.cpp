@@ -363,13 +363,14 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     }
     
     singleImageModel.sprites.append(sprite);
-    
+
     // Apply the model to the canvas
-    m_session->layoutModel = singleImageModel;
-    m_canvas->setModel(m_session->layoutModel);
-    QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
-    m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));
-    
+    m_session->layoutModels = { singleImageModel };
+    if (m_canvas) {
+        m_canvas->setModels(m_session->layoutModels);
+        QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+    }
+    m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));    
     // Update UI state
     populateActiveFrameListFromModel();
     updateMainContentView();

@@ -28,6 +28,8 @@
 #include <QLabel>
 #include <QTimer>
 #include <QApplication>
+#include <QMenu>
+#include <QAction>
 #include <QSet>
 #include <QStackedWidget>
 #include <QResizeEvent>
@@ -105,7 +107,8 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
  * @brief Parses the output from spratlayout into a LayoutModel.
  */
 LayoutModel MainWindow::parseLayoutOutput(const QString& output, const QString& folderPath) {
-    return LayoutParser::parse(output, folderPath);
+    QVector<LayoutModel> models = LayoutParser::parse(output, folderPath);
+    return models.isEmpty() ? LayoutModel() : models.first();
 }
 
 QString MainWindow::layoutParserFolder() const {
@@ -148,9 +151,10 @@ bool MainWindow::ensureFrameListInput() {
 
 void MainWindow::populateActiveFrameListFromModel() {
     m_session->activeFramePaths.clear();
-    m_session->activeFramePaths.reserve(m_session->layoutModel.sprites.size());
-    for (const auto& sprite : m_session->layoutModel.sprites) {
-        m_session->activeFramePaths.append(sprite->path);
+    for (const auto& model : m_session->layoutModels) {
+        for (const auto& sprite : model.sprites) {
+            m_session->activeFramePaths.append(sprite->path);
+        }
     }
 }
 
@@ -331,8 +335,10 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
             QFile::remove(m_session->frameListPath);
             m_session->frameListPath.clear();
         }
-        m_session->layoutModel.sprites.clear();
-        m_canvas->clearCanvas();
+        m_session->layoutModels.clear();
+        if (m_canvas) {
+            m_canvas->clearCanvas();
+        }
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
         m_statusLabel->setText(tr("No frames loaded"));
@@ -409,5 +415,7 @@ void MainWindow::onManageProfiles() {
  * @brief Applies application settings.
  */
 void MainWindow::applySettings() {
-    SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
+    if (m_canvas) {
+        SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
+    }
 }
