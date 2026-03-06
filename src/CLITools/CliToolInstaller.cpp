@@ -132,6 +132,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
 #elif defined(Q_OS_MACOS)
     // Use hdiutil to mount and cp
     QString script = QString("MOUNT_POINT=$(hdiutil mount \"%1\" | grep -o '/Volumes/.*' | head -n 1)\n"
+                             "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
                              "cp \"$MOUNT_POINT\"/* \"%2/\"\n"
                              "hdiutil unmount \"$MOUNT_POINT\"").arg(filePath, appDir);
     m_installProcess->start("bash", QStringList() << "-c" << script);
