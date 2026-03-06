@@ -109,12 +109,16 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
     }
 
     QTemporaryFile* tempFile = new QTemporaryFile(this);
-    if (tempFile->open()) {
-        tempFile->write(reply->readAll());
-        QString tempPath = tempFile->fileName();
-        tempFile->close();
-        installFromDownloadedFile(tempPath);
+    if (!tempFile->open()) {
+        QMessageBox::critical(nullptr, "Install Failed", "Could not create a temporary file for downloaded installer.");
+        emit installFinished(-1, QProcess::CrashExit);
+        reply->deleteLater();
+        return;
     }
+    tempFile->write(reply->readAll());
+    QString tempPath = tempFile->fileName();
+    tempFile->close();
+    installFromDownloadedFile(tempPath);
     reply->deleteLater();
 }
 
@@ -129,7 +133,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     // Use hdiutil to mount and cp
     QString script = QString(R"(
 MOUNT_POINT=$(hdiutil mount "%1" | grep -o '/Volumes/.*' | head -n 1)
-cp "$MOUNT_POINT"/\* "%2/"
+cp "$MOUNT_POINT"/* "%2/"
 hdiutil unmount "$MOUNT_POINT"
 )").arg(filePath, appDir);
     m_installProcess->start("bash", QStringList() << "-c" << script);

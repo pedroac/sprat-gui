@@ -6,4 +6,6 @@ class ProjectTests : public QObject {
 private slots:
     void testProjectPayloadBuildStoresListSource();
     void testProjectFileLoaderLoad();
+    void testProjectFileLoaderLoadZip();
+    void testAutosaveProjectStoreCreatesMissingParentDir();
 };

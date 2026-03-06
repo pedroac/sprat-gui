@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QStandardPaths>
 
@@ -30,12 +31,25 @@ bool AutosaveProjectStore::load(const QString& path, QJsonObject& root, QString&
 }
 
 bool AutosaveProjectStore::save(const QString& path, const QJsonObject& root, QString& error) {
+    const QFileInfo fileInfo(path);
+    const QString parentDir = fileInfo.path();
+    if (!parentDir.isEmpty()) {
+        QDir dir(parentDir);
+        if (!dir.exists() && !dir.mkpath(".")) {
+            error = "Could not create autosave directory.";
+            return false;
+        }
+    }
+
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         error = "Autosave failed";
         return false;
     }
-    file.write(QJsonDocument(root).toJson());
+    if (file.write(QJsonDocument(root).toJson()) < 0) {
+        error = "Autosave failed";
+        return false;
+    }
     file.close();
     return true;
 }

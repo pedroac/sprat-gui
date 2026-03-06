@@ -186,6 +186,7 @@ if(BUILD_TESTING)
         src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp
         src/Project/ProjectFileLoader.cpp
+        src/Project/AutosaveProjectStore.cpp
         src/Project/ProjectSession.cpp
         src/Project/ImageDiscoveryService.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
