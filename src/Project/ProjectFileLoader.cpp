@@ -1,5 +1,6 @@
 #include "ProjectFileLoader.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QJsonDocument>
 #include <QProcess>
@@ -10,6 +11,10 @@ QString powerShellSingleQuoted(const QString& value) {
     QString out = value;
     out.replace("'", "''");
     return QString("'%1'").arg(out);
+}
+
+QString trProjectFileLoader(const char* text) {
+    return QCoreApplication::translate("ProjectFileLoader", text);
 }
 }
 
@@ -25,11 +30,11 @@ bool ProjectFileLoader::load(const QString& path, QJsonObject& root, QString& er
             if (!unzipBin.isEmpty()) {
                 usePowerShell = true;
             } else {
-                error = "Neither 'unzip' nor 'powershell' was found. Cannot load zip projects.";
+                error = trProjectFileLoader("Neither 'unzip' nor 'powershell' was found. Cannot load zip projects.");
                 return false;
             }
 #else
-            error = "The 'unzip' command line tool is required to load .zip projects but was not found.";
+            error = trProjectFileLoader("The 'unzip' command line tool is required to load .zip projects but was not found.");
             return false;
 #endif
         }
@@ -45,18 +50,18 @@ bool ProjectFileLoader::load(const QString& path, QJsonObject& root, QString& er
         }
 
         if (!unzip.waitForStarted()) {
-            error = "Could not start archive reader.";
+            error = trProjectFileLoader("Could not start archive reader.");
             return false;
         }
         if (!unzip.waitForFinished(kZipReadTimeoutMs) || unzip.exitStatus() != QProcess::NormalExit || unzip.exitCode() != 0) {
-            error = "Could not read project.spart.json from zip.";
+            error = trProjectFileLoader("Could not read project.spart.json from zip.");
             return false;
         }
         jsonData = unzip.readAllStandardOutput();
     } else {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
-            error = "Could not open file.";
+            error = trProjectFileLoader("Could not open file.");
             return false;
         }
         jsonData = file.readAll();
@@ -64,7 +69,7 @@ bool ProjectFileLoader::load(const QString& path, QJsonObject& root, QString& er
 
     QJsonDocument doc = QJsonDocument::fromJson(jsonData);
     if (doc.isNull() || !doc.isObject()) {
-        error = "Invalid JSON data.";
+        error = trProjectFileLoader("Invalid JSON data.");
         return false;
     }
     root = doc.object();

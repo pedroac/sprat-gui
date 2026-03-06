@@ -1,8 +1,15 @@
 #include "AnimationPlaybackService.h"
 
+#include <QCoreApplication>
 #include <QPushButton>
 #include <QTimer>
 #include "AnimationTestOps.h"
+
+namespace {
+QString trAnimationPlayback(const char* text) {
+    return QCoreApplication::translate("AnimationPlaybackService", text);
+}
+}
 
 bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer, QPushButton* playPauseButton) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
@@ -13,7 +20,7 @@ bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines,
     }
     playing = false;
     timer->stop();
-    playPauseButton->setText("Play");
+    playPauseButton->setText(trAnimationPlayback("Play"));
     return true;
 }
 
@@ -26,7 +33,7 @@ bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines,
     }
     playing = false;
     timer->stop();
-    playPauseButton->setText("Play");
+    playPauseButton->setText(trAnimationPlayback("Play"));
     return true;
 }
 
@@ -45,7 +52,7 @@ bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>&
         return false;
     }
     playing = !playing;
-    playPauseButton->setText(playing ? "Pause" : "Play");
+    playPauseButton->setText(playing ? trAnimationPlayback("Pause") : trAnimationPlayback("Play"));
     if (playing) {
         timer->start(1000 / fps);
     } else {

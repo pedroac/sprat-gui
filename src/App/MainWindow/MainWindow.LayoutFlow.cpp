@@ -309,7 +309,7 @@ void MainWindow::setLoading(bool loading) {
 void MainWindow::onSpriteSelected(SpritePtr sprite) {
     m_session->selectedSprite = sprite;
     if (sprite) {
-        m_statusLabel->setText("Selected: " + sprite->name);
+        m_statusLabel->setText(tr("Selected: ") + sprite->name);
     }
     SpriteSelectionPresenter::applySpriteSelection(
         sprite,

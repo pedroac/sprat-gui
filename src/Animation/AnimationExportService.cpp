@@ -1,6 +1,7 @@
 #include "AnimationExportService.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileDialog>
 #include <QMessageBox>
@@ -10,6 +11,12 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+namespace {
+QString trAnimationExport(const char* text) {
+    return QCoreApplication::translate("AnimationExportService", text);
+}
+}
+
 QString AnimationExportService::chooseOutputPath(QWidget* parent) {
     QString ffmpegExe = QStandardPaths::findExecutable("ffmpeg");
     QString magickExe = QStandardPaths::findExecutable("magick");
@@ -18,17 +25,26 @@ QString AnimationExportService::chooseOutputPath(QWidget* parent) {
     }
 
     if (ffmpegExe.isEmpty() && magickExe.isEmpty()) {
-        QMessageBox::warning(parent, "Missing Tools", "To export animations, you need ImageMagick or FFmpeg installed.");
+        QMessageBox::warning(parent,
+                             trAnimationExport("Missing Tools"),
+                             trAnimationExport("To export animations, you need ImageMagick or FFmpeg installed."));
         return QString();
     }
 
     QStringList filters;
-    filters << "GIF Image (*.gif)";
+    filters << trAnimationExport("GIF Image (*.gif)");
     if (!ffmpegExe.isEmpty()) {
-        filters << "MP4 Video (*.mp4)" << "WebM Video (*.webm)" << "Ogg Video (*.ogv)" << "AVI Video (*.avi)";
+        filters << trAnimationExport("MP4 Video (*.mp4)")
+                << trAnimationExport("WebM Video (*.webm)")
+                << trAnimationExport("Ogg Video (*.ogv)")
+                << trAnimationExport("AVI Video (*.avi)");
     }
     QString selectedFilter;
-    return QFileDialog::getSaveFileName(parent, "Save Animation", "animation.gif", filters.join(";;"), &selectedFilter);
+    return QFileDialog::getSaveFileName(parent,
+                                        trAnimationExport("Save Animation"),
+                                        trAnimationExport("animation.gif"),
+                                        filters.join(";;"),
+                                        &selectedFilter);
 }
 
 bool AnimationExportService::exportAnimation(
@@ -57,17 +73,19 @@ bool AnimationExportService::exportAnimation(
     bool useMagick = isGif && !converterExe.isEmpty();
     if (!useMagick && ffmpegExe.isEmpty()) {
         if (!isGif) {
-            QMessageBox::warning(parent, "Error", "FFmpeg is required for video export.");
+            QMessageBox::warning(parent, trAnimationExport("Error"), trAnimationExport("FFmpeg is required for video export."));
             return false;
         }
         if (converterExe.isEmpty()) {
-            QMessageBox::warning(parent, "Error", "No suitable export tool found (FFmpeg or ImageMagick).");
+            QMessageBox::warning(parent,
+                                 trAnimationExport("Error"),
+                                 trAnimationExport("No suitable export tool found (FFmpeg or ImageMagick)."));
             return false;
         }
     }
 
     setLoading(true);
-    setStatus("Generating animation...");
+    setStatus(trAnimationExport("Generating animation..."));
     QApplication::processEvents();
 
     QTemporaryDir tempDir;
@@ -183,8 +201,8 @@ bool AnimationExportService::exportAnimation(
 
     bool ok = QFile::exists(outPath) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
     if (!ok) {
-        setStatus("Failed to generate animation");
-        QMessageBox::critical(parent, "Error", "Exporting animation failed. Check console output.");
+        setStatus(trAnimationExport("Failed to generate animation"));
+        QMessageBox::critical(parent, trAnimationExport("Error"), trAnimationExport("Exporting animation failed. Check console output."));
     }
     setLoading(false);
     return ok;

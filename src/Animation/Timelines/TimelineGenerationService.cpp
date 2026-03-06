@@ -2,6 +2,14 @@
 
 #include "TimelineBuilder.h"
 
+#include <QCoreApplication>
+
+namespace {
+QString trTimelineGeneration(const char* text) {
+    return QCoreApplication::translate("TimelineGenerationService", text);
+}
+}
+
 bool TimelineGenerationService::generateFromLayout(
     const QVector<LayoutModel>& layoutModels,
     QVector<AnimationTimeline>& timelines,
@@ -14,7 +22,7 @@ bool TimelineGenerationService::generateFromLayout(
     }
     QVector<TimelineSeed> generated = TimelineBuilder::buildFromSprites(allSprites);
     if (generated.isEmpty()) {
-        statusMessage = "No frame names match the supported timeline patterns.";
+        statusMessage = trTimelineGeneration("No frame names match the supported timeline patterns.");
         return false;
     }
 
@@ -64,6 +72,7 @@ bool TimelineGenerationService::generateFromLayout(
         }
     }
 
-    statusMessage = changed ? "Timelines generated from layout." : "No timelines were created.";
+    statusMessage = changed ? trTimelineGeneration("Timelines generated from layout.")
+                            : trTimelineGeneration("No timelines were created.");
     return changed;
 }

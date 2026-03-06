@@ -374,11 +374,11 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         if (!unzipBin.isEmpty()) {
             usePowerShell = true;
         } else {
-            QMessageBox::warning(this, "Missing Tool", "Neither 'unzip' nor 'powershell' was found. Cannot load ZIP archives.");
+            QMessageBox::warning(this, tr("Missing Tool"), tr("Neither 'unzip' nor 'powershell' was found. Cannot load ZIP archives."));
             return false;
         }
 #else
-        QMessageBox::warning(this, "Missing Tool", "Please install the 'unzip' utility to load ZIP archives.");
+        QMessageBox::warning(this, tr("Missing Tool"), tr("Please install the 'unzip' utility to load ZIP archives."));
         return false;
 #endif
     }
@@ -388,7 +388,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     }
     auto tempDir = std::make_unique<QTemporaryDir>();
     if (!tempDir->isValid()) {
-        QMessageBox::warning(this, "Load Failed", "Unable to create temporary directory for ZIP extraction.");
+        QMessageBox::warning(this, tr("Load Failed"), tr("Unable to create temporary directory for ZIP extraction."));
         return false;
     }
     QString tempPath = tempDir->path();
@@ -403,7 +403,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     }
     unzip.waitForFinished();
     if (unzip.exitStatus() != QProcess::NormalExit || unzip.exitCode() != 0) {
-        QMessageBox::warning(this, "Load Failed", "Could not extract ZIP archive.");
+        QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP archive."));
         return false;
     }
 
@@ -439,14 +439,14 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         return true;
     }
     if (selectionCanceled) {
-        m_statusLabel->setText("Load canceled");
+        m_statusLabel->setText(tr("Load canceled"));
         return false;
     }
     if (ImageDiscoveryService::hasImageFiles(tempPath)) {
         loadFolder(tempPath, action);
         return true;
     }
-    QMessageBox::warning(this, "Load Failed", "ZIP archive does not contain recognizable image folders.");
+    QMessageBox::warning(this, tr("Load Failed"), tr("ZIP archive does not contain recognizable image folders."));
     return false;
 }
 
