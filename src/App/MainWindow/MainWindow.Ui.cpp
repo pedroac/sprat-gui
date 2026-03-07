@@ -30,7 +30,7 @@
 
 void MainWindow::setupUi() {
     resize(1400, 860);
-    setWindowTitle(tr("Sprat GUI - C++"));
+    setWindowTitle(tr("Sprat GUI %1").arg(SPRAT_GUI_VERSION));
     setupToolbar();
 
     // Central Widget is a Stack

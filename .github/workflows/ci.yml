@@ -136,21 +136,30 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | xargs)
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Create release tag
-        id: release_tag
-        run: echo "tag=release-gui-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-
       - name: Publish GitHub Release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ steps.release_tag.outputs.tag }}
-          name: Release GUI ${{ steps.release_tag.outputs.tag }}
-          commit: ${{ github.sha }}
-          generateReleaseNotes: true
-          artifacts: "dist/sprat-gui-*"
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          files: |
+            dist/sprat-gui-linux.tar.gz
+            dist/sprat-gui-windows.zip
+            dist/sprat-gui-macos.dmg
+          generate_release_notes: true
+          draft: false
+          prerelease: false
