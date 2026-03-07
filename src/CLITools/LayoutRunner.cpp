@@ -127,6 +127,12 @@ void LayoutRunner::onProcessFinished(int exitCode, QProcess::ExitStatus exitStat
 
     if (exitStatus == QProcess::CrashExit || exitCode != 0) {
         result.success = false;
+#ifdef Q_OS_WIN
+        if (exitStatus == QProcess::CrashExit) {
+            if (!result.error.isEmpty()) result.error += "\n\n";
+            result.error += "Process crashed. This might be due to missing dependencies like 'archive.dll'. Please check the 'cli' folder.";
+        }
+#endif
     } else {
         result.success = true;
     }
@@ -138,6 +144,9 @@ void LayoutRunner::onProcessError(QProcess::ProcessError error) {
     QString errStr = m_process->errorString();
     if (error == QProcess::FailedToStart) {
         errStr = "Failed to start process: " + m_currentConfig.layoutBinary;
+#ifdef Q_OS_WIN
+        errStr += "\n\nThis might be due to missing dependencies like 'archive.dll'. Please ensure all required DLLs are in the 'cli' folder.";
+#endif
     }
     emit errorOccurred(errStr);
 }

@@ -94,8 +94,9 @@ jobs:
           $cli_url = "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-windows-x64.zip"
           Invoke-WebRequest -Uri $cli_url -OutFile cli.zip
           Expand-Archive cli.zip -DestinationPath cli-temp
-          # Copy everything from the extracted subdir to dist/
-          Copy-Item -Path cli-temp/* -Destination dist/ -Force
+          # Flatten CLI tools and dependencies into dist/cli/
+          mkdir dist/cli
+          Get-ChildItem -Path cli-temp -Recurse -File | Copy-Item -Destination dist/cli/ -Force
           # Bundle GUI
           Copy-Item -Path build/Release/sprat-gui.exe -Destination dist/ -Force
           windeployqt dist/sprat-gui.exe

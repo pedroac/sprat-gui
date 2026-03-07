@@ -117,9 +117,16 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
     }
 
     // 2. Check application directory
-    QFileInfo appFi(QDir(QCoreApplication::applicationDirPath()).filePath(executableName));
+    QDir appDir(QCoreApplication::applicationDirPath());
+    QFileInfo appFi(appDir.filePath(executableName));
     if (appFi.exists() && appFi.isExecutable()) {
         return appFi.absoluteFilePath();
+    }
+
+    // 2.1 Check "cli" subdirectory in application directory
+    QFileInfo cliFi(appDir.filePath(QString("cli/%1").arg(executableName)));
+    if (cliFi.exists() && cliFi.isExecutable()) {
+        return cliFi.absoluteFilePath();
     }
 
     // 3. Check current directory
