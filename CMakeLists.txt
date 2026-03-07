@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.16)
 project(sprat-gui LANGUAGES CXX)
 include(CTest)
 
+# === Project Version ===
+set(SPRAT_GUI_VERSION "v0.0.0")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" VERSION_CONTENT)
+    string(STRIP "${VERSION_CONTENT}" SPRAT_GUI_VERSION)
+endif()
+add_definitions(-DSPRAT_GUI_VERSION="${SPRAT_GUI_VERSION}")
+
 # === CLI Dependency ===
 set(SPRAT_CLI_VERSION "v0.0.0")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES")
