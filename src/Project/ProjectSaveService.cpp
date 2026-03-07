@@ -276,18 +276,35 @@ bool ProjectSaveService::save(
     auto readStdErr = [](QProcess& process) {
         return QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
     };
-    auto runProcess = [&](QProcess& process, const QString& tool, const QStringList& args, const QString& step) -> bool {
-        process.start(tool, args);
+    auto runProcess = [&](QProcess& process, const QString& tool, const QStringList& args, const QString& step, const QByteArray* inputData = nullptr, QByteArray* outputData = nullptr) -> bool {
+        process.setProgram(tool);
+        process.setArguments(args);
+        process.start();
+
         if (!process.waitForStarted()) {
             QMessageBox::critical(parent, trPS("Error"), QString(trPS("%1: failed to start '%2'.")).arg(step, tool));
             return false;
         }
-        if (!process.waitForFinished(kProcessTimeoutMs)) {
-            process.kill();
-            process.waitForFinished();
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("%1 timed out.")).arg(step));
-            return false;
+
+        if (inputData && !inputData->isEmpty()) {
+            process.write(*inputData);
+            process.closeWriteChannel();
         }
+
+        while (process.state() == QProcess::Running || process.bytesAvailable() > 0) {
+            bool hasOutput = process.waitForReadyRead(100);
+            if (outputData) {
+                outputData->append(process.readAllStandardOutput());
+            } else {
+                process.readAllStandardOutput(); // Drain stdout
+            }
+            // Always drain stderr to prevent deadlocks from Wine "fixme" noise
+            process.readAllStandardError(); 
+            
+            QCoreApplication::processEvents();
+            if (process.state() == QProcess::NotRunning) break;
+        }
+
         if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
             const QString err = readStdErr(process);
             QMessageBox::critical(parent, trPS("Error"), err.isEmpty() ? QString(trPS("%1 failed.")).arg(step)
@@ -403,36 +420,18 @@ bool ProjectSaveService::save(
 
             bool layoutSuccess = false;
             while (!layoutSuccess) {
-                if (layoutProc.state() != QProcess::NotRunning) {
-                    layoutProc.kill();
-                    layoutProc.waitForFinished();
-                }
-                layoutProc.start(spratLayoutBin, layoutArgs);
-                if (!layoutProc.waitForStarted()) {
-                    QMessageBox::critical(parent, trPS("Error"), QString(trPS("Layout generation failed for profile '%1': could not start spratlayout.")).arg(profileName));
-                    return false;
-                }
-                if (!layoutProc.waitForFinished(kProcessTimeoutMs)) {
-                    layoutProc.kill();
-                    layoutProc.waitForFinished();
-                    QMessageBox::critical(parent, trPS("Error"), QString(trPS("Layout generation timed out for profile '%1'.")).arg(profileName));
-                    return false;
-                }
-                if (layoutProc.exitStatus() != QProcess::NormalExit || layoutProc.exitCode() != 0) {
+                layoutData.clear();
+                if (!runProcess(layoutProc, spratLayoutBin, layoutArgs, QString(trPS("Layout generation failed for profile '%1'")).arg(profileName), nullptr, &layoutData)) {
                     const QString err = readStdErr(layoutProc);
                     const QString combined = (err + "\n" + QString::fromUtf8(layoutProc.readAllStandardOutput())).toLower();
                     if (layoutArgs.contains("--trim-transparent") && combined.contains("failed to compute compact layout")) {
                         layoutArgs.removeAll("--trim-transparent");
                         continue;
                     }
-                    QMessageBox::critical(parent, trPS("Error"), err.isEmpty()
-                                                              ? QString(trPS("Layout generation failed for profile '%1'.")).arg(profileName)
-                                                              : QString(trPS("Layout generation failed for profile '%1':\n%2")).arg(profileName, err));
                     return false;
                 }
                 layoutSuccess = true;
             }
-            layoutData = layoutProc.readAllStandardOutput();
             if (!layoutData.contains("atlas ")) {
                 const QString preview = QString::fromUtf8(layoutData.left(200)).trimmed();
                 QMessageBox::critical(parent,
@@ -443,27 +442,10 @@ bool ProjectSaveService::save(
             }
         }
         QProcess packProc;
-        packProc.start(spratPackBin, QStringList());
-        if (!packProc.waitForStarted()) {
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing failed for profile '%1': could not start spratpack.")).arg(profileName));
+        QByteArray imageData;
+        if (!runProcess(packProc, spratPackBin, QStringList(), QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
             return false;
         }
-        packProc.write(layoutData);
-        packProc.closeWriteChannel();
-        if (!packProc.waitForFinished(kProcessTimeoutMs)) {
-            packProc.kill();
-            packProc.waitForFinished();
-            QMessageBox::critical(parent, trPS("Error"), QString(trPS("Packing timed out for profile '%1'.")).arg(profileName));
-            return false;
-        }
-        if (packProc.exitStatus() != QProcess::NormalExit || packProc.exitCode() != 0) {
-            const QString err = readStdErr(packProc);
-            QString details = err.isEmpty() ? QString(trPS("Packing failed for profile '%1'.")).arg(profileName)
-                                            : QString(trPS("Packing failed for profile '%1':\n%2")).arg(profileName, err);
-            QMessageBox::critical(parent, trPS("Error"), details);
-            return false;
-        }
-        QByteArray imageData = packProc.readAllStandardOutput();
         const bool isMultipack = layoutData.contains("multipack true") || layoutData.count("atlas ") > 1;
 
         if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")) {
@@ -472,13 +454,8 @@ bool ProjectSaveService::save(
             if (!tarBin.isEmpty()) {
                 QProcess tarProc;
                 tarProc.setWorkingDirectory(profileDir.absolutePath());
-                tarProc.start(tarBin, QStringList() << "-xf" << "-");
-                if (tarProc.waitForStarted()) {
-                    tarProc.write(imageData);
-                    tarProc.closeWriteChannel();
-                    if (tarProc.waitForFinished(30000) && tarProc.exitStatus() == QProcess::NormalExit && tarProc.exitCode() == 0) {
-                        extracted = true;
-                    }
+                if (runProcess(tarProc, tarBin, QStringList() << "-xf" << "-", trPS("Failed to extract multipack atlases"), &imageData)) {
+                    extracted = true;
                 }
             }
             if (extracted) {
@@ -528,28 +505,12 @@ bool ProjectSaveService::save(
             } else {
                 convArgs << "--output" << "spritesheet.png";
             }
-            // No need for --markers and --animations as they are now in stdin
-            convProc.start(spratConvertBin, convArgs);
-            if (!convProc.waitForStarted()) {
-                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion failed for profile '%1': could not start spratconvert.")).arg(profileName));
+            
+            QByteArray convData;
+            if (!runProcess(convProc, spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, &convData)) {
                 return false;
             }
-            convProc.write(combinedInput);
-            convProc.closeWriteChannel();
-            if (!convProc.waitForFinished(kProcessTimeoutMs)) {
-                convProc.kill();
-                convProc.waitForFinished();
-                QMessageBox::critical(parent, trPS("Error"), QString(trPS("Format conversion timed out for profile '%1'.")).arg(profileName));
-                return false;
-            }
-            if (convProc.exitStatus() != QProcess::NormalExit || convProc.exitCode() != 0) {
-                const QString err = readStdErr(convProc);
-                QMessageBox::critical(parent, trPS("Error"), err.isEmpty()
-                                                          ? QString(trPS("Format conversion failed for profile '%1'.")).arg(profileName)
-                                                          : QString(trPS("Format conversion failed for profile '%1':\n%2")).arg(profileName, err));
-                return false;
-            }
-            QByteArray convData = convProc.readAllStandardOutput();
+            
             QString ext = config.transform == "css" ? "css" : (config.transform == "xml" ? "xml" : (config.transform == "csv" ? "csv" : "json"));
             QFile convFile(profileDir.filePath("layout_formatted." + ext));
             if (!convFile.open(QIODevice::WriteOnly) || convFile.write(convData) < 0) {

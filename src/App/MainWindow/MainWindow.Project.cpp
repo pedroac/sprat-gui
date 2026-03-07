@@ -394,16 +394,27 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     QString tempPath = tempDir->path();
     m_session->addTempDir(std::move(tempDir));
 
-    QProcess unzip;
-    if (usePowerShell) {
-        QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(zipPath, tempPath);
-        unzip.start(unzipBin, QStringList() << "-Command" << script);
-    } else {
-        unzip.start(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
+    bool success = false;
+    if (!unzipBin.isEmpty()) {
+        if (usePowerShell) {
+            QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(zipPath, tempPath);
+            success = runTool(unzipBin, QStringList() << "-Command" << script);
+            
+            // Fallback for Wine where powershell is a stub
+            if (!success && QDir(tempPath).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).isEmpty()) {
+                // Try tar as fallback if available
+                QString tarBin = QStandardPaths::findExecutable("tar");
+                if (!tarBin.isEmpty()) {
+                    success = runTool(tarBin, QStringList() << "-xf" << zipPath << "-C" << tempPath);
+                }
+            }
+        } else {
+            success = runTool(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
+        }
     }
-    unzip.waitForFinished();
-    if (unzip.exitStatus() != QProcess::NormalExit || unzip.exitCode() != 0) {
-        QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP archive."));
+
+    if (!success) {
+        QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP archive. Ensure 'unzip' or 'tar' is installed."));
         return false;
     }
 

@@ -807,6 +807,18 @@ private:
      */
     bool processExtractedFrames(const QString& tempPath, const QString& sourcePath, DropAction action = DropAction::Replace, const QColor& backgroundColor = QColor());
 
+    /**
+     * @brief Runs a CLI tool and captures its output.
+     * 
+     * @param tool Path to tool
+     * @param args Arguments for the tool
+     * @param input Optional input data for stdin
+     * @param output Optional buffer to store stdout
+     * @param error Optional buffer to store stderr
+     * @return bool True if tool exited normally with code 0
+     */
+    bool runTool(const QString& tool, const QStringList& args, const QByteArray* input = nullptr, QByteArray* output = nullptr, QByteArray* error = nullptr);
+
     // === UI Components ===
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
