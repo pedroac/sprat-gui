@@ -79,7 +79,7 @@ sh build.sh
 ```
 
 `build.sh` behavior:
-- Updates `DEPENDENCIES` to the newest `sprat-cli` semver tag if network access is available.
+- Updates `DEPENDENCIES` to the newest published `sprat-cli` release tag if network access is available.
 - Configures with `cmake -B build -S .`.
 - Builds with `cmake --build build`.
 - Runs tests with `ctest --test-dir build --output-on-failure`.

@@ -104,11 +104,12 @@ jobs:
       - name: Package (macOS)
         if: runner.os == 'macOS' && github.ref == 'refs/heads/release'
         run: |
+          set -euo pipefail
           mkdir dist
           cp -r build/sprat-gui.app dist/
           # Bundle sprat-cli (read version from DEPENDENCIES) into the App Bundle
           cli_version=$(cat DEPENDENCIES | xargs)
-          curl -L -o cli.dmg "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-macos-x64.dmg"
+          curl -fL -o cli.dmg "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-macos-x64.dmg"
           MOUNT_POINT=$(hdiutil mount cli.dmg | grep -o '/Volumes/.*' | head -n 1)
           if [ -z "$MOUNT_POINT" ]; then echo "Failed to mount DMG"; exit 1; fi
           cp "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/MacOS/
