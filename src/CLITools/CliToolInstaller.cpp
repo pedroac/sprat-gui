@@ -126,8 +126,14 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     QString appDir = QApplication::applicationDirPath();
     
 #ifdef Q_OS_WIN
-    // Use PowerShell to extract ZIP
-    QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(filePath, appDir);
+    // Use PowerShell to extract ZIP and flatten into 'cli' subdirectory
+    QString cliDir = QDir(appDir).filePath("cli");
+    QDir().mkpath(cliDir);
+    QString script = QString("$temp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString()); "
+                             "Expand-Archive -Path '%1' -DestinationPath $temp -Force; "
+                             "Get-ChildItem -Path $temp -Recurse -File | Copy-Item -Destination '%2' -Force; "
+                             "Remove-Item -Path $temp -Recurse -Force")
+                             .arg(filePath, cliDir);
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
     // Use hdiutil to mount and cp

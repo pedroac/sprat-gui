@@ -24,7 +24,18 @@ void MainWindow::checkCliTools() {
     if (allFound) {
         QString currentVersion = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
         QString requiredVersion = SPRAT_CLI_VERSION;
-        if (!currentVersion.isEmpty() && currentVersion != requiredVersion) {
+
+        if (currentVersion.isEmpty()) {
+            m_cliReady = false;
+            m_statusLabel->setText(tr("CLI error (failed to execute)"));
+            QMessageBox::critical(this, tr("CLI Execution Failed"),
+                tr("The CLI tool 'spratlayout' was found but failed to execute.\n"
+                   "This is usually caused by missing dependencies like 'archive.dll'.\n"
+                   "Please ensure all required DLLs are in the 'cli' folder."));
+            return;
+        }
+
+        if (currentVersion != requiredVersion) {
             if (CliToolsUi::askUpgrade(this, currentVersion, requiredVersion)) {
                 installCliTools();
                 return;
@@ -35,6 +46,12 @@ void MainWindow::checkCliTools() {
     } else {
         m_cliReady = false;
         m_statusLabel->setText(tr("CLI missing"));
+#ifdef Q_OS_WIN
+        QDir appDir(QCoreApplication::applicationDirPath());
+        if (!appDir.exists("cli")) {
+            m_statusLabel->setText(tr("CLI folder missing"));
+        }
+#endif
         showMissingCliDialog(missing);
     }
     updateUiState();
