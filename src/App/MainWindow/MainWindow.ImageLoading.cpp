@@ -82,24 +82,16 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
             
             // Use spratunpack with the correct command syntax
             // spratunpack <input_image> --frames - --output <output_directory>
-            QProcess unpackProcess;
             QStringList args;
             args << imagePath << "--frames" << "-" << "--output" << tempPath;
-            unpackProcess.start(m_spratUnpackBin, args);
             
-            // Write frames data to stdin
-            unpackProcess.write(framesData.toUtf8());
-            unpackProcess.closeWriteChannel();
-            
-            unpackProcess.waitForFinished();
-            
-            if (unpackProcess.exitCode() == 0) {
+            QByteArray framesDataBytes = framesData.toUtf8();
+            if (runTool(m_spratUnpackBin, args, &framesDataBytes)) {
                 if (processExtractedFrames(tempPath, imagePath, action, detection.backgroundColor)) {
                     onRunLayout();
                 }
             } else {
-                QString error = QString::fromUtf8(unpackProcess.readAllStandardError());
-                m_statusLabel->setText(tr("Error running spratunpack: ") + error);
+                m_statusLabel->setText(tr("Error running spratunpack"));
                 setLoading(false);
             }
         } else {
@@ -151,16 +143,8 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
 
     // Use tar directly to extract the file
     // tar -xf <tarPath> -C <tempDir>
-    QProcess tarProcess;
-    tarProcess.setProgram("tar");
-    tarProcess.setArguments(QStringList() << "-xf" << tarPath << "-C" << tempPath);
-
-    tarProcess.start();
-    bool finished = tarProcess.waitForFinished();
-    
-    if (!finished || tarProcess.exitCode() != 0) {
-        QString error = QString::fromUtf8(tarProcess.readAllStandardError());
-        m_statusLabel->setText(tr("Error extracting tar file: ") + error);
+    if (!runTool("tar", QStringList() << "-xf" << tarPath << "-C" << tempPath)) {
+        m_statusLabel->setText(tr("Error extracting tar file"));
         setLoading(false);
         return;
     }
@@ -177,18 +161,13 @@ MainWindow::FrameDetectionResult MainWindow::detectFramesInImage(const QString& 
         return result;
     }
     
-    QProcess framesProcess;
-    // Use spratframes to detect frames in the image
-    framesProcess.start(m_spratFramesBin, QStringList() << imagePath);
-    framesProcess.waitForFinished();
-    
-    if (framesProcess.exitCode() != 0) {
-        QString error = QString::fromUtf8(framesProcess.readAllStandardError());
-        qWarning() << "spratframes error:" << error;
+    QByteArray output;
+    if (!runTool(m_spratFramesBin, QStringList() << imagePath, nullptr, &output)) {
+        qWarning() << "spratframes error";
         return result;
     }
     
-    QString output = QString::fromUtf8(framesProcess.readAllStandardOutput());
+    QString outputStr = QString::fromUtf8(output);
     
     // Parse spratframes output to extract frame rectangles
     // Expected format:
@@ -196,7 +175,7 @@ MainWindow::FrameDetectionResult MainWindow::detectFramesInImage(const QString& 
     // background r,g,b
     // sprite x,y w,h
     // (possibly several sprite lines)
-    QTextStream stream(&output);
+    QTextStream stream(&outputStr);
     QString line;
     while (stream.readLineInto(&line)) {
         line = line.trimmed();

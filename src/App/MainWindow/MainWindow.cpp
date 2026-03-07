@@ -419,3 +419,44 @@ void MainWindow::applySettings() {
         SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
     }
 }
+
+bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
+    QProcess process;
+    process.setProgram(tool);
+    process.setArguments(args);
+    process.start();
+
+    if (!process.waitForStarted()) {
+        return false;
+    }
+
+    if (input && !input->isEmpty()) {
+        process.write(*input);
+        process.closeWriteChannel();
+    }
+
+    while (process.state() == QProcess::Running || process.bytesAvailable() > 0 || process.bytesToWrite() > 0) {
+        if (process.waitForReadyRead(50)) {
+            if (output) {
+                output->append(process.readAllStandardOutput());
+            } else {
+                process.readAllStandardOutput(); // Drain it
+            }
+            if (error) {
+                error->append(process.readAllStandardError());
+            } else {
+                process.readAllStandardError(); // Drain it
+            }
+        }
+        
+        // If we are writing and it's taking time, wait for bytes written
+        if (process.bytesToWrite() > 0) {
+            process.waitForBytesWritten(50);
+        }
+
+        QCoreApplication::processEvents();
+        if (process.state() == QProcess::NotRunning && process.bytesAvailable() == 0) break;
+    }
+
+    return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+}
