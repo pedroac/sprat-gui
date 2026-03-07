@@ -15,8 +15,15 @@ MissingCliAction CliToolsUi::askMissingCliAction(QWidget* parent, const QStringL
     QMessageBox msgBox(parent);
     msgBox.setWindowTitle(trCliToolsUi("Missing CLI Tools"));
     msgBox.setText(trCliToolsUi("The following sprat commands were not found:\n") + missing.join(", "));
-    msgBox.setInformativeText(QString(trCliToolsUi("Do you want to download and install them to %1, or provide a path?"))
-                              .arg(CliToolsConfig::defaultInstallDir()));
+    
+    QString informativeText;
+#ifdef Q_OS_WIN
+    informativeText = trCliToolsUi("The application expects CLI tools in a 'cli' folder next to the executable.\n");
+#endif
+    informativeText += QString(trCliToolsUi("Do you want to download and install them to %1, or provide a path?"))
+                       .arg(CliToolsConfig::defaultInstallDir());
+                       
+    msgBox.setInformativeText(informativeText);
 
     QPushButton* installBtn = msgBox.addButton(trCliToolsUi("Install"), QMessageBox::ActionRole);
     QPushButton* pathBtn = msgBox.addButton(trCliToolsUi("Provide Path"), QMessageBox::ActionRole);
