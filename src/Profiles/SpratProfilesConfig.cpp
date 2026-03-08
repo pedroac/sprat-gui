@@ -1,6 +1,8 @@
 #include "SpratProfilesConfig.h"
 #include "ResolutionUtils.h"
+#include "CliToolsConfig.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -128,11 +130,32 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
     if (errorMessage) {
         errorMessage->clear();
     }
-    const QString path = configPath();
-    QFile file(path);
-    if (!file.exists()) {
+
+    QStringList candidates;
+    candidates << configPath();
+    
+    const QString cliBaseDir = CliToolsConfig::loadCliPaths().baseDir;
+    if (!cliBaseDir.isEmpty()) {
+        candidates << QDir(cliBaseDir).filePath("spratprofiles.cfg");
+    }
+    
+    const QString appDir = QCoreApplication::applicationDirPath();
+    candidates << QDir(appDir).filePath("spratprofiles.cfg");
+    candidates << QDir(appDir).filePath("cli/spratprofiles.cfg");
+
+    QString path;
+    for (const QString& candidate : candidates) {
+        if (QFile::exists(candidate)) {
+            path = candidate;
+            break;
+        }
+    }
+
+    if (path.isEmpty()) {
         return {};
     }
+
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("Could not open %1: %2").arg(path, file.errorString());
@@ -295,7 +318,9 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
 
     const QVector<SpratProfile> cleaned = sanitizeProfiles(profiles);
     if (!cleaned.isEmpty()) {
-        saveProfileDefinitions(cleaned);
+        if (path != configPath()) {
+            saveProfileDefinitions(cleaned);
+        }
         return cleaned;
     }
     if (hasConfigContent && errorMessage) {

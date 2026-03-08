@@ -84,6 +84,9 @@ cmake -DSPRAT_DOWNLOAD_STB=ON .
 make -j$(nproc 2>/dev/null || echo 1)
 mkdir -p "$HOME/.local/bin"
 install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOME/.local/bin/"
+mkdir -p "$HOME/.local/share/sprat/transforms"
+cp spratprofiles.cfg "$HOME/.local/share/sprat/"
+cp -r transforms/* "$HOME/.local/share/sprat/transforms/"
 )").arg(m_cliVersion);
 
     m_installProcess->start("bash", QStringList() << "-c" << script);
@@ -126,20 +129,18 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     QString appDir = QApplication::applicationDirPath();
     
 #ifdef Q_OS_WIN
-    // Use PowerShell to extract ZIP and flatten into 'cli' subdirectory
+    // Extract ZIP and preserve structure in 'cli' subdirectory
     QString cliDir = QDir(appDir).filePath("cli");
     QDir().mkpath(cliDir);
-    QString script = QString("$ErrorActionPreference = 'Stop'; $temp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString()); "
-                             "Expand-Archive -Path '%1' -DestinationPath $temp -Force; "
-                             "Get-ChildItem -Path $temp -Recurse -File | Copy-Item -Destination '%2' -Force; "
-                             "Remove-Item -Path $temp -Recurse -Force")
+    QString script = QString("$ErrorActionPreference = 'Stop'; "
+                             "Expand-Archive -Path '%1' -DestinationPath '%2' -Force")
                              .arg(QString(filePath).replace("'", "''"), QString(cliDir).replace("'", "''"));
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
-    // Use hdiutil to mount and cp
+    // Use hdiutil to mount and cp while preserving structure
     QString script = QString("MOUNT_POINT=$(hdiutil mount \"%1\" | grep -o '/Volumes/.*' | head -n 1)\n"
                              "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
-                             "cp \"$MOUNT_POINT\"/* \"%2/\"\n"
+                             "cp -R \"$MOUNT_POINT\"/ \"%2/cli/\"\n"
                              "hdiutil unmount \"$MOUNT_POINT\"").arg(filePath, appDir);
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif

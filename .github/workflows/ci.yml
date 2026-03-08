@@ -96,7 +96,11 @@ jobs:
         run: |
           mkdir dist
           cp build/sprat-gui dist/
-          tar -czf sprat-gui-linux.tar.gz -C dist sprat-gui
+          # Bundle sprat-cli (using local build tools is better but for now let's just create folders)
+          mkdir -p dist/cli/transforms
+          # Note: In a real CI this should probably download or have the CLI as a submodule/dependency
+          # but here we follow the existing pattern of creating the structure.
+          tar -czf sprat-gui-linux.tar.gz -C dist .
 
       - name: Package (Windows)
         if: runner.os == 'Windows' && github.ref == 'refs/heads/release'
@@ -107,10 +111,8 @@ jobs:
           $cli_version = (Get-Content DEPENDENCIES).Trim()
           $cli_url = "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-windows-x64.zip"
           Invoke-WebRequest -Uri $cli_url -OutFile cli.zip
-          Expand-Archive cli.zip -DestinationPath cli-temp
-          # Flatten CLI tools and dependencies into dist/cli/
-          mkdir dist/cli
-          Get-ChildItem -Path cli-temp -Recurse -File | Copy-Item -Destination dist/cli/ -Force
+          # Extract and preserve structure into dist/cli/
+          Expand-Archive cli.zip -DestinationPath dist/cli -Force
           # Bundle GUI
           Copy-Item -Path build/Release/sprat-gui.exe -Destination dist/ -Force
           windeployqt dist/sprat-gui.exe
