@@ -8,6 +8,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QCoreApplication>
 #include <QMap>
 #include <QMessageBox>
 #include <QProcess>
