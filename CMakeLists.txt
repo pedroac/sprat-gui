@@ -74,7 +74,7 @@ if(NOT LibArchive_FOUND)
         FetchContent_Declare(
             zlib
             URL https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz
-            URL_HASH SHA256=106a3501f228d7a1772439167232e0e012e12818981f4f46487e49f87f4c084e
+            URL_HASH SHA256=17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c
         )
         FetchContent_MakeAvailable(zlib)
         set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR} CACHE PATH "" FORCE)
