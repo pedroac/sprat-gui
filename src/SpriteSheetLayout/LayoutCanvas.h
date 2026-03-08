@@ -24,6 +24,17 @@ public:
     void setModels(const QVector<LayoutModel>& models, std::atomic<bool>* canceled = nullptr);
 
     /**
+     * @brief Asynchronously prepares and sets models.
+     * 
+     * Loads pixmaps in a background thread and then updates the UI.
+     * 
+     * @param models The layout models to display
+     * @param canceled Optional atomic cancellation flag
+     * @param onFinished Optional callback for completion
+     */
+    void setModelsAsync(const QVector<LayoutModel>& models, std::atomic<bool>* canceled = nullptr, std::function<void()> onFinished = nullptr);
+
+    /**
      * @brief Clears all sprites from the canvas.
      */
     void clearCanvas();

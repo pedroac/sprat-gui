@@ -162,44 +162,43 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
     m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
-    // Let the message be shown before blocking with image loading
-    QCoreApplication::processEvents();
 
-    m_canvas->setModels(m_session->layoutModels, &m_isCanceled);
-    if (m_isCanceled) {
+    m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this, selectedPaths, primaryPath]() {
+        if (m_isCanceled) {
+            setLoading(false);
+            m_statusLabel->setText(tr("Loading images canceled"));
+            return;
+        }
+        m_canvas->setZoomManual(false);
+        QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+
+        m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
+            .arg(m_session->activeFramePaths.size())
+            .arg(m_session->layoutModels.size()));
+
+        populateActiveFrameListFromModel();
+        if (m_session->layoutSourceIsList) {
+            updateManualFrameLabel();
+        }
+
+        if (!m_session->pendingProjectPayload.isEmpty()) {
+            applyProjectPayload();
+        } else if (!selectedPaths.isEmpty()) {
+            m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
+        }
+
+        m_session->lastSuccessfulProfile = m_profileCombo->currentText();
+
+        updateMainContentView();
+        updateUiState();
+        
         setLoading(false);
-        m_statusLabel->setText(tr("Loading images canceled"));
-        return;
-    }
-    m_canvas->setZoomManual(false);
-    QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
 
-    m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
-        .arg(m_session->activeFramePaths.size())
-        .arg(newModels.size()));
-
-    populateActiveFrameListFromModel();
-    if (m_session->layoutSourceIsList) {
-        updateManualFrameLabel();
-    }
-
-    if (!m_session->pendingProjectPayload.isEmpty()) {
-        applyProjectPayload();
-    } else if (!selectedPaths.isEmpty()) {
-        m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
-    }
-
-    m_session->lastSuccessfulProfile = m_profileCombo->currentText();
-
-    updateMainContentView();
-    updateUiState();
-    
-    setLoading(false);
-
-    if (m_layoutRunPending) {
-        m_layoutRunPending = false;
-        onRunLayout();
-    }
+        if (m_layoutRunPending) {
+            m_layoutRunPending = false;
+            onRunLayout();
+        }
+    });
 }
 
 void MainWindow::onLayoutError(const QString& details) {

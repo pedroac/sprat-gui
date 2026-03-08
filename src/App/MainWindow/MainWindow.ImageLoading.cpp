@@ -396,16 +396,27 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     // Apply the model to the canvas
     m_session->layoutModels = { singleImageModel };
     if (m_canvas) {
-        m_canvas->setModels(m_session->layoutModels, &m_isCanceled);
-        QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+        m_loadingUiMessage = tr("Loading image...");
+        setLoading(true);
+        m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this, sprite]() {
+            if (m_isCanceled) {
+                setLoading(false);
+                return;
+            }
+            m_canvas->setZoomManual(false);
+            QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+            
+            m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));    
+            // Update UI state
+            populateActiveFrameListFromModel();
+            updateMainContentView();
+            updateUiState();
+            
+            setLoading(false);
+        });
+    } else {
+        setLoading(false);
     }
-    m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));    
-    // Update UI state
-    populateActiveFrameListFromModel();
-    updateMainContentView();
-    updateUiState();
-    
-    setLoading(false);
 }
 
 bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& sourcePath, DropAction action, const QColor& backgroundColor) {

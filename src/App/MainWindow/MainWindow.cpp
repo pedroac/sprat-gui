@@ -100,6 +100,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
  * 
  */
 MainWindow::~MainWindow() {
+    m_isCanceled = true;
+    
+    // Ensure all background tasks are stopped/finished before we destroy members
+    m_zipDiscoveryWatcher.waitForFinished();
+    m_projectLoadWatcher.waitForFinished();
+    m_folderDiscoveryWatcher.waitForFinished();
+    m_frameDetectionWatcher.waitForFinished();
+    m_tarExtractionWatcher.waitForFinished();
+    m_frameExtractionWatcher.waitForFinished();
+    m_projectSaveWatcher.waitForFinished();
+
     if (m_autosaveTimer) {
         m_autosaveTimer->stop();
         delete m_autosaveTimer;

@@ -217,20 +217,8 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
     const int margin = 100;
     int maxW = 0;
 
-    QSet<QString> activePaths;
     for (const auto& model : models) {
         maxW = qMax(maxW, model.atlasWidth);
-        for (const auto& sprite : model.sprites) {
-            activePaths.insert(sprite->path);
-        }
-    }
-
-    for (auto it = m_sourcePixmaps.begin(); it != m_sourcePixmaps.end();) {
-        if (!activePaths.contains(it.key())) {
-            it = m_sourcePixmaps.erase(it);
-            continue;
-        }
-        ++it;
     }
 
     QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
@@ -255,24 +243,18 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
             if (canceled && *canceled) {
                 break;
             }
-            QCoreApplication::processEvents();
 
-            QPixmap sourcePixmap = m_sourcePixmaps.value(sprite->path);
-            if (sourcePixmap.isNull()) {
-                if (!QPixmapCache::find(sprite->path, &sourcePixmap)) {
-                    sourcePixmap.load(sprite->path);
-                    if (!sourcePixmap.isNull()) {
-                        QPixmapCache::insert(sprite->path, sourcePixmap);
-                    }
-                }
-                if (!sourcePixmap.isNull()) {
-                    m_sourcePixmaps.insert(sprite->path, sourcePixmap);
+            QPixmap pixmap = m_sourcePixmaps.value(sprite->path);
+            if (pixmap.isNull()) {
+                // Should already be in cache from setModelsAsync but just in case
+                pixmap.load(sprite->path);
+                if (!pixmap.isNull()) {
+                    m_sourcePixmaps.insert(sprite->path, pixmap);
                 }
             }
-            if (sourcePixmap.isNull()) {
+            if (pixmap.isNull()) {
                 continue;
             }
-            QPixmap pixmap = sourcePixmap;
 
             if (sprite->trimmed) {
                  int l = sprite->trimRect.x();
@@ -319,6 +301,67 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
         currentY += model.atlasHeight + margin;
     }
     m_scene->setSceneRect(0, 0, maxW, currentY - margin);
+}
+
+void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomic<bool>* canceled, std::function<void()> onFinished) {
+    QSet<QString> activePaths;
+    for (const auto& model : models) {
+        for (const auto& sprite : model.sprites) {
+            activePaths.insert(sprite->path);
+        }
+    }
+
+    auto task = [this, models, activePaths, canceled, onFinished]() {
+        // Prepare pixmaps in background
+        for (const QString& path : activePaths) {
+            if (canceled && *canceled) return;
+            
+            bool exists = false;
+            {
+                // Note: QHash is not thread-safe for reading/writing simultaneously
+                // But we are only reading m_sourcePixmaps and writing to it later in main thread or now if we had a mutex.
+                // Let's use a local cache for now and merge.
+            }
+        }
+
+        // Simpler: Just ensure they are in QPixmapCache (it is thread-safe)
+        for (const QString& path : activePaths) {
+            if (canceled && *canceled) return;
+            QPixmap pm;
+            if (!QPixmapCache::find(path, &pm)) {
+                pm.load(path);
+                if (!pm.isNull()) {
+                    QPixmapCache::insert(path, pm);
+                }
+            }
+        }
+
+        QMetaObject::invokeMethod(this, [this, models, activePaths, canceled, onFinished]() {
+            if (canceled && *canceled) return;
+
+            // Update m_sourcePixmaps cache from QPixmapCache
+            for (const QString& path : activePaths) {
+                QPixmap pm;
+                if (QPixmapCache::find(path, &pm)) {
+                    m_sourcePixmaps.insert(path, pm);
+                }
+            }
+
+            // Cleanup old entries
+            for (auto it = m_sourcePixmaps.begin(); it != m_sourcePixmaps.end();) {
+                if (!activePaths.contains(it.key())) {
+                    it = m_sourcePixmaps.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+
+            setModels(models, canceled);
+            if (onFinished) onFinished();
+        }, Qt::QueuedConnection);
+    };
+
+    QtConcurrent::run(task);
 }
 
 void LayoutCanvas::clearCanvas() {

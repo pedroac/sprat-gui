@@ -30,9 +30,12 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
     archive_read_support_filter_all(a);
     ext = archive_write_disk_new();
     archive_write_disk_set_options(ext, flags);
-    archive_write_disk_set_standard_lookup(ext);
 
+#ifdef Q_OS_WIN
+    if ((r = archive_read_open_filename_w(a, reinterpret_cast<const wchar_t*>(archivePath.utf16()), 10240))) {
+#else
     if ((r = archive_read_open_filename(a, PATH_TO_UTF8(archivePath), 10240))) {
+#endif
         error = QString("Could not open archive: %1").arg(archive_error_string(a));
         archive_read_free(a);
         archive_write_free(ext);
@@ -63,10 +66,18 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
             break;
         }
 
+#ifdef Q_OS_WIN
+        const QString currentFile = QString::fromWCharArray(archive_entry_pathname_w(entry));
+#else
         const QString currentFile = QString::fromUtf8(archive_entry_pathname(entry));
+#endif
         const QString fullPath = destination.absoluteFilePath(currentFile);
         
+#ifdef Q_OS_WIN
+        archive_entry_set_pathname_w(entry, reinterpret_cast<const wchar_t*>(fullPath.utf16()));
+#else
         archive_entry_set_pathname(entry, PATH_TO_UTF8(fullPath));
+#endif
 
         r = archive_write_header(ext, entry);
         if (r < ARCHIVE_OK) {
@@ -75,7 +86,17 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
         } else if (archive_entry_size(entry) > 0) {
             r = copyData(a, ext);
             if (r < ARCHIVE_OK) {
-                error = QString("Error copying data from archive: %1").arg(archive_error_string(ext));
+                // If r < 0, it could be from archive_read_data_block or archive_write_data_block
+                // We try to get the most relevant error message
+                QString readErr = archive_error_string(a);
+                QString writeErr = archive_error_string(ext);
+                if (!readErr.isEmpty()) {
+                    error = QString("Error reading archive data: %1").arg(readErr);
+                } else if (!writeErr.isEmpty()) {
+                    error = QString("Error writing archive data: %1").arg(writeErr);
+                } else {
+                    error = "Unknown error during data copy";
+                }
                 break;
             }
             if (r < ARCHIVE_WARN) {
@@ -111,7 +132,11 @@ bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QSt
     archive_read_support_format_all(a);
     archive_read_support_filter_all(a);
 
+#ifdef Q_OS_WIN
+    if (archive_read_open_filename_w(a, reinterpret_cast<const wchar_t*>(archivePath.utf16()), 10240)) {
+#else
     if (archive_read_open_filename(a, PATH_TO_UTF8(archivePath), 10240)) {
+#endif
         error = QString("Could not open archive: %1").arg(archive_error_string(a));
         archive_read_free(a);
         return false;
@@ -119,7 +144,11 @@ bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QSt
 
     bool found = false;
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+#ifdef Q_OS_WIN
+        QString entryPath = QString::fromWCharArray(archive_entry_pathname_w(entry));
+#else
         QString entryPath = QString::fromUtf8(archive_entry_pathname(entry));
+#endif
         // Normalize paths for comparison (handles subdirectories inside zip)
         if (entryPath == fileName || entryPath.endsWith("/" + fileName)) {
             found = true;
