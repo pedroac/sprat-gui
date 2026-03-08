@@ -67,16 +67,17 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Test
-        shell: bash
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
         run: |
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            # Convert Windows path to Unix for bash and add to PATH
-            QT_BIN=$(cygpath -u "$Qt6_DIR")/bin
-            export PATH="$PATH:$(pwd)/build/Release:$QT_BIN"
-          else
-            export PATH="$PATH:$(pwd)/build"
-          fi
+          export PATH="$PATH:$(pwd)/build"
+          ctest --test-dir build --output-on-failure -C Release
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:PATH;$(Get-Location)\build\Release;$env:Qt6_DIR\bin"
           ctest --test-dir build --output-on-failure -C Release
 
       - name: Package (Linux)
