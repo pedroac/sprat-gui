@@ -2,6 +2,7 @@
 #include "ZoomableGraphicsView.h"
 #include "models.h"
 #include "SpriteItem.h"
+#include <atomic>
 
 class QFocusEvent;
 
@@ -20,7 +21,7 @@ public:
     /**
      * @brief Sets the layout models to display.
      */
-    void setModels(const QVector<LayoutModel>& models);
+    void setModels(const QVector<LayoutModel>& models, std::atomic<bool>* canceled = nullptr);
 
     /**
      * @brief Clears all sprites from the canvas.

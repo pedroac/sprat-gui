@@ -63,7 +63,9 @@ void MainWindow::onRunLayout() {
 
     m_session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile.clear();
+    m_loadingUiMessage = tr("Building layout...");
     m_statusLabel->setText(tr("Running spratlayout..."));
+    m_isCanceled = false;
     setLoading(true);
     m_layoutFailureDialogShown = false;
     
@@ -71,9 +73,8 @@ void MainWindow::onRunLayout() {
 }
 
 void MainWindow::onLayoutFinished(const LayoutResult& result) {
-    setLoading(false);
-
     if (!result.success) {
+        setLoading(false);
         m_runningLayoutProfile.clear();
         
         const QString combined = (result.error + "\n" + result.output).toLower();
@@ -158,7 +159,17 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
     m_session->layoutModels = newModels;
 
-    m_canvas->setModels(m_session->layoutModels);
+    m_loadingUiMessage = tr("Loading images...");
+    setLoading(true);
+    // Let the message be shown before blocking with image loading
+    QCoreApplication::processEvents();
+
+    m_canvas->setModels(m_session->layoutModels, &m_isCanceled);
+    if (m_isCanceled) {
+        setLoading(false);
+        m_statusLabel->setText(tr("Loading images canceled"));
+        return;
+    }
     m_canvas->setZoomManual(false);
     QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
 
@@ -181,6 +192,9 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
     updateMainContentView();
     updateUiState();
+    
+    setLoading(false);
+
     if (m_layoutRunPending) {
         m_layoutRunPending = false;
         onRunLayout();
@@ -273,7 +287,10 @@ void MainWindow::setLoading(bool loading) {
         if (m_cliInstallProgress) {
             m_cliInstallProgress->hide();
         }
-        m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        if (m_cancelLoadingButton) {
+            m_cancelLoadingButton->setVisible(!m_cliInstallInProgress);
+        }
+        m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
         m_cliInstallOverlay->show();
         m_cliInstallOverlay->raise();
         m_loadingOverlayVisible = true;

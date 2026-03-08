@@ -67,22 +67,29 @@ bool ProjectSaveService::save(
     }
 
     QString zipBin;
+    bool useTar = false;
     bool usePowerShell = false;
     if (isZip) {
         zipBin = QStandardPaths::findExecutable("zip");
         if (zipBin.isEmpty()) {
-#ifdef Q_OS_WIN
-            zipBin = QStandardPaths::findExecutable("powershell");
-            if (!zipBin.isEmpty()) {
-                usePowerShell = true;
+            QString tarBin = QStandardPaths::findExecutable("tar");
+            if (!tarBin.isEmpty()) {
+                zipBin = tarBin;
+                useTar = true;
             } else {
-                error = trPS("Neither 'zip' nor 'powershell' was found. Cannot create zip archive.");
-                return false;
-            }
+#ifdef Q_OS_WIN
+                zipBin = QStandardPaths::findExecutable("powershell");
+                if (!zipBin.isEmpty()) {
+                    usePowerShell = true;
+                } else {
+                    error = trPS("Neither 'zip', 'tar' nor 'powershell' was found. Cannot create zip archive.");
+                    return false;
+                }
 #else
-            error = trPS("The 'zip' command line tool is required to save .zip projects but was not found.");
-            return false;
+                error = trPS("The 'zip' or 'tar' command line tool is required to save .zip projects but was not found.");
+                return false;
 #endif
+            }
         }
     }
 
@@ -488,7 +495,15 @@ bool ProjectSaveService::save(
         QDir().mkpath(QFileInfo(absDest).path());
         QFile::remove(absDest);
 
-        if (usePowerShell) {
+        if (useTar) {
+            // tar -acvf archive.zip -C workingPath .
+            QStringList tarArgs;
+            tarArgs << "-acvf" << absDest << "-C" << workingPath << ".";
+            if (!runProcess(zipBin, tarArgs, trPS("Failed to create zip archive via tar"))) {
+                error = trPS("Failed to create zip archive via tar");
+                return false;
+            }
+        } else if (usePowerShell) {
             // Need to change working dir for Compress-Archive to work as expected with '*'
             // This is problematic in a background thread if using a shared process.
             // But runTool in MainWindow creates its own QProcess.
@@ -504,7 +519,8 @@ bool ProjectSaveService::save(
             zipArgs << "-r" << absDest << ".";
             // We need to run this with working directory set.
             // Our runProcessFunc doesn't support setting working dir.
-            // Let's hope it works or we might need to adjust runProcessFunc.
+            // Since we can't easily change working dir here without changing runProcessFunc,
+            // let's try to use tar if possible or hope zip works from current dir (unlikely for recursive).
             if (!runProcess(zipBin, zipArgs, trPS("Failed to create zip archive"))) {
                 error = trPS("Failed to create zip archive");
                 return false;

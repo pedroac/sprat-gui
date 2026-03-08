@@ -3,6 +3,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>
+#include <QThreadPool>
 #include <QtConcurrent>
 
 namespace {
@@ -99,7 +100,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         emit finished(result);
     };
 
-    QtConcurrent::run(task);
+    QThreadPool::globalInstance()->start(task);
 }
 
 QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {

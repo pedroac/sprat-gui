@@ -21,6 +21,7 @@
 
 #include "MainWindow.h"
 #include "FrameDetectionDialog.h"
+#include "ArchiveExtractor.h"
 
 void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
     if (action == DropAction::Replace && !confirmLayoutReplacement()) {
@@ -153,6 +154,7 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     }
     
     m_loadingUiMessage = tr("Extracting frames from tar file...");
+    m_isCanceled = false;
     setLoading(true);
     
     if (action == DropAction::Replace) {
@@ -172,7 +174,13 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
         result.tempPath = tempPath;
         result.tarPath = tarPath;
         result.action = action;
-        result.success = runTool("tar", QStringList() << "-xf" << tarPath << "-C" << tempPath);
+        result.success = false;
+        QString error;
+        if (ArchiveExtractor::extractToDirectory(tarPath, tempPath, error, &m_isCanceled)) {
+            result.success = !m_isCanceled;
+        } else {
+            qWarning() << "ArchiveExtractor (tar) error:" << error;
+        }
         return result;
     };
 
@@ -181,6 +189,11 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
 
 void MainWindow::onTarExtractionFinished() {
     TarExtractionResult result = m_tarExtractionWatcher.result();
+    if (m_isCanceled) {
+        setLoading(false);
+        m_statusLabel->setText(tr("Tar extraction canceled"));
+        return;
+    }
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.tarPath, result.action)) {
             onRunLayout();
@@ -288,7 +301,7 @@ QString MainWindow::generateSpratFramesFormat(const QVector<QRect>& frames, cons
     QString format;
     QTextStream stream(&format);
     
-    stream << "path " << imagePath << "\n";
+    stream << "path \"" << imagePath << "\"\n";
     for (const QRect& frame : frames) {
         stream << "sprite " << frame.x() << "," << frame.y() << " " 
                << frame.width() << "," << frame.height() << "\n";
@@ -383,7 +396,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     // Apply the model to the canvas
     m_session->layoutModels = { singleImageModel };
     if (m_canvas) {
-        m_canvas->setModels(m_session->layoutModels);
+        m_canvas->setModels(m_session->layoutModels, &m_isCanceled);
         QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
     }
     m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));    
@@ -407,8 +420,16 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
 
     // If a background color is provided, make it transparent in all extracted frames
     if (backgroundColor.isValid()) {
-        for (const QString& fileName : imageFiles) {
-            QString filePath = extractDir.absoluteFilePath(fileName);
+        m_loadingUiMessage = tr("Applying transparency...");
+        setLoading(true);
+        for (int i = 0; i < imageFiles.size(); ++i) {
+            if (m_isCanceled) {
+                setLoading(false);
+                return false;
+            }
+            QCoreApplication::processEvents();
+            
+            QString filePath = extractDir.absoluteFilePath(imageFiles[i]);
             QImage img(filePath);
             if (!img.isNull()) {
                 applyTransparencyToImage(img, backgroundColor);
