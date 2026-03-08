@@ -10,11 +10,13 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QtConcurrent>
 #include <QVBoxLayout>
 
 void MainWindow::checkCliTools() {
@@ -117,23 +119,75 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     if (action == DropAction::Cancel) {
         return;
     }
-    m_loadingUiMessage = tr("Loading images...");
-    setLoading(true);
-    QString targetPath = path;
-    QString selection;
-    bool selectionCanceled = false;
-    if (ImageFolderSelectionDialog::pickSingleFolderWithImages(this, path, selection, &selectionCanceled)) {
-        targetPath = selection;
-    } else if (selectionCanceled) {
-        m_statusLabel->setText(tr("Load canceled"));
-        setLoading(false);
+
+    if (m_folderDiscoveryWatcher.isRunning()) {
         return;
-    } else if (!ImageDiscoveryService::hasImageFiles(path)) {
+    }
+
+    m_loadingUiMessage = tr("Scanning folder...");
+    setLoading(true);
+
+    auto discoveryTask = [path, action]() {
+        FolderDiscoveryResult result;
+        result.root = path;
+        result.action = action;
+        result.directories = ImageDiscoveryService::imageDirectoriesOneLevel(path);
+        return result;
+    };
+
+    m_folderDiscoveryWatcher.setFuture(QtConcurrent::run(discoveryTask));
+}
+
+void MainWindow::onFolderDiscoveryFinished() {
+    FolderDiscoveryResult result = m_folderDiscoveryWatcher.result();
+    const QString path = result.root;
+    const DropAction action = result.action;
+    const QStringList directories = result.directories;
+
+    QString targetPath = path;
+    if (directories.isEmpty()) {
         setLoading(false);
         QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
         return;
     }
+
+    if (directories.size() > 1) {
+        // We still have to show a dialog, which is blocking, but at least the scan happened async.
+        // For a better UX, we could have a custom non-blocking dialog, but this is a good first step.
+        QDir base(path);
+        QStringList labels;
+        labels.reserve(directories.size());
+        for (const QString& dirPath : directories) {
+            labels.append(base.relativeFilePath(dirPath));
+        }
+
+        bool ok = false;
+        const QString chosen = QInputDialog::getItem(
+            this,
+            tr("Select frame folder"),
+            tr("Folders with images:"),
+            labels,
+            0,
+            false,
+            &ok);
+        
+        if (!ok) {
+            m_statusLabel->setText(tr("Load canceled"));
+            setLoading(false);
+            return;
+        }
+
+        const int index = labels.indexOf(chosen);
+        if (index >= 0 && index < directories.size()) {
+            targetPath = directories[index];
+        }
+    } else {
+        targetPath = directories.first();
+    }
     
+    m_loadingUiMessage = tr("Loading images...");
+    setLoading(true);
+
     const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
     if (action == DropAction::Merge) {
         m_session->activeFramePaths.append(absolutePaths);

@@ -41,6 +41,9 @@
 #include <QTextStream>
 #include <QIODevice>
 #include <QUuid>
+#include <QtConcurrent>
+#include <QFutureWatcher>
+#include <QThread>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -79,6 +82,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_autosaveTimer = new QTimer(this);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
     m_autosaveTimer->start(300000); // Autosave every 5 minutes
+
+    connect(&m_folderDiscoveryWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFolderDiscoveryFinished);
+    connect(&m_projectLoadWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectLoadFinished);
+    connect(&m_zipDiscoveryWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onZipDiscoveryFinished);
+    connect(&m_frameDetectionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameDetectionFinished);
+    connect(&m_tarExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onTarExtractionFinished);
+    connect(&m_frameExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameExtractionFinished);
 
     m_isRestoringProject = false;
 }
@@ -435,18 +445,22 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
         process.closeWriteChannel();
     }
 
+    const bool isGuiThread = (QThread::currentThread() == QCoreApplication::instance()->thread());
+
     while (process.state() == QProcess::Running || process.bytesAvailable() > 0 || process.bytesToWrite() > 0) {
-        if (process.waitForReadyRead(50)) {
-            if (output) {
-                output->append(process.readAllStandardOutput());
-            } else {
-                process.readAllStandardOutput(); // Drain it
-            }
-            if (error) {
-                error->append(process.readAllStandardError());
-            } else {
-                process.readAllStandardError(); // Drain it
-            }
+        process.waitForReadyRead(50);
+        
+        // Always drain both channels
+        if (output) {
+            output->append(process.readAllStandardOutput());
+        } else {
+            process.readAllStandardOutput();
+        }
+        
+        if (error) {
+            error->append(process.readAllStandardError());
+        } else {
+            process.readAllStandardError();
         }
         
         // If we are writing and it's taking time, wait for bytes written
@@ -454,7 +468,9 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
             process.waitForBytesWritten(50);
         }
 
-        QCoreApplication::processEvents();
+        if (isGuiThread) {
+            QCoreApplication::processEvents();
+        }
         if (process.state() == QProcess::NotRunning && process.bytesAvailable() == 0) break;
     }
 

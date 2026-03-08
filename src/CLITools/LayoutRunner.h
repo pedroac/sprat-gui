@@ -46,6 +46,8 @@ private slots:
 private:
     QProcess* m_process;
     LayoutRunConfig m_currentConfig;
+    QByteArray m_stdoutBuffer;
+    QByteArray m_stderrBuffer;
     
     QStringList buildArguments(const LayoutRunConfig& config);
 };

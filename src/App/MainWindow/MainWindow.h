@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QIcon>
 #include <QJsonObject>
+#include <QFutureWatcher>
 
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
@@ -359,6 +360,15 @@ private slots:
      * @brief Handles animation timer timeout.
      */
     void onAnimTimerTimeout();
+
+private slots:
+    // === Asynchronous Loading Slots ===
+    void onFolderDiscoveryFinished();
+    void onProjectLoadFinished();
+    void onZipDiscoveryFinished();
+    void onFrameDetectionFinished();
+    void onTarExtractionFinished();
+    void onFrameExtractionFinished();
 
 protected:
     // === Event Handling ===
@@ -898,6 +908,56 @@ private:
     QProgressBar* m_cliInstallProgress = nullptr;
     QString m_loadingUiMessage = "Loading...";
     
+    // === Async Loading Helpers ===
+    struct FolderDiscoveryResult {
+        QString root;
+        QStringList directories;
+        MainWindow::DropAction action;
+    };
+    QFutureWatcher<FolderDiscoveryResult> m_folderDiscoveryWatcher;
+
+    struct ProjectLoadResult {
+        QString path;
+        QJsonObject root;
+        QString error;
+        MainWindow::DropAction action;
+        bool success;
+    };
+    QFutureWatcher<ProjectLoadResult> m_projectLoadWatcher;
+
+    struct ZipDiscoveryResult {
+        QString tempPath;
+        QString zipPath;
+        QStringList selections;
+        MainWindow::DropAction action;
+        bool canceled;
+    };
+    QFutureWatcher<ZipDiscoveryResult> m_zipDiscoveryWatcher;
+
+    struct FrameDetectionTaskResult {
+        QString imagePath;
+        MainWindow::DropAction action;
+        FrameDetectionResult detection;
+    };
+    QFutureWatcher<FrameDetectionTaskResult> m_frameDetectionWatcher;
+
+    struct TarExtractionResult {
+        QString tempPath;
+        QString tarPath;
+        MainWindow::DropAction action;
+        bool success;
+    };
+    QFutureWatcher<TarExtractionResult> m_tarExtractionWatcher;
+
+    struct FrameExtractionResult {
+        QString tempPath;
+        QString sourcePath;
+        MainWindow::DropAction action;
+        QColor backgroundColor;
+        bool success;
+    };
+    QFutureWatcher<FrameExtractionResult> m_frameExtractionWatcher;
+
     QString m_runningLayoutProfile;
     bool m_layoutRunPending = false;
     bool m_layoutFailureDialogShown = false;

@@ -14,6 +14,12 @@ LayoutRunner::LayoutRunner(QObject* parent) : QObject(parent), m_process(new QPr
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &LayoutRunner::onProcessFinished);
     connect(m_process, &QProcess::errorOccurred, this, &LayoutRunner::onProcessError);
+    connect(m_process, &QProcess::readyReadStandardOutput, this, [this]() {
+        m_stdoutBuffer.append(m_process->readAllStandardOutput());
+    });
+    connect(m_process, &QProcess::readyReadStandardError, this, [this]() {
+        m_stderrBuffer.append(m_process->readAllStandardError());
+    });
 }
 
 LayoutRunner::~LayoutRunner() {
@@ -39,6 +45,8 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         return;
     }
 
+    m_stdoutBuffer.clear();
+    m_stderrBuffer.clear();
     m_currentConfig = config;
     QStringList args = buildArguments(config);
 
@@ -119,11 +127,15 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
 }
 
 void LayoutRunner::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    // Final drain
+    m_stdoutBuffer.append(m_process->readAllStandardOutput());
+    m_stderrBuffer.append(m_process->readAllStandardError());
+
     LayoutResult result;
     result.exitCode = exitCode;
     result.wasRetryingTrim = m_currentConfig.retryWithoutTrim;
-    result.output = QString::fromUtf8(m_process->readAllStandardOutput()).trimmed();
-    result.error = QString::fromUtf8(m_process->readAllStandardError()).trimmed();
+    result.output = QString::fromUtf8(m_stdoutBuffer).trimmed();
+    result.error = QString::fromUtf8(m_stderrBuffer).trimmed();
 
     if (exitStatus == QProcess::CrashExit || exitCode != 0) {
         result.success = false;
