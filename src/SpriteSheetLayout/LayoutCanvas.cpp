@@ -17,6 +17,7 @@
 #include <QPixmapCache>
 #include <QSet>
 #include <QKeySequence>
+#include <QtConcurrent>
 #include <limits>
 #include "ViewUtils.h"
 
