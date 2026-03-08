@@ -74,7 +74,7 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
         const QString fullPath = destination.absoluteFilePath(currentFile);
         
 #ifdef Q_OS_WIN
-        archive_entry_set_pathname_w(entry, reinterpret_cast<const wchar_t*>(fullPath.utf16()));
+        archive_entry_copy_pathname_w(entry, reinterpret_cast<const wchar_t*>(fullPath.utf16()));
 #else
         archive_entry_set_pathname(entry, PATH_TO_UTF8(fullPath));
 #endif
