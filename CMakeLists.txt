@@ -30,7 +30,38 @@ set(CMAKE_AUTOUIC ON)
 # === Find Dependencies ===
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
-find_package(LibArchive QUIET)
+
+# 1. Try to find LibArchive in a specific 'cli' folder (sibling or subfolder)
+# We check common development and deployment locations.
+set(LIBARCHIVE_SEARCH_PATHS
+    "${CMAKE_CURRENT_SOURCE_DIR}/cli"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cli"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli/build"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli"
+)
+
+find_path(LIBARCHIVE_INCLUDE_DIR NAMES archive.h
+          HINTS ${LIBARCHIVE_SEARCH_PATHS}
+          PATH_SUFFIXES include libarchive)
+
+find_library(LIBARCHIVE_LIBRARY NAMES archive libarchive
+             HINTS ${LIBARCHIVE_SEARCH_PATHS}
+             PATH_SUFFIXES lib bin)
+
+if(LIBARCHIVE_INCLUDE_DIR AND LIBARCHIVE_LIBRARY)
+    if(NOT TARGET LibArchive::LibArchive)
+        add_library(LibArchive::LibArchive UNKNOWN IMPORTED)
+        set_target_properties(LibArchive::LibArchive PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${LIBARCHIVE_INCLUDE_DIR}"
+            IMPORTED_LOCATION "${LIBARCHIVE_LIBRARY}"
+        )
+    endif()
+    set(LibArchive_FOUND TRUE)
+    message(STATUS "Found LibArchive in local or sibling directory: ${LIBARCHIVE_LIBRARY}")
+else()
+    # 2. Fallback to standard system search
+    find_package(LibArchive QUIET)
+endif()
 
 if(NOT LibArchive_FOUND)
     message(STATUS "LibArchive not found, using FetchContent to download it...")
@@ -55,6 +86,9 @@ if(NOT LibArchive_FOUND)
     if(TARGET archive_static)
         add_library(LibArchive::LibArchive ALIAS archive_static)
         target_include_directories(archive_static INTERFACE ${libarchive_SOURCE_DIR}/libarchive)
+        if(WIN32)
+            target_compile_definitions(archive_static INTERFACE LIBARCHIVE_STATIC)
+        endif()
     elseif(TARGET archive)
         add_library(LibArchive::LibArchive ALIAS archive)
     endif()
