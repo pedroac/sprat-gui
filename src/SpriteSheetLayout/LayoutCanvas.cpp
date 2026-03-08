@@ -2,6 +2,7 @@
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDrag>
 #include <QMimeData>
 #include <QGraphicsRectItem>
@@ -197,7 +198,7 @@ void LayoutCanvas::dropEvent(QDropEvent* event) {
     ZoomableGraphicsView::dropEvent(event);
 }
 
-void LayoutCanvas::setModels(const QVector<LayoutModel>& models) {
+void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<bool>* canceled) {
     clearCanvas();
     m_models = models;
     m_items.clear();
@@ -236,6 +237,9 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models) {
     borderPen.setCosmetic(true);
 
     for (int i = 0; i < models.size(); ++i) {
+        if (canceled && *canceled) {
+            break;
+        }
         const auto& model = models[i];
         m_modelOffsets.append(QPoint(0, currentY));
 
@@ -248,6 +252,11 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models) {
         bg->setZValue(-100);
 
         for (const auto& sprite : model.sprites) {
+            if (canceled && *canceled) {
+                break;
+            }
+            QCoreApplication::processEvents();
+
             QPixmap sourcePixmap = m_sourcePixmaps.value(sprite->path);
             if (sourcePixmap.isNull()) {
                 if (!QPixmapCache::find(sprite->path, &sourcePixmap)) {

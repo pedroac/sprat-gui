@@ -49,27 +49,21 @@ QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root)
 }
 
 QStringList ImageDiscoveryService::imageDirectoriesRecursive(const QString& root) {
-    QStringList imageDirs;
+    QSet<QString> imageDirs;
     QDir base(root);
     if (!base.exists()) {
-        return imageDirs;
+        return QStringList();
     }
 
-    if (hasImageFiles(base.absolutePath())) {
-        imageDirs.append(base.absolutePath());
-    }
-
-    QDirIterator it(base.absolutePath(), QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    QDirIterator it(base.absolutePath(), supportedImageFilters(), QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
-        const QString dirPath = QDir(it.next()).absolutePath();
-        if (hasImageFiles(dirPath)) {
-            imageDirs.append(dirPath);
-        }
+        it.next();
+        imageDirs.insert(it.fileInfo().absolutePath());
     }
 
-    imageDirs.removeDuplicates();
-    std::sort(imageDirs.begin(), imageDirs.end());
-    return imageDirs;
+    QStringList result = imageDirs.values();
+    std::sort(result.begin(), result.end());
+    return result;
 }
 
 QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
@@ -89,21 +83,16 @@ QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
 }
 
 QStringList ImageDiscoveryService::collectImagesRecursive(const QStringList& roots) {
-    QStringList absolutePaths;
-    QSet<QString> seen;
+    QSet<QString> absolutePaths;
 
     for (const QString& root : roots) {
         QDirIterator imageIt(root, supportedImageFilters(), QDir::Files, QDirIterator::Subdirectories);
         while (imageIt.hasNext()) {
-            const QString absPath = QFileInfo(imageIt.next()).absoluteFilePath();
-            if (seen.contains(absPath)) {
-                continue;
-            }
-            seen.insert(absPath);
-            absolutePaths.append(absPath);
+            absolutePaths.insert(imageIt.next());
         }
     }
 
-    std::sort(absolutePaths.begin(), absolutePaths.end());
-    return absolutePaths;
+    QStringList result = absolutePaths.values();
+    std::sort(result.begin(), result.end());
+    return result;
 }

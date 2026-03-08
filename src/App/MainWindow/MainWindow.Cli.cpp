@@ -29,11 +29,26 @@ void MainWindow::checkCliTools() {
 
         if (currentVersion.isEmpty()) {
             m_cliReady = false;
-            m_statusLabel->setText(tr("CLI error (failed to execute)"));
-            QMessageBox::critical(this, tr("CLI Execution Failed"),
-                tr("The CLI tool 'spratlayout' was found but failed to execute.\n"
-                   "This is usually caused by missing dependencies like 'archive.dll'.\n"
-                   "Please ensure all required DLLs are in the 'cli' folder."));
+            m_statusLabel->setText(tr("CLI error (failed to execute layout)"));
+            showCliExecutionError("spratlayout");
+            return;
+        }
+
+        // Verify other binaries can also execute (might be missing DLLs for some but not all)
+        if (CliToolsConfig::checkBinaryVersion(m_cliPaths.packBinary).isEmpty()) {
+            showCliExecutionError("spratpack");
+            return;
+        }
+        if (CliToolsConfig::checkBinaryVersion(m_cliPaths.convertBinary).isEmpty()) {
+            showCliExecutionError("spratconvert");
+            return;
+        }
+        if (CliToolsConfig::checkBinaryVersion(m_cliPaths.framesBinary).isEmpty()) {
+            showCliExecutionError("spratframes");
+            return;
+        }
+        if (CliToolsConfig::checkBinaryVersion(m_cliPaths.unpackBinary).isEmpty()) {
+            showCliExecutionError("spratunpack");
             return;
         }
 
@@ -92,6 +107,15 @@ bool MainWindow::resolveCliBinaries(QStringList& missing) {
     m_spratUnpackBin = m_cliPaths.unpackBinary;
 
     return missing.isEmpty();
+}
+
+void MainWindow::showCliExecutionError(const QString& tool) {
+    m_cliReady = false;
+    m_statusLabel->setText(tr("CLI error (failed to execute %1)").arg(tool));
+    QMessageBox::critical(this, tr("CLI Execution Failed"),
+        tr("The CLI tool '%1' was found but failed to execute.\n"
+           "This is usually caused by missing dependencies like 'archive.dll' or 'zlib1.dll'.\n"
+           "Please ensure all required DLLs are in the 'cli' folder.").arg(tool));
 }
 
 void MainWindow::showMissingCliDialog(const QStringList& missing) {
@@ -295,8 +319,32 @@ void MainWindow::setupCliInstallOverlay() {
     m_cliInstallProgress->setRange(0, 0);
     m_cliInstallProgress->setFixedWidth(220);
     layout->addWidget(m_cliInstallProgress);
+
+    m_cancelLoadingButton = new QPushButton(tr("Cancel"), m_cliInstallOverlay);
+    m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 6px 12px; font-weight: bold;");
+    m_cancelLoadingButton->setCursor(Qt::PointingHandCursor);
+    layout->addWidget(m_cancelLoadingButton);
+    connect(m_cancelLoadingButton, &QPushButton::clicked, this, &MainWindow::onCancelLoading);
+
     m_cliInstallOverlay->hide();
     updateCliOverlayGeometry();
+}
+
+void MainWindow::onCancelLoading() {
+    m_isCanceled = true;
+    if (m_layoutRunner && m_layoutRunner->isRunning()) {
+        m_layoutRunner->stop();
+    }
+    m_folderDiscoveryWatcher.cancel();
+    m_projectLoadWatcher.cancel();
+    m_zipDiscoveryWatcher.cancel();
+    m_frameDetectionWatcher.cancel();
+    m_tarExtractionWatcher.cancel();
+    m_frameExtractionWatcher.cancel();
+    m_projectSaveWatcher.cancel();
+    
+    m_statusLabel->setText(tr("Operation canceled"));
+    setLoading(false);
 }
 
 void MainWindow::showCliInstallOverlay() {

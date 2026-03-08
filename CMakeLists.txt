@@ -30,6 +30,26 @@ set(CMAKE_AUTOUIC ON)
 # === Find Dependencies ===
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
+find_package(LibArchive QUIET)
+
+if(NOT LibArchive_FOUND)
+    message(STATUS "LibArchive not found, using FetchContent to download it...")
+    include(FetchContent)
+    FetchContent_Declare(
+        libarchive
+        URL https://github.com/libarchive/libarchive/releases/download/v3.7.4/libarchive-3.7.4.tar.gz
+        URL_HASH SHA256=174092f69802099307c865f128be26c483a64756b17c24f6f36219491176b509
+    )
+    set(ENABLE_TEST OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CPIO OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CAT OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(libarchive)
+    add_library(LibArchive::LibArchive ALIAS archive)
+endif()
 
 # === Source Files ===
 set(PROJECT_SOURCES
@@ -124,6 +144,8 @@ set(PROJECT_SOURCES
     src/Animation/Timelines/TimelineBuilder.h
     src/Core/ZoomableGraphicsView.cpp
     src/Core/ZoomableGraphicsView.h
+    src/Core/ArchiveExtractor.cpp
+    src/Core/ArchiveExtractor.h
     src/Core/models.h
 )
 
@@ -161,6 +183,7 @@ target_link_libraries(sprat-gui PRIVATE
     Qt6::Widgets
     Qt6::Concurrent
     Qt6::Network
+    LibArchive::LibArchive
 )
 
 # === Translations ===
@@ -198,6 +221,7 @@ if(BUILD_TESTING)
         src/Project/ProjectSession.cpp
         src/Project/ImageDiscoveryService.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
+        src/Core/ArchiveExtractor.cpp
     )
 
     target_include_directories(sprat-gui-tests PRIVATE
@@ -216,6 +240,7 @@ if(BUILD_TESTING)
         Qt6::Widgets
         Qt6::Network
         Qt6::Test
+        LibArchive::LibArchive
     )
 
     add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)

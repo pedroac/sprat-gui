@@ -347,6 +347,11 @@ private slots:
     void onAutosaveTimer();
 
     /**
+     * @brief Handles cancel button click on loading overlay.
+     */
+    void onCancelLoading();
+
+    /**
      * @brief Handles next frame button click.
      */
     void onAnimNextClicked();
@@ -500,6 +505,7 @@ private:
      * @param missing List of missing binaries
      */
     void showMissingCliDialog(const QStringList& missing);
+    void showCliExecutionError(const QString& tool);
 
     /**
      * @brief Confirms the action to take when a file/folder is dropped.
@@ -903,12 +909,14 @@ private:
     bool m_animPlaying = false;
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
+    std::atomic<bool> m_isCanceled{false};
     AppSettings m_settings;
     CliPaths m_cliPaths;
     SaveConfig m_lastSaveConfig;
     QWidget* m_cliInstallOverlay = nullptr;
     QLabel* m_cliInstallOverlayLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;
+    QPushButton* m_cancelLoadingButton = nullptr;
     QString m_loadingUiMessage = "Loading...";
     
     // === Async Loading Helpers ===
@@ -934,6 +942,7 @@ private:
         QStringList selections;
         MainWindow::DropAction action;
         bool canceled;
+        QString error;
     };
     QFutureWatcher<ZipDiscoveryResult> m_zipDiscoveryWatcher;
 

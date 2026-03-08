@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AnimationCanvas.h"
 
+#include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
 #include "ImageDiscoveryService.h"
 #include "ImageFolderSelectionDialog.h"
@@ -291,6 +292,11 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     const QString ext = info.suffix().toLower();
     
     // Delegate to specific loaders based on extension
+    if (ext == "zip") {
+        loadImagesFromZip(path, action);
+        return;
+    }
+    
     if (ext == "tar" || ext == "gz" || ext == "bz2" || ext == "xz") {
         loadTarFile(path, action);
         return;
@@ -425,6 +431,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     }
 
     m_loadingUiMessage = tr("Extracting ZIP...");
+    m_isCanceled = false;
     setLoading(true);
 
     if (action == DropAction::Replace) {
@@ -446,37 +453,20 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         result.action = action;
         result.canceled = false;
 
-        QString unzipBin = QStandardPaths::findExecutable("unzip");
-        bool usePowerShell = false;
-        if (unzipBin.isEmpty()) {
-#ifdef Q_OS_WIN
-            unzipBin = QStandardPaths::findExecutable("powershell");
-            if (!unzipBin.isEmpty()) {
-                usePowerShell = true;
+        QString error;
+        if (ArchiveExtractor::extractToDirectory(zipPath, tempPath, error, &m_isCanceled)) {
+            if (m_isCanceled) {
+                result.canceled = true;
             } else {
-                return result; // Error handled in finished slot
-            }
-#else
-            return result; // Error handled in finished slot
-#endif
-        }
-
-        bool extractSuccess = false;
-        if (usePowerShell) {
-            QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(zipPath, tempPath);
-            extractSuccess = runTool(unzipBin, QStringList() << "-Command" << script);
-            if (!extractSuccess && QDir(tempPath).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).isEmpty()) {
-                QString tarBin = QStandardPaths::findExecutable("tar");
-                if (!tarBin.isEmpty()) {
-                    extractSuccess = runTool(tarBin, QStringList() << "-xf" << zipPath << "-C" << tempPath);
-                }
+                result.selections = ImageDiscoveryService::imageDirectoriesRecursive(tempPath);
             }
         } else {
-            extractSuccess = runTool(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
-        }
-
-        if (extractSuccess) {
-            result.selections = ImageDiscoveryService::imageDirectoriesRecursive(tempPath);
+            if (m_isCanceled) {
+                result.canceled = true;
+            } else {
+                result.error = error;
+                qWarning() << "ArchiveExtractor error:" << error;
+            }
         }
         return result;
     };
@@ -487,6 +477,11 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
 
 void MainWindow::onZipDiscoveryFinished() {
     ZipDiscoveryResult result = m_zipDiscoveryWatcher.result();
+    if (result.canceled) {
+        setLoading(false);
+        m_statusLabel->setText(tr("ZIP extraction canceled"));
+        return;
+    }
     const QString tempPath = result.tempPath;
     const QString zipPath = result.zipPath;
     const DropAction action = result.action;
@@ -494,13 +489,8 @@ void MainWindow::onZipDiscoveryFinished() {
 
     if (imageDirectories.isEmpty()) {
         setLoading(false);
-        // Check if tools were missing or extraction failed
-        QString unzipBin = QStandardPaths::findExecutable("unzip");
-#ifdef Q_OS_WIN
-        if (unzipBin.isEmpty()) unzipBin = QStandardPaths::findExecutable("powershell");
-#endif
-        if (unzipBin.isEmpty()) {
-            QMessageBox::warning(this, tr("Load Failed"), tr("Missing ZIP extraction tool."));
+        if (!result.error.isEmpty()) {
+            QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(result.error));
         } else {
             QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP or no image folders found."));
         }
