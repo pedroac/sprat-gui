@@ -66,6 +66,27 @@ endif()
 if(NOT LibArchive_FOUND)
     message(STATUS "LibArchive not found, using FetchContent to download it...")
     include(FetchContent)
+    
+    # Try to find ZLIB as libarchive depends on it for ZIP decompression (deflate)
+    find_package(ZLIB QUIET)
+    if(NOT ZLIB_FOUND)
+        message(STATUS "ZLIB not found, downloading it via FetchContent...")
+        FetchContent_Declare(
+            zlib
+            URL https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz
+            URL_HASH SHA256=106a3501f228d7a1772439167232e0e012e12818981f4f46487e49f87f4c084e
+        )
+        FetchContent_MakeAvailable(zlib)
+        set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR} CACHE PATH "" FORCE)
+        if(TARGET zlibstatic)
+            set(ZLIB_LIBRARY zlibstatic CACHE STRING "" FORCE)
+            set(ZLIB_LIBRARIES zlibstatic CACHE STRING "" FORCE)
+        elseif(TARGET zlib)
+            set(ZLIB_LIBRARY zlib CACHE STRING "" FORCE)
+            set(ZLIB_LIBRARIES zlib CACHE STRING "" FORCE)
+        endif()
+    endif()
+
     FetchContent_Declare(
         libarchive
         URL https://github.com/libarchive/libarchive/releases/download/v3.8.5/libarchive-3.8.5.tar.gz
@@ -79,6 +100,7 @@ if(NOT LibArchive_FOUND)
     set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
     set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
     set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ZLIB ON CACHE BOOL "" FORCE)
     if(WIN32)
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     endif()
@@ -88,6 +110,9 @@ if(NOT LibArchive_FOUND)
         target_include_directories(archive_static INTERFACE ${libarchive_SOURCE_DIR}/libarchive)
         if(WIN32)
             target_compile_definitions(archive_static INTERFACE LIBARCHIVE_STATIC)
+        endif()
+        if(TARGET zlibstatic OR TARGET zlib)
+             target_link_libraries(archive_static PRIVATE ${ZLIB_LIBRARY})
         endif()
     elseif(TARGET archive)
         add_library(LibArchive::LibArchive ALIAS archive)
