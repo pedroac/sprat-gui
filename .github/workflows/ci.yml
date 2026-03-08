@@ -71,7 +71,8 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" == "Windows" ]; then
-            export PATH="$PATH:$(pwd)/build/Release"
+            # Add both the build directory and the Qt bin directory to PATH
+            export PATH="$PATH:$(pwd)/build/Release:$QT_ROOT_DIR/bin"
           else
             export PATH="$PATH:$(pwd)/build"
           fi
