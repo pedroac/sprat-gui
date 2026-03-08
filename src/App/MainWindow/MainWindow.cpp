@@ -64,6 +64,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setAcceptDrops(true);
 
     m_layoutRunner = new LayoutRunner(this);
+    m_layoutRunner->setMutex(&m_toolMutex);
     connect(m_layoutRunner, &LayoutRunner::finished, this, &MainWindow::onLayoutFinished);
     connect(m_layoutRunner, &LayoutRunner::errorOccurred, this, &MainWindow::onLayoutError);
 
@@ -89,6 +90,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(&m_frameDetectionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameDetectionFinished);
     connect(&m_tarExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onTarExtractionFinished);
     connect(&m_frameExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameExtractionFinished);
+    connect(&m_projectSaveWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectSaveFinished);
 
     m_isRestoringProject = false;
 }
@@ -431,6 +433,8 @@ void MainWindow::applySettings() {
 }
 
 bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
+    QMutexLocker locker(&m_toolMutex);
+
     QProcess process;
     process.setProgram(tool);
     process.setArguments(args);
@@ -446,8 +450,17 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
     }
 
     const bool isGuiThread = (QThread::currentThread() == QCoreApplication::instance()->thread());
+    QElapsedTimer timer;
+    timer.start();
+    const int timeoutMs = 120000; // 2 minutes
 
     while (process.state() == QProcess::Running || process.bytesAvailable() > 0 || process.bytesToWrite() > 0) {
+        if (timer.elapsed() > timeoutMs) {
+            process.kill();
+            process.waitForFinished(1000);
+            return false;
+        }
+
         process.waitForReadyRead(50);
         
         // Always drain both channels

@@ -151,32 +151,56 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         return false;
     }
 
+    if (m_projectSaveWatcher.isRunning()) {
+        return false;
+    }
+
     m_loadingUiMessage = tr("Saving...");
     m_statusLabel->setText(tr("Saving..."));
-    QApplication::processEvents();
-    QString savedDestination;
-    bool ok = ProjectSaveService::save(
-        this,
-        config,
-        m_session->layoutSourcePath,
-        m_session->activeFramePaths,
-        configuredProfiles(),
-        m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
-        m_spratLayoutBin,
-        m_spratPackBin,
-        m_spratConvertBin,
-        buildProjectPayload(config, m_session),
-        savedDestination,
-        [this](bool loading) { setLoading(loading); },
-        [this](const QString& status) { m_statusLabel->setText(status); }
-    );
-    if (ok) {
-        m_statusLabel->setText(tr("Saved to ") + savedDestination);
-        QMetaObject::invokeMethod(this, [this, savedDestination]() {
-            QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + savedDestination);
-        });
+    setLoading(true);
+
+    auto saveTask = [this, config]() {
+        ProjectSaveResult result;
+        
+        auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& step, const QByteArray* input, QByteArray* output) {
+            // Error output is discarded here but we could pass another QByteArray to runTool if needed
+            return this->runTool(tool, args, input, output, nullptr);
+        };
+
+        result.success = ProjectSaveService::save(
+            config,
+            m_session->layoutSourcePath,
+            m_session->activeFramePaths,
+            configuredProfiles(),
+            m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
+            m_spratLayoutBin,
+            m_spratPackBin,
+            m_spratConvertBin,
+            buildProjectPayload(config, m_session),
+            result.savedDestination,
+            result.error,
+            nullptr, // setLoading handled by finished slot
+            nullptr, // setStatus handled by finished slot
+            runToolBound
+        );
+        return result;
+    };
+
+    m_projectSaveWatcher.setFuture(QtConcurrent::run(saveTask));
+    return true;
+}
+
+void MainWindow::onProjectSaveFinished() {
+    ProjectSaveResult result = m_projectSaveWatcher.result();
+    setLoading(false);
+
+    if (result.success) {
+        m_statusLabel->setText(tr("Saved to ") + result.savedDestination);
+        QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+    } else {
+        m_statusLabel->setText(tr("Save failed"));
+        QMessageBox::critical(this, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);
     }
-    return ok;
 }
 
 QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* session) {

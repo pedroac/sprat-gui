@@ -8,6 +8,8 @@
 #include <QIcon>
 #include <QJsonObject>
 #include <QFutureWatcher>
+#include <QMutex>
+#include <QElapsedTimer>
 
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
@@ -369,6 +371,7 @@ private slots:
     void onFrameDetectionFinished();
     void onTarExtractionFinished();
     void onFrameExtractionFinished();
+    void onProjectSaveFinished();
 
 protected:
     // === Event Handling ===
@@ -958,6 +961,14 @@ private:
     };
     QFutureWatcher<FrameExtractionResult> m_frameExtractionWatcher;
 
+    struct ProjectSaveResult {
+        QString savedDestination;
+        QString error;
+        bool success;
+    };
+    QFutureWatcher<ProjectSaveResult> m_projectSaveWatcher;
+
+    QMutex m_toolMutex;
     QString m_runningLayoutProfile;
     bool m_layoutRunPending = false;
     bool m_layoutFailureDialogShown = false;
