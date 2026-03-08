@@ -38,7 +38,7 @@ if(NOT LibArchive_FOUND)
     FetchContent_Declare(
         libarchive
         URL https://github.com/libarchive/libarchive/releases/download/v3.7.4/libarchive-3.7.4.tar.gz
-        URL_HASH SHA256=174092f69802099307c865f128be26c483a64756b17c24f6f36219491176b509
+        URL_HASH SHA256=7875d49596286055b52439ed42f044bd8ad426aa4cc5aabd96bfe7abb971d5e8
     )
     set(ENABLE_TEST OFF CACHE BOOL "" FORCE)
     set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
