@@ -18,6 +18,7 @@
 #include <QSet>
 #include <QKeySequence>
 #include <QtConcurrent>
+#include <QThreadPool>
 #include <limits>
 #include "ViewUtils.h"
 
@@ -362,7 +363,7 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
         }, Qt::QueuedConnection);
     };
 
-    QtConcurrent::run(task);
+    QThreadPool::globalInstance()->start(task);
 }
 
 void LayoutCanvas::clearCanvas() {
