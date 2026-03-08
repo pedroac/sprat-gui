@@ -4,6 +4,8 @@
 #include <QString>
 #include <QStringList>
 #include <QProcess>
+#include <QMutex>
+#include <QElapsedTimer>
 #include "SpratProfilesConfig.h"
 
 struct LayoutRunConfig {
@@ -34,18 +36,19 @@ public:
     void stop();
     bool isRunning() const;
 
+    void setMutex(QMutex* mutex) { m_mutex = mutex; }
+
 signals:
     void started();
     void finished(const LayoutResult& result);
     void errorOccurred(const QString& description);
 
-private slots:
-    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
-    void onProcessError(QProcess::ProcessError error);
-
 private:
     QProcess* m_process;
+    QMutex* m_mutex = nullptr;
     LayoutRunConfig m_currentConfig;
+    QByteArray m_stdoutBuffer;
+    QByteArray m_stderrBuffer;
     
     QStringList buildArguments(const LayoutRunConfig& config);
 };

@@ -3,6 +3,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>
+#include <QtConcurrent>
 
 namespace {
     bool isCompactMode(const QString& mode) {
@@ -11,21 +12,17 @@ namespace {
 }
 
 LayoutRunner::LayoutRunner(QObject* parent) : QObject(parent), m_process(new QProcess(this)) {
-    connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, &LayoutRunner::onProcessFinished);
-    connect(m_process, &QProcess::errorOccurred, this, &LayoutRunner::onProcessError);
+    // We don't connect signals anymore as we'll run synchronously in a thread
 }
 
 LayoutRunner::~LayoutRunner() {
-    if (m_process->state() != QProcess::NotRunning) {
-        m_process->kill();
-        m_process->waitForFinished();
-    }
+    stop();
 }
 
 void LayoutRunner::stop() {
     if (m_process->state() != QProcess::NotRunning) {
         m_process->kill();
+        m_process->waitForFinished(1000);
     }
 }
 
@@ -43,7 +40,66 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
     QStringList args = buildArguments(config);
 
     emit started();
-    m_process->start(config.layoutBinary, args);
+
+    auto task = [this, config, args]() {
+        QMutexLocker locker(m_mutex);
+        
+        m_stdoutBuffer.clear();
+        m_stderrBuffer.clear();
+        
+        m_process->setProgram(config.layoutBinary);
+        m_process->setArguments(args);
+        m_process->start();
+
+        if (!m_process->waitForStarted()) {
+            emit errorOccurred("Failed to start process: " + config.layoutBinary);
+            return;
+        }
+
+        QElapsedTimer timer;
+        timer.start();
+        const int timeoutMs = 300000; // 5 minutes for layout
+
+        while (m_process->state() == QProcess::Running || m_process->bytesAvailable() > 0) {
+            if (timer.elapsed() > timeoutMs) {
+                m_process->kill();
+                m_process->waitForFinished(1000);
+                break;
+            }
+
+            m_process->waitForReadyRead(50);
+            m_stdoutBuffer.append(m_process->readAllStandardOutput());
+            m_stderrBuffer.append(m_process->readAllStandardError());
+            
+            if (m_process->state() == QProcess::NotRunning && m_process->bytesAvailable() == 0) break;
+        }
+
+        LayoutResult result;
+        result.exitCode = m_process->exitCode();
+        result.wasRetryingTrim = config.retryWithoutTrim;
+        result.output = QString::fromUtf8(m_stdoutBuffer).trimmed();
+        result.error = QString::fromUtf8(m_stderrBuffer).trimmed();
+
+        if (m_process->exitStatus() == QProcess::CrashExit || result.exitCode != 0 || timer.elapsed() > timeoutMs) {
+            result.success = false;
+            if (timer.elapsed() > timeoutMs) {
+                result.error = "Process timed out after 5 minutes.";
+            } else if (m_process->exitStatus() == QProcess::CrashExit) {
+#ifdef Q_OS_WIN
+                if (!result.error.isEmpty()) result.error += "\n\n";
+                result.error += "Process crashed. This might be due to missing dependencies like 'archive.dll'. Please check the 'cli' folder.";
+#else
+                result.error = "Process crashed.";
+#endif
+            }
+        } else {
+            result.success = true;
+        }
+
+        emit finished(result);
+    };
+
+    QtConcurrent::run(task);
 }
 
 QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
@@ -116,37 +172,4 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
     }
 
     return args;
-}
-
-void LayoutRunner::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
-    LayoutResult result;
-    result.exitCode = exitCode;
-    result.wasRetryingTrim = m_currentConfig.retryWithoutTrim;
-    result.output = QString::fromUtf8(m_process->readAllStandardOutput()).trimmed();
-    result.error = QString::fromUtf8(m_process->readAllStandardError()).trimmed();
-
-    if (exitStatus == QProcess::CrashExit || exitCode != 0) {
-        result.success = false;
-#ifdef Q_OS_WIN
-        if (exitStatus == QProcess::CrashExit) {
-            if (!result.error.isEmpty()) result.error += "\n\n";
-            result.error += "Process crashed. This might be due to missing dependencies like 'archive.dll'. Please check the 'cli' folder.";
-        }
-#endif
-    } else {
-        result.success = true;
-    }
-
-    emit finished(result);
-}
-
-void LayoutRunner::onProcessError(QProcess::ProcessError error) {
-    QString errStr = m_process->errorString();
-    if (error == QProcess::FailedToStart) {
-        errStr = "Failed to start process: " + m_currentConfig.layoutBinary;
-#ifdef Q_OS_WIN
-        errStr += "\n\nThis might be due to missing dependencies like 'archive.dll'. Please ensure all required DLLs are in the 'cli' folder.";
-#endif
-    }
-    emit errorOccurred(errStr);
 }

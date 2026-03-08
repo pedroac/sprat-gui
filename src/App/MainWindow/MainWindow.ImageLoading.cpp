@@ -16,6 +16,7 @@
 #include <QDebug>
 #include <QCollator>
 #include <QRegularExpression>
+#include <QtConcurrent>
 #include <algorithm>
 
 #include "MainWindow.h"
@@ -39,32 +40,46 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         QMessageBox::warning(this, tr("Error"), tr("spratframes binary not found."));
         return;
     }
-    
-    m_loadingUiMessage = tr("Detecting frames in image...");
-    setLoading(true);
-    
-    // Use spratframes to detect frames in the image
-    FrameDetectionResult detection = detectFramesInImage(imagePath);
-    setLoading(false);
-    
-    if (detection.frames.isEmpty()) {
-        // No frames detected by spratframes, use the image as a single frame
-        m_statusLabel->setText(tr("No frames detected, using image as single frame"));
-        handleSingleImageLayout(imagePath, action, detection.backgroundColor);
+
+    if (m_frameDetectionWatcher.isRunning()) {
         return;
     }
     
-    // Show modal dialog with detected frames
-    FrameDetectionDialog dialog(imagePath, detection.frames, m_settings, detection.backgroundColor, this);
+    m_loadingUiMessage = tr("Detecting frames in image...");
+    setLoading(true);
+
+    auto task = [this, imagePath, action]() {
+        FrameDetectionTaskResult result;
+        result.imagePath = imagePath;
+        result.action = action;
+        result.detection = detectFramesInImage(imagePath);
+        return result;
+    };
+
+    m_frameDetectionWatcher.setFuture(QtConcurrent::run(task));
+}
+
+void MainWindow::onFrameDetectionFinished() {
+    FrameDetectionTaskResult result = m_frameDetectionWatcher.result();
+    setLoading(false);
+
+    if (result.detection.frames.isEmpty()) {
+        m_statusLabel->setText(tr("No frames detected, using image as single frame"));
+        handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
+        return;
+    }
+
+    FrameDetectionDialog dialog(result.imagePath, result.detection.frames, m_settings, result.detection.backgroundColor, this);
     if (dialog.exec() == QDialog::Accepted) {
         if (dialog.userAccepted()) {
+            QVector<QRect> selectedFrames = dialog.getSelectedFrames();
+            const DropAction action = result.action;
+            const QString imagePath = result.imagePath;
+            const QColor backgroundColor = result.detection.backgroundColor;
+
             m_loadingUiMessage = tr("Extracting frames...");
             setLoading(true);
-            
-            // ... (keep the same)
-            QVector<QRect> selectedFrames = dialog.getSelectedFrames();
-            
-            // Use persistent temp dir in session to ensure files persist
+
             if (action == DropAction::Replace) {
                 m_session->clearTempDirs();
             }
@@ -76,32 +91,40 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
             }
             QString tempPath = tempDir->path();
             m_session->addTempDir(std::move(tempDir));
-            
-            // Generate spratframes format
-            QString framesData = generateSpratFramesFormat(selectedFrames, imagePath);
-            
-            // Use spratunpack with the correct command syntax
-            // spratunpack <input_image> --frames - --output <output_directory>
-            QStringList args;
-            args << imagePath << "--frames" << "-" << "--output" << tempPath;
-            
-            QByteArray framesDataBytes = framesData.toUtf8();
-            if (runTool(m_spratUnpackBin, args, &framesDataBytes)) {
-                if (processExtractedFrames(tempPath, imagePath, action, detection.backgroundColor)) {
-                    onRunLayout();
-                }
-            } else {
-                m_statusLabel->setText(tr("Error running spratunpack"));
-                setLoading(false);
-            }
+
+            auto extractTask = [this, selectedFrames, imagePath, tempPath, action, backgroundColor]() {
+                FrameExtractionResult res;
+                res.tempPath = tempPath;
+                res.sourcePath = imagePath;
+                res.action = action;
+                res.backgroundColor = backgroundColor;
+
+                QString framesData = generateSpratFramesFormat(selectedFrames, imagePath);
+                QStringList args;
+                args << imagePath << "--frames" << "-" << "--output" << tempPath;
+                QByteArray framesDataBytes = framesData.toUtf8();
+                res.success = runTool(m_spratUnpackBin, args, &framesDataBytes);
+                return res;
+            };
+
+            m_frameExtractionWatcher.setFuture(QtConcurrent::run(extractTask));
         } else {
-            // User rejected, use image as single frame
             m_statusLabel->setText(tr("Using image as single frame"));
-            handleSingleImageLayout(imagePath, action, detection.backgroundColor);
+            handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
         }
     } else {
-        // User cancelled the dialog
         m_statusLabel->setText(tr("Frame detection cancelled"));
+    }
+}
+
+void MainWindow::onFrameExtractionFinished() {
+    FrameExtractionResult result = m_frameExtractionWatcher.result();
+    if (result.success) {
+        if (processExtractedFrames(result.tempPath, result.sourcePath, result.action, result.backgroundColor)) {
+            onRunLayout();
+        }
+    } else {
+        m_statusLabel->setText(tr("Error running spratunpack"));
         setLoading(false);
     }
 }
@@ -124,11 +147,14 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
         QMessageBox::warning(this, tr("Error"), tr("spratunpack binary not found."));
         return;
     }
+
+    if (m_tarExtractionWatcher.isRunning()) {
+        return;
+    }
     
     m_loadingUiMessage = tr("Extracting frames from tar file...");
     setLoading(true);
     
-    // Use persistent temp dir in session to ensure files persist
     if (action == DropAction::Replace) {
         m_session->clearTempDirs();
     }
@@ -141,16 +167,27 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     QString tempPath = tempDir->path();
     m_session->addTempDir(std::move(tempDir));
 
-    // Use tar directly to extract the file
-    // tar -xf <tarPath> -C <tempDir>
-    if (!runTool("tar", QStringList() << "-xf" << tarPath << "-C" << tempPath)) {
+    auto task = [this, tarPath, tempPath, action]() {
+        TarExtractionResult result;
+        result.tempPath = tempPath;
+        result.tarPath = tarPath;
+        result.action = action;
+        result.success = runTool("tar", QStringList() << "-xf" << tarPath << "-C" << tempPath);
+        return result;
+    };
+
+    m_tarExtractionWatcher.setFuture(QtConcurrent::run(task));
+}
+
+void MainWindow::onTarExtractionFinished() {
+    TarExtractionResult result = m_tarExtractionWatcher.result();
+    if (result.success) {
+        if (processExtractedFrames(result.tempPath, result.tarPath, result.action)) {
+            onRunLayout();
+        }
+    } else {
         m_statusLabel->setText(tr("Error extracting tar file"));
         setLoading(false);
-        return;
-    }
-    
-    if (processExtractedFrames(tempPath, tarPath, action)) {
-        onRunLayout();
     }
 }
 

@@ -11,6 +11,7 @@
 #include "ResolutionUtils.h"
 
 #include <QComboBox>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -25,6 +26,10 @@
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QVBoxLayout>
+#include <QtConcurrent>
 #include <QApplication>
 #include <QListWidgetItem>
 #include <QStringList>
@@ -146,32 +151,56 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         return false;
     }
 
+    if (m_projectSaveWatcher.isRunning()) {
+        return false;
+    }
+
     m_loadingUiMessage = tr("Saving...");
     m_statusLabel->setText(tr("Saving..."));
-    QApplication::processEvents();
-    QString savedDestination;
-    bool ok = ProjectSaveService::save(
-        this,
-        config,
-        m_session->layoutSourcePath,
-        m_session->activeFramePaths,
-        configuredProfiles(),
-        m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
-        m_spratLayoutBin,
-        m_spratPackBin,
-        m_spratConvertBin,
-        buildProjectPayload(config, m_session),
-        savedDestination,
-        [this](bool loading) { setLoading(loading); },
-        [this](const QString& status) { m_statusLabel->setText(status); }
-    );
-    if (ok) {
-        m_statusLabel->setText(tr("Saved to ") + savedDestination);
-        QMetaObject::invokeMethod(this, [this, savedDestination]() {
-            QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + savedDestination);
-        });
+    setLoading(true);
+
+    auto saveTask = [this, config]() {
+        ProjectSaveResult result;
+        
+        auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& step, const QByteArray* input, QByteArray* output) {
+            // Error output is discarded here but we could pass another QByteArray to runTool if needed
+            return this->runTool(tool, args, input, output, nullptr);
+        };
+
+        result.success = ProjectSaveService::save(
+            config,
+            m_session->layoutSourcePath,
+            m_session->activeFramePaths,
+            configuredProfiles(),
+            m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
+            m_spratLayoutBin,
+            m_spratPackBin,
+            m_spratConvertBin,
+            buildProjectPayload(config, m_session),
+            result.savedDestination,
+            result.error,
+            nullptr, // setLoading handled by finished slot
+            nullptr, // setStatus handled by finished slot
+            runToolBound
+        );
+        return result;
+    };
+
+    m_projectSaveWatcher.setFuture(QtConcurrent::run(saveTask));
+    return true;
+}
+
+void MainWindow::onProjectSaveFinished() {
+    ProjectSaveResult result = m_projectSaveWatcher.result();
+    setLoading(false);
+
+    if (result.success) {
+        m_statusLabel->setText(tr("Saved to ") + result.savedDestination);
+        QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+    } else {
+        m_statusLabel->setText(tr("Save failed"));
+        QMessageBox::critical(this, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);
     }
-    return ok;
 }
 
 QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* session) {
@@ -272,17 +301,40 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
         return;
     }
 
-    QJsonObject root;
-    QString error;
-    if (!ProjectFileLoader::load(path, root, error)) {
+    if (m_projectLoadWatcher.isRunning()) {
+        return;
+    }
+
+    m_loadingUiMessage = tr("Loading project...");
+    setLoading(true);
+
+    auto loadTask = [path, action]() {
+        ProjectLoadResult result;
+        result.path = path;
+        result.action = action;
+        result.success = ProjectFileLoader::load(path, result.root, result.error);
+        return result;
+    };
+
+    m_projectLoadWatcher.setFuture(QtConcurrent::run(loadTask));
+}
+
+void MainWindow::onProjectLoadFinished() {
+    ProjectLoadResult result = m_projectLoadWatcher.result();
+    const QString path = result.path;
+    const DropAction action = result.action;
+
+    if (!result.success) {
         if (path.endsWith(".zip", Qt::CaseInsensitive)) {
             loadImagesFromZip(path, action);
             return;
         }
-        QMessageBox::warning(this, tr("Load Failed"), error);
+        setLoading(false);
+        QMessageBox::warning(this, tr("Load Failed"), result.error);
         return;
     }
     
+    QJsonObject root = result.root;
     QJsonObject layoutInfo = root["layout"].toObject();
     QString folder = layoutInfo["folder"].toString();
     QStringList framePaths;
@@ -294,6 +346,7 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     }
 
     if (action == DropAction::Merge) {
+        setLoading(false);
         if (!framePaths.isEmpty()) {
             m_session->activeFramePaths.append(framePaths);
             onRunLayout();
@@ -351,11 +404,12 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
             m_folderLabel->setText(tr("Folder: ") + folder);
         }
         onRunLayout();
+    } else {
+        setLoading(false);
     }
 }
 
 bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
-
     if (action == DropAction::Replace && !confirmLayoutReplacement()) {
         return false;
     }
@@ -366,99 +420,193 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         return false;
     }
 
-    QString unzipBin = QStandardPaths::findExecutable("unzip");
-    bool usePowerShell = false;
-    if (unzipBin.isEmpty()) {
-#ifdef Q_OS_WIN
-        unzipBin = QStandardPaths::findExecutable("powershell");
-        if (!unzipBin.isEmpty()) {
-            usePowerShell = true;
-        } else {
-            QMessageBox::warning(this, tr("Missing Tool"), tr("Neither 'unzip' nor 'powershell' was found. Cannot load ZIP archives."));
-            return false;
-        }
-#else
-        QMessageBox::warning(this, tr("Missing Tool"), tr("Please install the 'unzip' utility to load ZIP archives."));
+    if (m_zipDiscoveryWatcher.isRunning()) {
         return false;
-#endif
     }
+
+    m_loadingUiMessage = tr("Extracting ZIP...");
+    setLoading(true);
 
     if (action == DropAction::Replace) {
         m_session->clearTempDirs();
     }
     auto tempDir = std::make_unique<QTemporaryDir>();
     if (!tempDir->isValid()) {
+        setLoading(false);
         QMessageBox::warning(this, tr("Load Failed"), tr("Unable to create temporary directory for ZIP extraction."));
         return false;
     }
     QString tempPath = tempDir->path();
     m_session->addTempDir(std::move(tempDir));
 
-    bool success = false;
-    if (!unzipBin.isEmpty()) {
+    auto zipTask = [this, zipPath, tempPath, action]() {
+        ZipDiscoveryResult result;
+        result.tempPath = tempPath;
+        result.zipPath = zipPath;
+        result.action = action;
+        result.canceled = false;
+
+        QString unzipBin = QStandardPaths::findExecutable("unzip");
+        bool usePowerShell = false;
+        if (unzipBin.isEmpty()) {
+#ifdef Q_OS_WIN
+            unzipBin = QStandardPaths::findExecutable("powershell");
+            if (!unzipBin.isEmpty()) {
+                usePowerShell = true;
+            } else {
+                return result; // Error handled in finished slot
+            }
+#else
+            return result; // Error handled in finished slot
+#endif
+        }
+
+        bool extractSuccess = false;
         if (usePowerShell) {
             QString script = QString("Expand-Archive -Path '%1' -DestinationPath '%2' -Force").arg(zipPath, tempPath);
-            success = runTool(unzipBin, QStringList() << "-Command" << script);
-            
-            // Fallback for Wine where powershell is a stub
-            if (!success && QDir(tempPath).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).isEmpty()) {
-                // Try tar as fallback if available
+            extractSuccess = runTool(unzipBin, QStringList() << "-Command" << script);
+            if (!extractSuccess && QDir(tempPath).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot).isEmpty()) {
                 QString tarBin = QStandardPaths::findExecutable("tar");
                 if (!tarBin.isEmpty()) {
-                    success = runTool(tarBin, QStringList() << "-xf" << zipPath << "-C" << tempPath);
+                    extractSuccess = runTool(tarBin, QStringList() << "-xf" << zipPath << "-C" << tempPath);
                 }
             }
         } else {
-            success = runTool(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
+            extractSuccess = runTool(unzipBin, QStringList() << "-qq" << "-o" << zipPath << "-d" << tempPath);
         }
-    }
 
-    if (!success) {
-        QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP archive. Ensure 'unzip' or 'tar' is installed."));
-        return false;
-    }
-
-    QStringList selections;
-    bool selectionCanceled = false;
-    if (ImageFolderSelectionDialog::pickMultipleFoldersWithImages(this, tempPath, selections, &selectionCanceled)) {
-        const QStringList absolutePaths = ImageDiscoveryService::collectImagesRecursive(selections);
-        if (absolutePaths.isEmpty()) {
-            QMessageBox::warning(this, tr("Load Failed"), tr("No images found in selected folders."));
-            return false;
+        if (extractSuccess) {
+            result.selections = ImageDiscoveryService::imageDirectoriesRecursive(tempPath);
         }
-        m_loadingUiMessage = tr("Loading images...");
-        setLoading(true);
-        
-        if (action == DropAction::Merge) {
-            m_session->activeFramePaths.append(absolutePaths);
+        return result;
+    };
+
+    m_zipDiscoveryWatcher.setFuture(QtConcurrent::run(zipTask));
+    return true;
+}
+
+void MainWindow::onZipDiscoveryFinished() {
+    ZipDiscoveryResult result = m_zipDiscoveryWatcher.result();
+    const QString tempPath = result.tempPath;
+    const QString zipPath = result.zipPath;
+    const DropAction action = result.action;
+    QStringList imageDirectories = result.selections;
+
+    if (imageDirectories.isEmpty()) {
+        setLoading(false);
+        // Check if tools were missing or extraction failed
+        QString unzipBin = QStandardPaths::findExecutable("unzip");
+#ifdef Q_OS_WIN
+        if (unzipBin.isEmpty()) unzipBin = QStandardPaths::findExecutable("powershell");
+#endif
+        if (unzipBin.isEmpty()) {
+            QMessageBox::warning(this, tr("Load Failed"), tr("Missing ZIP extraction tool."));
         } else {
-            if (!m_session->frameListPath.isEmpty()) {
-                QFile::remove(m_session->frameListPath);
-                m_session->frameListPath.clear();
-            }
-            m_session->activeFramePaths = absolutePaths;
+            QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP or no image folders found."));
         }
-
-        if (!ensureFrameListInput()) {
-            setLoading(false);
-            QMessageBox::warning(this, tr("Load Failed"), tr("Could not create temporary frame list from ZIP selection."));
-            return false;
-        }
-        updateManualFrameLabel();
-        m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
-        onRunLayout();
-        return true;
+        return;
     }
+
+    QStringList selectedFolders;
+    bool selectionCanceled = false;
+    
+    if (imageDirectories.size() == 1) {
+        selectedFolders = imageDirectories;
+    } else {
+        // Show selection dialog (blocking, but scan was async)
+        QDialog dialog(this);
+        dialog.setWindowTitle(tr("Select frame folders"));
+        dialog.setModal(true);
+        QVBoxLayout* layout = new QVBoxLayout(&dialog);
+        layout->addWidget(new QLabel(tr("Choose one or more folders with images:"), &dialog));
+        QTreeWidget* tree = new QTreeWidget(&dialog);
+        tree->setHeaderLabel(tr("Folders"));
+        tree->setSelectionMode(QAbstractItemView::NoSelection);
+        layout->addWidget(tree, 1);
+        QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+        const QDir base(tempPath);
+        QHash<QString, QTreeWidgetItem*> items;
+        for (const QString& absPath : imageDirectories) {
+            QString relPath = base.relativeFilePath(absPath).replace('\\', '/');
+            QStringList parts = relPath.split('/', Qt::SkipEmptyParts);
+            QTreeWidgetItem* parent = nullptr;
+            QString currentPath;
+            for (const QString& part : parts) {
+                currentPath = currentPath.isEmpty() ? part : currentPath + "/" + part;
+                if (!items.contains(currentPath)) {
+                    QTreeWidgetItem* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(tree);
+                    item->setText(0, part);
+                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+                    item->setCheckState(0, Qt::Unchecked);
+                    item->setData(0, Qt::UserRole, currentPath);
+                    items.insert(currentPath, item);
+                }
+                parent = items.value(currentPath);
+            }
+        }
+        tree->expandAll();
+
+        if (dialog.exec() == QDialog::Accepted) {
+            for (auto it = items.begin(); it != items.end(); ++it) {
+                if (it.value()->checkState(0) == Qt::Checked) {
+                    QString relPath = it.key();
+                    selectedFolders.append(base.absoluteFilePath(relPath));
+                }
+            }
+        } else {
+            selectionCanceled = true;
+        }
+    }
+
     if (selectionCanceled) {
         m_statusLabel->setText(tr("Load canceled"));
-        return false;
+        setLoading(false);
+        return;
     }
-    if (ImageDiscoveryService::hasImageFiles(tempPath)) {
-        loadFolder(tempPath, action);
-        return true;
+
+    if (selectedFolders.isEmpty()) {
+        // Fallback to checking root if nothing selected or just one folder wasn't enough
+        if (ImageDiscoveryService::hasImageFiles(tempPath)) {
+            selectedFolders << tempPath;
+        } else {
+            setLoading(false);
+            QMessageBox::warning(this, tr("Load Failed"), tr("No folders selected."));
+            return;
+        }
     }
-    QMessageBox::warning(this, tr("Load Failed"), tr("ZIP archive does not contain recognizable image folders."));
-    return false;
+
+    const QStringList absolutePaths = ImageDiscoveryService::collectImagesRecursive(selectedFolders);
+    if (absolutePaths.isEmpty()) {
+        setLoading(false);
+        QMessageBox::warning(this, tr("Load Failed"), tr("No images found in selected folders."));
+        return;
+    }
+
+    m_loadingUiMessage = tr("Loading images...");
+    setLoading(true);
+    
+    if (action == DropAction::Merge) {
+        m_session->activeFramePaths.append(absolutePaths);
+    } else {
+        if (!m_session->frameListPath.isEmpty()) {
+            QFile::remove(m_session->frameListPath);
+            m_session->frameListPath.clear();
+        }
+        m_session->activeFramePaths = absolutePaths;
+    }
+
+    if (!ensureFrameListInput()) {
+        setLoading(false);
+        QMessageBox::warning(this, tr("Load Failed"), tr("Could not create temporary frame list from ZIP selection."));
+        return;
+    }
+    updateManualFrameLabel();
+    m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
+    onRunLayout();
 }
 
 void MainWindow::applyProjectPayload() {
