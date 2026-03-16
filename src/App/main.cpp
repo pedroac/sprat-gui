@@ -38,25 +38,6 @@ EMSCRIPTEN_BINDINGS(sprat_gui_dummy) {
  * @return int Application exit code
  */
 int main(int argc, char *argv[]) {
-#ifdef Q_OS_WASM
-    // Mount IndexedDB for persistence
-    EM_ASM({
-        try {
-            var path = '/home/webuser/.config';
-            FS.mkdirTree(path);
-            // Check if already mounted to avoid errors on restart
-            var mnt = FS.findObject(path).mount;
-            if (!mnt) {
-                FS.mount(IDBFS, {}, path);
-                FS.syncfs(true, function (err) {
-                    if (err) console.error('FS.syncfs error:', err);
-                });
-            }
-        } catch (e) {
-            console.warn('IndexedDB mount skipped:', e);
-        }
-    });
-#endif
     QApplication app(argc, argv);
 
     // Initialize CLI tools configuration
