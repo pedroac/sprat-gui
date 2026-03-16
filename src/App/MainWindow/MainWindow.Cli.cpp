@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#ifdef Q_OS_WASM
+#include "WasmFileDialog.h"
+#endif
 #include "AnimationCanvas.h"
 
 #include "CliToolsConfig.h"
@@ -12,6 +15,8 @@
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QLabel>
+#include <QElapsedTimer>
+#include <QDebug>
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QProgressBar>
@@ -75,6 +80,14 @@ void MainWindow::checkCliTools() {
 }
 
 bool MainWindow::resolveCliBinaries(QStringList& missing) {
+#ifdef SPRAT_EMBEDDED_CLI
+    m_spratLayoutBin = "spratlayout";
+    m_spratPackBin = "spratpack";
+    m_spratConvertBin = "spratconvert";
+    m_spratFramesBin = "spratframes";
+    m_spratUnpackBin = "spratunpack";
+    return true;
+#else
     m_cliPaths.layoutBinary = CliToolsConfig::resolveBinary("spratlayout", m_cliPaths.baseDir);
     if (m_cliPaths.layoutBinary.isEmpty()) {
         missing << "spratlayout";
@@ -107,6 +120,7 @@ bool MainWindow::resolveCliBinaries(QStringList& missing) {
     m_spratUnpackBin = m_cliPaths.unpackBinary;
 
     return missing.isEmpty();
+#endif
 }
 
 void MainWindow::showCliExecutionError(const QString& tool) {
@@ -152,18 +166,32 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     setLoading(true);
 
     auto discoveryTask = [path, action]() {
+        QElapsedTimer timer;
+        timer.start();
+        qInfo() << "[WASM] loadFolder scan start path=" << path;
         FolderDiscoveryResult result;
         result.root = path;
         result.action = action;
         result.directories = ImageDiscoveryService::imageDirectoriesOneLevel(path);
+        qInfo() << "[WASM] loadFolder scan done path=" << path
+                << "dirs=" << result.directories.size()
+                << "ms=" << timer.elapsed();
         return result;
     };
 
+#ifdef Q_OS_WASM
+    // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
+    processFolderDiscoveryResult(discoveryTask());
+#else
     m_folderDiscoveryWatcher.setFuture(QtConcurrent::run(discoveryTask));
+#endif
 }
 
 void MainWindow::onFolderDiscoveryFinished() {
-    FolderDiscoveryResult result = m_folderDiscoveryWatcher.result();
+    processFolderDiscoveryResult(m_folderDiscoveryWatcher.result());
+}
+
+void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& result) {
     const QString path = result.root;
     const DropAction action = result.action;
     const QStringList directories = result.directories;
@@ -212,7 +240,12 @@ void MainWindow::onFolderDiscoveryFinished() {
     m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
 
+    QElapsedTimer loadTimer;
+    loadTimer.start();
     const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
+    qInfo() << "[WASM] loadFolder imagesInDirectory done"
+            << "count=" << absolutePaths.size()
+            << "ms=" << loadTimer.elapsed();
     if (action == DropAction::Merge) {
         m_session->activeFramePaths.append(absolutePaths);
     } else {
@@ -237,12 +270,16 @@ void MainWindow::onFolderDiscoveryFinished() {
     progress.setAutoClose(true);
     progress.setAutoReset(true);
 
+    qInfo() << "[WASM] loadFolder loading frames start"
+            << "count=" << imageCount;
     for (int i = 0; i < absolutePaths.size(); ++i) {
         const QString absolutePath = absolutePaths[i];
         progress.setValue(i);
         progress.setLabelText(QString("%1: %2\n%3").arg(tr("Loading"), QFileInfo(absolutePath).fileName(), absolutePath));
         m_statusLabel->setText(tr("Loading frame: ") + absolutePath);
+#ifndef Q_OS_WASM
         QApplication::processEvents();
+#endif
         if (progress.wasCanceled()) {
             m_statusLabel->setText(tr("Frame loading canceled"));
             setLoading(false);
@@ -250,6 +287,8 @@ void MainWindow::onFolderDiscoveryFinished() {
         }
     }
     progress.setValue(imageCount);
+    qInfo() << "[WASM] loadFolder loading frames done"
+            << "ms=" << loadTimer.elapsed();
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(QDir(targetPath).absolutePath()));
 
     onRunLayout();
@@ -270,6 +309,10 @@ bool MainWindow::confirmLayoutReplacement() {
 }
 
 void MainWindow::onLoadFolder() {
+#ifdef Q_OS_WASM
+    wasmOpenFileDialog(true);
+    return;
+#endif
     QString dir = QFileDialog::getExistingDirectory(this, tr("Select Frames Folder"));
     if (!dir.isEmpty()) {
         if (m_animCanvas) m_animCanvas->setZoomManual(false);
@@ -277,9 +320,19 @@ void MainWindow::onLoadFolder() {
     }
 }
 
-void MainWindow::onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+void MainWindow::onInstallFinished(int exitCode, 
+#ifndef SPRAT_EMBEDDED_CLI
+    QProcess::ExitStatus exitStatus
+#else
+    int exitStatus
+#endif
+) {
     hideCliInstallOverlay();
+#ifndef SPRAT_EMBEDDED_CLI
     if (exitStatus == QProcess::NormalExit && exitCode == 0) {
+#else
+    if (exitCode == 0) {
+#endif
         m_statusLabel->setText(tr("CLI installation finished"));
         checkCliTools();
         return;
@@ -385,6 +438,7 @@ void MainWindow::updateCliOverlayGeometry() {
     m_cliInstallOverlay->raise();
 }
 
+#ifndef SPRAT_EMBEDDED_CLI
 void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     // General process finished handler if needed
 }
@@ -392,3 +446,4 @@ void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus
 void MainWindow::onProcessError(QProcess::ProcessError error) {
     // General process error handler
 }
+#endif

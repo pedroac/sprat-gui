@@ -1,6 +1,7 @@
 #include "ZoomableGraphicsView.h"
 #include <QScrollBar>
 #include <QApplication>
+#include <QTimer>
 #include <QtGlobal>
 
 ZoomableGraphicsView::ZoomableGraphicsView(QWidget* parent) : QGraphicsView(parent) {
@@ -149,8 +150,14 @@ void ZoomableGraphicsView::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
+#ifdef Q_OS_WASM
+    if (!m_isZoomManual) {
+        QTimer::singleShot(0, this, &ZoomableGraphicsView::initialFit);
+    }
+#else
     QGraphicsView::resizeEvent(event);
     if (!m_isZoomManual) {
-        initialFit();
+        QTimer::singleShot(0, this, &ZoomableGraphicsView::initialFit);
     }
+#endif
 }

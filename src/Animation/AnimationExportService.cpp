@@ -86,7 +86,9 @@ bool AnimationExportService::exportAnimation(
 
     setLoading(true);
     setStatus(trAnimationExport("Generating animation..."));
+#ifndef Q_OS_WASM
     QApplication::processEvents();
+#endif
 
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
@@ -176,30 +178,33 @@ bool AnimationExportService::exportAnimation(
         }
     }
 
+#ifndef SPRAT_EMBEDDED_CLI
     QProcess proc;
+    QStringList args;
     if (useMagick) {
-        int delay = qRound(100.0 / fps);
-        QStringList args;
-        args << "-dispose" << "background" << "-delay" << QString::number(delay) << "-loop" << "0";
-        for (int i = 0; i < frameDataList.size(); ++i) {
-            args << tempDir.filePath(QString("frame_%1.png").arg(i, 4, 10, QChar('0')));
-        }
-        args << outPath;
+        args << "-delay" << QString::number(100 / fps) << "-loop" << "0"
+             << tempDir.path() + "/frame_*.png" << outPath;
         proc.start(converterExe, args);
-    } else {
-        QStringList args;
-        args << "-framerate" << QString::number(fps) << "-i" << tempDir.filePath("frame_%04d.png");
-        if (outPath.endsWith(".mp4", Qt::CaseInsensitive)) {
-            args << "-c:v" << "libx264" << "-pix_fmt" << "yuv420p";
-        } else if (outPath.endsWith(".webm", Qt::CaseInsensitive)) {
-            args << "-c:v" << "libvpx-vp9" << "-pix_fmt" << "yuva420p";
-        }
-        args << "-y" << outPath;
+    } else if (!ffmpegExe.isEmpty()) {
+        args << "-y" << "-framerate" << QString::number(fps)
+             << "-i" << tempDir.path() + "/frame_%04d.png"
+             << "-c:v" << "libx264" << "-pix_fmt" << "yuv420p" << outPath;
         proc.start(ffmpegExe, args);
+    } else {
+        setLoading(false);
+        return false;
     }
-    proc.waitForFinished();
-
+    proc.waitForFinished(-1);
     bool ok = QFile::exists(outPath) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
+#else
+    Q_UNUSED(useMagick);
+    Q_UNUSED(converterExe);
+    Q_UNUSED(ffmpegExe);
+    Q_UNUSED(outPath);
+    Q_UNUSED(parent);
+    bool ok = false;
+    QMessageBox::information(parent, trAnimationExport("Not Supported"), trAnimationExport("Exporting to GIF/Video is not supported in the web version."));
+#endif
     if (!ok) {
         setStatus(trAnimationExport("Failed to generate animation"));
         QMessageBox::critical(parent, trAnimationExport("Error"), trAnimationExport("Exporting animation failed. Check console output."));

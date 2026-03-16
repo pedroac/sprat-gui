@@ -20,6 +20,9 @@
 #include "TimelineUi.h"
 #include "ProfilesDialog.h"
 #include "SpratProfilesConfig.h"
+#ifdef Q_OS_WASM
+#include "WasmFileDialog.h"
+#endif
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDir>
@@ -47,8 +50,16 @@
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
+#ifdef SPRAT_EMBEDDED_CLI
+#include "EmbeddedCli.h"
+#endif
+
 Q_LOGGING_CATEGORY(project, "project")
 Q_LOGGING_CATEGORY(autosave, "autosave")
+
+#ifdef Q_OS_WASM
+MainWindow* MainWindow::s_wasmInstance = nullptr;
+#endif
 
 /**
  * @brief Constructs the MainWindow.
@@ -61,17 +72,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_cliPaths = CliToolsConfig::loadCliPaths();
     setupUi();
     setupCliInstallOverlay();
+#ifdef Q_OS_WASM
+    s_wasmInstance = this;
+    setAcceptDrops(false);
+    wasmInstallDropHandlers();
+#else
     setAcceptDrops(true);
+#endif
 
     m_layoutRunner = new LayoutRunner(this);
     m_layoutRunner->setMutex(&m_toolMutex);
     connect(m_layoutRunner, &LayoutRunner::finished, this, &MainWindow::onLayoutFinished);
     connect(m_layoutRunner, &LayoutRunner::errorOccurred, this, &MainWindow::onLayoutError);
 
+#ifndef SPRAT_EMBEDDED_CLI
     m_process = new QProcess(this);
+#endif
     m_cliToolInstaller = new CliToolInstaller(this);
+#ifndef SPRAT_EMBEDDED_CLI
     connect(m_process, &QProcess::finished, this, &MainWindow::onProcessFinished);
     connect(m_process, &QProcess::errorOccurred, this, &MainWindow::onProcessError);
+#endif
     connect(m_cliToolInstaller, &CliToolInstaller::installFinished, this, &MainWindow::onInstallFinished);
     connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
     connect(m_cliToolInstaller, &CliToolInstaller::downloadProgress, this, &MainWindow::onDownloadProgress);
@@ -94,6 +115,40 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     m_isRestoringProject = false;
 }
+
+#ifdef Q_OS_WASM
+MainWindow* MainWindow::wasmInstance() {
+    return s_wasmInstance;
+}
+
+void MainWindow::onWasmFilePicked(const QString& path, bool isFolder) {
+    if (path.isEmpty()) {
+        return;
+    }
+    qInfo() << "[WASM] onWasmFilePicked path=" << path << "isFolder=" << isFolder;
+    if (isFolder) {
+        if (m_animCanvas) {
+            m_animCanvas->setZoomManual(false);
+        }
+        loadFolder(path);
+    } else {
+        if (!isSupportedDropPath(path)) {
+            QMessageBox::information(this, tr("Unsupported File"),
+                                     tr("This file type is not supported."));
+            return;
+        }
+#ifdef Q_OS_WASM
+        // Avoid modal dialogs in WASM; treat drops as Replace.
+        tryHandleDroppedPath(path, DropAction::Replace);
+#else
+        DropAction action = confirmDropAction(path);
+        if (action != DropAction::Cancel) {
+            tryHandleDroppedPath(path, action);
+        }
+#endif
+    }
+}
+#endif
 
 /**
  * @brief Destroy the Main Window:: Main Window object
@@ -122,8 +177,17 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
+#ifdef Q_OS_WASM
+    // Defer the entire resize logic to avoid re-entrant calls into a potentially
+    // suspended Asyncify stack. Using singleShot(0) ensures the browser returns
+    // from the event handler immediately.
+    QTimer::singleShot(0, this, [this]() {
+        updateCliOverlayGeometry();
+    });
+#else
     QMainWindow::resizeEvent(event);
     updateCliOverlayGeometry();
+#endif
 }
 
 /**
@@ -445,58 +509,28 @@ void MainWindow::applySettings() {
 
 bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
     QMutexLocker locker(&m_toolMutex);
-
+#ifdef SPRAT_EMBEDDED_CLI
+    // Convert tool path to command name
+    QString command = QFileInfo(tool).baseName();
+    CliResult result = EmbeddedCli::run(command, args, input ? *input : QByteArray());
+    
+    if (output) *output = result.stdOut;
+    if (error) *error = result.stdErr;
+    
+    return result.exitCode == 0;
+#else
     QProcess process;
-    process.setProgram(tool);
-    process.setArguments(args);
-    process.start();
-
-    if (!process.waitForStarted()) {
-        return false;
-    }
-
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    process.start(tool, args);
     if (input && !input->isEmpty()) {
         process.write(*input);
         process.closeWriteChannel();
     }
-
-    const bool isGuiThread = (QThread::currentThread() == QCoreApplication::instance()->thread());
-    QElapsedTimer timer;
-    timer.start();
-    const int timeoutMs = 120000; // 2 minutes
-
-    while (process.state() == QProcess::Running || process.bytesAvailable() > 0 || process.bytesToWrite() > 0) {
-        if (timer.elapsed() > timeoutMs) {
-            process.kill();
-            process.waitForFinished(1000);
-            return false;
-        }
-
-        process.waitForReadyRead(50);
-        
-        // Always drain both channels
-        if (output) {
-            output->append(process.readAllStandardOutput());
-        } else {
-            process.readAllStandardOutput();
-        }
-        
-        if (error) {
-            error->append(process.readAllStandardError());
-        } else {
-            process.readAllStandardError();
-        }
-        
-        // If we are writing and it's taking time, wait for bytes written
-        if (process.bytesToWrite() > 0) {
-            process.waitForBytesWritten(50);
-        }
-
-        if (isGuiThread) {
-            QCoreApplication::processEvents();
-        }
-        if (process.state() == QProcess::NotRunning && process.bytesAvailable() == 0) break;
+    if (!process.waitForFinished(-1)) {
+        return false;
     }
-
+    if (output) *output = process.readAllStandardOutput();
+    if (error) *error = process.readAllStandardError();
     return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+#endif
 }

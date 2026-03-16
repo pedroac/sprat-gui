@@ -82,6 +82,11 @@ public:
      */
     ~MainWindow() override;
 
+#ifdef Q_OS_WASM
+    static MainWindow* wasmInstance();
+    void onWasmFilePicked(const QString& path, bool isFolder);
+#endif
+
 private slots:
     // === Layout Canvas Events ===
     /**
@@ -154,14 +159,10 @@ private slots:
      * @param exitCode Exit code of the process
      * @param exitStatus Exit status of the process
      */
+#ifndef SPRAT_EMBEDDED_CLI
     void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
-
-    /**
-     * @brief Handles errors from generic processes.
-     * 
-     * @param error Type of process error
-     */
     void onProcessError(QProcess::ProcessError error);
+#endif
 
     // === CLI Tool Management Events ===
     /**
@@ -170,7 +171,11 @@ private slots:
      * @param exitCode Exit code of the installation process
      * @param exitStatus Exit status of the installation process
      */
+#ifndef SPRAT_EMBEDDED_CLI
     void onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus);
+#else
+    void onInstallFinished(int exitCode, int exitStatus);
+#endif
 
     /**
      * @brief Handles download progress of CLI tools.
@@ -728,6 +733,7 @@ private:
      */
     void refreshTimelineList();
 
+public slots:
     /**
      * @brief Refreshes animation test.
      */
@@ -748,6 +754,7 @@ private:
      */
     void refreshTimelineFrames();
 
+public:
     /**
      * @brief Exports animation to file.
      * 
@@ -901,7 +908,9 @@ private:
     QString m_spratFramesBin;
     QString m_spratUnpackBin;
     LayoutRunner* m_layoutRunner;
+#ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
+#endif
     bool m_cliReady = false;
     bool m_isLoading = false;
     QTimer* m_animTimer;
@@ -926,6 +935,7 @@ private:
         MainWindow::DropAction action;
     };
     QFutureWatcher<FolderDiscoveryResult> m_folderDiscoveryWatcher;
+    void processFolderDiscoveryResult(const FolderDiscoveryResult& result);
 
     struct ProjectLoadResult {
         QString path;
@@ -945,6 +955,7 @@ private:
         QString error;
     };
     QFutureWatcher<ZipDiscoveryResult> m_zipDiscoveryWatcher;
+    void processZipDiscoveryResult(const ZipDiscoveryResult& result);
 
     struct FrameDetectionTaskResult {
         QString imagePath;
@@ -952,6 +963,7 @@ private:
         FrameDetectionResult detection;
     };
     QFutureWatcher<FrameDetectionTaskResult> m_frameDetectionWatcher;
+    void processFrameDetectionResult(const FrameDetectionTaskResult& result);
 
     struct TarExtractionResult {
         QString tempPath;
@@ -960,6 +972,7 @@ private:
         bool success;
     };
     QFutureWatcher<TarExtractionResult> m_tarExtractionWatcher;
+    void processTarExtractionResult(const TarExtractionResult& result);
 
     struct FrameExtractionResult {
         QString tempPath;
@@ -969,6 +982,7 @@ private:
         bool success;
     };
     QFutureWatcher<FrameExtractionResult> m_frameExtractionWatcher;
+    void processFrameExtractionResult(const FrameExtractionResult& result);
 
     struct ProjectSaveResult {
         QString savedDestination;
@@ -984,4 +998,8 @@ private:
     bool m_retryWithoutTrimOnFailure = false;
     QTimer* m_autosaveTimer = nullptr;
     bool m_isRestoringProject = false;
+
+#ifdef Q_OS_WASM
+    static MainWindow* s_wasmInstance;
+#endif
 };
