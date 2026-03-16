@@ -348,6 +348,7 @@ if(EMSCRIPTEN)
             "-sASYNCIFY_DEBUG=1"
             "-sASYNCIFY_STACK_SIZE=128000"
             "-sASSERTIONS=1"
+            "-sDISCARD_NAVIGATOR_CLIPBOARD_PROMISE=1"
         )
     endif()
     # Let Qt's wasm macros append these to its default exported methods.

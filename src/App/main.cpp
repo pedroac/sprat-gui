@@ -70,9 +70,11 @@ int main(int argc, char *argv[]) {
         qWarning() << "Warning: Translation file not found for locale" << systemLocale;
     }
 
-    // Create and show main window
+    // Create main window
     MainWindow mainWindow;
-    mainWindow.show();
+
+    // Show window after event loop starts to ensure platform is ready
+    QTimer::singleShot(0, &mainWindow, &MainWindow::show);
 
     // Start Qt event loop
     return app.exec();

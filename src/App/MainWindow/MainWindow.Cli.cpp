@@ -25,6 +25,10 @@
 #include <QVBoxLayout>
 
 void MainWindow::checkCliTools() {
+    static bool inCheck = false;
+    if (inCheck) return;
+    inCheck = true;
+
     QStringList missing;
     bool allFound = resolveCliBinaries(missing);
     
@@ -36,30 +40,36 @@ void MainWindow::checkCliTools() {
             m_cliReady = false;
             m_statusLabel->setText(tr("CLI error (failed to execute layout)"));
             showCliExecutionError("spratlayout");
+            inCheck = false;
             return;
         }
 
         // Verify other binaries can also execute (might be missing DLLs for some but not all)
         if (CliToolsConfig::checkBinaryVersion(m_cliPaths.packBinary).isEmpty()) {
             showCliExecutionError("spratpack");
+            inCheck = false;
             return;
         }
         if (CliToolsConfig::checkBinaryVersion(m_cliPaths.convertBinary).isEmpty()) {
             showCliExecutionError("spratconvert");
+            inCheck = false;
             return;
         }
         if (CliToolsConfig::checkBinaryVersion(m_cliPaths.framesBinary).isEmpty()) {
             showCliExecutionError("spratframes");
+            inCheck = false;
             return;
         }
         if (CliToolsConfig::checkBinaryVersion(m_cliPaths.unpackBinary).isEmpty()) {
             showCliExecutionError("spratunpack");
+            inCheck = false;
             return;
         }
 
         if (currentVersion != requiredVersion) {
             if (CliToolsUi::askUpgrade(this, currentVersion, requiredVersion)) {
                 installCliTools();
+                inCheck = false;
                 return;
             }
         }
@@ -77,6 +87,7 @@ void MainWindow::checkCliTools() {
         showMissingCliDialog(missing);
     }
     updateUiState();
+    inCheck = false;
 }
 
 bool MainWindow::resolveCliBinaries(QStringList& missing) {
