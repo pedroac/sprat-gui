@@ -345,6 +345,9 @@ if(EMSCRIPTEN)
     else()
         target_link_options(sprat-gui PRIVATE
             "-sASYNCIFY"
+            "-sASYNCIFY_DEBUG=1"
+            "-sASYNCIFY_STACK_SIZE=128000"
+            "-sASSERTIONS=1"
         )
     endif()
     # Let Qt's wasm macros append these to its default exported methods.

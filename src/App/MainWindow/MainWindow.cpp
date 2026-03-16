@@ -177,17 +177,22 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
+    static bool inResize = false;
+    if (inResize) return;
+    inResize = true;
+
+    QMainWindow::resizeEvent(event);
+    
 #ifdef Q_OS_WASM
-    // Defer the entire resize logic to avoid re-entrant calls into a potentially
-    // suspended Asyncify stack. Using singleShot(0) ensures the browser returns
-    // from the event handler immediately.
+    // Defer overlay update to ensure it happens after the main resize is done
     QTimer::singleShot(0, this, [this]() {
         updateCliOverlayGeometry();
     });
 #else
-    QMainWindow::resizeEvent(event);
     updateCliOverlayGeometry();
 #endif
+
+    inResize = false;
 }
 
 /**

@@ -479,7 +479,9 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
                 setLoading(false);
                 return false;
             }
+#ifndef Q_OS_WASM
             QCoreApplication::processEvents();
+#endif
             
             QString filePath = extractDir.absoluteFilePath(imageFiles[i]);
             QImage img(filePath);

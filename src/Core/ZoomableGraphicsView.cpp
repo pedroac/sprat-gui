@@ -150,14 +150,14 @@ void ZoomableGraphicsView::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
-#ifdef Q_OS_WASM
-    if (!m_isZoomManual) {
-        QTimer::singleShot(0, this, &ZoomableGraphicsView::initialFit);
-    }
-#else
+    static bool inResize = false;
+    if (inResize) return;
+    inResize = true;
+
     QGraphicsView::resizeEvent(event);
     if (!m_isZoomManual) {
         QTimer::singleShot(0, this, &ZoomableGraphicsView::initialFit);
     }
-#endif
+
+    inResize = false;
 }
