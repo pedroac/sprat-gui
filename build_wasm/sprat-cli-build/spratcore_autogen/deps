@@ -1,0 +1,23 @@
+spratcore_autogen/timestamp: \
+	/home/pedroac/Projects/sprat-cli/CMakeLists.txt \
+	/home/pedroac/Projects/sprat-cli/src/commands/spratconvert_command.cpp \
+	/home/pedroac/Projects/sprat-cli/src/commands/spratframes_command.cpp \
+	/home/pedroac/Projects/sprat-cli/src/commands/spratlayout_command.cpp \
+	/home/pedroac/Projects/sprat-cli/src/commands/spratpack_command.cpp \
+	/home/pedroac/Projects/sprat-cli/src/commands/spratunpack_command.cpp \
+	/home/pedroac/Projects/sprat-cli/src/core/cli_parse.cpp \
+	/home/pedroac/Projects/sprat-cli/src/core/cli_parse.h \
+	/home/pedroac/Projects/sprat-cli/src/core/i18n.cpp \
+	/home/pedroac/Projects/sprat-cli/src/core/i18n.h \
+	/home/pedroac/Projects/sprat-cli/src/core/layout_parser.cpp \
+	/home/pedroac/Projects/sprat-cli/src/core/layout_parser.h \
+	/home/pedroac/Projects/sprat-cli/src/core/output_pattern.cpp \
+	/home/pedroac/Projects/sprat-cli/src/core/output_pattern.h \
+	/home/pedroac/Projects/sprat-cli/src/core/stb_impl.cpp \
+	/usr/share/cmake/Modules/CMakePushCheckState.cmake \
+	/usr/share/cmake/Modules/CheckCXXSourceCompiles.cmake \
+	/usr/share/cmake/Modules/FindIntl.cmake \
+	/usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake \
+	/usr/share/cmake/Modules/FindPackageMessage.cmake \
+	/usr/share/cmake/Modules/GNUInstallDirs.cmake \
+	/usr/sbin/cmake

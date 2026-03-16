@@ -329,6 +329,11 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
     return {};
 }
 
+#ifdef Q_OS_WASM
+#include <emscripten.h>
+extern "C" { void sync_idbfs(); }
+#endif
+
 bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& profiles) {
     const QVector<SpratProfile> cleaned = sanitizeProfiles(profiles);
 
@@ -380,6 +385,11 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
     }
 
     out.flush();
+    file.close();
+
+#ifdef Q_OS_WASM
+    sync_idbfs();
+#endif
     return out.status() == QTextStream::Ok;
 }
 

@@ -31,7 +31,27 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     if (action == DropAction::Cancel) {
         return;
     }
+
+#ifdef Q_OS_WASM
+    if (!m_cliReady || m_isLoading) {
+        QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        return;
+    }
     
+    if (m_spratFramesBin.isEmpty()) {
+        QMessageBox::warning(this, tr("Error"), tr("spratframes binary not found."));
+        return;
+    }
+
+    m_loadingUiMessage = tr("Detecting frames in image...");
+    setLoading(true);
+
+    FrameDetectionTaskResult result;
+    result.imagePath = imagePath;
+    result.action = action;
+    result.detection = detectFramesInImage(imagePath);
+    processFrameDetectionResult(result);
+#else
     if (!m_cliReady || m_isLoading) {
         QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
         return;
@@ -58,10 +78,14 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     };
 
     m_frameDetectionWatcher.setFuture(QtConcurrent::run(task));
+#endif
 }
 
 void MainWindow::onFrameDetectionFinished() {
-    FrameDetectionTaskResult result = m_frameDetectionWatcher.result();
+    processFrameDetectionResult(m_frameDetectionWatcher.result());
+}
+
+void MainWindow::processFrameDetectionResult(const FrameDetectionTaskResult& result) {
     setLoading(false);
 
     if (result.detection.frames.isEmpty()) {
@@ -108,7 +132,11 @@ void MainWindow::onFrameDetectionFinished() {
                 return res;
             };
 
+#ifdef Q_OS_WASM
+            processFrameExtractionResult(extractTask());
+#else
             m_frameExtractionWatcher.setFuture(QtConcurrent::run(extractTask));
+#endif
         } else {
             m_statusLabel->setText(tr("Using image as single frame"));
             handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
@@ -119,7 +147,10 @@ void MainWindow::onFrameDetectionFinished() {
 }
 
 void MainWindow::onFrameExtractionFinished() {
-    FrameExtractionResult result = m_frameExtractionWatcher.result();
+    processFrameExtractionResult(m_frameExtractionWatcher.result());
+}
+
+void MainWindow::processFrameExtractionResult(const FrameExtractionResult& result) {
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.sourcePath, result.action, result.backgroundColor)) {
             onRunLayout();
@@ -184,11 +215,19 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
         return result;
     };
 
+#ifdef Q_OS_WASM
+    // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
+    processTarExtractionResult(task());
+#else
     m_tarExtractionWatcher.setFuture(QtConcurrent::run(task));
+#endif
 }
 
 void MainWindow::onTarExtractionFinished() {
-    TarExtractionResult result = m_tarExtractionWatcher.result();
+    processTarExtractionResult(m_tarExtractionWatcher.result());
+}
+
+void MainWindow::processTarExtractionResult(const TarExtractionResult& result) {
     if (m_isCanceled) {
         setLoading(false);
         m_statusLabel->setText(tr("Tar extraction canceled"));
@@ -337,6 +376,7 @@ void MainWindow::applyTransparencyToImage(QImage& img, const QColor& backgroundC
 }
 
 void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction action, const QColor& backgroundColor) {
+    qInfo() << "[WASM] handleSingleImageLayout start path=" << imagePath;
     QString finalPath = imagePath;
     
     if (backgroundColor.isValid()) {
@@ -413,6 +453,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
             updateUiState();
             
             setLoading(false);
+            qInfo() << "[WASM] handleSingleImageLayout done";
         });
     } else {
         setLoading(false);

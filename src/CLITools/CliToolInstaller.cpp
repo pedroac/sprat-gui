@@ -11,18 +11,28 @@
 
 CliToolInstaller::CliToolInstaller(QObject* parent) 
     : QObject(parent), 
+#ifndef SPRAT_EMBEDDED_CLI
       m_installProcess(new QProcess(this)),
+#endif
       m_networkManager(new QNetworkAccessManager(this)) {
+#ifndef SPRAT_EMBEDDED_CLI
     connect(m_installProcess, &QProcess::finished, this, &CliToolInstaller::onInstallProcessFinished);
+#endif
     connect(m_networkManager, &QNetworkAccessManager::finished, this, &CliToolInstaller::onDownloadFinished);
 }
 
 CliToolInstaller::~CliToolInstaller() {
+#ifndef SPRAT_EMBEDDED_CLI
     delete m_installProcess;
+#endif
     delete m_networkManager;
 }
 
 bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
+#ifdef SPRAT_EMBEDDED_CLI
+    Q_UNUSED(missing);
+    return true; // Embedded CLI tools are always "present"
+#else
     QStringList tools = {"spratlayout", "spratpack", "spratconvert", "spratframes", "spratunpack"};
     for (const auto& tool : tools) {
         if (CliToolsConfig::resolveBinary(tool).isEmpty()) {
@@ -30,11 +40,15 @@ bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
         }
     }
     return missing.isEmpty();
+#endif
 }
 
 void CliToolInstaller::installCliTools() {
     emit installStarted();
 
+#ifdef SPRAT_EMBEDDED_CLI
+    emit installFinished(0, 0);
+#else
 #ifdef Q_OS_LINUX
     installOnLinux();
 #else
@@ -55,9 +69,11 @@ void CliToolInstaller::installCliTools() {
              .arg(m_cliVersion, osSuffix));
     startDownload(url);
 #endif
+#endif
 }
 
 void CliToolInstaller::installOnLinux() {
+#ifndef SPRAT_EMBEDDED_CLI
     bool hasCpp = !QStandardPaths::findExecutable("g++").isEmpty() || !QStandardPaths::findExecutable("c++").isEmpty();
     QStringList deps = {"git", "cmake", "make"};
     QStringList missing;
@@ -90,6 +106,7 @@ cp -r transforms/* "$HOME/.local/share/sprat/transforms/"
 )").arg(m_cliVersion);
 
     m_installProcess->start("bash", QStringList() << "-c" << script);
+#endif
 }
 
 void CliToolInstaller::startDownload(const QUrl& url) {
@@ -106,7 +123,11 @@ void CliToolInstaller::onDownloadProgress(qint64 bytesReceived, qint64 bytesTota
 void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
     if (reply->error() != QNetworkReply::NoError) {
         QMessageBox::critical(nullptr, "Download Failed", "Could not download sprat-cli: " + reply->errorString());
+#ifndef SPRAT_EMBEDDED_CLI
         emit installFinished(-1, QProcess::CrashExit);
+#else
+        emit installFinished(-1, -1);
+#endif
         reply->deleteLater();
         return;
     }
@@ -114,7 +135,11 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
     QTemporaryFile* tempFile = new QTemporaryFile(this);
     if (!tempFile->open()) {
         QMessageBox::critical(nullptr, "Install Failed", "Could not create a temporary file for downloaded installer.");
+#ifndef SPRAT_EMBEDDED_CLI
         emit installFinished(-1, QProcess::CrashExit);
+#else
+        emit installFinished(-1, -1);
+#endif
         reply->deleteLater();
         return;
     }
@@ -126,6 +151,7 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
 }
 
 void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
+#ifndef SPRAT_EMBEDDED_CLI
     QString appDir = QApplication::applicationDirPath();
     
 #ifdef Q_OS_WIN
@@ -144,8 +170,13 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "hdiutil unmount \"$MOUNT_POINT\"").arg(filePath, appDir);
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
+#else
+    Q_UNUSED(filePath);
+#endif
 }
 
+#ifndef SPRAT_EMBEDDED_CLI
 void CliToolInstaller::onInstallProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     emit installFinished(exitCode, exitStatus);
 }
+#endif

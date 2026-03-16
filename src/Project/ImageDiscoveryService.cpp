@@ -2,8 +2,10 @@
 
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QSet>
+#include <QDebug>
 
 #include <algorithm>
 
@@ -26,6 +28,8 @@ bool ImageDiscoveryService::hasImageFiles(const QString& path) {
 }
 
 QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root) {
+    QElapsedTimer timer;
+    timer.start();
     QStringList directories;
     QDir base(root);
     if (!base.exists()) {
@@ -36,7 +40,8 @@ QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root)
         directories.append(base.absolutePath());
     }
 
-    for (const QString& entry : base.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+    const QStringList subdirs = base.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString& entry : subdirs) {
         const QString candidate = QDir(base.filePath(entry)).absolutePath();
         if (hasImageFiles(candidate)) {
             directories.append(candidate);
@@ -45,6 +50,10 @@ QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root)
 
     directories.removeDuplicates();
     std::sort(directories.begin(), directories.end());
+    qInfo() << "[WASM] imageDirectoriesOneLevel root=" << root
+            << "subdirs=" << subdirs.size()
+            << "imageDirs=" << directories.size()
+            << "ms=" << timer.elapsed();
     return directories;
 }
 
@@ -67,6 +76,8 @@ QStringList ImageDiscoveryService::imageDirectoriesRecursive(const QString& root
 }
 
 QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
+    QElapsedTimer timer;
+    timer.start();
     QStringList absolutePaths;
     QDir dir(path);
     if (!dir.exists()) {
@@ -79,6 +90,9 @@ QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
         absolutePaths.append(dir.absoluteFilePath(relPath));
     }
     std::sort(absolutePaths.begin(), absolutePaths.end());
+    qInfo() << "[WASM] imagesInDirectory path=" << path
+            << "files=" << absolutePaths.size()
+            << "ms=" << timer.elapsed();
     return absolutePaths;
 }
 

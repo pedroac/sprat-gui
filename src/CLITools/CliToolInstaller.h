@@ -24,13 +24,19 @@ public:
     void installCliTools();
 
 signals:
+#ifndef SPRAT_EMBEDDED_CLI
     void installFinished(int exitCode, QProcess::ExitStatus exitStatus);
+#else
+    void installFinished(int exitCode, int exitStatus);
+#endif
     void installStarted();
     void cliToolsResolved(bool ready);
     void downloadProgress(qint64 bytesReceived, qint64 bytesTotal);
 
 private slots:
+#ifndef SPRAT_EMBEDDED_CLI
     void onInstallProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+#endif
     void onDownloadFinished(QNetworkReply* reply);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
 
@@ -39,7 +45,9 @@ private:
     void installFromDownloadedFile(const QString& filePath);
     void installOnLinux();
 
+#ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_installProcess = nullptr;
+#endif
     QNetworkAccessManager* m_networkManager = nullptr;
     const QString m_cliVersion = SPRAT_CLI_VERSION; // Target version for compatibility
 };

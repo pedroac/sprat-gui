@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/usr/sbin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/pedroac/Projects/sprat-gui/build_wasm/_deps/libarchive-subbuild/libarchive-populate-prefix/src/libarchive-populate-stamp/download-libarchive-populate.cmake;COMMAND;/usr/sbin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/pedroac/Projects/sprat-gui/build_wasm/_deps/libarchive-subbuild/libarchive-populate-prefix/src/libarchive-populate-stamp/verify-libarchive-populate.cmake;COMMAND;/usr/sbin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/pedroac/Projects/sprat-gui/build_wasm/_deps/libarchive-subbuild/libarchive-populate-prefix/src/libarchive-populate-stamp/extract-libarchive-populate.cmake
+source_dir=/home/pedroac/Projects/sprat-gui/build_wasm/_deps/libarchive-src
+work_dir=/home/pedroac/Projects/sprat-gui/build_wasm/_deps
+url(s)=https://github.com/libarchive/libarchive/releases/download/v3.8.5/libarchive-3.8.5.tar.gz
+hash=SHA256=8a60f3a7bfd59c54ce82ae805a93dba65defd04148c3333b7eaa2102f03b7ffd
+      no_extract=
+

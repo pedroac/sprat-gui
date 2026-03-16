@@ -7,10 +7,9 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
-#define PATH_TO_UTF8(p) (p).toUtf8().constData()
-#else
-#define PATH_TO_UTF8(p) (p).toLocal8Bit().constData()
 #endif
+
+#define PATH_TO_UTF8(p) (p).toUtf8().constData()
 
 bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QString& destDir, QString& error, std::atomic<bool>* canceled) {
     struct archive* a;
@@ -168,6 +167,61 @@ bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QSt
     archive_read_close(a);
     archive_read_free(a);
     return found;
+}
+
+#include <QDirIterator>
+
+bool ArchiveExtractor::createZip(const QString& sourceDir, const QString& destZipPath, QString& error) {
+    struct archive* a = archive_write_new();
+    archive_write_set_format_zip(a);
+    
+#ifdef Q_OS_WIN
+    int r = archive_write_open_filename_w(a, reinterpret_cast<const wchar_t*>(destZipPath.utf16()));
+#else
+    int r = archive_write_open_filename(a, PATH_TO_UTF8(destZipPath));
+#endif
+
+    if (r != ARCHIVE_OK) {
+        error = QString("Could not open output archive: %1").arg(archive_error_string(a));
+        archive_write_free(a);
+        return false;
+    }
+
+    QDir source(sourceDir);
+    QDirIterator it(sourceDir, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        QString filePath = it.next();
+        QString relPath = source.relativeFilePath(filePath);
+        
+        struct archive_entry* entry = archive_entry_new();
+        archive_entry_set_pathname(entry, PATH_TO_UTF8(relPath));
+        
+        QFileInfo info(filePath);
+        archive_entry_set_size(entry, info.size());
+        archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_perm(entry, 0644);
+        
+        if (archive_write_header(a, entry) != ARCHIVE_OK) {
+            error = QString("Header write error: %1").arg(archive_error_string(a));
+            archive_entry_free(entry);
+            archive_write_close(a);
+            archive_write_free(a);
+            return false;
+        }
+
+        QFile file(filePath);
+        if (file.open(QIODevice::ReadOnly)) {
+            QByteArray content = file.readAll();
+            archive_write_data(a, content.data(), static_cast<size_t>(content.size()));
+            file.close();
+        }
+        
+        archive_entry_free(entry);
+    }
+
+    archive_write_close(a);
+    archive_write_free(a);
+    return true;
 }
 
 int ArchiveExtractor::copyData(struct archive* ar, struct archive* aw) {

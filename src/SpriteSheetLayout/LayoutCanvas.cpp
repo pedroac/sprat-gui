@@ -19,12 +19,30 @@
 #include <QKeySequence>
 #include <QtConcurrent>
 #include <QThreadPool>
+#include <QElapsedTimer>
+#include <QDebug>
+#include <QFile>
+#include <QImage>
 #include <limits>
 #include "ViewUtils.h"
 
 namespace {
     const QColor kSelectionColor(10, 125, 255);
     const QColor kContextTargetColor(255, 215, 0);
+
+    bool loadPixmapFromFile(const QString& path, QPixmap& out) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            return false;
+        }
+        const QByteArray data = file.readAll();
+        QImage img;
+        if (!img.loadFromData(data)) {
+            return false;
+        }
+        out = QPixmap::fromImage(img);
+        return !out.isNull();
+    }
 
 enum class NavigationDirection {
     Left,
@@ -168,18 +186,36 @@ int findRowEdgeIndex(const QVector<SpriteItem*>& items, int currentIndex, bool e
 LayoutCanvas::LayoutCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
+#ifdef Q_OS_WASM
+    setAcceptDrops(false);
+#else
     setAcceptDrops(true);
+#endif
     setZoomRange(0.1, 8.0);
 }
 
 void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(event);
+    return;
+#endif
     if (event->mimeData()->hasUrls()) {
         const QList<QUrl> urls = event->mimeData()->urls();
-        if (urls.count() == 1 && urls.first().isLocalFile()) {
+        if (urls.count() == 1) {
+#ifndef Q_OS_WASM
+            if (!urls.first().isLocalFile()) {
+                ZoomableGraphicsView::dragEnterEvent(event);
+                return;
+            }
+#endif
             const QString path = urls.first().toLocalFile();
             QFileInfo info(path);
             const QString ext = info.suffix().toLower();
-            if (info.isDir() || ext == "zip" || ext == "json") {
+            bool supported = info.isDir() || ext == "zip" || ext == "json";
+#ifdef Q_OS_WASM
+            supported = true;
+#endif
+            if (supported) {
                 event->acceptProposedAction();
                 return;
             }
@@ -189,10 +225,27 @@ void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void LayoutCanvas::dropEvent(QDropEvent* event) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(event);
+    return;
+#endif
     if (event->mimeData()->hasUrls()) {
         const QList<QUrl> urls = event->mimeData()->urls();
-        if (urls.count() == 1 && urls.first().isLocalFile()) {
-            emit externalPathDropped(urls.first().toLocalFile());
+        if (urls.count() == 1) {
+#ifndef Q_OS_WASM
+            if (!urls.first().isLocalFile()) {
+                ZoomableGraphicsView::dropEvent(event);
+                return;
+            }
+#endif
+            const QString localPath = urls.first().toLocalFile();
+#ifdef Q_OS_WASM
+            if (localPath.isEmpty() || !QFileInfo::exists(localPath)) {
+                ZoomableGraphicsView::dropEvent(event);
+                return;
+            }
+#endif
+            emit externalPathDropped(localPath);
             event->acceptProposedAction();
             return;
         }
@@ -249,8 +302,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
             QPixmap pixmap = m_sourcePixmaps.value(sprite->path);
             if (pixmap.isNull()) {
                 // Should already be in cache from setModelsAsync but just in case
-                pixmap.load(sprite->path);
-                if (!pixmap.isNull()) {
+                if (loadPixmapFromFile(sprite->path, pixmap)) {
                     m_sourcePixmaps.insert(sprite->path, pixmap);
                 }
             }
@@ -314,6 +366,10 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
     }
 
     auto task = [this, models, activePaths, canceled, onFinished]() {
+        QElapsedTimer timer;
+        timer.start();
+        qInfo() << "[WASM] setModelsAsync task start"
+                << "sprites=" << activePaths.size();
         // Prepare pixmaps in background
         for (const QString& path : activePaths) {
             if (canceled && *canceled) return;
@@ -331,12 +387,13 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
             if (canceled && *canceled) return;
             QPixmap pm;
             if (!QPixmapCache::find(path, &pm)) {
-                pm.load(path);
-                if (!pm.isNull()) {
+                if (loadPixmapFromFile(path, pm)) {
                     QPixmapCache::insert(path, pm);
                 }
             }
         }
+        qInfo() << "[WASM] setModelsAsync task pixmaps ready"
+                << "ms=" << timer.elapsed();
 
         QMetaObject::invokeMethod(this, [this, models, activePaths, canceled, onFinished]() {
             if (canceled && *canceled) return;
@@ -360,10 +417,15 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
 
             setModels(models, canceled);
             if (onFinished) onFinished();
+            qInfo() << "[WASM] setModelsAsync UI apply done";
         }, Qt::QueuedConnection);
     };
 
+#ifdef Q_OS_WASM
+    task();
+#else
     QThreadPool::globalInstance()->start(task);
+#endif
 }
 
 void LayoutCanvas::clearCanvas() {
@@ -502,6 +564,10 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
 
 void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
     ZoomableGraphicsView::mouseMoveEvent(event);
+#ifdef Q_OS_WASM
+    // Drag-and-drop is not reliable in WebAssembly builds.
+    return;
+#endif
     if (m_isPanning) {
         m_pendingDeselect = false;
         return;

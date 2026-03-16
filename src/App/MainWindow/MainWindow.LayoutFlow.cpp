@@ -16,6 +16,8 @@
 #include <QStackedWidget>
 #include <QStandardItem>
 #include <QStandardItemModel>
+#include <QElapsedTimer>
+#include <QDebug>
 
 namespace {
 int legacyDefaultPivotX(const SpritePtr& sprite) {
@@ -117,7 +119,12 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     m_retryWithoutTrimOnFailure = false;
 
     const QString layoutText = result.output;
+    QElapsedTimer parseTimer;
+    parseTimer.start();
     QVector<LayoutModel> newModels = LayoutParser::parse(layoutText, layoutParserFolder());
+    qInfo() << "[WASM] LayoutParser::parse done"
+            << "models=" << newModels.size()
+            << "ms=" << parseTimer.elapsed();
     if (newModels.isEmpty()) {
         newModels.append(LayoutModel());
     }
@@ -163,6 +170,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
 
+    qInfo() << "[WASM] setModelsAsync start"
+            << "models=" << m_session->layoutModels.size();
     m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this, selectedPaths, primaryPath]() {
         if (m_isCanceled) {
             setLoading(false);
@@ -193,6 +202,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         updateUiState();
         
         setLoading(false);
+        qInfo() << "[WASM] setModelsAsync finished";
 
         if (m_layoutRunPending) {
             m_layoutRunPending = false;

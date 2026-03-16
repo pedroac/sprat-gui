@@ -58,6 +58,18 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
                 s->rotated = true;
             }
             // Use the original image dimensions so the pivot aligns with the visual frame center.
+#ifdef Q_OS_WASM
+            // Avoid QImageReader size calls in WASM (slow/async). Use trim/rect fallback.
+            if (s->trimmed) {
+                const int sourceWidth = s->trimRect.x() + s->rect.width() + s->trimRect.width();
+                const int sourceHeight = s->trimRect.y() + s->rect.height() + s->trimRect.height();
+                s->pivotX = sourceWidth / 2;
+                s->pivotY = sourceHeight / 2;
+            } else {
+                s->pivotX = s->rect.width() / 2;
+                s->pivotY = s->rect.height() / 2;
+            }
+#else
             QSize sourceSize = sourceSizeCache.value(s->path);
             if (!sourceSize.isValid()) {
                 sourceSize = QImageReader(s->path).size();
@@ -77,6 +89,7 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
                 s->pivotX = s->rect.width() / 2;
                 s->pivotY = s->rect.height() / 2;
             }
+#endif
             model.sprites.append(s);
         }
     }

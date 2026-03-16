@@ -27,25 +27,58 @@ namespace {
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(event);
+    return;
+#endif
     if (!event->mimeData()->hasUrls()) {
         return;
     }
     const QList<QUrl> urls = event->mimeData()->urls();
-    if (urls.count() != 1 || !urls.first().isLocalFile()) {
+    if (urls.count() != 1) {
         return;
     }
+#ifndef Q_OS_WASM
+    if (!urls.first().isLocalFile()) {
+        return;
+    }
+#endif
     const QString localPath = urls.first().toLocalFile();
-    if (isSupportedDropPath(localPath)) {
+    bool supported = isSupportedDropPath(localPath);
+#ifdef Q_OS_WASM
+    supported = true; // Trust the browser's drop event
+#endif
+    if (supported) {
         event->acceptProposedAction();
     }
 }
 
 void MainWindow::dropEvent(QDropEvent* event) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(event);
+    return;
+#endif
     const QList<QUrl> urls = event->mimeData()->urls();
-    if (urls.count() != 1 || !urls.first().isLocalFile()) {
+    if (urls.count() != 1) {
         return;
     }
+#ifndef Q_OS_WASM
+    if (!urls.first().isLocalFile()) {
+        return;
+    }
+#endif
     const QString localPath = urls.first().toLocalFile();
+#ifdef Q_OS_WASM
+    if (localPath.isEmpty() || !QFileInfo::exists(localPath)) {
+        QMessageBox::information(this, tr("Drop Not Supported"),
+                                 tr("Drag-and-drop from the host OS is not supported in the Web build. "
+                                    "Please use the Load button."));
+        return;
+    }
+#endif
+    if (localPath.isEmpty()) {
+        return;
+    }
     DropAction action = confirmDropAction(localPath);
     if (action != DropAction::Cancel) {
         if (tryHandleDroppedPath(localPath, action)) {
@@ -146,9 +179,9 @@ bool MainWindow::handleAnimPreviewWheel(QWheelEvent*) {
 
 void MainWindow::handleAnimPreviewResize() {
     if (m_animCanvas && !m_animCanvas->isZoomManual()) {
-        fitAnimationToViewport();
+        QTimer::singleShot(0, this, &MainWindow::fitAnimationToViewport);
     }
-    refreshAnimationTest();
+    QTimer::singleShot(0, this, &MainWindow::refreshAnimationTest);
 }
 
 bool MainWindow::handleAnimPreviewContextMenu(QContextMenuEvent* contextEvent) {

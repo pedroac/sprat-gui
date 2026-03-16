@@ -6,6 +6,27 @@
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/bind.h>
+
+extern "C" {
+    EMSCRIPTEN_KEEPALIVE
+    void sync_idbfs() {
+        EM_ASM(
+            FS.syncfs(false, function (err) {
+                if (err) console.error('FS.syncfs error:', err);
+            });
+        );
+    }
+}
+
+// Force embind symbols to be included
+EMSCRIPTEN_BINDINGS(sprat_gui_dummy) {
+    emscripten::function("sprat_gui_dummy_func", &sync_idbfs);
+}
+#endif
+
 /**
  * @brief Main entry point for the sprat-gui application.
  * 
@@ -17,6 +38,25 @@
  * @return int Application exit code
  */
 int main(int argc, char *argv[]) {
+#ifdef Q_OS_WASM
+    // Mount IndexedDB for persistence
+    EM_ASM({
+        try {
+            var path = '/home/webuser/.config';
+            FS.mkdirTree(path);
+            // Check if already mounted to avoid errors on restart
+            var mnt = FS.findObject(path).mount;
+            if (!mnt) {
+                FS.mount(IDBFS, {}, path);
+                FS.syncfs(true, function (err) {
+                    if (err) console.error('FS.syncfs error:', err);
+                });
+            }
+        } catch (e) {
+            console.warn('IndexedDB mount skipped:', e);
+        }
+    });
+#endif
     QApplication app(argc, argv);
 
     // Initialize CLI tools configuration

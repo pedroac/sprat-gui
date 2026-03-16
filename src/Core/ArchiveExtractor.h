@@ -32,6 +32,15 @@ public:
      */
     static bool readFileFromArchive(const QString& archivePath, const QString& fileName, QByteArray& data, QString& error);
 
+    /**
+     * @brief Creates a ZIP archive from a source directory.
+     * @param sourceDir Directory containing files to archive.
+     * @param destZipPath Path to the destination ZIP file.
+     * @param error Output error message if creation fails.
+     * @return bool True if creation was successful.
+     */
+    static bool createZip(const QString& sourceDir, const QString& destZipPath, QString& error);
+
 private:
     static int copyData(struct archive* ar, struct archive* aw);
 };

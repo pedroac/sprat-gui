@@ -3,8 +3,13 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QThreadPool>
 #include <QtConcurrent>
+
+#ifdef SPRAT_EMBEDDED_CLI
+#include "EmbeddedCli.h"
+#endif
 
 namespace {
     bool isCompactMode(const QString& mode) {
@@ -12,7 +17,11 @@ namespace {
     }
 }
 
-LayoutRunner::LayoutRunner(QObject* parent) : QObject(parent), m_process(new QProcess(this)) {
+LayoutRunner::LayoutRunner(QObject* parent) : QObject(parent)
+#ifndef SPRAT_EMBEDDED_CLI
+    , m_process(new QProcess(this))
+#endif
+{
     // We don't connect signals anymore as we'll run synchronously in a thread
 }
 
@@ -21,14 +30,22 @@ LayoutRunner::~LayoutRunner() {
 }
 
 void LayoutRunner::stop() {
+#ifdef SPRAT_EMBEDDED_CLI
+    EmbeddedCli::requestStop();
+#else
     if (m_process->state() != QProcess::NotRunning) {
         m_process->kill();
         m_process->waitForFinished(1000);
     }
+#endif
 }
 
 bool LayoutRunner::isRunning() const {
+#ifdef SPRAT_EMBEDDED_CLI
+    return false; // Embedded runner is synchronous in its thread
+#else
     return m_process->state() != QProcess::NotRunning;
+#endif
 }
 
 void LayoutRunner::run(const LayoutRunConfig& config) {
@@ -48,6 +65,27 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         m_stdoutBuffer.clear();
         m_stderrBuffer.clear();
         
+#ifdef SPRAT_EMBEDDED_CLI
+        Q_UNUSED(config.layoutBinary);
+        QElapsedTimer timer;
+        timer.start();
+        qInfo() << "[WASM] spratlayout start"
+                << "source=" << config.sourcePath
+                << "args=" << args.join(' ');
+        CliResult embeddedResult = EmbeddedCli::run("spratlayout", args);
+        qInfo() << "[WASM] spratlayout done"
+                << "exit=" << embeddedResult.exitCode
+                << "stdoutBytes=" << embeddedResult.stdOut.size()
+                << "stderrBytes=" << embeddedResult.stdErr.size()
+                << "ms=" << timer.elapsed();
+        
+        LayoutResult result;
+        result.exitCode = embeddedResult.exitCode;
+        result.wasRetryingTrim = config.retryWithoutTrim;
+        result.output = QString::fromUtf8(embeddedResult.stdOut).trimmed();
+        result.error = QString::fromUtf8(embeddedResult.stdErr).trimmed();
+        result.success = (result.exitCode == 0);
+#else
         m_process->setProgram(config.layoutBinary);
         m_process->setArguments(args);
         m_process->start();
@@ -96,11 +134,23 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         } else {
             result.success = true;
         }
+#endif
 
+#ifdef Q_OS_WASM
+        QMetaObject::invokeMethod(this, [this, result]() {
+            emit finished(result);
+        }, Qt::QueuedConnection);
+#else
         emit finished(result);
+#endif
     };
 
+#ifdef Q_OS_WASM
+    // QtConcurrent/QThreadPool may not run without pthreads/COOP+COEP.
+    task();
+#else
     QThreadPool::globalInstance()->start(task);
+#endif
 }
 
 QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {

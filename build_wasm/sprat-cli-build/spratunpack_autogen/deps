@@ -1,0 +1,11 @@
+spratunpack_autogen/timestamp: \
+	/home/pedroac/Projects/sprat-cli/CMakeLists.txt \
+	/home/pedroac/Projects/sprat-cli/src/commands/spratunpack_command.cpp \
+	/home/pedroac/Projects/sprat-cli/src/spratunpack.cpp \
+	/usr/share/cmake/Modules/CMakePushCheckState.cmake \
+	/usr/share/cmake/Modules/CheckCXXSourceCompiles.cmake \
+	/usr/share/cmake/Modules/FindIntl.cmake \
+	/usr/share/cmake/Modules/FindPackageHandleStandardArgs.cmake \
+	/usr/share/cmake/Modules/FindPackageMessage.cmake \
+	/usr/share/cmake/Modules/GNUInstallDirs.cmake \
+	/usr/sbin/cmake

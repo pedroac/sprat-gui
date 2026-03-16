@@ -1,0 +1,1 @@
+4.0.7|/opt/qt6-wasm/emsdk/upstream/bin

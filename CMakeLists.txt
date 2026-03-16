@@ -1,6 +1,23 @@
 cmake_minimum_required(VERSION 3.16)
 project(sprat-gui LANGUAGES CXX)
+
+if(EMSCRIPTEN)
+    # Bypass the broken helper functions globally
+    macro(_qt_test_emscripten_version)
+    endmacro()
+    macro(__qt_internal_query_emsdk_version)
+    endmacro()
+    macro(__qt_internal_get_emroot_path_suffix_from_emsdk_env)
+    endmacro()
+    
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    # Early find_package to initialize WASM macros
+    list(APPEND CMAKE_MODULE_PATH "/opt/qt6-wasm/lib/cmake/Qt6")
+    find_package(Qt6 REQUIRED COMPONENTS Core)
+endif()
 include(CTest)
+include(FindPkgConfig)
+
 
 # === Project Version ===
 set(SPRAT_GUI_VERSION "v0.0.0")
@@ -22,6 +39,19 @@ add_definitions(-DSPRAT_CLI_VERSION="${SPRAT_CLI_VERSION}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(SPRAT_EMBEDDED_CLI "Link CLI tools directly into the GUI (required for WASM)" OFF)
+option(SPRAT_WASM_DEBUG "Enable extra Emscripten debug flags for WASM builds" OFF)
+option(SPRAT_WASM_JSPI "Enable JSPI (disable Asyncify) for WASM builds" ON)
+if(EMSCRIPTEN)
+    set(SPRAT_EMBEDDED_CLI ON)
+endif()
+
+if(SPRAT_EMBEDDED_CLI)
+    add_definitions(-DSPRAT_EMBEDDED_CLI)
+    set(SPRAT_CLI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
+    include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
+endif()
+
 # === Qt6 Configuration ===
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -32,7 +62,6 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 # 1. Try to find LibArchive in a specific 'cli' folder (sibling or subfolder)
-# We check common development and deployment locations.
 set(LIBARCHIVE_SEARCH_PATHS
     "${CMAKE_CURRENT_SOURCE_DIR}/cli"
     "${CMAKE_CURRENT_SOURCE_DIR}/../cli"
@@ -67,16 +96,27 @@ if(NOT LibArchive_FOUND)
     message(STATUS "LibArchive not found, using FetchContent to download it...")
     include(FetchContent)
     
-    # Try to find ZLIB as libarchive depends on it for ZIP decompression (deflate)
-    find_package(ZLIB QUIET)
-    if(NOT ZLIB_FOUND)
+    if(EMSCRIPTEN)
+        # Force a local zlib build so libarchive has headers/libs available.
+        set(ZLIB_FOUND FALSE)
+    else()
+        find_package(ZLIB QUIET)
+    endif()
+
+    if(ZLIB_FOUND)
+        set(ZLIB_LIBRARY ZLIB::ZLIB CACHE STRING "" FORCE)
+        set(ZLIB_LIBRARIES ZLIB::ZLIB CACHE STRING "" FORCE)
+    else()
         message(STATUS "ZLIB not found, downloading it via FetchContent...")
         FetchContent_Declare(
             zlib
             URL https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz
             URL_HASH SHA256=17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c
         )
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(zlib)
+        set(ZLIB_FOUND TRUE CACHE BOOL "" FORCE)
         set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR} CACHE PATH "" FORCE)
         if(TARGET zlibstatic)
             set(ZLIB_LIBRARY zlibstatic CACHE STRING "" FORCE)
@@ -84,6 +124,9 @@ if(NOT LibArchive_FOUND)
         elseif(TARGET zlib)
             set(ZLIB_LIBRARY zlib CACHE STRING "" FORCE)
             set(ZLIB_LIBRARIES zlib CACHE STRING "" FORCE)
+        else()
+            set(ZLIB_LIBRARY ${zlib_BINARY_DIR}/libz.a CACHE FILEPATH "" FORCE)
+            set(ZLIB_LIBRARIES ${zlib_BINARY_DIR}/libz.a CACHE STRING "" FORCE)
         endif()
     endif()
 
@@ -97,35 +140,33 @@ if(NOT LibArchive_FOUND)
     set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
     set(ENABLE_CPIO OFF CACHE BOOL "" FORCE)
     set(ENABLE_CAT OFF CACHE BOOL "" FORCE)
+    if(EMSCRIPTEN)
+        # Avoid building libarchive tools/shared libs in wasm (saves time and avoids emcc cache lock issues)
+        set(ENABLE_UNZIP OFF CACHE BOOL "" FORCE)
+        set(ENABLE_UNZIP_SHARED OFF CACHE BOOL "" FORCE)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    endif()
     set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
     set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
     set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
     
-    # Aggressively disable crypto and optional dependencies to avoid DLL hell on Wine/Windows
     set(CMAKE_DISABLE_FIND_PACKAGE_OpenSSL ON CACHE BOOL "" FORCE)
     set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
     set(ENABLE_CRYPTO OFF CACHE BOOL "" FORCE)
-    set(ENABLE_CNG OFF CACHE BOOL "" FORCE)
-    set(ENABLE_MBEDTLS OFF CACHE BOOL "" FORCE)
-    set(ENABLE_NETTLE OFF CACHE BOOL "" FORCE)
-    set(ENABLE_LIBB2 OFF CACHE BOOL "" FORCE)
     
     set(ENABLE_ZLIB ON CACHE BOOL "" FORCE)
     set(ENABLE_BZIP2 OFF CACHE BOOL "" FORCE)
     set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)
     set(ENABLE_EXPAT OFF CACHE BOOL "" FORCE)
-    set(ENABLE_LZ4 OFF CACHE BOOL "" FORCE)
-    set(ENABLE_LZMA OFF CACHE BOOL "" FORCE)
-    set(ENABLE_LZO OFF CACHE BOOL "" FORCE)
-    set(ENABLE_ZSTD OFF CACHE BOOL "" FORCE)
-    
-    set(ENABLE_TAR ON CACHE BOOL "" FORCE) # Support tar.gz/tar.bz2 etc.
     
     if(WIN32)
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     endif()
     FetchContent_MakeAvailable(libarchive)
+    set(LibArchive_FOUND TRUE)
+    set(LIBARCHIVE_INCLUDE_DIRS ${libarchive_SOURCE_DIR}/libarchive)
     if(TARGET archive_static)
+        set(LIBARCHIVE_LIBRARY archive_static CACHE INTERNAL "")
         add_library(LibArchive::LibArchive ALIAS archive_static)
         target_include_directories(archive_static INTERFACE ${libarchive_SOURCE_DIR}/libarchive)
         if(WIN32)
@@ -153,6 +194,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.TimelineEditor.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
     src/App/MainWindow/MainWindow.h
+    src/App/WasmFileDialog.cpp
+    src/App/WasmFileDialog.h
     src/App/MainWindow/FrameDetectionDialog.cpp
     src/App/MainWindow/FrameDetectionDialog.h
     src/App/MainWindow/FrameDetectionCanvas.cpp
@@ -237,13 +280,27 @@ set(PROJECT_SOURCES
     src/Core/models.h
 )
 
+if(SPRAT_EMBEDDED_CLI)
+    list(APPEND PROJECT_SOURCES
+        src/CLITools/EmbeddedCli.cpp
+        src/CLITools/EmbeddedCli.h
+    )
+    add_subdirectory("${SPRAT_CLI_SOURCE_DIR}" "sprat-cli-build")
+endif()
+
 # === Executable ===
 if(WIN32)
-    add_executable(sprat-gui WIN32 ${PROJECT_SOURCES})
+    qt_add_executable(sprat-gui WIN32 ${PROJECT_SOURCES})
 elseif(APPLE)
-    add_executable(sprat-gui MACOSX_BUNDLE ${PROJECT_SOURCES})
+    qt_add_executable(sprat-gui MACOSX_BUNDLE ${PROJECT_SOURCES})
 else()
-    add_executable(sprat-gui ${PROJECT_SOURCES})
+    qt_add_executable(sprat-gui ${PROJECT_SOURCES})
+endif()
+
+if(EMSCRIPTEN)
+    foreach(preload_file ${WASM_PRELOAD_FILES})
+        target_link_options(sprat-gui PRIVATE "--preload-file" "${preload_file}")
+    endforeach()
 endif()
 
 # === Include Directories ===
@@ -274,6 +331,50 @@ target_link_libraries(sprat-gui PRIVATE
     LibArchive::LibArchive
 )
 
+if(EMSCRIPTEN)
+    target_compile_options(sprat-gui PRIVATE "SHELL:--bind")
+    target_link_options(sprat-gui PRIVATE
+        "SHELL:--bind"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "SHELL:--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli/spratprofiles.cfg@/spratprofiles.cfg"
+        "SHELL:--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli/transforms@/transforms"
+        "SHELL:--js-library=${CMAKE_CURRENT_SOURCE_DIR}/wasm/mktime_fix.js"
+    )
+    if(SPRAT_WASM_JSPI)
+        target_link_options(sprat-gui PRIVATE "SHELL:-sJSPI")
+    else()
+        target_link_options(sprat-gui PRIVATE
+            "-sASYNCIFY"
+        )
+    endif()
+    # Let Qt's wasm macros append these to its default exported methods.
+    set_property(TARGET sprat-gui PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ccall,cwrap")
+
+    # Explicitly include embind/emval JS libraries (some toolchains don't auto-add them).
+    get_filename_component(EMSCRIPTEN_ROOT_PATH "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(EMSCRIPTEN_JS_LIB_DIR "${EMSCRIPTEN_ROOT_PATH}/src/lib")
+    target_link_options(sprat-gui PRIVATE
+        "SHELL:--js-library=${EMSCRIPTEN_JS_LIB_DIR}/libemval.js"
+        "SHELL:--js-library=${EMSCRIPTEN_JS_LIB_DIR}/libembind.js"
+    )
+
+    if(SPRAT_WASM_DEBUG)
+        target_compile_options(sprat-gui PRIVATE "-g")
+        target_link_options(sprat-gui PRIVATE
+            "-sASSERTIONS=2"
+            "-sSTACK_OVERFLOW_CHECK=2"
+            "-sSAFE_HEAP=1"
+            "-sNO_DISABLE_EXCEPTION_CATCHING=1"
+            "-sEXIT_RUNTIME=0"
+        )
+    endif()
+endif()
+
+if(SPRAT_EMBEDDED_CLI)
+    target_link_libraries(sprat-gui PRIVATE spratcore)
+endif()
+
+
 # === Translations ===
 set(TS_FILES
     i18n/sprat-gui_en.ts
@@ -288,7 +389,6 @@ else()
 endif()
 
 # === Testing ===
-set(BUILD_TESTING ON CACHE BOOL "Enable testing" FORCE)
 
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)

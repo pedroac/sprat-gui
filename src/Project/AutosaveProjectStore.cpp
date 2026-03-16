@@ -30,6 +30,11 @@ bool AutosaveProjectStore::load(const QString& path, QJsonObject& root, QString&
     return true;
 }
 
+#ifdef Q_OS_WASM
+#include <emscripten.h>
+extern "C" { void sync_idbfs(); }
+#endif
+
 bool AutosaveProjectStore::save(const QString& path, const QJsonObject& root, QString& error) {
     const QFileInfo fileInfo(path);
     const QString parentDir = fileInfo.path();
@@ -51,5 +56,9 @@ bool AutosaveProjectStore::save(const QString& path, const QJsonObject& root, QS
         return false;
     }
     file.close();
+
+#ifdef Q_OS_WASM
+    sync_idbfs();
+#endif
     return true;
 }

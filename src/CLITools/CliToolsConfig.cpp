@@ -66,6 +66,11 @@ CliPaths CliToolsConfig::loadCliPaths() {
     return out;
 }
 
+#ifdef Q_OS_WASM
+#include <emscripten.h>
+extern "C" { void sync_idbfs(); }
+#endif
+
 void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths& cliPaths) {
     QString pathToConfig = configPath();
     QDir().mkpath(QFileInfo(pathToConfig).path());
@@ -78,11 +83,20 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/detection_selected_color", settings.detectionSelectedColor.name(QColor::HexArgb));
     qsettings.setValue("settings/border_style", static_cast<int>(settings.borderStyle));
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
+    qsettings.sync();
+
+#ifdef Q_OS_WASM
+    sync_idbfs();
+#endif
 }
 
 #include <QProcess>
 
 QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
+#ifdef SPRAT_EMBEDDED_CLI
+    Q_UNUSED(binaryPath);
+    return SPRAT_CLI_VERSION;
+#else
     if (binaryPath.isEmpty()) {
         return QString();
     }
@@ -98,6 +112,7 @@ QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
         return parts.last();
     }
     return QString();
+#endif
 }
 
 QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDir) {

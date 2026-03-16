@@ -361,6 +361,7 @@ struct AppSettings {
      * Default: Qt::DashLine
      */
     Qt::PenStyle borderStyle = Qt::DashLine;
+
 };
 
 /**

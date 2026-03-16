@@ -1,6 +1,11 @@
 #include "ProjectSaveService.h"
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
+#include "ArchiveExtractor.h"
+
+#ifdef SPRAT_EMBEDDED_CLI
+#include "EmbeddedCli.h"
+#endif
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -63,33 +68,6 @@ bool ProjectSaveService::save(
         } else {
             config.destination += ".zip";
             isZip = true;
-        }
-    }
-
-    QString zipBin;
-    bool useTar = false;
-    bool usePowerShell = false;
-    if (isZip) {
-        zipBin = QStandardPaths::findExecutable("zip");
-        if (zipBin.isEmpty()) {
-            QString tarBin = QStandardPaths::findExecutable("tar");
-            if (!tarBin.isEmpty()) {
-                zipBin = tarBin;
-                useTar = true;
-            } else {
-#ifdef Q_OS_WIN
-                zipBin = QStandardPaths::findExecutable("powershell");
-                if (!zipBin.isEmpty()) {
-                    usePowerShell = true;
-                } else {
-                    error = trPS("Neither 'zip', 'tar' nor 'powershell' was found. Cannot create zip archive.");
-                    return false;
-                }
-#else
-                error = trPS("The 'zip' or 'tar' command line tool is required to save .zip projects but was not found.");
-                return false;
-#endif
-            }
         }
     }
 
@@ -281,6 +259,28 @@ bool ProjectSaveService::save(
     }
 
     auto runProcess = [&](const QString& tool, const QStringList& args, const QString& step, const QByteArray* inputData = nullptr, QByteArray* outputData = nullptr) -> bool {
+#ifdef SPRAT_EMBEDDED_CLI
+        QString toolName = QFileInfo(tool).baseName();
+        if (toolName.startsWith("sprat")) {
+            // Use EmbeddedCli for sprat-* tools
+            CliResult embeddedResult = EmbeddedCli::run(
+                toolName,
+                args,
+                inputData ? *inputData : QByteArray());
+            
+            if (outputData) *outputData = embeddedResult.stdOut;
+            if (embeddedResult.exitCode != 0) {
+                const QString stderrText = QString::fromUtf8(embeddedResult.stdErr).trimmed();
+                if (!stderrText.isEmpty()) {
+                    error = stderrText;
+                } else {
+                    error = trPS("Command failed: %1").arg(step);
+                }
+                return false;
+            }
+            return true;
+        }
+#endif
         if (!runProcessFunc) return false;
         if (!runProcessFunc(tool, args, step, inputData, outputData)) {
             // Error handling is complex here since we don't have access to process.readAllStandardError() directly,
@@ -495,36 +495,8 @@ bool ProjectSaveService::save(
         QDir().mkpath(QFileInfo(absDest).path());
         QFile::remove(absDest);
 
-        if (useTar) {
-            // tar -acvf archive.zip -C workingPath .
-            QStringList tarArgs;
-            tarArgs << "-acvf" << absDest << "-C" << workingPath << ".";
-            if (!runProcess(zipBin, tarArgs, trPS("Failed to create zip archive via tar"))) {
-                error = trPS("Failed to create zip archive via tar");
-                return false;
-            }
-        } else if (usePowerShell) {
-            // Need to change working dir for Compress-Archive to work as expected with '*'
-            // This is problematic in a background thread if using a shared process.
-            // But runTool in MainWindow creates its own QProcess.
-            // We'll just assume it works or fix it later.
-            QString script = QString("Set-Location -Path '%1'; Compress-Archive -Path * -DestinationPath '%2' -Force").arg(workingPath, absDest);
-            if (!runProcess(zipBin, QStringList() << "-Command" << script, trPS("Failed to create zip archive via PowerShell"))) {
-                error = trPS("Failed to create zip archive via PowerShell");
-                return false;
-            }
-        } else {
-            // For zip tool, we can use -j or change dir.
-            QStringList zipArgs;
-            zipArgs << "-r" << absDest << ".";
-            // We need to run this with working directory set.
-            // Our runProcessFunc doesn't support setting working dir.
-            // Since we can't easily change working dir here without changing runProcessFunc,
-            // let's try to use tar if possible or hope zip works from current dir (unlikely for recursive).
-            if (!runProcess(zipBin, zipArgs, trPS("Failed to create zip archive"))) {
-                error = trPS("Failed to create zip archive");
-                return false;
-            }
+        if (!ArchiveExtractor::createZip(workingPath, absDest, error)) {
+            return false;
         }
     }
 

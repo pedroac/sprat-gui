@@ -6,6 +6,9 @@
 #include "ImageDiscoveryService.h"
 #include "ImageFolderSelectionDialog.h"
 #include "ProjectFileLoader.h"
+#ifdef Q_OS_WASM
+#include "WasmFileDialog.h"
+#endif
 #include "ProjectPayloadCodec.h"
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
@@ -36,6 +39,10 @@
 #include <QStringList>
 #include <QtGlobal>
 #include <algorithm>
+
+#ifdef Q_OS_WASM
+#include <emscripten.h>
+#endif
 
 namespace {
 void syncSourceResolutionPresetSelection(QComboBox* combo, int width, int height) {
@@ -116,6 +123,10 @@ void MainWindow::loadAutosavedProject() {
 }
 
 void MainWindow::onLoadProject() {
+#ifdef Q_OS_WASM
+    wasmOpenFileDialog(false);
+    return;
+#endif
     QString filter = tr("All Supported Files (*.json *.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz *.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds);;"
                         "Project Files (*.json);;"
                         "Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz);;"
@@ -197,6 +208,31 @@ void MainWindow::onProjectSaveFinished() {
 
     if (result.success) {
         m_statusLabel->setText(tr("Saved to ") + result.savedDestination);
+#ifdef Q_OS_WASM
+        // Trigger browser download for the saved file
+        QFile file(result.savedDestination);
+        if (file.open(QIODevice::ReadOnly)) {
+            QByteArray content = file.readAll();
+            QString fileName = QFileInfo(result.savedDestination).fileName();
+            
+            EM_ASM({
+                var content = Qt.copyToHeap($0, $1);
+                var fileName = UTF8ToString($2);
+                var blob = new Blob([content], {type: "application/octet-stream"});
+                var url = window.URL.createObjectURL(blob);
+                var a = document.createElement("a");
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                Qt.freeFromHeap(content);
+            }, content.constData(), content.size(), fileName.toUtf8().constData());
+            
+            file.close();
+        }
+#endif
         QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
     } else {
         m_statusLabel->setText(tr("Save failed"));
@@ -471,12 +507,20 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         return result;
     };
 
+#ifdef Q_OS_WASM
+    // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
+    processZipDiscoveryResult(zipTask());
+#else
     m_zipDiscoveryWatcher.setFuture(QtConcurrent::run(zipTask));
+#endif
     return true;
 }
 
 void MainWindow::onZipDiscoveryFinished() {
-    ZipDiscoveryResult result = m_zipDiscoveryWatcher.result();
+    processZipDiscoveryResult(m_zipDiscoveryWatcher.result());
+}
+
+void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     if (result.canceled) {
         setLoading(false);
         m_statusLabel->setText(tr("ZIP extraction canceled"));

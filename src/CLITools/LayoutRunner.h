@@ -44,7 +44,9 @@ signals:
     void errorOccurred(const QString& description);
 
 private:
+#ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
+#endif
     QMutex* m_mutex = nullptr;
     LayoutRunConfig m_currentConfig;
     QByteArray m_stdoutBuffer;
