@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QTimer>
 #include <QtGlobal>
+#include "ViewUtils.h"
 
 ZoomableGraphicsView::ZoomableGraphicsView(QWidget* parent) : QGraphicsView(parent) {
     setRenderHint(QPainter::Antialiasing, false);
@@ -150,14 +151,30 @@ void ZoomableGraphicsView::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
-    static bool inResize = false;
-    if (inResize) return;
-    inResize = true;
+    // In WASM, directly calling the base class or doing work here can cause
+    // a crash if a resize event arrives while the app is suspended.
+    // Instead, we do NOTHING but start a debounced timer. The timer's
+    // callback will do the actual work when it's safe.
+    m_pendingResizeSize = event->size();
+    m_pendingResizeOldSize = event->oldSize();
 
-    QGraphicsView::resizeEvent(event);
-    if (!m_isZoomManual) {
-        QTimer::singleShot(0, this, &ZoomableGraphicsView::initialFit);
+    if (!m_resizeTimer) {
+        m_resizeTimer = new QTimer(this);
+        m_resizeTimer->setSingleShot(true);
+        m_resizeTimer->setInterval(200); // Debounce interval
+        connect(m_resizeTimer, &QTimer::timeout, this, [this]() {
+#ifdef Q_OS_WASM
+            if (jsIsAsyncBusy() || jsHaveJspi()) {
+                m_resizeTimer->start(); // Try again if busy
+                return;
+            }
+#endif
+            QResizeEvent dummyEvent(m_pendingResizeSize, m_pendingResizeOldSize);
+            QGraphicsView::resizeEvent(&dummyEvent); // Call base class implementation
+            if (!m_isZoomManual) {
+                initialFit();
+            }
+        });
     }
-
-    inResize = false;
+    m_resizeTimer->start();
 }

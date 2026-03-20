@@ -138,14 +138,33 @@ void MainWindow::onLoadProject() {
 }
 
 void MainWindow::onSaveClicked() {
-    QString defaultPath = QDir::currentPath() + "/export";
+    QString defaultPath;
+#ifdef Q_OS_WASM
+    QString baseName = m_session ? QFileInfo(m_session->currentFolder).fileName().trimmed() : QString();
+    if (baseName.isEmpty()) {
+        baseName = "sprat-export";
+    }
+    defaultPath = QDir::temp().filePath(baseName + ".zip");
+    SaveConfig dialogConfig = m_lastSaveConfig;
+    dialogConfig.destination = defaultPath;
+    SaveDialog dlg(defaultPath,
+                   configuredProfiles(),
+                   m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
+                   dialogConfig,
+                   this,
+                   false);
+#else
+    defaultPath = QDir::currentPath() + "/export";
     if (!m_session->currentFolder.isEmpty()) {
         defaultPath = QFileInfo(m_session->currentFolder).dir().filePath("export");
     }
-
     SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(), m_lastSaveConfig, this);
+#endif
     const int result = dlg.exec();
     m_lastSaveConfig = dlg.getConfig();
+#ifdef Q_OS_WASM
+    m_lastSaveConfig.destination = defaultPath;
+#endif
     if (result != QDialog::Accepted) {
         return;
     }
@@ -167,11 +186,44 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         return false;
     }
 
+    m_isCanceled = false;
     m_loadingUiMessage = tr("Saving...");
     m_statusLabel->setText(tr("Saving..."));
     setLoading(true);
 
-    auto saveTask = [this, config]() {
+    auto setStatus = [this](const QString& status) {
+#ifdef Q_OS_WASM
+        m_loadingUiMessage = status;
+        m_statusLabel->setText(status);
+        if (m_cliInstallOverlayLabel) {
+            m_cliInstallOverlayLabel->setText(status);
+        }
+        if (m_welcomeLabel && (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty())) {
+            m_welcomeLabel->setText(status);
+        }
+        QApplication::processEvents();
+#else
+        QMetaObject::invokeMethod(this, [this, status]() {
+            m_loadingUiMessage = status;
+            m_statusLabel->setText(status);
+            if (m_cliInstallOverlayLabel) {
+                m_cliInstallOverlayLabel->setText(status);
+            }
+            if (m_welcomeLabel && (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty())) {
+                m_welcomeLabel->setText(status);
+            }
+        }, Qt::QueuedConnection);
+#endif
+    };
+
+    auto shouldCancel = [this]() {
+#ifdef Q_OS_WASM
+        QApplication::processEvents();
+#endif
+        return m_isCanceled.load();
+    };
+
+    auto saveTask = [this, config, setStatus, shouldCancel]() {
         ProjectSaveResult result;
         
         auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& step, const QByteArray* input, QByteArray* output) {
@@ -192,22 +244,45 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
             result.savedDestination,
             result.error,
             nullptr, // setLoading handled by finished slot
-            nullptr, // setStatus handled by finished slot
+            setStatus,
+            shouldCancel,
             runToolBound
         );
+        if (!result.success && shouldCancel()) {
+            result.canceled = true;
+        }
         return result;
     };
 
+    #ifdef Q_OS_WASM
+    QTimer::singleShot(0, this, [this, saveTask]() {
+        ProjectSaveResult result = saveTask();
+        handleProjectSaveResult(result);
+    });
+    #else
     m_projectSaveWatcher.setFuture(QtConcurrent::run(saveTask));
+    #endif
     return true;
 }
 
 void MainWindow::onProjectSaveFinished() {
-    ProjectSaveResult result = m_projectSaveWatcher.result();
+    handleProjectSaveResult(m_projectSaveWatcher.result());
+}
+
+void MainWindow::handleProjectSaveResult(const ProjectSaveResult& result) {
     setLoading(false);
 
+    if (result.canceled) {
+        m_statusLabel->setText(tr("Save canceled"));
+        return;
+    }
+
     if (result.success) {
+#ifdef Q_OS_WASM
+        m_statusLabel->setText(tr("Preparing download..."));
+#else
         m_statusLabel->setText(tr("Saved to ") + result.savedDestination);
+#endif
 #ifdef Q_OS_WASM
         // Trigger browser download for the saved file
         QFile file(result.savedDestination);
@@ -216,7 +291,7 @@ void MainWindow::onProjectSaveFinished() {
             QString fileName = QFileInfo(result.savedDestination).fileName();
             
             EM_ASM({
-                var content = Qt.copyToHeap($0, $1);
+                var content = HEAPU8.slice($0, $0 + $1);
                 var fileName = UTF8ToString($2);
                 var blob = new Blob([content], {type: "application/octet-stream"});
                 var url = window.URL.createObjectURL(blob);
@@ -227,13 +302,20 @@ void MainWindow::onProjectSaveFinished() {
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-                Qt.freeFromHeap(content);
             }, content.constData(), content.size(), fileName.toUtf8().constData());
             
             file.close();
         }
+        if (!result.savedDestination.isEmpty()) {
+            QFile::remove(result.savedDestination);
+        }
+        m_statusLabel->setText(tr("Download started"));
 #endif
+#ifdef Q_OS_WASM
+        QMessageBox::information(this, tr("Saved"), tr("Download started."));
+#else
         QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+#endif
     } else {
         m_statusLabel->setText(tr("Save failed"));
         QMessageBox::critical(this, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);

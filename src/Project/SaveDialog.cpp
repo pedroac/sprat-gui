@@ -29,8 +29,10 @@ SaveDialog::SaveDialog(const QString& defaultPath,
                        const QVector<SpratProfile>& availableProfiles,
                        const QString& selectedProfileName,
                        const SaveConfig& lastConfig,
-                       QWidget* parent)
-    : QDialog(parent) {
+                       QWidget* parent,
+                       bool showDestination)
+    : QDialog(parent),
+      m_showDestination(showDestination) {
     setupUi();
     
     if (!lastConfig.destination.isEmpty()) {
@@ -88,6 +90,9 @@ void SaveDialog::setupUi() {
     destRow->addWidget(browseFileBtn);
     
     destLayout->addLayout(destRow);
+    if (!m_showDestination) {
+        destGroup->setVisible(false);
+    }
     mainLayout->addWidget(destGroup);
     
     // Options

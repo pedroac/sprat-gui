@@ -24,7 +24,15 @@
 #include <QtConcurrent>
 #include <QVBoxLayout>
 
+#include "ViewUtils.h"
+
 void MainWindow::checkCliTools() {
+#ifdef Q_OS_WASM
+    if (jsIsAsyncBusy()) {
+        QTimer::singleShot(100, this, &MainWindow::checkCliTools);
+        return;
+    }
+#endif
     static bool inCheck = false;
     if (inCheck) return;
     inCheck = true;
@@ -92,11 +100,11 @@ void MainWindow::checkCliTools() {
 
 bool MainWindow::resolveCliBinaries(QStringList& missing) {
 #ifdef SPRAT_EMBEDDED_CLI
-    m_spratLayoutBin = "spratlayout";
-    m_spratPackBin = "spratpack";
-    m_spratConvertBin = "spratconvert";
-    m_spratFramesBin = "spratframes";
-    m_spratUnpackBin = "spratunpack";
+    m_spratLayoutBin = "/spratlayout";
+    m_spratPackBin = "/spratpack";
+    m_spratConvertBin = "/spratconvert";
+    m_spratFramesBin = "/spratframes";
+    m_spratUnpackBin = "/spratunpack";
     return true;
 #else
     m_cliPaths.layoutBinary = CliToolsConfig::resolveBinary("spratlayout", m_cliPaths.baseDir);

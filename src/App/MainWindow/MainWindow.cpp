@@ -66,6 +66,8 @@ MainWindow* MainWindow::s_wasmInstance = nullptr;
  * 
  * Initializes the UI, processes, and timers.
  */
+#include "ViewUtils.h"
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_session = new ProjectSession(this);
     m_settings = CliToolsConfig::loadAppSettings();
@@ -75,7 +77,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 #ifdef Q_OS_WASM
     s_wasmInstance = this;
     setAcceptDrops(false);
-    wasmInstallDropHandlers();
+    QTimer::singleShot(500, []() { wasmInstallDropHandlers(); });
 #else
     setAcceptDrops(true);
 #endif
@@ -96,7 +98,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_cliToolInstaller, &CliToolInstaller::installFinished, this, &MainWindow::onInstallFinished);
     connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
     connect(m_cliToolInstaller, &CliToolInstaller::downloadProgress, this, &MainWindow::onDownloadProgress);
-    QTimer::singleShot(100, this, &MainWindow::checkCliTools);
+    QTimer::singleShot(1000, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
     
@@ -121,10 +123,19 @@ MainWindow* MainWindow::wasmInstance() {
     return s_wasmInstance;
 }
 
-void MainWindow::onWasmFilePicked(const QString& path, bool isFolder) {
+void MainWindow::onWasmFilePicked(const QString& path, int mode) {
     if (path.isEmpty()) {
         return;
     }
+#ifdef Q_OS_WASM
+    if (jsIsAsyncBusy()) {
+        QTimer::singleShot(100, [path, mode]() {
+            MainWindow::wasmInstance()->onWasmFilePicked(path, mode);
+        });
+        return;
+    }
+#endif
+    bool isFolder = (mode == 1);
     qInfo() << "[WASM] onWasmFilePicked path=" << path << "isFolder=" << isFolder;
     if (isFolder) {
         if (m_animCanvas) {
@@ -177,24 +188,32 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
-    static bool inResize = false;
-    if (inResize) return;
-    inResize = true;
+    // In WASM, directly calling the base class or doing work here can cause
+    // a crash if a resize event arrives while the app is suspended.
+    // Instead, we do NOTHING but start a debounced timer. The timer's
+    // callback will do the actual work when it's safe.
+    m_pendingResizeSize = event->size();
+    m_pendingResizeOldSize = event->oldSize();
 
-    QMainWindow::resizeEvent(event);
-    
+    if (!m_resizeDebounceTimer) {
+        m_resizeDebounceTimer = new QTimer(this);
+        m_resizeDebounceTimer->setSingleShot(true);
+        m_resizeDebounceTimer->setInterval(200);
+        connect(m_resizeDebounceTimer, &QTimer::timeout, this, [this]() {
 #ifdef Q_OS_WASM
-    // Defer overlay update to ensure it happens after the main resize is done
-    QTimer::singleShot(0, this, [this]() {
-        updateCliOverlayGeometry();
-    });
-#else
-    updateCliOverlayGeometry();
+            if (jsIsAsyncBusy() || jsHaveJspi()) { // On JSPI, we must be extra careful, though jsIsAsyncBusy should handle it
+                m_resizeDebounceTimer->start(); // Try again if busy
+                return;
+            }
 #endif
-
-    inResize = false;
+            QResizeEvent dummyEvent(m_pendingResizeSize, m_pendingResizeOldSize);
+            QMainWindow::resizeEvent(&dummyEvent);
+            updateCliOverlayGeometry();
+            handleAnimPreviewResize();
+        });
+    }
+    m_resizeDebounceTimer->start();
 }
-
 /**
  * @brief Parses the output from spratlayout into a LayoutModel.
  */
@@ -513,6 +532,12 @@ void MainWindow::applySettings() {
 }
 
 bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
+#ifdef Q_OS_WASM
+    if (jsIsAsyncBusy()) {
+        qWarning() << "[WASM] runTool called while Asyncify is busy! Tool:" << tool;
+        return false;
+    }
+#endif
     QMutexLocker locker(&m_toolMutex);
 #ifdef SPRAT_EMBEDDED_CLI
     // Convert tool path to command name

@@ -84,7 +84,7 @@ public:
 
 #ifdef Q_OS_WASM
     static MainWindow* wasmInstance();
-    void onWasmFilePicked(const QString& path, bool isFolder);
+    void onWasmFilePicked(const QString& path, int mode);
 #endif
 
 private slots:
@@ -373,6 +373,9 @@ private slots:
      */
     void onAnimTimerTimeout();
 
+private:
+    struct ProjectSaveResult;
+
 private slots:
     // === Asynchronous Loading Slots ===
     void onFolderDiscoveryFinished();
@@ -382,6 +385,7 @@ private slots:
     void onTarExtractionFinished();
     void onFrameExtractionFinished();
     void onProjectSaveFinished();
+    void handleProjectSaveResult(const ProjectSaveResult& result);
 
 protected:
     // === Event Handling ===
@@ -845,6 +849,7 @@ public:
      */
     bool runTool(const QString& tool, const QStringList& args, const QByteArray* input = nullptr, QByteArray* output = nullptr, QByteArray* error = nullptr);
 
+private:
     // === UI Components ===
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
@@ -988,6 +993,7 @@ public:
         QString savedDestination;
         QString error;
         bool success;
+        bool canceled = false;
     };
     QFutureWatcher<ProjectSaveResult> m_projectSaveWatcher;
 
@@ -997,6 +1003,10 @@ public:
     bool m_layoutFailureDialogShown = false;
     bool m_retryWithoutTrimOnFailure = false;
     QTimer* m_autosaveTimer = nullptr;
+    QTimer* m_resizeDebounceTimer = nullptr;
+    QSize m_pendingResizeSize;
+    QSize m_pendingResizeOldSize;
+    bool m_inResize = false;
     bool m_isRestoringProject = false;
 
 #ifdef Q_OS_WASM

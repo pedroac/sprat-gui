@@ -24,6 +24,7 @@ public:
         QString& error,
         const std::function<void(bool)>& setLoading = nullptr,
         const std::function<void(const QString&)>& setStatus = nullptr,
+        const std::function<bool()>& shouldCancel = nullptr,
         const std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)>& runProcessFunc = nullptr
     );
 };

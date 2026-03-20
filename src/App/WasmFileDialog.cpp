@@ -8,6 +8,64 @@
 
 namespace {
 EM_JS(void, sprat_open_file_dialog, (int mode), {
+    console.log('[sprat] open file dialog mode=', mode);
+    function ensureUploadOverlay() {
+        if (Module.spratUploadOverlay) return Module.spratUploadOverlay;
+        var overlay = document.createElement('div');
+        overlay.id = 'sprat-upload-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.left = '0';
+        overlay.style.top = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.display = 'none';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.background = 'rgba(20, 20, 20, 0.55)';
+        overlay.style.color = '#fff';
+        overlay.style.fontFamily = 'system-ui, sans-serif';
+        overlay.style.fontSize = '18px';
+        overlay.style.zIndex = '10000';
+        overlay.style.flexDirection = 'column';
+        overlay.style.textAlign = 'center';
+        var text = document.createElement('div');
+        text.textContent = 'Uploading files...';
+        text.style.marginBottom = '10px';
+        var bar = document.createElement('div');
+        bar.style.width = '60%';
+        bar.style.maxWidth = '420px';
+        bar.style.height = '8px';
+        bar.style.background = 'rgba(255,255,255,0.2)';
+        bar.style.borderRadius = '4px';
+        var fill = document.createElement('div');
+        fill.style.height = '100%';
+        fill.style.width = '0%';
+        fill.style.background = '#41cd52';
+        fill.style.borderRadius = '4px';
+        bar.appendChild(fill);
+        overlay.appendChild(text);
+        overlay.appendChild(bar);
+        document.body.appendChild(overlay);
+        Module.spratUploadOverlay = overlay;
+        Module.spratUploadOverlayText = text;
+        Module.spratUploadOverlayFill = fill;
+        return overlay;
+    }
+    function showUploadOverlay(message, progress) {
+        var overlay = ensureUploadOverlay();
+        if (Module.spratUploadOverlayText) {
+            Module.spratUploadOverlayText.textContent = message;
+        }
+        if (Module.spratUploadOverlayFill && typeof progress === 'number') {
+            Module.spratUploadOverlayFill.style.width = Math.max(0, Math.min(100, progress)) + '%';
+        }
+        overlay.style.display = 'flex';
+    }
+    function hideUploadOverlay() {
+        if (Module.spratUploadOverlay) {
+            Module.spratUploadOverlay.style.display = 'none';
+        }
+    }
     var input = document.createElement('input');
     input.type = 'file';
     if (mode === 1) {
@@ -18,8 +76,11 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
     input.onchange = function () {
         var files = input.files;
         if (!files || files.length === 0) {
+            console.warn('[sprat] File picker returned no files.');
             return;
         }
+        console.log('[sprat] File picker selected', files.length, 'files');
+        showUploadOverlay('Preparing files... (0/' + files.length + ')', 0);
         var base = '/home/webuser/uploads';
         FS.mkdirTree(base);
         var firstRoot = null;
@@ -41,15 +102,47 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
                 } else {
                     finalPath = base + '/' + files[0].name;
                 }
-                // Defer into a fresh task so we don't call into WASM while an async JS
-                // operation is still in flight (Asyncify allows only one at a time).
-                setTimeout(function() {
+                
+                console.log('[sprat] All files read. Final path', finalPath);
+                showUploadOverlay('Finalizing...', 100);
+                var waitForAsyncifyIdle = function(onReady) {
+                    var asyncify = (typeof Asyncify !== 'undefined' ? Asyncify : (typeof Module !== 'undefined' ? Module['Asyncify'] : null));
+                    if (!asyncify || !asyncify.currData) {
+                        onReady();
+                        return;
+                    }
+                    var state = asyncify.state;
+                    var normal = asyncify.State ? asyncify.State.Normal : 0;
+                    if (state !== undefined && state === normal) {
+                        onReady();
+                        return;
+                    }
+                    showUploadOverlay('Waiting for app to be ready...', 100);
+                    if (typeof asyncify.whenDone === 'function' && !asyncify.asyncPromiseHandlers) {
+                        asyncify.whenDone().then(onReady).catch(function () {
+                            setTimeout(function () { waitForAsyncifyIdle(onReady); }, 100);
+                        });
+                        return;
+                    }
+                    setTimeout(function () { waitForAsyncifyIdle(onReady); }, 100);
+                };
+                var callIntoWasm = function() {
+                    if (!Module || typeof Module.ccall !== 'function') {
+                        console.error('[sprat] Module.ccall not available; cannot notify wasm of picked files.');
+                        hideUploadOverlay();
+                        return;
+                    }
+                    console.log('[sprat] Calling wasm file picked', finalPath, mode);
                     Module.ccall('sprat_on_file_picked', null, ['string', 'number'], [finalPath, mode]);
-                }, 0);
+                    hideUploadOverlay();
+                };
+                setTimeout(function () { waitForAsyncifyIdle(callIntoWasm); }, 0);
                 return;
             }
             var f = files[idx++];
             var rel = f.webkitRelativePath || f.name;
+            console.log('[sprat] Reading file', idx + '/' + files.length, rel, f.size);
+            showUploadOverlay('Uploading files... (' + idx + '/' + files.length + ')', (idx / files.length) * 100);
             var dest = base + '/' + (mode === 1 ? rel : f.name);
             var dir = dest.substring(0, dest.lastIndexOf('/'));
             if (dir) {
@@ -57,11 +150,23 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
             }
             var reader = new FileReader();
             reader.onload = function () {
+                console.log('[sprat] Read complete', rel, f.size);
                 var data = new Uint8Array(reader.result);
-                FS.writeFile(dest, data);
+                try {
+                    FS.writeFile(dest, data);
+                } catch (e) {
+                    console.error('[sprat] FS.writeFile failed for', dest, e);
+                }
                 next();
             };
             reader.onerror = function () {
+                console.warn('[sprat] Failed to read file:', f && f.name ? f.name : rel);
+                showUploadOverlay('Uploading files... (' + idx + '/' + files.length + ')', (idx / files.length) * 100);
+                next();
+            };
+            reader.onabort = function () {
+                console.warn('[sprat] File read aborted:', f && f.name ? f.name : rel);
+                showUploadOverlay('Uploading files... (' + idx + '/' + files.length + ')', (idx / files.length) * 100);
                 next();
             };
             reader.readAsArrayBuffer(f);
@@ -155,7 +260,7 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             }
             if (entry.isDirectory) {
                 var reader = entry.createReader();
-                var prefix = item.relPath + (entry.name ? entry.name + '/' : '');
+                var prefix = item.relPath + (entry.name ? entry.name + '/' : "");
                 function readBatch() {
                     reader.readEntries(function (entries) {
                         if (!entries || entries.length === 0) {
@@ -214,6 +319,64 @@ EM_JS(void, sprat_install_drop_handlers, (), {
         document.body.appendChild(overlay);
         Module.spratDropOverlay = overlay;
         return overlay;
+    }
+
+    function ensureUploadOverlay() {
+        if (Module.spratUploadOverlay) return Module.spratUploadOverlay;
+        var overlay = document.createElement('div');
+        overlay.id = 'sprat-upload-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.left = '0';
+        overlay.style.top = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.display = 'none';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.background = 'rgba(20, 20, 20, 0.55)';
+        overlay.style.color = '#fff';
+        overlay.style.fontFamily = 'system-ui, sans-serif';
+        overlay.style.fontSize = '18px';
+        overlay.style.zIndex = '10000';
+        overlay.style.flexDirection = 'column';
+        overlay.style.textAlign = 'center';
+        var text = document.createElement('div');
+        text.textContent = 'Uploading files...';
+        text.style.marginBottom = '10px';
+        var bar = document.createElement('div');
+        bar.style.width = '60%';
+        bar.style.maxWidth = '420px';
+        bar.style.height = '8px';
+        bar.style.background = 'rgba(255,255,255,0.2)';
+        bar.style.borderRadius = '4px';
+        var fill = document.createElement('div');
+        fill.style.height = '100%';
+        fill.style.width = '0%';
+        fill.style.background = '#41cd52';
+        fill.style.borderRadius = '4px';
+        bar.appendChild(fill);
+        overlay.appendChild(text);
+        overlay.appendChild(bar);
+        document.body.appendChild(overlay);
+        Module.spratUploadOverlay = overlay;
+        Module.spratUploadOverlayText = text;
+        Module.spratUploadOverlayFill = fill;
+        return overlay;
+    }
+    function showUploadOverlay(message, progress) {
+        var overlay = ensureUploadOverlay();
+        if (Module.spratUploadOverlayText) {
+            Module.spratUploadOverlayText.textContent = message;
+        }
+        if (Module.spratUploadOverlayFill && typeof progress === 'number') {
+            Module.spratUploadOverlayFill.style.width = Math.max(0, Math.min(100, progress)) + '%';
+        }
+        overlay.style.display = 'flex';
+    }
+    function hideUploadOverlay() {
+        if (Module.spratUploadOverlay) {
+            Module.spratUploadOverlay.style.display = 'none';
+        }
     }
 
     function showToast(message) {
@@ -284,6 +447,7 @@ EM_JS(void, sprat_install_drop_handlers, (), {
         hideOverlay();
         if (Module.spratDropInProgress) return;
         Module.spratDropInProgress = true;
+        console.log('[sprat] Drop received');
         collectFiles(e.dataTransfer, function (files) {
             if (!files.length) {
                 if (!supportsDirectoryDrop) {
@@ -292,6 +456,8 @@ EM_JS(void, sprat_install_drop_handlers, (), {
                 Module.spratDropInProgress = false;
                 return;
             }
+            console.log('[sprat] Drop collected', files.length, 'files');
+            showUploadOverlay('Preparing files... (0/' + files.length + ')', 0);
             var base = '/home/webuser/uploads';
             var dropRoot = base + '/drop-' + Date.now();
             FS.mkdirTree(dropRoot);
@@ -319,15 +485,49 @@ EM_JS(void, sprat_install_drop_handlers, (), {
                     } else if (hasDirectories && firstRoot) {
                         finalPath = dropRoot + '/' + firstRoot;
                     }
-                    setTimeout(function() {
+                    
+                    console.log('[sprat] Drop all files read. Final path', finalPath);
+                    showUploadOverlay('Finalizing...', 100);
+                    var waitForAsyncifyIdle = function(onReady) {
+                        var asyncify = (typeof Asyncify !== 'undefined' ? Asyncify : (typeof Module !== 'undefined' ? Module['Asyncify'] : null));
+                        if (!asyncify || !asyncify.currData) {
+                            onReady();
+                            return;
+                        }
+                        var state = asyncify.state;
+                        var normal = asyncify.State ? asyncify.State.Normal : 0;
+                        if (state !== undefined && state === normal) {
+                            onReady();
+                            return;
+                        }
+                        showUploadOverlay('Waiting for app to be ready...', 100);
+                        if (typeof asyncify.whenDone === 'function' && !asyncify.asyncPromiseHandlers) {
+                            asyncify.whenDone().then(onReady).catch(function () {
+                                setTimeout(function () { waitForAsyncifyIdle(onReady); }, 100);
+                            });
+                            return;
+                        }
+                        setTimeout(function () { waitForAsyncifyIdle(onReady); }, 100);
+                    };
+                    var callIntoWasm = function() {
+                        if (!Module || typeof Module.ccall !== 'function') {
+                            console.error('[sprat] Module.ccall not available; cannot notify wasm of dropped files.');
+                            Module.spratDropInProgress = false;
+                            hideUploadOverlay();
+                            return;
+                        }
+                        console.log('[sprat] Calling wasm drop picked', finalPath, mode);
                         Module.ccall('sprat_on_file_picked', null, ['string', 'number'], [finalPath, mode]);
                         Module.spratDropInProgress = false;
-                    }, 0);
+                        hideUploadOverlay();
+                    };
+                    setTimeout(function () { waitForAsyncifyIdle(callIntoWasm); }, 0);
                     return;
                 }
                 var entry = files[idx++];
                 var file = entry.file || entry;
                 var relPath = entry.relPath || file.name;
+                showUploadOverlay('Uploading files... (' + (idx + 1) + '/' + files.length + ')', ((idx + 1) / files.length) * 100);
                 var dest = dropRoot + '/' + relPath;
                 var dir = dest.substring(0, dest.lastIndexOf('/'));
                 if (dir) {
@@ -336,10 +536,16 @@ EM_JS(void, sprat_install_drop_handlers, (), {
                 var reader = new FileReader();
                 reader.onload = function () {
                     var data = new Uint8Array(reader.result);
-                    FS.writeFile(dest, data);
+                    try {
+                        FS.writeFile(dest, data);
+                    } catch (e) {
+                        console.error('[sprat] FS.writeFile failed for', dest, e);
+                    }
                     next();
                 };
                 reader.onerror = function () {
+                    console.warn('[sprat] Failed to read dropped file:', file && file.name ? file.name : relPath);
+                    showUploadOverlay('Uploading files... (' + (idx + 1) + '/' + files.length + ')', ((idx + 1) / files.length) * 100);
                     next();
                 };
                 reader.readAsArrayBuffer(file);
@@ -347,6 +553,32 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             next();
         });
     }, false);
+
+    if (!Module.spratResizeGuardInstalled) {
+        Module.spratResizeGuardInstalled = true;
+        var isAsyncBusy = function() {
+            var asyncify = (typeof Asyncify !== 'undefined' ? Asyncify : (typeof Module !== 'undefined' ? Module['Asyncify'] : null));
+            return !!(asyncify && asyncify.currData);
+        };
+        var scheduleResizeReplay = function() {
+            if (!Module.spratPendingResize) return;
+            if (isAsyncBusy()) {
+                setTimeout(scheduleResizeReplay, 100);
+                return;
+            }
+            Module.spratPendingResize = false;
+            window.dispatchEvent(new Event('resize'));
+        };
+        window.addEventListener('resize', function (e) {
+            if (!isAsyncBusy()) {
+                return;
+            }
+            Module.spratPendingResize = true;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            setTimeout(scheduleResizeReplay, 100);
+        }, true);
+    }
 });
 
 }
@@ -368,7 +600,7 @@ void sprat_on_file_picked(const char* path, int mode) {
     scheduled = true;
     QTimer::singleShot(0, []() {
         scheduled = false;
-        wasmHandleFilePicked(pendingPath, pendingMode == 1);
+        wasmHandleFilePicked(pendingPath, pendingMode);
     });
 }
 }
@@ -381,13 +613,13 @@ void wasmInstallDropHandlers() {
     sprat_install_drop_handlers();
 }
 
-void wasmHandleFilePicked(const QString& path, bool isFolder) {
+void wasmHandleFilePicked(const QString& path, int mode) {
     MainWindow* window = MainWindow::wasmInstance();
     if (!window) {
         return;
     }
-    QMetaObject::invokeMethod(window, [window, path, isFolder]() {
-        window->onWasmFilePicked(path, isFolder);
+    QMetaObject::invokeMethod(window, [window, path, mode]() {
+        window->onWasmFilePicked(path, mode);
     }, Qt::QueuedConnection);
 }
 

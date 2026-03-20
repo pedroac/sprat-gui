@@ -278,6 +278,7 @@ set(PROJECT_SOURCES
     src/Core/ArchiveExtractor.cpp
     src/Core/ArchiveExtractor.h
     src/Core/models.h
+    src/Core/ViewUtils.cpp
 )
 
 if(SPRAT_EMBEDDED_CLI)
@@ -345,14 +346,15 @@ if(EMSCRIPTEN)
     else()
         target_link_options(sprat-gui PRIVATE
             "-sASYNCIFY"
-            "-sASYNCIFY_DEBUG=1"
             "-sASYNCIFY_STACK_SIZE=128000"
             "-sASSERTIONS=1"
-            "-sDISCARD_NAVIGATOR_CLIPBOARD_PROMISE=1"
+            "-sASYNCIFY_IMPORTS=[invoke_iii,invoke_vii,invoke_iiii,invoke_diiiii]"
         )
     endif()
     # Let Qt's wasm macros append these to its default exported methods.
-    set_property(TARGET sprat-gui PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ccall,cwrap")
+    # NOTE: This must be a single comma-separated string; a CMake list would be split into extra args.
+    set_property(TARGET sprat-gui PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ccall,cwrap,Asyncify")
+    target_link_options(sprat-gui PRIVATE "SHELL:-sEXPORTED_FUNCTIONS=[_main,_jsIsAsyncBusy,_jsHaveAsyncify,_jsHaveJspi,_sprat_on_file_picked]")
 
     # Explicitly include embind/emval JS libraries (some toolchains don't auto-add them).
     get_filename_component(EMSCRIPTEN_ROOT_PATH "${CMAKE_CXX_COMPILER}" DIRECTORY)

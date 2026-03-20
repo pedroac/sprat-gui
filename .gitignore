@@ -17,6 +17,7 @@ Testing/
 *.pro.user*
 
 build/
+build_wasm/
 *.o
 *.obj
 *.a

@@ -3,78 +3,70 @@
 #include <QDir>
 #include <QLocale>
 #include <QTranslator>
+#include <QTimer>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#include <emscripten/bind.h>
 
 extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void sync_idbfs() {
+        // Safe check to avoid Asyncify collisions
         EM_ASM(
-            FS.syncfs(false, function (err) {
-                if (err) console.error('FS.syncfs error:', err);
-            });
+            if (typeof Asyncify !== 'undefined' && Asyncify.currData) return;
+            if (typeof Module !== 'undefined' && Module.asm && Module.asm.async_status && Module.asm.async_status() !== 0) return;
+            if (typeof FS !== 'undefined' && FS.syncfs) {
+                if (FS.syncing) return;
+                FS.syncfs(false, function (err) {
+                    if (err) console.error('FS.syncfs error:', err);
+                });
+            }
         );
     }
-}
-
-// Force embind symbols to be included
-EMSCRIPTEN_BINDINGS(sprat_gui_dummy) {
-    emscripten::function("sprat_gui_dummy_func", &sync_idbfs);
+    bool jsIsAsyncBusy();
 }
 #endif
 
-/**
- * @brief Main entry point for the sprat-gui application.
- * 
- * Initializes the Qt application, sets up internationalization,
- * and launches the main window.
- * 
- * @param argc Command line argument count
- * @param argv Command line arguments
- * @return int Application exit code
- */
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
-    // Initialize CLI tools configuration
-    CliToolsConfig::ensureConfigExists();
+    // Initialize CLI tools configuration after a generous delay
+    QTimer::singleShot(1000, []() {
+#ifdef __EMSCRIPTEN__
+        if (jsIsAsyncBusy()) {
+            QTimer::singleShot(500, []() { CliToolsConfig::ensureConfigExists(); });
+            return;
+        }
+#endif
+        CliToolsConfig::ensureConfigExists();
+    });
 
     // Set up internationalization
     QTranslator translator;
     const QString systemLocale = QLocale::system().name();
     const QString translationBaseName = QString("sprat-gui_%1").arg(systemLocale);
-    const QString applicationDirectory = QCoreApplication::applicationDirPath();
-
-    // Search for translation files in multiple locations
+    app.installTranslator(&translator);
+    
     const QStringList translationDirectories = {
-        applicationDirectory + "/i18n",
-        applicationDirectory,
+        ":/i18n",
+        QCoreApplication::applicationDirPath() + "/i18n",
+        QCoreApplication::applicationDirPath(),
         QDir::currentPath() + "/i18n"
     };
 
-    bool translationLoaded = false;
     for (const QString& directory : translationDirectories) {
         if (translator.load(translationBaseName, directory)) {
-            app.installTranslator(&translator);
-            translationLoaded = true;
             break;
         }
-    }
-
-    // Log translation loading status for debugging
-    if (!translationLoaded) {
-        qWarning() << "Warning: Translation file not found for locale" << systemLocale;
     }
 
     // Create main window
     MainWindow mainWindow;
 
-    // Show window after event loop starts to ensure platform is ready
-    QTimer::singleShot(0, &mainWindow, &MainWindow::show);
+    // Show window after event loop starts with a small delay
+    QTimer::singleShot(100, &mainWindow, &MainWindow::show);
 
     // Start Qt event loop
     return app.exec();

@@ -71,4 +71,8 @@ protected:
 
     double m_minZoom = 0.1;
     double m_maxZoom = 16.0;
+    QTimer* m_resizeTimer = nullptr;
+    QSize m_pendingResizeSize;
+    QSize m_pendingResizeOldSize;
+    bool m_inResize = false;
 };

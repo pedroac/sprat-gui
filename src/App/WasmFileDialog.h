@@ -12,5 +12,5 @@ void wasmInstallDropHandlers();
 
 
 // Called after JS file picker writes files into the virtual FS.
-void wasmHandleFilePicked(const QString& path, bool isFolder);
+void wasmHandleFilePicked(const QString& path, int mode);
 #endif

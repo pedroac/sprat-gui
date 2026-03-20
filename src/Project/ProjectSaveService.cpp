@@ -46,6 +46,7 @@ bool ProjectSaveService::save(
     QString& error,
     const std::function<void(bool)>& setLoading,
     const std::function<void(const QString&)>& setStatus,
+    const std::function<bool()>& shouldCancel,
     const std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)>& runProcessFunc
 ) {
     constexpr int kProcessTimeoutMs = 120000;
@@ -91,6 +92,22 @@ bool ProjectSaveService::save(
     LoadingGuard loadingGuard{setLoading};
     if (setStatus) setStatus(trPS("Saving..."));
 
+    auto checkCanceled = [&]() -> bool {
+        if (shouldCancel && shouldCancel()) {
+            error = trPS("Save canceled.");
+            return true;
+        }
+        return false;
+    };
+    auto updateStatus = [&](const QString& status) {
+        if (setStatus) {
+            setStatus(status);
+        }
+    };
+    if (checkCanceled()) {
+        return false;
+    }
+
     QDir destDir(workingPath);
     if (!destDir.exists()) {
         if (!destDir.mkpath(".")) {
@@ -109,6 +126,10 @@ bool ProjectSaveService::save(
         return false;
     }
     projectFile.close();
+    updateStatus(trPS("Writing metadata..."));
+    if (checkCanceled()) {
+        return false;
+    }
 
     QJsonObject layoutInfo = projectPayload["layout"].toObject();
     const QJsonObject layoutOptions = projectPayload["layout_options"].toObject();
@@ -240,6 +261,10 @@ bool ProjectSaveService::save(
         return false;
     }
 
+    updateStatus(trPS("Preparing layout input..."));
+    if (checkCanceled()) {
+        return false;
+    }
     QString layoutPathForSave = layoutInputPath;
     QTemporaryFile saveFrameList;
     if (!framePaths.isEmpty()) {
@@ -306,6 +331,10 @@ bool ProjectSaveService::save(
         const QString profileName = profileNameRaw.trimmed();
         if (profileName.isEmpty()) {
             continue;
+        }
+        updateStatus(QString(trPS("Generating layout for profile '%1'...")).arg(profileName));
+        if (checkCanceled()) {
+            return false;
         }
 
         SpratProfile effectiveProfile;
@@ -409,6 +438,9 @@ bool ProjectSaveService::save(
                 }
                 layoutSuccess = true;
             }
+            if (checkCanceled()) {
+                return false;
+            }
             if (!layoutData.contains("atlas ")) {
                 error = QString(trPS("Layout generation produced invalid output for profile '%1'.")).arg(profileName);
                 return false;
@@ -416,11 +448,18 @@ bool ProjectSaveService::save(
         }
         
         QByteArray imageData;
+        updateStatus(QString(trPS("Packing spritesheet for profile '%1'...")).arg(profileName));
+        if (checkCanceled()) {
+            return false;
+        }
         if (!runProcess(spratPackBin, QStringList(), QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
             error = QString(trPS("Packing failed for profile '%1'")).arg(profileName);
             return false;
         }
         const bool isMultipack = layoutData.contains("multipack true") || layoutData.count("atlas ") > 1;
+        if (checkCanceled()) {
+            return false;
+        }
 
         if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")) {
             QString tarBin = QStandardPaths::findExecutable("tar");
@@ -466,6 +505,10 @@ bool ProjectSaveService::save(
         }
 
         if (config.transform != "none" && !spratConvertBin.isEmpty()) {
+            updateStatus(QString(trPS("Formatting output for profile '%1'...")).arg(profileName));
+            if (checkCanceled()) {
+                return false;
+            }
             QStringList convArgs;
             convArgs << "--transform" << config.transform;
             if (isMultipack) {
@@ -477,6 +520,9 @@ bool ProjectSaveService::save(
             QByteArray convData;
             if (!runProcess(spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, &convData)) {
                 error = QString(trPS("Format conversion failed for profile '%1'")).arg(profileName);
+                return false;
+            }
+            if (checkCanceled()) {
                 return false;
             }
             
@@ -491,6 +537,10 @@ bool ProjectSaveService::save(
     }
 
     if (isZip) {
+        updateStatus(trPS("Building zip..."));
+        if (checkCanceled()) {
+            return false;
+        }
         QString absDest = QFileInfo(config.destination).absoluteFilePath();
         QDir().mkpath(QFileInfo(absDest).path());
         QFile::remove(absDest);

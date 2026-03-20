@@ -57,6 +57,7 @@ void SettingsDialog::setupUi() {
     form->addRow(tr("Border Style:"), m_borderStyleCombo);
     layout->addLayout(form);
 
+#ifndef Q_OS_WASM
     QGroupBox* cliGroup = new QGroupBox(tr("CLI Tools"), this);
     QFormLayout* cliForm = new QFormLayout(cliGroup);
     
@@ -76,6 +77,7 @@ void SettingsDialog::setupUi() {
     layout->addWidget(cliGroup);
 
     updateCliUi();
+#endif
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton* resetBtn = buttons->addButton(tr("Reset"), QDialogButtonBox::ResetRole);

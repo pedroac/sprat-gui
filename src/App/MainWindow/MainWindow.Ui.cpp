@@ -40,7 +40,7 @@ void MainWindow::setupUi() {
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);
     QVBoxLayout* welcomeLayout = new QVBoxLayout(m_welcomePage);
-    m_welcomeLabel = new QLabel(tr("Drag and Drop folder with image files"), m_welcomePage);
+    m_welcomeLabel = new QLabel(tr("Drag and drop a folder, image file, or archive (zip/tar)"), m_welcomePage);
     m_welcomeLabel->setAlignment(Qt::AlignCenter);
     welcomeLayout->addWidget(m_welcomeLabel);
     m_mainStack->addWidget(m_welcomePage);

@@ -72,5 +72,13 @@ mergeInto(LibraryManager.library, {
       return -1;
     }
     return timeMs / 1000;
+  },
+
+  jsHaveAsyncify: function() {
+    return (typeof Asyncify !== 'undefined' || (typeof Module !== 'undefined' && !!Module['Asyncify']));
+  },
+
+  jsHaveJspi: function() {
+    return (typeof WebAssembly !== 'undefined' && typeof WebAssembly.Suspender !== 'undefined');
   }
 });

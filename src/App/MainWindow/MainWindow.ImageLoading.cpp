@@ -46,11 +46,13 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     m_loadingUiMessage = tr("Detecting frames in image...");
     setLoading(true);
 
-    FrameDetectionTaskResult result;
-    result.imagePath = imagePath;
-    result.action = action;
-    result.detection = detectFramesInImage(imagePath);
-    processFrameDetectionResult(result);
+    QTimer::singleShot(0, this, [this, imagePath, action]() {
+        FrameDetectionTaskResult result;
+        result.imagePath = imagePath;
+        result.action = action;
+        result.detection = detectFramesInImage(imagePath);
+        processFrameDetectionResult(result);
+    });
 #else
     if (!m_cliReady || m_isLoading) {
         QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
@@ -133,7 +135,9 @@ void MainWindow::processFrameDetectionResult(const FrameDetectionTaskResult& res
             };
 
 #ifdef Q_OS_WASM
-            processFrameExtractionResult(extractTask());
+            QTimer::singleShot(0, this, [this, extractTask]() {
+                processFrameExtractionResult(extractTask());
+            });
 #else
             m_frameExtractionWatcher.setFuture(QtConcurrent::run(extractTask));
 #endif
@@ -216,8 +220,9 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     };
 
 #ifdef Q_OS_WASM
-    // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
-    processTarExtractionResult(task());
+    QTimer::singleShot(0, this, [this, task]() {
+        processTarExtractionResult(task());
+    });
 #else
     m_tarExtractionWatcher.setFuture(QtConcurrent::run(task));
 #endif
