@@ -72,6 +72,8 @@ Use the layout canvas context menu to manage individual frames without reloading
 
 ## Build
 
+### Linux / WASM
+
 Default build (updates `DEPENDENCIES` from remote tags, configures, builds, then runs tests):
 
 ```bash
@@ -84,10 +86,29 @@ sh build.sh
 - Builds with `cmake --build build`.
 - Runs tests with `ctest --test-dir build --output-on-failure`.
 
+### Windows
+
+A dedicated batch file is provided for Windows builds using Visual Studio or Ninja:
+
+```cmd
+build_windows.bat
+```
+
+This script:
+- Configures the project with `SPRAT_EMBEDDED_CLI=ON` (the default for Windows).
+- Automatically downloads `sprat-cli` source if not found locally.
+- Builds the project in Release mode.
+- Deploys Qt dependencies using `windeployqt`.
+- Copies required assets (`spratprofiles.cfg` and `transforms/`).
+
+On Windows, the application and its dependencies are placed in a `build/bin` directory. A `sprat.bat` launcher is created in the `build` root for convenience.
+
+### Manual build
+
 Manual build (does not modify `DEPENDENCIES`):
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DSPRAT_EMBEDDED_CLI=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```

@@ -194,7 +194,11 @@ bool ArchiveExtractor::createZip(const QString& sourceDir, const QString& destZi
         QString relPath = source.relativeFilePath(filePath);
         
         struct archive_entry* entry = archive_entry_new();
+#ifdef Q_OS_WIN
+        archive_entry_copy_pathname_w(entry, reinterpret_cast<const wchar_t*>(relPath.utf16()));
+#else
         archive_entry_set_pathname(entry, PATH_TO_UTF8(relPath));
+#endif
         
         QFileInfo info(filePath);
         archive_entry_set_size(entry, info.size());

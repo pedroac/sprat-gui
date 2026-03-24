@@ -155,12 +155,12 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     QString appDir = QApplication::applicationDirPath();
     
 #ifdef Q_OS_WIN
-    // Extract ZIP and preserve structure in 'cli' subdirectory
-    QString cliDir = QDir(appDir).filePath("cli");
-    QDir().mkpath(cliDir);
+    // Extract ZIP into the CLI directory
+    QString destDir = CliToolsConfig::defaultInstallDir();
+    QDir().mkpath(destDir);
     QString script = QString("$ErrorActionPreference = 'Stop'; "
                              "Expand-Archive -Path '%1' -DestinationPath '%2' -Force")
-                             .arg(QString(filePath).replace("'", "''"), QString(cliDir).replace("'", "''"));
+                             .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"));
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
     // Use hdiutil to mount and cp while preserving structure

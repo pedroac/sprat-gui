@@ -16,7 +16,7 @@ QString CliToolsConfig::configPath() {
 
 QString CliToolsConfig::defaultInstallDir() {
 #ifdef Q_OS_WIN
-    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath("bin");
+    return QDir(QCoreApplication::applicationDirPath()).filePath("cli");
 #else
     return QDir::homePath() + "/.local/bin";
 #endif
@@ -138,7 +138,11 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
         return appFi.absoluteFilePath();
     }
 
-    // 2.1 Check "cli" subdirectory in application directory
+    // 2.1 Check "bin" or "cli" subdirectory in application directory
+    QFileInfo binFi(appDir.filePath(QString("bin/%1").arg(executableName)));
+    if (binFi.exists() && binFi.isExecutable()) {
+        return binFi.absoluteFilePath();
+    }
     QFileInfo cliFi(appDir.filePath(QString("cli/%1").arg(executableName)));
     if (cliFi.exists() && cliFi.isExecutable()) {
         return cliFi.absoluteFilePath();

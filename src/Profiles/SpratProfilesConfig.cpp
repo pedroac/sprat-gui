@@ -141,6 +141,7 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
     
     const QString appDir = QCoreApplication::applicationDirPath();
     candidates << QDir(appDir).filePath("spratprofiles.cfg");
+    candidates << QDir(appDir).filePath("bin/spratprofiles.cfg");
     candidates << QDir(appDir).filePath("cli/spratprofiles.cfg");
 
     QString path;

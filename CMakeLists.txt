@@ -39,7 +39,12 @@ add_definitions(-DSPRAT_CLI_VERSION="${SPRAT_CLI_VERSION}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(SPRAT_EMBEDDED_CLI "Link CLI tools directly into the GUI (required for WASM)" OFF)
+set(DEFAULT_SPRAT_EMBEDDED_CLI OFF)
+if(EMSCRIPTEN OR WIN32)
+    set(DEFAULT_SPRAT_EMBEDDED_CLI ON)
+endif()
+
+option(SPRAT_EMBEDDED_CLI "Link CLI tools directly into the GUI (required for WASM)" ${DEFAULT_SPRAT_EMBEDDED_CLI})
 option(SPRAT_WASM_DEBUG "Enable extra Emscripten debug flags for WASM builds" OFF)
 option(SPRAT_WASM_JSPI "Enable JSPI (disable Asyncify) for WASM builds" ON)
 if(EMSCRIPTEN)
@@ -48,7 +53,30 @@ endif()
 
 if(SPRAT_EMBEDDED_CLI)
     add_definitions(-DSPRAT_EMBEDDED_CLI)
-    set(SPRAT_CLI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
+    set(SPRAT_DOWNLOAD_STB ON CACHE BOOL "Download STB headers for sprat-cli" FORCE)
+    
+    # Locate sprat-cli source
+    set(SPRAT_CLI_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
+    
+    if(EXISTS "${SPRAT_CLI_LOCAL_DIR}/CMakeLists.txt")
+        message(STATUS "Using local sprat-cli at ${SPRAT_CLI_LOCAL_DIR}")
+        set(SPRAT_CLI_SOURCE_DIR "${SPRAT_CLI_LOCAL_DIR}")
+        # Check if already added (unlikely but safe)
+        if(NOT TARGET spratcore)
+            add_subdirectory("${SPRAT_CLI_SOURCE_DIR}" "sprat-cli-build")
+        endif()
+    else()
+        message(STATUS "sprat-cli source not found locally, fetching from GitHub...")
+        include(FetchContent)
+        FetchContent_Declare(
+            sprat_cli
+            GIT_REPOSITORY https://github.com/pedroac/sprat-cli.git
+            GIT_TAG ${SPRAT_CLI_VERSION}
+        )
+        FetchContent_MakeAvailable(sprat_cli)
+        set(SPRAT_CLI_SOURCE_DIR "${sprat_cli_SOURCE_DIR}")
+    endif()
+
     include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
 endif()
 
@@ -286,7 +314,6 @@ if(SPRAT_EMBEDDED_CLI)
         src/CLITools/EmbeddedCli.cpp
         src/CLITools/EmbeddedCli.h
     )
-    add_subdirectory("${SPRAT_CLI_SOURCE_DIR}" "sprat-cli-build")
 endif()
 
 # === Executable ===
@@ -332,13 +359,30 @@ target_link_libraries(sprat-gui PRIVATE
     LibArchive::LibArchive
 )
 
+# Copy sprat-cli assets (config and transforms) for host builds
+if(NOT EMSCRIPTEN)
+    set(SPRAT_ASSETS_DEST "$<TARGET_FILE_DIR:sprat-gui>")
+    add_custom_command(TARGET sprat-gui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg"
+        "${SPRAT_ASSETS_DEST}/spratprofiles.cfg"
+        COMMENT "Copying spratprofiles.cfg..."
+    )
+    add_custom_command(TARGET sprat-gui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${SPRAT_CLI_SOURCE_DIR}/transforms"
+        "${SPRAT_ASSETS_DEST}/transforms"
+        COMMENT "Copying transforms directory..."
+    )
+endif()
+
 if(EMSCRIPTEN)
     target_compile_options(sprat-gui PRIVATE "SHELL:--bind")
     target_link_options(sprat-gui PRIVATE
         "SHELL:--bind"
         "-sALLOW_MEMORY_GROWTH=1"
-        "SHELL:--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli/spratprofiles.cfg@/spratprofiles.cfg"
-        "SHELL:--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli/transforms@/transforms"
+        "SHELL:--preload-file ${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg@/spratprofiles.cfg"
+        "SHELL:--preload-file ${SPRAT_CLI_SOURCE_DIR}/transforms@/transforms"
         "SHELL:--js-library=${CMAKE_CURRENT_SOURCE_DIR}/wasm/mktime_fix.js"
     )
     if(SPRAT_WASM_JSPI)
@@ -439,4 +483,51 @@ if(BUILD_TESTING)
 
     add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)
     set_tests_properties(sprat-gui-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+# === Windows Deployment & Launcher ===
+if(WIN32)
+    # Move the GUI and tests into a 'bin' subdirectory to share DLLs
+    # and keep the root directory clean.
+    set_target_properties(sprat-gui PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(TARGET sprat-gui-tests)
+        set_target_properties(sprat-gui-tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    endif()
+
+    # Generate a batch file in the root to launch the GUI
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/sprat.bat"
+         CONTENT "@echo off\nstart \"\" \"%~dp0bin\\sprat-gui.exe\" %*\n")
+
+    # Run windeployqt to copy Qt DLLs
+    get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+
+    if(WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET sprat-gui POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+            --dir "$<TARGET_FILE_DIR:sprat-gui>"
+            --no-opengl-sw
+            --no-system-d3d-compiler
+            --no-compiler-runtime
+            "$<TARGET_FILE:sprat-gui>"
+            COMMENT "Running windeployqt..."
+        )
+    endif()
+
+    # Still copy necessary DLLs from search paths to the 'bin' folder
+    # so the build is immediately runnable.
+    foreach(search_path ${LIBARCHIVE_SEARCH_PATHS})
+        if(EXISTS "${search_path}" AND IS_DIRECTORY "${search_path}")
+            file(GLOB_RECURSE FOUND_DLLS "${search_path}/*.dll")
+            foreach(dll ${FOUND_DLLS})
+                add_custom_command(TARGET sprat-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${dll}"
+                    $<TARGET_FILE_DIR:sprat-gui>
+                    COMMENT "Copying runtime dependency ${dll}"
+                )
+            endforeach()
+        endif()
+    endforeach()
 endif()
