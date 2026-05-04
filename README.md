@@ -70,6 +70,14 @@ Place the `sprat-cli` repository beside this project (for example, at `../sprat-
 
 Use the layout canvas context menu to manage individual frames without reloading an entire folder. Right-click an empty area, choose **Add Frames...**, and pick one or more image files. The GUI writes a temporary plaintext list that `spratlayout` already understands (the same list-file input described in the [`sprat-cli`](https://github.com/pedroac/sprat-cli) README) and runs the layout using that list, so you can mix files from anywhere on disk. Right-clicking a sprite exposes a **Remove Frame** action for the frame under the cursor; if that frame is referenced by existing timelines you are warned that timelines will drop those entries before removal proceeds.
 
+## Try Online
+
+**Web Demo:** No installation required!
+- **[Sprat GUI Web Demo](https://sprat-gui.itch.io)** - Full app in your browser
+- For full features (frame detection, GIF/video export), use the desktop version.
+
+See [WASM_DEPLOYMENT.md](WASM_DEPLOYMENT.md) for deployment instructions.
+
 ## Build
 
 ### Linux / WASM

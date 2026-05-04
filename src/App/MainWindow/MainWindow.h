@@ -47,6 +47,7 @@ class QWidget;
 class QProgressBar;
 class QDockWidget;
 class QTextEdit;
+class QPlainTextEdit;
 class QAction;
 
 // Forward declarations for custom classes
@@ -386,6 +387,9 @@ private slots:
     void onFrameExtractionFinished();
     void onProjectSaveFinished();
     void handleProjectSaveResult(const ProjectSaveResult& result);
+
+    // === CLI Installation Logging ===
+    void onCliInstallLog(const QString& message);
 
 protected:
     // === Event Handling ===
@@ -931,6 +935,7 @@ private:
     QLabel* m_cliInstallOverlayLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;
     QPushButton* m_cancelLoadingButton = nullptr;
+    QPlainTextEdit* m_cliInstallLog = nullptr;
     QString m_loadingUiMessage = "Loading...";
     
     // === Async Loading Helpers ===

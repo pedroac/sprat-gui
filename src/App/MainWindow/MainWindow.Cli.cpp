@@ -23,6 +23,8 @@
 #include <QPushButton>
 #include <QtConcurrent>
 #include <QVBoxLayout>
+#include <QPlainTextEdit>
+#include <QScrollBar>
 
 #include "ViewUtils.h"
 
@@ -374,6 +376,20 @@ void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
     }
 }
 
+void MainWindow::onCliInstallLog(const QString& message) {
+    if (!m_cliInstallLog) {
+        return;
+    }
+    const QString trimmed = message.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+    m_cliInstallLog->appendPlainText(trimmed);
+    if (QScrollBar* bar = m_cliInstallLog->verticalScrollBar()) {
+        bar->setValue(bar->maximum());
+    }
+}
+
 void MainWindow::setupCliInstallOverlay() {
     if (m_cliInstallOverlay) {
         return;
@@ -391,6 +407,12 @@ void MainWindow::setupCliInstallOverlay() {
     m_cliInstallProgress->setRange(0, 0);
     m_cliInstallProgress->setFixedWidth(220);
     layout->addWidget(m_cliInstallProgress);
+    m_cliInstallLog = new QPlainTextEdit(m_cliInstallOverlay);
+    m_cliInstallLog->setReadOnly(true);
+    m_cliInstallLog->document()->setMaximumBlockCount(200);
+    m_cliInstallLog->setFixedSize(520, 180);
+    m_cliInstallLog->setStyleSheet("background: rgba(0, 0, 0, 90); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 60);");
+    layout->addWidget(m_cliInstallLog);
 
     m_cancelLoadingButton = new QPushButton(tr("Cancel"), m_cliInstallOverlay);
     m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 6px 12px; font-weight: bold;");
@@ -432,6 +454,10 @@ void MainWindow::showCliInstallOverlay() {
     }
     m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     m_cliInstallOverlayLabel->setText(tr("Installing CLI tools..."));
+    if (m_cliInstallLog) {
+        m_cliInstallLog->clear();
+        m_cliInstallLog->appendPlainText(tr("Starting CLI install..."));
+    }
     updateCliOverlayGeometry();
     m_cliInstallOverlay->show();
     m_loadingOverlayVisible = true;

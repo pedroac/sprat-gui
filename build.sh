@@ -44,9 +44,12 @@ if [ "$BUILD_TYPE" == "wasm" ]; then
         -DSPRAT_WASM_DEBUG=ON \
         -DSPRAT_WASM_JSPI="${JSPI_FLAG}" \
         -DEGL_INCLUDE_DIR=/opt/qt6-wasm/emsdk/upstream/emscripten/system/include \
-        -DEGL_LIBRARY=${EGL_STUB_LIB}
+        -DEGL_LIBRARY=${EGL_STUB_LIB} \
+        -DCMAKE_CXX_FLAGS="-DNDEBUG -DEMSCRIPTEN_DISABLE_ASSERTS=1" \
+        -DCMAKE_C_FLAGS="-DNDEBUG -DEMSCRIPTEN_DISABLE_ASSERTS=1"
     
     echo "Building for WASM..."
+    export EMFLAGS="-sASSERTIONS=0"
     cmake --build build_wasm --parallel
     
     echo "WASM build complete in build_wasm/"

@@ -16,7 +16,9 @@ CliToolInstaller::CliToolInstaller(QObject* parent)
 #endif
       m_networkManager(new QNetworkAccessManager(this)) {
 #ifndef SPRAT_EMBEDDED_CLI
+    m_installProcess->setProcessChannelMode(QProcess::MergedChannels);
     connect(m_installProcess, &QProcess::finished, this, &CliToolInstaller::onInstallProcessFinished);
+    connect(m_installProcess, &QProcess::readyReadStandardOutput, this, &CliToolInstaller::onInstallProcessOutput);
 #endif
     connect(m_networkManager, &QNetworkAccessManager::finished, this, &CliToolInstaller::onDownloadFinished);
 }
@@ -49,6 +51,7 @@ void CliToolInstaller::installCliTools() {
 #ifdef SPRAT_EMBEDDED_CLI
     emit installFinished(0, 0);
 #else
+    emit installLog(QString("Installing sprat-cli %1").arg(m_cliVersion));
 #ifdef Q_OS_LINUX
     installOnLinux();
 #else
@@ -67,6 +70,7 @@ void CliToolInstaller::installCliTools() {
 
     QUrl url(QString("https://github.com/pedroac/sprat-cli/releases/download/%1/sprat-cli-%2")
              .arg(m_cliVersion, osSuffix));
+    emit installLog(QString("Downloading release %1 (%2)").arg(m_cliVersion, osSuffix));
     startDownload(url);
 #endif
 #endif
@@ -89,6 +93,7 @@ void CliToolInstaller::installOnLinux() {
         return;
     }
 
+    emit installLog(QString("Cloning sprat-cli (%1)...").arg(m_cliVersion));
     QString script = QString(R"(
 set -euo pipefail
 workdir=$(mktemp -d)
@@ -146,6 +151,7 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
     tempFile->write(reply->readAll());
     QString tempPath = tempFile->fileName();
     tempFile->close();
+    emit installLog("Download finished. Extracting installer...");
     installFromDownloadedFile(tempPath);
     reply->deleteLater();
 }
@@ -155,6 +161,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     QString appDir = QApplication::applicationDirPath();
     
 #ifdef Q_OS_WIN
+    emit installLog("Extracting ZIP...");
     // Extract ZIP into the CLI directory
     QString destDir = CliToolsConfig::defaultInstallDir();
     QDir().mkpath(destDir);
@@ -163,6 +170,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"));
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
+    emit installLog("Mounting DMG and copying files...");
     // Use hdiutil to mount and cp while preserving structure
     QString script = QString("MOUNT_POINT=$(hdiutil mount \"%1\" | grep -o '/Volumes/.*' | head -n 1)\n"
                              "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
@@ -176,7 +184,37 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
 }
 
 #ifndef SPRAT_EMBEDDED_CLI
+void CliToolInstaller::onInstallProcessOutput() {
+    if (!m_installProcess) {
+        return;
+    }
+    m_installOutputBuffer.append(m_installProcess->readAllStandardOutput());
+    int newlineIndex = -1;
+    while ((newlineIndex = m_installOutputBuffer.indexOf('\n')) != -1) {
+        QByteArray line = m_installOutputBuffer.left(newlineIndex);
+        m_installOutputBuffer.remove(0, newlineIndex + 1);
+        const QString text = QString::fromLocal8Bit(line).trimmed();
+        if (!text.isEmpty()) {
+            emit installLog(text);
+        }
+    }
+    if (m_installOutputBuffer.size() > 8192) {
+        const QString text = QString::fromLocal8Bit(m_installOutputBuffer).trimmed();
+        if (!text.isEmpty()) {
+            emit installLog(text);
+        }
+        m_installOutputBuffer.clear();
+    }
+}
+
 void CliToolInstaller::onInstallProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    if (!m_installOutputBuffer.isEmpty()) {
+        const QString text = QString::fromLocal8Bit(m_installOutputBuffer).trimmed();
+        if (!text.isEmpty()) {
+            emit installLog(text);
+        }
+        m_installOutputBuffer.clear();
+    }
     emit installFinished(exitCode, exitStatus);
 }
 #endif

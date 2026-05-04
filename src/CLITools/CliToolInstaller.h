@@ -30,12 +30,14 @@ signals:
     void installFinished(int exitCode, int exitStatus);
 #endif
     void installStarted();
+    void installLog(const QString& message);
     void cliToolsResolved(bool ready);
     void downloadProgress(qint64 bytesReceived, qint64 bytesTotal);
 
 private slots:
 #ifndef SPRAT_EMBEDDED_CLI
     void onInstallProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    void onInstallProcessOutput();
 #endif
     void onDownloadFinished(QNetworkReply* reply);
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
@@ -47,6 +49,7 @@ private:
 
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_installProcess = nullptr;
+    QByteArray m_installOutputBuffer;
 #endif
     QNetworkAccessManager* m_networkManager = nullptr;
     const QString m_cliVersion = SPRAT_CLI_VERSION; // Target version for compatibility

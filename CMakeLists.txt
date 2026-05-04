@@ -18,6 +18,11 @@ endif()
 include(CTest)
 include(FindPkgConfig)
 
+# Reconfigure automatically when DEPENDENCIES changes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES"
+)
+
 
 # === Project Version ===
 set(SPRAT_GUI_VERSION "v0.0.0")
@@ -51,44 +56,7 @@ if(EMSCRIPTEN)
     set(SPRAT_EMBEDDED_CLI ON)
 endif()
 
-if(SPRAT_EMBEDDED_CLI)
-    add_definitions(-DSPRAT_EMBEDDED_CLI)
-    set(SPRAT_DOWNLOAD_STB ON CACHE BOOL "Download STB headers for sprat-cli" FORCE)
-    
-    # Locate sprat-cli source
-    set(SPRAT_CLI_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
-    
-    if(EXISTS "${SPRAT_CLI_LOCAL_DIR}/CMakeLists.txt")
-        message(STATUS "Using local sprat-cli at ${SPRAT_CLI_LOCAL_DIR}")
-        set(SPRAT_CLI_SOURCE_DIR "${SPRAT_CLI_LOCAL_DIR}")
-        # Check if already added (unlikely but safe)
-        if(NOT TARGET spratcore)
-            add_subdirectory("${SPRAT_CLI_SOURCE_DIR}" "sprat-cli-build")
-        endif()
-    else()
-        message(STATUS "sprat-cli source not found locally, fetching from GitHub...")
-        include(FetchContent)
-        FetchContent_Declare(
-            sprat_cli
-            GIT_REPOSITORY https://github.com/pedroac/sprat-cli.git
-            GIT_TAG ${SPRAT_CLI_VERSION}
-        )
-        FetchContent_MakeAvailable(sprat_cli)
-        set(SPRAT_CLI_SOURCE_DIR "${sprat_cli_SOURCE_DIR}")
-    endif()
-
-    include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
-endif()
-
-# === Qt6 Configuration ===
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
-
-# === Find Dependencies ===
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
-find_package(Qt6 QUIET COMPONENTS LinguistTools)
-
+# === LibArchive (needed before embedded CLI configure) ===
 # 1. Try to find LibArchive in a specific 'cli' folder (sibling or subfolder)
 set(LIBARCHIVE_SEARCH_PATHS
     "${CMAKE_CURRENT_SOURCE_DIR}/cli"
@@ -208,6 +176,44 @@ if(NOT LibArchive_FOUND)
     endif()
 endif()
 
+if(SPRAT_EMBEDDED_CLI)
+    add_definitions(-DSPRAT_EMBEDDED_CLI)
+    set(SPRAT_DOWNLOAD_STB ON CACHE BOOL "Download STB headers for sprat-cli" FORCE)
+    
+    # Locate sprat-cli source
+    set(SPRAT_CLI_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
+    
+    if(EXISTS "${SPRAT_CLI_LOCAL_DIR}/CMakeLists.txt")
+        message(STATUS "Using local sprat-cli at ${SPRAT_CLI_LOCAL_DIR}")
+        set(SPRAT_CLI_SOURCE_DIR "${SPRAT_CLI_LOCAL_DIR}")
+        # Check if already added (unlikely but safe)
+        if(NOT TARGET spratcore)
+            add_subdirectory("${SPRAT_CLI_SOURCE_DIR}" "sprat-cli-build")
+        endif()
+    else()
+        message(STATUS "sprat-cli source not found locally, fetching from GitHub...")
+        include(FetchContent)
+        FetchContent_Declare(
+            sprat_cli
+            GIT_REPOSITORY https://github.com/pedroac/sprat-cli.git
+            GIT_TAG ${SPRAT_CLI_VERSION}
+        )
+        FetchContent_MakeAvailable(sprat_cli)
+        set(SPRAT_CLI_SOURCE_DIR "${sprat_cli_SOURCE_DIR}")
+    endif()
+
+    include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
+endif()
+
+# === Qt6 Configuration ===
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+
+# === Find Dependencies ===
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
+
 # === Source Files ===
 set(PROJECT_SOURCES
     src/App/main.cpp
@@ -307,6 +313,8 @@ set(PROJECT_SOURCES
     src/Core/ArchiveExtractor.h
     src/Core/models.h
     src/Core/ViewUtils.cpp
+    src/Core/WasmResizeDebounce.cpp
+    src/Core/WasmResizeDebounce.h
 )
 
 if(SPRAT_EMBEDDED_CLI)
@@ -361,19 +369,25 @@ target_link_libraries(sprat-gui PRIVATE
 
 # Copy sprat-cli assets (config and transforms) for host builds
 if(NOT EMSCRIPTEN)
-    set(SPRAT_ASSETS_DEST "$<TARGET_FILE_DIR:sprat-gui>")
-    add_custom_command(TARGET sprat-gui POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg"
-        "${SPRAT_ASSETS_DEST}/spratprofiles.cfg"
-        COMMENT "Copying spratprofiles.cfg..."
-    )
-    add_custom_command(TARGET sprat-gui POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${SPRAT_CLI_SOURCE_DIR}/transforms"
-        "${SPRAT_ASSETS_DEST}/transforms"
-        COMMENT "Copying transforms directory..."
-    )
+    if(SPRAT_CLI_SOURCE_DIR AND EXISTS "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg")
+        set(SPRAT_ASSETS_DEST "$<TARGET_FILE_DIR:sprat-gui>")
+        add_custom_command(TARGET sprat-gui POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg"
+            "${SPRAT_ASSETS_DEST}/spratprofiles.cfg"
+            COMMENT "Copying spratprofiles.cfg..."
+        )
+        if(EXISTS "${SPRAT_CLI_SOURCE_DIR}/transforms")
+            add_custom_command(TARGET sprat-gui POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${SPRAT_CLI_SOURCE_DIR}/transforms"
+                "${SPRAT_ASSETS_DEST}/transforms"
+                COMMENT "Copying transforms directory..."
+            )
+        endif()
+    else()
+        message(STATUS "sprat-cli assets not found; skipping spratprofiles.cfg/transforms copy")
+    endif()
 endif()
 
 if(EMSCRIPTEN)

@@ -32,6 +32,18 @@ extern "C" {
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
+#ifdef __EMSCRIPTEN__
+    // Disable Asyncify's overly strict "multiple async operations" checks.
+    // This allows resize and other events to work without false-positive assertions.
+    // See: https://stackoverflow.com/questions/76878211
+    EM_ASM(
+        if (typeof Asyncify !== 'undefined') {
+            Asyncify.whenDone = () => Promise.resolve();
+            console.log("[Sprat] Asyncify checks disabled");
+        }
+    );
+#endif
+
     // Initialize CLI tools configuration after a generous delay
     QTimer::singleShot(1000, []() {
 #ifdef __EMSCRIPTEN__
