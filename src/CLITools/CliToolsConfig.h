@@ -13,4 +13,6 @@ public:
     static QString checkBinaryVersion(const QString& binaryPath);
     static QString defaultInstallDir();
     static void ensureConfigExists();
+    static void saveInstalledCliVersion(const QString& version);
+    static QString loadInstalledCliVersion();
 };

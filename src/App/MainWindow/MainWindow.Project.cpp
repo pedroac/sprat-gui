@@ -758,11 +758,14 @@ void MainWindow::applyProjectPayload() {
     m_settings = applied.appSettings;
     m_lastSaveConfig = applied.saveConfig;
     applySettings();
-    
+
     QStringList missing;
     resolveCliBinaries(missing);
-    m_cliReady = !m_spratLayoutBin.isEmpty() && !m_spratPackBin.isEmpty();
-    m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI missing"));
+    QString storedVersion = CliToolsConfig::loadInstalledCliVersion();
+    m_cliReady = missing.isEmpty()
+                 && !storedVersion.isEmpty()
+                 && storedVersion == QString(SPRAT_CLI_VERSION);
+    m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI tools not ready"));
     updateUiState();
 
     m_session->timelines = applied.timelines;

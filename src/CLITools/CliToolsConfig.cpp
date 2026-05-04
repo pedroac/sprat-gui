@@ -91,6 +91,7 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
 }
 
 #include <QProcess>
+#include <QRegularExpression>
 
 QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
 #ifdef SPRAT_EMBEDDED_CLI
@@ -107,11 +108,9 @@ QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
     }
     QString output = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
     // Expected output format: "spratlayout version v0.1.0"
-    QStringList parts = output.split(' ');
-    if (parts.size() >= 3) {
-        return parts.last();
-    }
-    return QString();
+    static const QRegularExpression versionRe("(v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*)");
+    QRegularExpressionMatch match = versionRe.match(output);
+    return match.hasMatch() ? match.captured(1) : QString();
 #endif
 }
 
@@ -178,4 +177,17 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
     }
 
     return QString();
+}
+
+void CliToolsConfig::saveInstalledCliVersion(const QString& version) {
+    QString pathToConfig = configPath();
+    QDir().mkpath(QFileInfo(pathToConfig).path());
+    QSettings qsettings(pathToConfig, QSettings::IniFormat);
+    qsettings.setValue("cli/installed_version", version);
+    qsettings.sync();
+}
+
+QString CliToolsConfig::loadInstalledCliVersion() {
+    QSettings settings(configPath(), QSettings::IniFormat);
+    return settings.value("cli/installed_version", QString()).toString();
 }

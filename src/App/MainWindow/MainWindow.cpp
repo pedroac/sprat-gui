@@ -98,6 +98,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_cliToolInstaller, &CliToolInstaller::installFinished, this, &MainWindow::onInstallFinished);
     connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
     connect(m_cliToolInstaller, &CliToolInstaller::downloadProgress, this, &MainWindow::onDownloadProgress);
+    connect(m_cliToolInstaller, &CliToolInstaller::installLog, this, &MainWindow::onCliInstallLog);
     QTimer::singleShot(1000, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);

@@ -78,12 +78,17 @@ void MainWindow::checkCliTools() {
 
         if (currentVersion != requiredVersion) {
             if (CliToolsUi::askUpgrade(this, currentVersion, requiredVersion)) {
+                m_cliReady = false;
+                updateUiState();
                 installCliTools();
                 inCheck = false;
                 return;
             }
+            // User declined upgrade; version is confirmed readable, persist it
+            CliToolsConfig::saveInstalledCliVersion(currentVersion);
         }
         m_cliReady = true;
+        CliToolsConfig::saveInstalledCliVersion(currentVersion);
         m_statusLabel->setText(tr("CLI ready (%1)").arg(currentVersion));
     } else {
         m_cliReady = false;
@@ -157,6 +162,26 @@ void MainWindow::showMissingCliDialog(const QStringList& missing) {
     MissingCliAction action = CliToolsUi::askMissingCliAction(this, missing);
     if (action == MissingCliAction::Install) {
         installCliTools();
+    } else if (action == MissingCliAction::ProvidePath) {
+        QString dir = QFileDialog::getExistingDirectory(
+            this, tr("Select CLI Tools Folder"), QDir::homePath());
+        if (dir.isEmpty()) {
+            m_statusLabel->setText(tr("CLI missing"));
+            QApplication::quit();
+            return;
+        }
+        m_cliPaths.baseDir = dir;
+        CliToolsConfig::saveAppSettings(CliToolsConfig::loadAppSettings(), m_cliPaths);
+        QStringList stillMissing;
+        if (resolveCliBinaries(stillMissing)) {
+            checkCliTools();
+        } else {
+            QMessageBox::warning(this, tr("Tools Not Found"),
+                tr("Some CLI tools were not found in the selected folder:\n%1")
+                .arg(stillMissing.join(", ")));
+            m_statusLabel->setText(tr("CLI missing"));
+            QApplication::quit();
+        }
     } else {
         m_statusLabel->setText(tr("CLI missing"));
         QApplication::quit();
