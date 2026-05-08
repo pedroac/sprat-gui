@@ -16,6 +16,7 @@
 #include "TimelineListWidget.h"
 #include "CliToolInstaller.h"
 #include "LayoutRunner.h"
+#include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
 #include "SaveDialog.h"
 #include "SpratProfilesConfig.h"
@@ -53,6 +54,7 @@ class QAction;
 // Forward declarations for custom classes
 class FrameDetectionDialog;
 class AnimationCanvas;
+class SourceFolderWatcher;
 
 /**
  * @class MainWindow
@@ -391,6 +393,13 @@ private slots:
     // === CLI Installation Logging ===
     void onCliInstallLog(const QString& message);
 
+    // === Source Folder Sync ===
+    void onFolderWatcherFilesAdded(const QStringList& paths);
+    void onFolderWatcherFilesRemoved(const QStringList& paths);
+    void onFolderWatcherFilesModified(const QStringList& paths);
+    void onSyncNowRequested();
+    void performFolderSync();
+
 protected:
     // === Event Handling ===
     /**
@@ -477,6 +486,21 @@ private:
      * @return bool True if profile is enabled
      */
     bool isProfileEnabled(const QString& profile) const;
+
+    /**
+     * @brief Initializes the source folder watcher based on sync mode.
+     */
+    void initializeSourceFolderWatcher();
+
+    /**
+     * @brief Stops and cleans up the source folder watcher.
+     */
+    void cleanupSourceFolderWatcher();
+
+    /**
+     * @brief Shows a notification about folder sync changes.
+     */
+    void showSyncNotification(const QString& message);
 
     // === UI Setup Methods ===
     /**
@@ -917,6 +941,7 @@ private:
     QString m_spratFramesBin;
     QString m_spratUnpackBin;
     LayoutRunner* m_layoutRunner;
+    SourceFolderWatcher* m_folderWatcher;
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
 #endif

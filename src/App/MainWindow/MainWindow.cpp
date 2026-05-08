@@ -20,6 +20,7 @@
 #include "TimelineUi.h"
 #include "ProfilesDialog.h"
 #include "SpratProfilesConfig.h"
+#include "FolderSyncService.h"
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
 #endif
@@ -86,6 +87,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_layoutRunner->setMutex(&m_toolMutex);
     connect(m_layoutRunner, &LayoutRunner::finished, this, &MainWindow::onLayoutFinished);
     connect(m_layoutRunner, &LayoutRunner::errorOccurred, this, &MainWindow::onLayoutError);
+
+    m_folderWatcher = new SourceFolderWatcher(this);
+    connect(m_folderWatcher, &SourceFolderWatcher::filesAdded,
+            this, &MainWindow::onFolderWatcherFilesAdded);
+    connect(m_folderWatcher, &SourceFolderWatcher::filesRemoved,
+            this, &MainWindow::onFolderWatcherFilesRemoved);
+    connect(m_folderWatcher, &SourceFolderWatcher::filesModified,
+            this, &MainWindow::onFolderWatcherFilesModified);
 
 #ifndef SPRAT_EMBEDDED_CLI
     m_process = new QProcess(this);
@@ -530,6 +539,13 @@ void MainWindow::applySettings() {
     if (m_canvas) {
         SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
     }
+
+    // Update source folder watcher based on sync mode
+    if (m_settings.syncMode == SyncMode::None) {
+        cleanupSourceFolderWatcher();
+    } else if (m_settings.syncMode == SyncMode::Watch) {
+        initializeSourceFolderWatcher();
+    }
 }
 
 bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
@@ -564,4 +580,108 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
     if (error) *error = process.readAllStandardError();
     return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
 #endif
+}
+
+// ===== Source Folder Sync Slots =====
+
+void MainWindow::onFolderWatcherFilesAdded(const QStringList& paths) {
+    if (m_settings.syncMode != SyncMode::Watch) {
+        return;
+    }
+    QString message = QString(tr("Detected %1 new sprite(s). Syncing...")).arg(paths.size());
+    showSyncNotification(message);
+    performFolderSync();
+}
+
+void MainWindow::onFolderWatcherFilesRemoved(const QStringList& paths) {
+    if (m_settings.syncMode != SyncMode::Watch) {
+        return;
+    }
+    QString message = QString(tr("Warning: %1 sprite(s) removed from source folder.")).arg(paths.size());
+    QMessageBox::warning(this, tr("Source Folder Changed"), message);
+}
+
+void MainWindow::onFolderWatcherFilesModified(const QStringList& paths) {
+    if (m_settings.syncMode != SyncMode::Watch) {
+        return;
+    }
+    qDebug() << "Source folder files modified:" << paths.count();
+    // Could trigger a refresh of modified sprites, for now just log
+}
+
+void MainWindow::onSyncNowRequested() {
+    if (m_session->sourceFolder.isEmpty()) {
+        QMessageBox::information(this, tr("Sync"), tr("No source folder configured."));
+        return;
+    }
+    performFolderSync();
+}
+
+void MainWindow::performFolderSync() {
+    if (m_session->layoutModels.isEmpty()) {
+        qWarning() << "Cannot sync: no layout models loaded";
+        return;
+    }
+
+    // Detect changes
+    auto syncResult = FolderSyncService::detectChanges(
+        m_session->sourceFolder,
+        m_session->layoutModels.first().sprites);
+
+    if (!syncResult.error.isEmpty()) {
+        QMessageBox::warning(this, tr("Sync Error"), syncResult.error);
+        return;
+    }
+
+    if (!syncResult.hasChanges()) {
+        showSyncNotification(tr("No changes detected"));
+        return;
+    }
+
+    // Show summary
+    QString summary = FolderSyncService::describeSyncResult(syncResult);
+    qInfo() << "Folder sync:" << summary;
+
+    // Merge changes into layout
+    if (!FolderSyncService::mergeSyncResults(
+            m_session->layoutModels.first(), syncResult)) {
+        QMessageBox::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
+        return;
+    }
+
+    showSyncNotification(summary);
+
+    // Re-run layout to position new sprites
+    if (!syncResult.newImagePaths.isEmpty()) {
+        m_statusLabel->setText(tr("Re-generating layout with new sprites..."));
+        onRunLayout();
+    }
+}
+
+void MainWindow::initializeSourceFolderWatcher() {
+    if (!m_session || m_session->sourceFolder.isEmpty()) {
+        return;
+    }
+
+    if (m_settings.syncMode == SyncMode::Watch) {
+        m_folderWatcher->watchFolder(m_session->sourceFolder);
+        qInfo() << "Source folder watcher started:" << m_session->sourceFolder;
+    } else if (m_settings.syncMode == SyncMode::Manual) {
+        // Manual mode: don't watch, but folder is available for manual sync
+        qInfo() << "Source folder set for manual sync:" << m_session->sourceFolder;
+    }
+}
+
+void MainWindow::cleanupSourceFolderWatcher() {
+    if (m_folderWatcher && m_folderWatcher->isWatching()) {
+        m_folderWatcher->stopWatching();
+        qInfo() << "Source folder watcher stopped";
+    }
+}
+
+void MainWindow::showSyncNotification(const QString& message) {
+    if (m_statusLabel) {
+        m_statusLabel->setText(message);
+    }
+    qInfo() << "Sync:" << message;
 }

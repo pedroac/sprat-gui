@@ -13,6 +13,7 @@
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
 #include "ResolutionUtils.h"
+#include "FolderSyncService.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -728,6 +729,10 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
 
 void MainWindow::applyProjectPayload() {
     m_isRestoringProject = true;
+
+    // Clean up previous source folder watcher before loading new project
+    cleanupSourceFolderWatcher();
+
     QJsonObject root = m_session->pendingProjectPayload;
     m_session->pendingProjectPayload = QJsonObject();
     ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->layoutModels);
@@ -759,6 +764,15 @@ void MainWindow::applyProjectPayload() {
     m_settings = applied.appSettings;
     m_lastSaveConfig = applied.saveConfig;
     applySettings();
+
+    // Initialize source folder for sync if layoutSourcePath points to a folder
+    if (!m_session->layoutSourcePath.isEmpty()) {
+        QFileInfo fi(m_session->layoutSourcePath);
+        if (fi.isDir()) {
+            m_session->sourceFolder = fi.absoluteFilePath();
+            initializeSourceFolderWatcher();
+        }
+    }
 
     QStringList missing;
     resolveCliBinaries(missing);
