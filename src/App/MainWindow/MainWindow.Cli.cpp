@@ -366,7 +366,7 @@ void MainWindow::onLoadFolder() {
     }
 }
 
-void MainWindow::onInstallFinished(int exitCode, 
+void MainWindow::onInstallFinished(int exitCode,
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess::ExitStatus exitStatus
 #else
@@ -384,7 +384,24 @@ void MainWindow::onInstallFinished(int exitCode,
         return;
     }
     m_statusLabel->setText(tr("CLI installation failed"));
-    QMessageBox::warning(this, tr("Install Failed"), tr("Could not install CLI tools automatically."));
+
+    // Show error dialog with logs
+    QMessageBox errorDialog(this);
+    errorDialog.setWindowTitle(tr("CLI Installation Failed"));
+    errorDialog.setIcon(QMessageBox::Critical);
+    errorDialog.setText(tr("Could not install CLI tools automatically."));
+
+    // Get the installation logs
+    QString logContent;
+    if (m_cliInstallLog) {
+        logContent = m_cliInstallLog->toPlainText();
+    }
+
+    if (!logContent.isEmpty()) {
+        errorDialog.setDetailedText(logContent);
+    }
+
+    errorDialog.exec();
 }
 
 void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
@@ -420,29 +437,35 @@ void MainWindow::setupCliInstallOverlay() {
         return;
     }
     m_cliInstallOverlay = new QWidget(this);
-    m_cliInstallOverlay->setStyleSheet("background: rgba(0, 0, 0, 180);");
+    m_cliInstallOverlay->setStyleSheet("background: rgba(40, 40, 40, 200); border-radius: 8px;");
     m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     QVBoxLayout* layout = new QVBoxLayout(m_cliInstallOverlay);
     layout->setAlignment(Qt::AlignCenter);
-    layout->setSpacing(12);
+    layout->setSpacing(6);
+    layout->setContentsMargins(12, 12, 12, 12);
+
     m_cliInstallOverlayLabel = new QLabel(tr("Installing CLI tools..."), m_cliInstallOverlay);
-    m_cliInstallOverlayLabel->setStyleSheet("color: white; font-weight: bold;");
+    m_cliInstallOverlayLabel->setStyleSheet("color: white; font-weight: bold; padding: 0px;");
     layout->addWidget(m_cliInstallOverlayLabel);
+
     m_cliInstallProgress = new QProgressBar(m_cliInstallOverlay);
     m_cliInstallProgress->setRange(0, 0);
-    m_cliInstallProgress->setFixedWidth(220);
+    m_cliInstallProgress->setFixedWidth(200);
+    m_cliInstallProgress->setMaximumHeight(6);
     layout->addWidget(m_cliInstallProgress);
+
     m_cliInstallLog = new QPlainTextEdit(m_cliInstallOverlay);
     m_cliInstallLog->setReadOnly(true);
-    m_cliInstallLog->document()->setMaximumBlockCount(200);
-    m_cliInstallLog->setFixedSize(520, 180);
-    m_cliInstallLog->setStyleSheet("background: rgba(0, 0, 0, 90); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 60);");
+    m_cliInstallLog->document()->setMaximumBlockCount(100);
+    m_cliInstallLog->setFixedSize(340, 100);
+    m_cliInstallLog->setStyleSheet("background: rgba(0, 0, 0, 90); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 60); font-size: 10px;");
     layout->addWidget(m_cliInstallLog);
 
     m_cancelLoadingButton = new QPushButton(tr("Cancel"), m_cliInstallOverlay);
-    m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 6px 12px; font-weight: bold;");
+    m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 4px 8px; font-weight: bold; font-size: 11px;");
     m_cancelLoadingButton->setCursor(Qt::PointingHandCursor);
-    layout->addWidget(m_cancelLoadingButton);
+    m_cancelLoadingButton->setMaximumWidth(80);
+    layout->addWidget(m_cancelLoadingButton, 0, Qt::AlignCenter);
     connect(m_cancelLoadingButton, &QPushButton::clicked, this, &MainWindow::onCancelLoading);
 
     m_cliInstallOverlay->hide();
@@ -504,7 +527,12 @@ void MainWindow::updateCliOverlayGeometry() {
     if (!m_cliInstallOverlay) {
         return;
     }
-    m_cliInstallOverlay->setGeometry(rect());
+    // Position the overlay dialog in the center with minimal size
+    int width = 380;
+    int height = 200;
+    int x = (rect().width() - width) / 2;
+    int y = (rect().height() - height) / 2;
+    m_cliInstallOverlay->setGeometry(x, y, width, height);
     m_cliInstallOverlay->raise();
 }
 

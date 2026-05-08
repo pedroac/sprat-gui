@@ -94,13 +94,30 @@ void CliToolInstaller::installOnLinux() {
     }
 
     emit installLog(QString("Cloning sprat-cli (%1)...").arg(m_cliVersion));
-    QString script = QString(R"(
+    QString script = QString(R"SCRIPT(
 set -euo pipefail
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
-cd "$workdir"
-git clone --depth 1 --branch %1 https://github.com/pedroac/sprat-cli.git
-cd sprat-cli
+
+# Try to use local sprat-cli copy first (sibling directory)
+local_sprat_cli="$(cd "$(dirname "%1")/.." 2>/dev/null && pwd)/sprat-cli" 2>/dev/null || true
+if [ -d "$local_sprat_cli" ] && [ -f "$local_sprat_cli/CMakeLists.txt" ]; then
+  echo "Found local sprat-cli at $local_sprat_cli, using it instead of cloning"
+  cp -r "$local_sprat_cli" "$workdir/sprat-cli"
+  # Clean up build artifacts to avoid CMakeCache.txt conflicts
+  echo "Cleaning up build artifacts..."
+  rm -rf "$workdir/sprat-cli/build" "$workdir/sprat-cli/build_test" "$workdir/sprat-cli/build_debug" "$workdir/sprat-cli/build_release" "$workdir/sprat-cli/build_win"
+  rm -rf "$workdir/sprat-cli/CMakeCache.txt" "$workdir/sprat-cli/CMakeFiles" "$workdir/sprat-cli/cmake_install.cmake" "$workdir/sprat-cli/compile_commands.json"
+else
+  echo "No local sprat-cli found, cloning from GitHub..."
+  cd "$workdir"
+  git clone --depth 1 --branch %1 https://github.com/pedroac/sprat-cli.git 2>&1 | grep -E "(Cloning|fatal|error)" || true
+fi
+
+cd "$workdir/sprat-cli"
+echo "VERSION file content:"
+cat VERSION
+echo "---"
 cmake -DSPRAT_DOWNLOAD_STB=ON .
 make -j$(nproc 2>/dev/null || echo 1)
 mkdir -p "$HOME/.local/bin"
@@ -108,7 +125,21 @@ install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOM
 mkdir -p "$HOME/.local/share/sprat/transforms"
 cp spratprofiles.cfg "$HOME/.local/share/sprat/"
 cp -r transforms/* "$HOME/.local/share/sprat/transforms/"
-)").arg(m_cliVersion);
+
+echo "Checking installed CLI tool versions:"
+echo "Expected version: %1"
+echo "---"
+for tool in spratlayout spratpack spratconvert spratframes spratunpack; do
+  installed_version=$("$HOME/.local/bin/$tool" --version 2>&1 | grep -oP 'v\d+\.\d+\.\d+(?:[.\-][a-zA-Z0-9]+)*' | head -1)
+  echo "$tool: $installed_version"
+  if [ "$installed_version" != "%1" ]; then
+    echo "ERROR: Version mismatch for $tool! Expected %1 but got $installed_version" >&2
+    exit 1
+  fi
+done
+echo "---"
+echo "Successfully installed all sprat-cli tools with version %1"
+)SCRIPT").arg(m_cliVersion);
 
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
@@ -159,23 +190,50 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
 void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
 #ifndef SPRAT_EMBEDDED_CLI
     QString appDir = QApplication::applicationDirPath();
-    
+    QString expectedVersion = m_cliVersion;
+
 #ifdef Q_OS_WIN
     emit installLog("Extracting ZIP...");
     // Extract ZIP into the CLI directory
     QString destDir = CliToolsConfig::defaultInstallDir();
     QDir().mkpath(destDir);
     QString script = QString("$ErrorActionPreference = 'Stop'; "
-                             "Expand-Archive -Path '%1' -DestinationPath '%2' -Force")
-                             .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"));
+                             "Expand-Archive -Path '%1' -DestinationPath '%2' -Force; "
+                             "Write-Output 'Checking installed CLI tool versions:'; "
+                             "Write-Output 'Expected version: %3'; "
+                             "Write-Output '---'; "
+                             "foreach ($tool in @('spratlayout', 'spratpack', 'spratconvert', 'spratframes', 'spratunpack')) { "
+                             "  $exe = '%2\\' + $tool + '.exe'; "
+                             "  $installed_version = & $exe --version 2>$null | Select-String -Pattern 'v\\d+\\.\\d+\\.\\d+' -AllMatches | ForEach-Object { $_.Matches[0].Value }; "
+                             "  Write-Output \"$tool`: $installed_version\"; "
+                             "  if ($installed_version -ne '%3') { throw \"Version mismatch for $tool! Expected %3 but got $installed_version\" } "
+                             "}; "
+                             "Write-Output '---'; "
+                             "Write-Output 'Successfully installed all sprat-cli tools with version %3'")
+                             .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"), expectedVersion);
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
     emit installLog("Mounting DMG and copying files...");
     // Use hdiutil to mount and cp while preserving structure
-    QString script = QString("MOUNT_POINT=$(hdiutil mount \"%1\" | grep -o '/Volumes/.*' | head -n 1)\n"
+    QString script = QString("set -euo pipefail\n"
+                             "MOUNT_POINT=$(hdiutil mount \"%1\" | grep -o '/Volumes/.*' | head -n 1)\n"
                              "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
-                             "cp -R \"$MOUNT_POINT\"/ \"%2/cli/\"\n"
-                             "hdiutil unmount \"$MOUNT_POINT\"").arg(filePath, appDir);
+                             "mkdir -p \"%2/cli\"\n"
+                             "cp -R \"$MOUNT_POINT\"/* \"%2/cli/\" 2>/dev/null || true\n"
+                             "hdiutil unmount \"$MOUNT_POINT\"\n"
+                             "echo \"Checking installed CLI tool versions:\"\n"
+                             "echo \"Expected version: %3\"\n"
+                             "echo \"---\"\n"
+                             "for tool in spratlayout spratpack spratconvert spratframes spratunpack; do\n"
+                             "  installed_version=$(\"%2/cli/$tool\" --version 2>&1 | grep -oP 'v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*' | head -1)\n"
+                             "  echo \"$tool: $installed_version\"\n"
+                             "  if [ \"$installed_version\" != \"%3\" ]; then\n"
+                             "    echo \"ERROR: Version mismatch for $tool! Expected %3 but got $installed_version\" >&2\n"
+                             "    exit 1\n"
+                             "  fi\n"
+                             "done\n"
+                             "echo \"---\"\n"
+                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(filePath, appDir, expectedVersion);
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
 #else
