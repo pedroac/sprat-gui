@@ -255,6 +255,10 @@ set(PROJECT_SOURCES
     src/CLITools/CliToolsConfig.h
     src/CLITools/LayoutRunner.cpp
     src/CLITools/LayoutRunner.h
+    src/CLITools/SourceFolderWatcher.cpp
+    src/CLITools/SourceFolderWatcher.h
+    src/CLITools/FolderSyncService.cpp
+    src/CLITools/FolderSyncService.h
     src/SelectedSpriteFrame/Markers/MarkersDialog.cpp
     src/SelectedSpriteFrame/Markers/MarkersDialog.h
     src/Project/SaveDialog.cpp

@@ -21,6 +21,8 @@ private slots:
     void pickColor(QPushButton* btn, QColor& color);
     void resetToDefaults();
     void pickCliBaseDir();
+    void onSyncModeChanged(int index);
+    void onSyncNowClicked();
 
 private:
     void setupUi();
@@ -42,4 +44,10 @@ private:
     QLineEdit* m_cliBaseDirEdit;
     QPushButton* m_cliBaseDirBtn;
     QPushButton* m_installCliBtn;
+
+    // Spritesheet sync controls
+    QLineEdit* m_sourceFolderEdit;
+    QPushButton* m_browseFolderBtn;
+    QComboBox* m_syncModeCombo;
+    QPushButton* m_syncNowBtn;
 };

@@ -25,6 +25,56 @@ enum class MarkerKind {
 };
 
 /**
+ * @enum SyncMode
+ * @brief Enum representing folder synchronization modes.
+ *
+ * This enum defines how the project syncs with the source folder:
+ * - None: No synchronization
+ * - Manual: User-initiated sync via "Sync Now" button
+ * - Watch: Live file system monitoring with auto-detection
+ */
+enum class SyncMode {
+    None = 0,
+    Manual,
+    Watch
+};
+
+/**
+ * @brief Converts SyncMode enum to string representation.
+ *
+ * @param mode SyncMode to convert
+ * @return QString String representation of the sync mode
+ */
+inline QString syncModeToString(SyncMode mode) {
+    switch (mode) {
+    case SyncMode::None:
+        return "none";
+    case SyncMode::Manual:
+        return "manual";
+    case SyncMode::Watch:
+        return "watch";
+    }
+    return "none";
+}
+
+/**
+ * @brief Converts string representation to SyncMode enum.
+ *
+ * @param mode String representation of sync mode
+ * @return SyncMode Corresponding SyncMode enum value
+ */
+inline SyncMode syncModeFromString(const QString& mode) {
+    const QString normalized = mode.trimmed().toLower();
+    if (normalized == "manual") {
+        return SyncMode::Manual;
+    }
+    if (normalized == "watch") {
+        return SyncMode::Watch;
+    }
+    return SyncMode::None;
+}
+
+/**
  * @brief Converts MarkerKind enum to string representation.
  * 
  * @param kind MarkerKind to convert
@@ -373,6 +423,15 @@ struct AppSettings {
      * Default: "none"
      */
     QString deduplicateMode = "none";
+
+    /**
+     * @brief Folder synchronization mode.
+     *
+     * Options: None (no sync), Manual (user-initiated), Watch (live monitoring)
+     *
+     * Default: None
+     */
+    SyncMode syncMode = SyncMode::None;
 
 };
 

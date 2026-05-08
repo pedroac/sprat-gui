@@ -77,6 +77,34 @@ void SettingsDialog::setupUi() {
 
     spritesheetForm->addRow(tr("Deduplicate Sprites:"), m_deduplicateModeCombo);
 
+    // Sync controls
+    QHBoxLayout* sourceFolderLayout = new QHBoxLayout();
+    m_sourceFolderEdit = new QLineEdit(this);
+    m_sourceFolderEdit->setReadOnly(true);
+    m_sourceFolderEdit->setPlaceholderText(tr("No source folder selected"));
+    m_browseFolderBtn = new QPushButton(tr("Browse..."), this);
+    connect(m_browseFolderBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
+    sourceFolderLayout->addWidget(m_sourceFolderEdit);
+    sourceFolderLayout->addWidget(m_browseFolderBtn);
+    spritesheetForm->addRow(tr("Source Folder:"), sourceFolderLayout);
+
+    m_syncModeCombo = new QComboBox(this);
+    m_syncModeCombo->addItem(tr("None (no sync)"), (int)SyncMode::None);
+    m_syncModeCombo->addItem(tr("Manual (sync on demand)"), (int)SyncMode::Manual);
+    m_syncModeCombo->addItem(tr("Watch (live monitoring)"), (int)SyncMode::Watch);
+    int syncIndex = m_syncModeCombo->findData((int)m_settings.syncMode);
+    if (syncIndex >= 0) {
+        m_syncModeCombo->setCurrentIndex(syncIndex);
+    }
+    connect(m_syncModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &SettingsDialog::onSyncModeChanged);
+    spritesheetForm->addRow(tr("Sync Mode:"), m_syncModeCombo);
+
+    m_syncNowBtn = new QPushButton(tr("Sync Now"), this);
+    m_syncNowBtn->setEnabled(m_settings.syncMode != SyncMode::None);
+    connect(m_syncNowBtn, &QPushButton::clicked, this, &SettingsDialog::onSyncNowClicked);
+    spritesheetForm->addRow("", m_syncNowBtn);
+
     layout->addWidget(spritesheetGroup);
 
 #ifndef Q_OS_WASM
@@ -176,9 +204,22 @@ AppSettings SettingsDialog::getSettings() const {
     s.showCheckerboard = m_checkerboardCheck->isChecked();
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
+    s.syncMode = (SyncMode)m_syncModeCombo->currentData().toInt();
     return s;
 }
 
 CliPaths SettingsDialog::getCliPaths() const {
     return m_cliPaths;
+}
+
+void SettingsDialog::onSyncModeChanged(int index) {
+    Q_UNUSED(index);
+    // Enable "Sync Now" button only for Manual and Watch modes
+    SyncMode mode = (SyncMode)m_syncModeCombo->currentData().toInt();
+    m_syncNowBtn->setEnabled(mode != SyncMode::None);
+}
+
+void SettingsDialog::onSyncNowClicked() {
+    // Emit signal or perform sync - for now just acknowledge
+    // The MainWindow will handle the actual sync operation
 }

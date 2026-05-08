@@ -25,6 +25,7 @@ public:
     QString currentFolder;
     QString layoutSourcePath;
     bool layoutSourceIsList = false;
+    QString sourceFolder;  // Source folder for sync operations
     QStringList activeFramePaths;
     QString frameListPath; // Temporary file path for frame list
 
