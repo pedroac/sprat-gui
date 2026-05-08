@@ -22,6 +22,7 @@ public:
         const QJsonObject& projectPayload,
         QString& savedDestination,
         QString& error,
+        const QString& deduplicateMode = "none",
         const std::function<void(bool)>& setLoading = nullptr,
         const std::function<void(const QString&)>& setStatus = nullptr,
         const std::function<bool()>& shouldCancel = nullptr,

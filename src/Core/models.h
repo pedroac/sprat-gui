@@ -315,52 +315,64 @@ struct SaveConfig {
 struct AppSettings {
     /**
      * @brief Background color of the workspace (outside the sprite area).
-     * 
+     *
      * Default: QColor(90, 90, 90) - dark gray
      */
     QColor workspaceColor = QColor(90, 90, 90);
 
     /**
      * @brief Background color of the sprite frames.
-     * 
+     *
      * Default: #ffffff - white
      */
     QColor spriteFrameColor = QColor("#ffffff");
 
     /**
      * @brief Whether to show checkerboard background for transparency.
-     * 
+     *
      * Default: true
      */
     bool showCheckerboard = true;
 
     /**
      * @brief Whether to show borders around sprites.
-     * 
+     *
      * Default: true
      */
     bool showBorders = true;
 
     /**
      * @brief Color of borders around sprites.
-     * 
+     *
      * Default: QColor(86, 86, 86) - medium gray
      */
     QColor borderColor = QColor(86, 86, 86);
 
     /**
      * @brief Color for selected frames in detection dialog.
-     * 
+     *
      * Default: Qt::green
      */
     QColor detectionSelectedColor = Qt::green;
 
     /**
      * @brief Style of borders around sprites.
-     * 
+     *
      * Default: Qt::DashLine
      */
     Qt::PenStyle borderStyle = Qt::DashLine;
+
+    /**
+     * @brief Deduplication mode for identical sprites.
+     *
+     * Options: "none" (default), "exact", "perceptual"
+     * - none: No deduplication
+     * - exact: Detect byte-for-byte identical images (FNV-1a hash)
+     * - perceptual: Detect visually similar images (dHash algorithm)
+     *
+     * Default: "none"
+     */
+    QString deduplicateMode = "none";
 
 };
 

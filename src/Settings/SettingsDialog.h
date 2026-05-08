@@ -37,7 +37,8 @@ private:
     QPushButton* m_borderColorBtn;
     QPushButton* m_detectionSelectedColorBtn;
     QComboBox* m_borderStyleCombo;
-    
+    QComboBox* m_deduplicateModeCombo;
+
     QLineEdit* m_cliBaseDirEdit;
     QPushButton* m_cliBaseDirBtn;
     QPushButton* m_installCliBtn;

@@ -63,6 +63,7 @@ void MainWindow::onRunLayout() {
     config.sourceResolutionWidth = sourceResolutionWidth;
     config.sourceResolutionHeight = sourceResolutionHeight;
     config.retryWithoutTrim = m_retryWithoutTrimOnFailure;
+    config.deduplicateMode = m_settings.deduplicateMode;
 
     m_session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile.clear();

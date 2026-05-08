@@ -51,6 +51,7 @@ AppSettings CliToolsConfig::loadAppSettings() {
     }
     out.borderStyle = static_cast<Qt::PenStyle>(
         settings.value("settings/border_style", static_cast<int>(out.borderStyle)).toInt());
+    out.deduplicateMode = settings.value("settings/deduplicate_mode", out.deduplicateMode).toString();
     return out;
 }
 
@@ -82,6 +83,7 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/border_color", settings.borderColor.name(QColor::HexArgb));
     qsettings.setValue("settings/detection_selected_color", settings.detectionSelectedColor.name(QColor::HexArgb));
     qsettings.setValue("settings/border_style", static_cast<int>(settings.borderStyle));
+    qsettings.setValue("settings/deduplicate_mode", settings.deduplicateMode);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

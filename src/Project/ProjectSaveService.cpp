@@ -44,6 +44,7 @@ bool ProjectSaveService::save(
     const QJsonObject& projectPayload,
     QString& savedDestination,
     QString& error,
+    const QString& deduplicateMode,
     const std::function<void(bool)>& setLoading,
     const std::function<void(const QString&)>& setStatus,
     const std::function<bool()>& shouldCancel,
@@ -423,6 +424,9 @@ bool ProjectSaveService::save(
             if (!effectiveProfile.sort.trimmed().isEmpty()) {
                 layoutArgs << "--sort" << effectiveProfile.sort.trimmed();
             }
+            if (!deduplicateMode.isEmpty() && deduplicateMode != "none") {
+                layoutArgs << "--deduplicate" << deduplicateMode;
+            }
 
             bool layoutSuccess = false;
             while (!layoutSuccess) {
@@ -452,7 +456,17 @@ bool ProjectSaveService::save(
         if (checkCanceled()) {
             return false;
         }
-        if (!runProcess(spratPackBin, QStringList(), QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
+
+        QStringList packArgs;
+        if (effectiveProfile.dilate > 0) {
+            packArgs << "--dilate" << QString::number(effectiveProfile.dilate);
+        }
+        const bool hasDds = !effectiveProfile.gpuCompress.isEmpty();
+        if (hasDds) {
+            packArgs << "--gpu-compress" << effectiveProfile.gpuCompress;
+        }
+
+        if (!runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
             error = QString(trPS("Packing failed for profile '%1'")).arg(profileName);
             return false;
         }
@@ -483,7 +497,8 @@ bool ProjectSaveService::save(
                 }
             }
         } else {
-            QFile imgFile(profileDir.filePath("spritesheet.png"));
+            const QString imageFileName = hasDds ? "spritesheet.dds" : "spritesheet.png";
+            QFile imgFile(profileDir.filePath(imageFileName));
             if (!imgFile.open(QIODevice::WriteOnly) || imgFile.write(imageData) < 0) {
                 error = QString(trPS("Could not write spritesheet for profile '%1'.")).arg(profileName);
                 return false;

@@ -222,5 +222,9 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
         args << "--sort" << p.sort.trimmed();
     }
 
+    if (!config.deduplicateMode.isEmpty() && config.deduplicateMode != "none") {
+        args << "--deduplicate" << config.deduplicateMode;
+    }
+
     return args;
 }

@@ -65,9 +65,17 @@ void SettingsDialog::setupUi() {
     QGroupBox* spritesheetGroup = new QGroupBox(tr("Spritesheet"), this);
     QFormLayout* spritesheetForm = new QFormLayout(spritesheetGroup);
 
-    m_deduplicateCheck = new QCheckBox(tr("Deduplicate identical sprites"), this);
-    m_deduplicateCheck->setChecked(m_settings.deduplicateSprites);
-    spritesheetForm->addRow("", m_deduplicateCheck);
+    m_deduplicateModeCombo = new QComboBox(this);
+    m_deduplicateModeCombo->addItem(tr("None (no deduplication)"), "none");
+    m_deduplicateModeCombo->addItem(tr("Exact (identical images)"), "exact");
+    m_deduplicateModeCombo->addItem(tr("Perceptual (similar images)"), "perceptual");
+
+    int deducateIndex = m_deduplicateModeCombo->findData(m_settings.deduplicateMode);
+    if (deducateIndex >= 0) {
+        m_deduplicateModeCombo->setCurrentIndex(deducateIndex);
+    }
+
+    spritesheetForm->addRow(tr("Deduplicate Sprites:"), m_deduplicateModeCombo);
 
     layout->addWidget(spritesheetGroup);
 
@@ -151,7 +159,12 @@ void SettingsDialog::resetToDefaults() {
     updateColorButton(m_borderColorBtn, m_settings.borderColor);
     updateColorButton(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor);
     m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
-    m_deduplicateCheck->setChecked(m_settings.deduplicateSprites);
+
+    int deduplicateIndex = m_deduplicateModeCombo->findData(m_settings.deduplicateMode);
+    if (deduplicateIndex >= 0) {
+        m_deduplicateModeCombo->setCurrentIndex(deduplicateIndex);
+    }
+
     int index = m_borderStyleCombo->findData((int)m_settings.borderStyle);
     if (index >= 0) {
         m_borderStyleCombo->setCurrentIndex(index);
@@ -162,7 +175,7 @@ AppSettings SettingsDialog::getSettings() const {
     AppSettings s = m_settings;
     s.showCheckerboard = m_checkerboardCheck->isChecked();
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
-    s.deduplicateSprites = m_deduplicateCheck->isChecked();
+    s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
     return s;
 }
 

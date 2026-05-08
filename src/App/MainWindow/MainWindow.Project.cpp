@@ -243,6 +243,7 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
             buildProjectPayload(config, m_session),
             result.savedDestination,
             result.error,
+            m_settings.deduplicateMode,
             nullptr, // setLoading handled by finished slot
             setStatus,
             shouldCancel,

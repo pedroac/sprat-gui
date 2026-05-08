@@ -16,6 +16,7 @@ struct LayoutRunConfig {
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     bool retryWithoutTrim = false;
+    QString deduplicateMode = "none";
 };
 
 struct LayoutResult {
