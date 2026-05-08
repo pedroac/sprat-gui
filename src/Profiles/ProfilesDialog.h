@@ -57,6 +57,8 @@ private:
     QDoubleSpinBox* m_scaleSpin = nullptr;
     QCheckBox* m_multipackCheck = nullptr;
     QComboBox* m_sortCombo = nullptr;
+    QComboBox* m_gpuCompressCombo = nullptr;
+    QSpinBox* m_dilateSpin = nullptr;
 
     QVector<SpratProfile> m_profiles;
     int m_currentRow = -1;

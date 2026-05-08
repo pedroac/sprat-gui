@@ -23,6 +23,8 @@ struct SpratProfile {
     double scale = 1.0;
     bool multipack = false;
     QString sort = "name";
+    QString gpuCompress = "";  // "" = none, "dxt1", "dxt5"
+    int dilate = 0;             // 0 = disabled, N = passes
 };
 
 class SpratProfilesConfig {

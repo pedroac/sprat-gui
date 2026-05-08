@@ -38,8 +38,11 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - **Project persistence**  
   Save and load full project state (layout options, markers, timelines) to continue work later.
 
-- **CLI tools configuration/installation UI**  
+- **CLI tools configuration/installation UI**
   Configure binary paths in Settings or install required CLI tools from the app.
+
+- **Advanced output processing**
+  Per-profile GPU texture compression (DXT1/DXT5), artifact reduction via pixel dilation, and sprite deduplication via hash detection.
 
 ## Requirements
 
@@ -51,6 +54,7 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   - `spratlayout`
   - `spratpack`
   - `spratconvert` (optional for format transforms)
+  - libsquish (bundled in sprat-cli for DXT texture compression)
   *(If the app detects them missing it can run the bundled installer and drop binaries into `~/.local/bin`.)*
   - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratframes`, `spratlayout`, `spratpack`, and `spratconvert` from it, or let you point Settings directly at those binaries.
 - Optional export tools:
@@ -130,20 +134,28 @@ Run:
 ## Quick start
 
 1. Launch the app.
-2. Open **Settings** and verify CLI tool paths (or use install action).
+2. Open **Settings** and verify CLI tool paths (or use install action); optionally enable **Deduplicate identical sprites**.
 3. Click **Load Images Folder** and select your frames directory.
-4. Adjust layout options (profile/padding/trim).
+4. Adjust layout options (profile/padding/trim) and use **Manage Profiles** to configure per-profile output processing (GPU compression, artifact reduction).
 5. Select sprites to edit pivots/markers.
 6. Create timelines manually or generate from frame names.
 7. Test animation in the Animation panel.
-8. Save project (`.json` or `.zip`) or export animation.
+8. Save project (`.json` or `.zip`) or export animation; output format (PNG vs. DDS) depends on active profile compression settings.
 
 ## UI workflow
 
 - **CLI Tools / Settings**
   - On first launch the toolbar shows “CLI missing”; click Settings to point to `spratframes`, `spratlayout`, `spratpack`, and optionally `spratconvert`, or use the “Install CLI Tools” button to download/build into `~/.local/bin`.
-  - Settings also exposes canvas/marker colors and border styles that apply immediately and persist.
+  - Settings also exposes canvas/marker colors, border styles, and sprite deduplication options that apply immediately and persist.
   - ![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
+
+- **Profile management with output processing**
+  - Use **Manage Profiles** to create and configure layout profiles.
+  - Each profile supports per-target output processing:
+    - **GPU Compression**: Choose None, DXT1 (RGB, no alpha), or DXT5 (RGBA) for hardware texture compression. Output is saved as `.dds` when enabled.
+    - **Dilate (Artifact Reduction)**: Apply pixel dilation passes (0–16) to bleed opaque pixels into transparent neighbors, reducing dark halos around trimmed sprites.
+  - These settings are profile-specific; different targets can use different compression formats.
+  - **Global Deduplicate**: Enable “Deduplicate identical sprites” in Settings to use hash-based detection and create aliases for duplicate sprites during layout generation.
 
 - **Loading frame folders**
   - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.

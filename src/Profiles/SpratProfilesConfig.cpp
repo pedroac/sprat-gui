@@ -27,7 +27,9 @@ SpratProfile makeProfile(const QString& name,
                          bool trimTransparent,
                          double scale,
                          bool multipack,
-                         const QString& sort) {
+                         const QString& sort,
+                         const QString& gpuCompress = "",
+                         int dilate = 0) {
     SpratProfile p;
     p.name = name;
     p.mode = mode;
@@ -46,6 +48,8 @@ SpratProfile makeProfile(const QString& name,
     p.scale = scale;
     p.multipack = multipack;
     p.sort = sort;
+    p.gpuCompress = gpuCompress;
+    p.dilate = dilate;
     return p;
 }
 
@@ -113,6 +117,13 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
         p.sort = p.sort.trimmed().toLower();
         if (p.sort != "name" && p.sort != "none") {
             p.sort = "name";
+        }
+        p.gpuCompress = p.gpuCompress.trimmed().toLower();
+        if (p.gpuCompress != "" && p.gpuCompress != "dxt1" && p.gpuCompress != "dxt5") {
+            p.gpuCompress = "";
+        }
+        if (p.dilate < 0) {
+            p.dilate = 0;
         }
         seen.append(p.name);
         cleaned.append(p);
@@ -310,6 +321,14 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             current.multipack = toBool(value, current.multipack);
         } else if (key == "sort") {
             current.sort = value;
+        } else if (key == "gpu_compress") {
+            current.gpuCompress = value;
+        } else if (key == "dilate") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.dilate = n;
+            }
         }
     }
 
@@ -383,6 +402,12 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         out << "scale=" << p.scale << "\n";
         out << "multipack=" << (p.multipack ? "true" : "false") << "\n";
         out << "sort=" << p.sort << "\n";
+        if (!p.gpuCompress.isEmpty()) {
+            out << "gpu_compress=" << p.gpuCompress << "\n";
+        }
+        if (p.dilate > 0) {
+            out << "dilate=" << p.dilate << "\n";
+        }
     }
 
     out.flush();

@@ -42,6 +42,8 @@ SpratProfile makeDefaultProfile(const QString& name) {
     p.scale = 1.0;
     p.multipack = false;
     p.sort = "name";
+    p.gpuCompress = "";
+    p.dilate = 0;
     return p;
 }
 
@@ -190,6 +192,23 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     advancedLayout->addRow(tr("Threads:"), threadsLayout);
 
     detailsScrollLayout->addWidget(advancedGroup);
+
+    // === Group 4: Output Processing ===
+    QGroupBox* outputGroup = new QGroupBox(tr("Output Processing"), this);
+    QFormLayout* outputLayout = new QFormLayout(outputGroup);
+
+    m_gpuCompressCombo = new QComboBox(this);
+    m_gpuCompressCombo->addItem(tr("None"), "");
+    m_gpuCompressCombo->addItem(tr("DXT1 (RGB, no alpha)"), "dxt1");
+    m_gpuCompressCombo->addItem(tr("DXT5 (RGBA)"), "dxt5");
+    outputLayout->addRow(tr("GPU compression:"), m_gpuCompressCombo);
+
+    m_dilateSpin = new QSpinBox(this);
+    m_dilateSpin->setRange(0, 16);
+    m_dilateSpin->setValue(0);
+    outputLayout->addRow(tr("Dilate (artifact reduction):"), m_dilateSpin);
+
+    detailsScrollLayout->addWidget(outputGroup);
     detailsScrollLayout->addStretch();
 
     scrollArea->setWidget(detailsWidget);
@@ -339,6 +358,8 @@ void ProfilesDialog::saveEditorsToProfile(int row) {
     p.scale = m_scaleSpin->value();
     p.multipack = m_multipackCheck->isChecked();
     p.sort = m_sortCombo->currentData().toString();
+    p.gpuCompress = m_gpuCompressCombo->currentData().toString();
+    p.dilate = m_dilateSpin->value();
 
     const QString displayName = p.name.isEmpty() ? tr("<unnamed>") : p.name;
     if (QListWidgetItem* item = m_listWidget->item(row)) {
@@ -369,6 +390,8 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_scaleSpin->setEnabled(valid);
     m_multipackCheck->setEnabled(valid);
     m_sortCombo->setEnabled(valid);
+    m_gpuCompressCombo->setEnabled(valid);
+    m_dilateSpin->setEnabled(valid);
 
     if (!valid) {
         m_nameEdit->clear();
@@ -392,6 +415,8 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
         m_scaleSpin->setValue(1.0);
         m_multipackCheck->setChecked(false);
         m_sortCombo->setCurrentIndex(0);
+        m_gpuCompressCombo->setCurrentIndex(0);
+        m_dilateSpin->setValue(0);
         m_updatingEditors = false;
         return;
     }
@@ -439,6 +464,10 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_multipackCheck->setChecked(p.multipack);
     const int sortIndex = m_sortCombo->findData(p.sort);
     m_sortCombo->setCurrentIndex(sortIndex >= 0 ? sortIndex : 0);
+
+    const int gpuCompressIndex = m_gpuCompressCombo->findData(p.gpuCompress);
+    m_gpuCompressCombo->setCurrentIndex(gpuCompressIndex >= 0 ? gpuCompressIndex : 0);
+    m_dilateSpin->setValue(p.dilate);
 
     m_updatingEditors = false;
     refreshMaxCombinationsEnabledState();
