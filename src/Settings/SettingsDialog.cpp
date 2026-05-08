@@ -19,27 +19,30 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliP
 void SettingsDialog::setupUi() {
     setWindowTitle(tr("Settings"));
     QVBoxLayout* layout = new QVBoxLayout(this);
-    QFormLayout* form = new QFormLayout();
+
+    // Styles Group
+    QGroupBox* stylesGroup = new QGroupBox(tr("Styles"), this);
+    QFormLayout* stylesForm = new QFormLayout(stylesGroup);
 
     m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
     connect(m_canvasColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_canvasColorBtn, m_settings.workspaceColor); });
-    form->addRow(tr("Workspace Background:"), m_canvasColorBtn);
+    stylesForm->addRow(tr("Workspace Background:"), m_canvasColorBtn);
 
     m_frameColorBtn = createColorButton(m_settings.spriteFrameColor);
     connect(m_frameColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_frameColorBtn, m_settings.spriteFrameColor); });
-    form->addRow(tr("Sprite Frame Background:"), m_frameColorBtn);
+    stylesForm->addRow(tr("Sprite Frame Background:"), m_frameColorBtn);
 
     m_checkerboardCheck = new QCheckBox(tr("Show Transparency Checkerboard"), this);
     m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
-    form->addRow("", m_checkerboardCheck);
+    stylesForm->addRow("", m_checkerboardCheck);
 
     m_borderColorBtn = createColorButton(m_settings.borderColor);
     connect(m_borderColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_borderColorBtn, m_settings.borderColor); });
-    form->addRow(tr("Border Color:"), m_borderColorBtn);
+    stylesForm->addRow(tr("Border Color:"), m_borderColorBtn);
 
     m_detectionSelectedColorBtn = createColorButton(m_settings.detectionSelectedColor);
     connect(m_detectionSelectedColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor); });
-    form->addRow(tr("Detection Selected Color:"), m_detectionSelectedColorBtn);
+    stylesForm->addRow(tr("Detection Selected Color:"), m_detectionSelectedColorBtn);
 
     m_borderStyleCombo = new QComboBox(this);
     m_borderStyleCombo->addItem(tr("None"), (int)Qt::NoPen);
@@ -54,8 +57,19 @@ void SettingsDialog::setupUi() {
         m_borderStyleCombo->setCurrentIndex(index);
     }
 
-    form->addRow(tr("Border Style:"), m_borderStyleCombo);
-    layout->addLayout(form);
+    stylesForm->addRow(tr("Border Style:"), m_borderStyleCombo);
+
+    layout->addWidget(stylesGroup);
+
+    // Spritesheet Group
+    QGroupBox* spritesheetGroup = new QGroupBox(tr("Spritesheet"), this);
+    QFormLayout* spritesheetForm = new QFormLayout(spritesheetGroup);
+
+    m_deduplicateCheck = new QCheckBox(tr("Deduplicate identical sprites"), this);
+    m_deduplicateCheck->setChecked(m_settings.deduplicateSprites);
+    spritesheetForm->addRow("", m_deduplicateCheck);
+
+    layout->addWidget(spritesheetGroup);
 
 #ifndef Q_OS_WASM
     QGroupBox* cliGroup = new QGroupBox(tr("CLI Tools"), this);
@@ -137,6 +151,7 @@ void SettingsDialog::resetToDefaults() {
     updateColorButton(m_borderColorBtn, m_settings.borderColor);
     updateColorButton(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor);
     m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
+    m_deduplicateCheck->setChecked(m_settings.deduplicateSprites);
     int index = m_borderStyleCombo->findData((int)m_settings.borderStyle);
     if (index >= 0) {
         m_borderStyleCombo->setCurrentIndex(index);
@@ -147,6 +162,7 @@ AppSettings SettingsDialog::getSettings() const {
     AppSettings s = m_settings;
     s.showCheckerboard = m_checkerboardCheck->isChecked();
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
+    s.deduplicateSprites = m_deduplicateCheck->isChecked();
     return s;
 }
 
