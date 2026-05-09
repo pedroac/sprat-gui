@@ -428,9 +428,49 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
 #endif
 }
 
+void LayoutCanvas::ensureSplitLineItem() {
+    if (!m_splitLineItem) {
+        setMouseTracking(true);
+        m_splitLineItem = new QGraphicsLineItem();
+        QPen splitPen(Qt::red, 2, Qt::DashLine);
+        splitPen.setCosmetic(true);
+        m_splitLineItem->setPen(splitPen);
+        m_splitLineItem->setZValue(100.0);
+        m_splitLineItem->hide();
+        m_scene->addItem(m_splitLineItem);
+    }
+}
+
+void LayoutCanvas::setSplitMode(bool enabled) {
+    ensureSplitLineItem();
+
+    m_splitMode = enabled;
+    if (!m_splitMode) {
+        if (m_splitLineItem) {
+            m_splitLineItem->hide();
+        }
+        m_splitItemIndex = -1;
+        if (viewport()) {
+            viewport()->setCursor(Qt::ArrowCursor);
+        }
+    } else {
+        if (viewport()) {
+            viewport()->setCursor(Qt::CrossCursor);
+        }
+    }
+}
+
 void LayoutCanvas::clearCanvas() {
+    // Remove split line from scene before clearing to avoid dangling pointer
+    if (m_splitLineItem) {
+        m_scene->removeItem(m_splitLineItem);
+        delete m_splitLineItem;
+        m_splitLineItem = nullptr;
+    }
+
     m_scene->clear();
     m_items.clear();
+    m_splitItemIndex = -1;
 }
 
 void LayoutCanvas::selectSpriteByPath(const QString& path) {
@@ -482,6 +522,24 @@ void LayoutCanvas::setSettings(const AppSettings& settings) {
 }
 
 void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
+    // Commit split on left-click in split mode
+    if (m_splitMode && event->button() == Qt::LeftButton && m_splitLineItem) {
+        if (m_splitItemIndex >= 0 && m_splitItemIndex < m_items.size() && m_splitLineItem->isVisible()) {
+            SpriteItem* item = m_items[m_splitItemIndex];
+            if (item) {
+                QPointF local = mapToScene(event->pos()) - item->pos();
+                int pos = (m_splitOrientation == Qt::Horizontal)
+                              ? qRound(local.y())
+                              : qRound(local.x());
+                emit splitSpriteRequested(item->getData(), m_splitOrientation, pos);
+                m_splitLineItem->hide();
+                m_splitItemIndex = -1;
+            }
+        }
+        event->accept();
+        return;
+    }
+
     if (!m_searchQuery.isEmpty() && m_searchCloseRect.contains(event->pos())) {
         m_searchQuery.clear();
         updateSearch();
@@ -563,6 +621,45 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
+    // Split mode: show preview line over hovered sprite
+    if (m_splitMode) {
+        ensureSplitLineItem();
+        if (m_splitLineItem) {
+            QPointF scenePos = mapToScene(event->pos());
+            m_splitItemIndex = -1;
+            m_splitLineItem->hide();
+
+            for (int i = 0; i < m_items.size(); ++i) {
+                SpriteItem* item = m_items[i];
+                if (!item) continue;
+
+                QRectF itemRect(item->pos(), item->pixmap().size());
+                if (itemRect.contains(scenePos)) {
+                    m_splitItemIndex = i;
+                    m_splitOrientation = (event->modifiers() & Qt::ShiftModifier)
+                                             ? Qt::Vertical
+                                             : Qt::Horizontal;
+                    if (m_splitOrientation == Qt::Horizontal) {
+                        // Horizontal line across sprite at cursor Y
+                        m_splitLineItem->setLine(
+                            itemRect.left(), scenePos.y(),
+                            itemRect.right(), scenePos.y());
+                    } else {
+                        // Vertical line across sprite at cursor X
+                        m_splitLineItem->setLine(
+                            scenePos.x(), itemRect.top(),
+                            scenePos.x(), itemRect.bottom());
+                    }
+                    m_splitLineItem->show();
+                    break;
+                }
+            }
+        }
+        // Consume event so normal hover logic is skipped in split mode
+        event->accept();
+        return;
+    }
+
     ZoomableGraphicsView::mouseMoveEvent(event);
 #ifdef Q_OS_WASM
     // Drag-and-drop is not reliable in WebAssembly builds.
@@ -572,7 +669,7 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
         m_pendingDeselect = false;
         return;
     }
-    
+
     if (event->buttons() & Qt::LeftButton) {
         if ((event->pos() - m_lastMousePos).manhattanLength() > QApplication::startDragDistance()) {
             m_pendingDeselect = false;
@@ -676,6 +773,12 @@ void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_S && !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier))) {
+        setSplitMode(!m_splitMode);
+        event->accept();
+        return;
+    }
+
     if (event->matches(QKeySequence::SelectAll)) {
         if (!m_items.isEmpty()) {
             for (auto* item : m_items) {
@@ -882,6 +985,12 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
             QApplication::clipboard()->setImage(QImage(m_contextMenuTargetPath));
         });
     }
+
+    menu.addSeparator();
+    QAction* splitAction = menu.addAction(tr("Split Mode"));
+    splitAction->setCheckable(true);
+    splitAction->setChecked(m_splitMode);
+    connect(splitAction, &QAction::triggered, this, &LayoutCanvas::setSplitMode);
 
     menu.exec(event->globalPos());
 }

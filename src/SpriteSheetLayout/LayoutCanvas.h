@@ -54,6 +54,16 @@ public:
      */
     void setSettings(const AppSettings& settings);
 
+    /**
+     * @brief Enables or disables split mode.
+     */
+    void setSplitMode(bool enabled);
+
+    /**
+     * @brief Checks if split mode is currently active.
+     */
+    bool isSplitMode() const { return m_splitMode; }
+
 signals:
     /**
      * @brief Emitted when the sprite selection changes.
@@ -85,6 +95,11 @@ signals:
      */
     void removeFramesRequested(const QStringList& paths);
 
+    /**
+     * @brief Emitted when a sprite should be split into two sub-images.
+     */
+    void splitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos);
+
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -102,6 +117,7 @@ private:
     void finalizeSearchSelection();
     void emitSelectionChanged();
     void updateBorderHighlights();
+    void ensureSplitLineItem();
 
     QGraphicsScene* m_scene;
     QString m_searchQuery;
@@ -119,4 +135,9 @@ private:
     QList<QAbstractGraphicsShapeItem*> m_borderItems;
     QHash<QString, QPixmap> m_sourcePixmaps;
     QString m_contextMenuTargetPath;
+
+    bool                m_splitMode     = false;
+    QGraphicsLineItem*  m_splitLineItem = nullptr;
+    int                 m_splitItemIndex = -1;
+    Qt::Orientation     m_splitOrientation = Qt::Horizontal;
 };

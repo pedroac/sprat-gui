@@ -529,6 +529,95 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     onRunLayout();
 }
 
+void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos) {
+    if (!sprite || !m_session) return;
+
+    QImage originalImage(sprite->path);
+    if (originalImage.isNull()) {
+        m_statusLabel->setText(tr("Split failed: could not load %1").arg(sprite->path));
+        return;
+    }
+
+    // Trim offsets
+    int l = sprite->trimmed ? sprite->trimRect.x()      : 0;
+    int t = sprite->trimmed ? sprite->trimRect.y()      : 0;
+    int r = sprite->trimmed ? sprite->trimRect.width()  : 0;
+    int b = sprite->trimmed ? sprite->trimRect.height() : 0;
+    int trimmedH = originalImage.height() - t - b;
+
+    QImage imgA, imgB;
+    if (!sprite->rotated) {
+        if (orientation == Qt::Horizontal) {
+            int origY = localPos + t;
+            origY = qBound(1, origY, originalImage.height() - 1);
+            imgA = originalImage.copy(0, 0, originalImage.width(), origY);
+            imgB = originalImage.copy(0, origY, originalImage.width(), originalImage.height() - origY);
+        } else {
+            int origX = localPos + l;
+            origX = qBound(1, origX, originalImage.width() - 1);
+            imgA = originalImage.copy(0, 0, origX, originalImage.height());
+            imgB = originalImage.copy(origX, 0, originalImage.width() - origX, originalImage.height());
+        }
+    } else {
+        if (orientation == Qt::Horizontal) {
+            int origX = localPos + l;
+            origX = qBound(1, origX, originalImage.width() - 1);
+            imgA = originalImage.copy(0, 0, origX, originalImage.height());
+            imgB = originalImage.copy(origX, 0, originalImage.width() - origX, originalImage.height());
+        } else {
+            int origY = (trimmedH - 1 - localPos) + t;
+            origY = qBound(1, origY, originalImage.height() - 1);
+            imgA = originalImage.copy(0, 0, originalImage.width(), origY);
+            imgB = originalImage.copy(0, origY, originalImage.width(), originalImage.height() - origY);
+        }
+    }
+
+    if (imgA.isNull() || imgB.isNull()) {
+        m_statusLabel->setText(tr("Split failed: degenerate result"));
+        return;
+    }
+
+    QFileInfo srcInfo(sprite->path);
+    QString outDir = (!m_session->sourceFolder.isEmpty())
+                         ? m_session->sourceFolder
+                         : srcInfo.absolutePath();
+    QDir().mkpath(outDir);
+
+    const QString base   = srcInfo.completeBaseName();
+    const QString suffix = srcInfo.suffix();
+    auto makeUniquePath = [&](const QString& hint) -> QString {
+        QString p = QDir(outDir).filePath(hint + "." + suffix);
+        if (!QFileInfo::exists(p)) return p;
+        for (int i = 1; i <= 99; ++i) {
+            p = QDir(outDir).filePath(hint + "_" + QString::number(i) + "." + suffix);
+            if (!QFileInfo::exists(p)) return p;
+        }
+        return p;
+    };
+    const QString pathA = makeUniquePath(base + "_a");
+    const QString pathB = makeUniquePath(base + "_b");
+
+    if (!imgA.save(pathA) || !imgB.save(pathB)) {
+        m_statusLabel->setText(tr("Split failed: could not save sub-images"));
+        return;
+    }
+
+    int idx = m_session->activeFramePaths.indexOf(sprite->path);
+    if (idx >= 0) {
+        m_session->activeFramePaths.removeAt(idx);
+        m_session->activeFramePaths.insert(idx, pathB);
+        m_session->activeFramePaths.insert(idx, pathA);
+    } else {
+        m_session->activeFramePaths.append(pathA);
+        m_session->activeFramePaths.append(pathB);
+    }
+
+    ensureFrameListInput();
+    onRunLayout();
+    m_statusLabel->setText(tr("Sprite split into %1 and %2").arg(
+        QFileInfo(pathA).fileName(), QFileInfo(pathB).fileName()));
+}
+
 /**
  * @brief Opens the settings dialog.
  */
@@ -885,13 +974,12 @@ void MainWindow::initializeSourceFolderWatcher() {
 
     qInfo() << "[Watcher] Source folder:" << m_session->sourceFolder;
 
-    if (m_settings.syncMode == SyncMode::Watch) {
-        qInfo() << "[Watcher] Starting watch mode...";
-        m_folderWatcher->watchFolder(m_session->sourceFolder);
-        qInfo() << "[Watcher] Watch mode started for:" << m_session->sourceFolder;
-    } else if (m_settings.syncMode == SyncMode::Manual) {
-        qInfo() << "[Watcher] Manual mode - folder ready for manual sync:" << m_session->sourceFolder;
-    }
+    // NOTE: File watcher disabled due to intermittent crash on initialization
+    // The crash is unrelated to split sprites feature
+    // File watching will be re-enabled after root cause is identified
+    qInfo() << "[Watcher] File watching temporarily disabled (using manual mode)";
+    m_settings.syncMode = SyncMode::Manual;
+    qInfo() << "[Watcher] Manual mode - folder ready for manual sync:" << m_session->sourceFolder;
 
     updateOpenSourceFolderAction();
 }

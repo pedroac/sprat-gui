@@ -109,10 +109,19 @@ private slots:
 
     /**
      * @brief Handles request to remove frames from the layout.
-     * 
+     *
      * @param paths List of paths to remove
      */
     void onRemoveFramesRequested(const QStringList& paths);
+
+    /**
+     * @brief Handles sprite split request from layout canvas.
+     *
+     * @param sprite The sprite to split
+     * @param orientation Split orientation (Horizontal or Vertical)
+     * @param localPos Position of the split in local sprite coordinates
+     */
+    void onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos);
 
     // === Project Management Events ===
     /**

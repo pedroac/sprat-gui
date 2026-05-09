@@ -7,18 +7,32 @@
 
 SourceFolderWatcher::SourceFolderWatcher(QObject* parent)
     : QObject(parent),
-      m_watcher(new QFileSystemWatcher(this)),
-      m_debounceTimer(new QTimer(this)),
+      m_watcher(nullptr),
+      m_debounceTimer(nullptr),
       m_debounceInterval(500) {
 
-    connect(m_watcher, &QFileSystemWatcher::directoryChanged,
-            this, &SourceFolderWatcher::onDirectoryChanged);
-    connect(m_watcher, &QFileSystemWatcher::fileChanged,
-            this, &SourceFolderWatcher::onFileChanged);
+    try {
+        m_watcher = new QFileSystemWatcher(this);
+        m_debounceTimer = new QTimer(this);
 
-    m_debounceTimer->setSingleShot(true);
-    connect(m_debounceTimer, &QTimer::timeout,
-            this, &SourceFolderWatcher::onDebounceTimeout);
+        if (!m_watcher || !m_debounceTimer) {
+            qWarning() << "SourceFolderWatcher: Failed to allocate watcher or timer";
+            return;
+        }
+
+        connect(m_watcher, &QFileSystemWatcher::directoryChanged,
+                this, &SourceFolderWatcher::onDirectoryChanged);
+        connect(m_watcher, &QFileSystemWatcher::fileChanged,
+                this, &SourceFolderWatcher::onFileChanged);
+
+        m_debounceTimer->setSingleShot(true);
+        connect(m_debounceTimer, &QTimer::timeout,
+                this, &SourceFolderWatcher::onDebounceTimeout);
+    } catch (...) {
+        qWarning() << "SourceFolderWatcher: Exception during construction";
+        m_watcher = nullptr;
+        m_debounceTimer = nullptr;
+    }
 }
 
 SourceFolderWatcher::~SourceFolderWatcher() {
@@ -35,19 +49,95 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
     }
 
     m_watchedPath = dir.absolutePath();
-    m_watcher->addPath(m_watchedPath);
 
-    // Store initial file list for change detection
-    updatePreviousFilesList();
+    // Verify the path still exists and is valid before adding to watcher
+    if (!QDir(m_watchedPath).exists()) {
+        qWarning() << "SourceFolderWatcher: Folder path is invalid:" << m_watchedPath;
+        m_watchedPath.clear();
+        return;
+    }
 
-    emit watchingStarted();
-    qInfo() << "SourceFolderWatcher: Started watching" << m_watchedPath;
+    // Ensure watcher is properly initialized
+    if (!m_watcher) {
+        try {
+            m_watcher = new QFileSystemWatcher(this);
+            if (!m_watcher) {
+                qWarning() << "SourceFolderWatcher: Failed to create watcher";
+                m_watchedPath.clear();
+                return;
+            }
+
+            connect(m_watcher, &QFileSystemWatcher::directoryChanged,
+                    this, &SourceFolderWatcher::onDirectoryChanged);
+            connect(m_watcher, &QFileSystemWatcher::fileChanged,
+                    this, &SourceFolderWatcher::onFileChanged);
+        } catch (...) {
+            qWarning() << "SourceFolderWatcher: Exception creating watcher";
+            m_watcher = nullptr;
+            m_watchedPath.clear();
+            return;
+        }
+    }
+
+    // Ensure timer is properly initialized
+    if (!m_debounceTimer) {
+        try {
+            m_debounceTimer = new QTimer(this);
+            if (!m_debounceTimer) {
+                qWarning() << "SourceFolderWatcher: Failed to create timer";
+                m_watchedPath.clear();
+                return;
+            }
+
+            m_debounceTimer->setSingleShot(true);
+            connect(m_debounceTimer, &QTimer::timeout,
+                    this, &SourceFolderWatcher::onDebounceTimeout);
+        } catch (...) {
+            qWarning() << "SourceFolderWatcher: Exception creating timer";
+            m_debounceTimer = nullptr;
+            m_watchedPath.clear();
+            return;
+        }
+    }
+
+    // Add path to watcher with try-catch
+    try {
+        // Use QTimer to defer the addPath call, avoiding synchronous issues
+        QTimer::singleShot(100, this, [this]() {
+            if (!m_watchedPath.isEmpty() && m_watcher) {
+                try {
+                    m_watcher->addPath(m_watchedPath);
+                    if (m_watcher->directories().contains(m_watchedPath)) {
+                        updatePreviousFilesList();
+                        emit watchingStarted();
+                        qInfo() << "SourceFolderWatcher: Started watching" << m_watchedPath;
+                    } else {
+                        qWarning() << "SourceFolderWatcher: Failed to add path to watcher:" << m_watchedPath;
+                        m_watchedPath.clear();
+                    }
+                } catch (...) {
+                    qWarning() << "SourceFolderWatcher: Exception in deferred addPath:" << m_watchedPath;
+                    m_watchedPath.clear();
+                }
+            }
+        });
+    } catch (...) {
+        qWarning() << "SourceFolderWatcher: Exception setting up watch:" << m_watchedPath;
+        m_watchedPath.clear();
+        return;
+    }
+
+    qInfo() << "SourceFolderWatcher: Watch scheduled for:" << m_watchedPath;
 }
 
 void SourceFolderWatcher::stopWatching() {
     if (!m_watchedPath.isEmpty()) {
-        m_watcher->removePath(m_watchedPath);
-        m_debounceTimer->stop();
+        if (m_watcher) {
+            m_watcher->removePath(m_watchedPath);
+        }
+        if (m_debounceTimer) {
+            m_debounceTimer->stop();
+        }
         m_pendingAdds.clear();
         m_pendingRemoves.clear();
         m_pendingModifies.clear();
