@@ -8,6 +8,7 @@
 #include <QToolTip>
 #include <QPainter>
 #include "ViewUtils.h"
+#include "SplitModeUtils.h"
 
 FrameDetectionCanvas::FrameDetectionCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
@@ -194,18 +195,18 @@ void FrameDetectionCanvas::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
-    if (m_splitMode || (event->modifiers() & Qt::ShiftModifier)) {
+    if (m_splitMode || (event->modifiers() & Qt::AltModifier)) {
         for (int i = 0; i < m_frames.size(); ++i) {
-            ResizeHandle handle = getResizeHandle(event->pos(), m_frames[i]);
-            if (handle == Left || handle == Right || handle == Top || handle == Bottom) {
+            const QRectF rf(m_frames[i]);
+            if (rf.contains(scenePos)) {
                 m_splitFrameIndex = i;
                 const QRect& r = m_frames[i];
-                if (handle == Left || handle == Right) {
-                    m_splitOrientation = Qt::Horizontal;
+                QPointF localPos = scenePos - rf.topLeft();
+                m_splitOrientation = SplitModeUtils::splitOrientation(localPos, rf.size());
+                if (m_splitOrientation == Qt::Horizontal) {
                     m_splitPos = qRound(scenePos.y());
                     m_splitLineItem->setLine(r.left(), m_splitPos, r.right(), m_splitPos);
                 } else {
-                    m_splitOrientation = Qt::Vertical;
                     m_splitPos = qRound(scenePos.x());
                     m_splitLineItem->setLine(m_splitPos, r.top(), m_splitPos, r.bottom());
                 }
@@ -214,6 +215,7 @@ void FrameDetectionCanvas::mouseMoveEvent(QMouseEvent* event) {
                 return;
             }
         }
+        m_splitFrameIndex = -1;
     }
     m_splitLineItem->hide();
 
@@ -250,6 +252,11 @@ void FrameDetectionCanvas::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void FrameDetectionCanvas::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_S && !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier))) {
+        setSplitMode(!m_splitMode);
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         deleteSelectedFrames();
         return;
@@ -267,9 +274,11 @@ void FrameDetectionCanvas::contextMenuEvent(QContextMenuEvent* event) {
     connect(deleteAction, &QAction::triggered, this, &FrameDetectionCanvas::deleteSelectedFrames);
 
     menu.addSeparator();
-    QAction* splitAction = menu.addAction(tr("Split Mode"));
+    QAction* splitAction = menu.addAction(tr("Split Mode (S)"));
     splitAction->setCheckable(true);
     splitAction->setChecked(m_splitMode);
+    splitAction->setToolTip(tr("Toggle split mode. Hold ALT to activate temporarily. "
+                                "Orientation is determined by which edge is nearest."));
     connect(splitAction, &QAction::triggered, this, &FrameDetectionCanvas::setSplitMode);
 
     QAction* createAction = menu.addAction(tr("Create New Frame"));

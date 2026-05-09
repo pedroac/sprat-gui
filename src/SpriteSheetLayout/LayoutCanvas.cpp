@@ -25,6 +25,7 @@
 #include <QImage>
 #include <limits>
 #include "ViewUtils.h"
+#include "SplitModeUtils.h"
 
 namespace {
     const QColor kSelectionColor(10, 125, 255);
@@ -523,7 +524,7 @@ void LayoutCanvas::setSettings(const AppSettings& settings) {
 
 void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
     // Commit split on left-click in split mode
-    if (m_splitMode && event->button() == Qt::LeftButton && m_splitLineItem) {
+    if ((m_splitMode || (event->modifiers() & Qt::AltModifier)) && event->button() == Qt::LeftButton && m_splitLineItem) {
         if (m_splitItemIndex >= 0 && m_splitItemIndex < m_items.size() && m_splitLineItem->isVisible()) {
             SpriteItem* item = m_items[m_splitItemIndex];
             if (item) {
@@ -622,7 +623,7 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
 
 void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
     // Split mode: show preview line over hovered sprite
-    if (m_splitMode) {
+    if (m_splitMode || (event->modifiers() & Qt::AltModifier)) {
         ensureSplitLineItem();
         if (m_splitLineItem) {
             QPointF scenePos = mapToScene(event->pos());
@@ -636,16 +637,13 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                 QRectF itemRect(item->pos(), item->pixmap().size());
                 if (itemRect.contains(scenePos)) {
                     m_splitItemIndex = i;
-                    m_splitOrientation = (event->modifiers() & Qt::AltModifier)
-                                             ? Qt::Vertical
-                                             : Qt::Horizontal;
+                    m_splitOrientation = SplitModeUtils::splitOrientation(
+                        scenePos - itemRect.topLeft(), itemRect.size());
                     if (m_splitOrientation == Qt::Horizontal) {
-                        // Horizontal line across sprite at cursor Y
                         m_splitLineItem->setLine(
                             itemRect.left(), scenePos.y(),
                             itemRect.right(), scenePos.y());
                     } else {
-                        // Vertical line across sprite at cursor X
                         m_splitLineItem->setLine(
                             scenePos.x(), itemRect.top(),
                             scenePos.x(), itemRect.bottom());
@@ -655,9 +653,13 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                 }
             }
         }
-        // Consume event so normal hover logic is skipped in split mode
         event->accept();
         return;
+    }
+
+    // Hide split line when not in split mode and Alt is not pressed
+    if (m_splitLineItem) {
+        m_splitLineItem->hide();
     }
 
     ZoomableGraphicsView::mouseMoveEvent(event);
@@ -990,7 +992,8 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
     QAction* splitAction = menu.addAction(tr("Split Mode (S)"));
     splitAction->setCheckable(true);
     splitAction->setChecked(m_splitMode);
-    splitAction->setToolTip(tr("Toggle split mode. Hold ALT while hovering to switch between horizontal and vertical split."));
+    splitAction->setToolTip(tr("Toggle split mode (S). Hold ALT to activate temporarily. "
+                                "Orientation is determined by which edge is nearest."));
     connect(splitAction, &QAction::triggered, this, &LayoutCanvas::setSplitMode);
 
     menu.exec(event->globalPos());
