@@ -59,13 +59,14 @@ public:
      */
     static QString describeSyncResult(const SyncResult& result);
 
-private:
     /**
      * Get all image files in a folder.
      * @param folderPath Absolute path to folder
      * @return Sorted list of absolute paths to image files
      */
     static QStringList getImageFilesInFolder(const QString& folderPath);
+
+private:
 
     /**
      * Extract absolute paths from sprites.

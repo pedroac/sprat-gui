@@ -511,6 +511,8 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     if (action == DropAction::Merge) {
         m_session->activeFramePaths.append(framePaths);
     } else {
+        m_projectFilePath.clear();
+        m_sourceFolderIsTemp = false;
         m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;
         m_session->layoutSourceIsList = false;

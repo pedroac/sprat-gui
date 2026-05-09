@@ -280,6 +280,8 @@ void MainWindow::handleProjectSaveResult(const ProjectSaveResult& result) {
     }
 
     if (result.success) {
+        promoteSourceFolderAfterSave(result.savedDestination);
+
 #ifdef Q_OS_WASM
         m_statusLabel->setText(tr("Preparing download..."));
 #else
@@ -462,6 +464,18 @@ void MainWindow::onProjectLoadFinished() {
 
     // Add to recent projects
     addToRecentProjects(path);
+
+    // Track project file path and prefer sprites subfolder
+    m_projectFilePath = path;
+    m_sourceFolderIsTemp = false;
+
+    // Prefer a pre-existing sprites subfolder next to the project file
+    const QString projectDir = QFileInfo(path).absolutePath();
+    const QString spritesDir = QDir(projectDir).filePath("sprites");
+    if (QDir(spritesDir).exists()) {
+        m_session->sourceFolder = spritesDir;
+    }
+    // If no sprites dir found, applyProjectPayload will set sourceFolder from layoutSourcePath
 
     QJsonObject root = result.root;
     QJsonObject layoutInfo = root["layout"].toObject();
@@ -713,6 +727,8 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     if (action == DropAction::Merge) {
         m_session->activeFramePaths.append(absolutePaths);
     } else {
+        m_projectFilePath.clear();
+        m_sourceFolderIsTemp = false;
         if (!m_session->frameListPath.isEmpty()) {
             QFile::remove(m_session->frameListPath);
             m_session->frameListPath.clear();
@@ -728,6 +744,39 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     updateManualFrameLabel();
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
     onRunLayout();
+}
+
+void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
+    QFileInfo destInfo(saveDestination);
+    const QString projectDir = destInfo.isDir()
+        ? saveDestination
+        : destInfo.absolutePath();
+    const QString newSpritesPath = QDir(projectDir).filePath("sprites");
+
+    if (m_session->sourceFolder == newSpritesPath) return; // already correct
+
+    if (m_sourceFolderIsTemp && !m_session->sourceFolder.isEmpty()) {
+        QDir newDir;
+        if (newDir.mkpath(newSpritesPath)) {
+            const QStringList files = QDir(m_session->sourceFolder)
+                .entryList(QDir::Files | QDir::NoDotAndDotDot);
+            for (const QString& file : files) {
+                const QString src = QDir(m_session->sourceFolder).filePath(file);
+                const QString dst = QDir(newSpritesPath).filePath(file);
+                QFile::rename(src, dst);
+            }
+        }
+    }
+
+    m_session->sourceFolder = newSpritesPath;
+    m_sourceFolderIsTemp = false;
+
+    if (m_folderWatcher && m_settings.syncMode == SyncMode::Watch) {
+        m_folderWatcher->stopWatching();
+        m_folderWatcher->watchFolder(newSpritesPath);
+    }
+
+    updateOpenSourceFolderAction();
 }
 
 void MainWindow::applyProjectPayload() {

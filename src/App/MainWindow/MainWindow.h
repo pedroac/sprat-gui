@@ -406,6 +406,10 @@ private slots:
     void onFolderWatcherFilesModified(const QStringList& paths);
     void onSyncNowRequested();
     void performFolderSync();
+    void onOpenSourceFolderClicked();
+    void ensureSourceFolder();             // creates temp dir if needed
+    void promoteSourceFolderAfterSave(const QString& saveDestination);
+    void updateOpenSourceFolderAction();   // enable/disable based on state
 
 protected:
     // === Event Handling ===
@@ -441,10 +445,28 @@ private:
 
     /**
      * @brief Ensures frame list input is valid.
-     * 
+     *
      * @return bool True if input is valid
      */
     bool ensureFrameListInput();
+
+    /**
+     * @brief Checks if active frames are in the source folder.
+     *
+     * @return bool True if all active frames are in the source folder
+     */
+    bool activeFramesAreInSourceFolder() const;
+
+    /**
+     * @brief Copies active frames to the source folder.
+     */
+    void copyActiveFramesToSourceFolder();
+
+    /**
+     * @brief Performs manual sync: compares layout sprites with folder images.
+     * Removes missing sprites, updates modified ones, adds new ones.
+     */
+    void performManualSync();
 
     /**
      * @brief Gets configured profiles.
@@ -974,6 +996,10 @@ private:
     QString m_spratUnpackBin;
     LayoutRunner* m_layoutRunner;
     SourceFolderWatcher* m_folderWatcher;
+    QAction* m_openSourceFolderAction = nullptr;
+    QString  m_projectFilePath;            // path of the last loaded project file
+    bool     m_sourceFolderIsTemp = false; // true when sourceFolder is a QTemporaryDir
+    SyncMode m_appliedSyncMode = SyncMode::None;
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
 #endif

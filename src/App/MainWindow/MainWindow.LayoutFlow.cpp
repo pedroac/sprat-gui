@@ -30,6 +30,15 @@ int legacyDefaultPivotY(const SpritePtr& sprite) {
 }
 
 void MainWindow::onRunLayout() {
+    // If sync is active, ensure active frames have been copied to the sprites folder.
+    if (m_settings.syncMode != SyncMode::None
+        && m_session
+        && !m_session->sourceFolder.isEmpty()
+        && !m_session->activeFramePaths.isEmpty()
+        && !activeFramesAreInSourceFolder()) {
+        copyActiveFramesToSourceFolder();
+    }
+
     if (m_session->layoutSourcePath.isEmpty()) {
         return;
     }

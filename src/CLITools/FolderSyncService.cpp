@@ -58,6 +58,16 @@ bool FolderSyncService::mergeSyncResults(
         return false;
     }
 
+    // Remove deleted sprites from layout
+    for (const QString& deletedPath : changes.deletedImagePaths) {
+        auto it = std::find_if(layout.sprites.begin(), layout.sprites.end(),
+            [&deletedPath](const SpritePtr& sprite) { return sprite && sprite->path == deletedPath; });
+        if (it != layout.sprites.end()) {
+            qInfo() << "FolderSyncService: Removed sprite" << (*it)->name;
+            layout.sprites.erase(it);
+        }
+    }
+
     // Add new sprites to layout
     for (const QString& imagePath : changes.newImagePaths) {
         auto newSprite = std::make_shared<Sprite>();
@@ -78,7 +88,8 @@ bool FolderSyncService::mergeSyncResults(
         qInfo() << "FolderSyncService: Added sprite" << newSprite->name;
     }
 
-    qInfo() << "FolderSyncService: Merged" << changes.newImagePaths.size() << "new sprites";
+    qInfo() << "FolderSyncService: Merged" << changes.newImagePaths.size() << "new sprites,"
+            << changes.deletedImagePaths.size() << "deleted sprites";
     return true;
 }
 

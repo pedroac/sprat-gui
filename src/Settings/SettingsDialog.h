@@ -16,6 +16,7 @@ public:
 
 signals:
     void installCliToolsRequested();
+    void syncNowRequested();
 
 private slots:
     void pickColor(QPushButton* btn, QColor& color);
@@ -46,9 +47,7 @@ private:
     QPushButton* m_cliBaseDirBtn;
     QPushButton* m_installCliBtn;
 
-    // Spritesheet sync controls
-    QLineEdit* m_sourceFolderEdit;
-    QPushButton* m_browseFolderBtn;
+    // Sync controls
     QComboBox* m_syncModeCombo;
     QPushButton* m_syncNowBtn;
 };

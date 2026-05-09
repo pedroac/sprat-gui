@@ -46,6 +46,8 @@
 #include <QTextStream>
 #include <QIODevice>
 #include <QUuid>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QThread>
@@ -203,7 +205,7 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
  */
 MainWindow::~MainWindow() {
     m_isCanceled = true;
-    
+
     // Ensure all background tasks are stopped/finished before we destroy members
     m_zipDiscoveryWatcher.waitForFinished();
     m_projectLoadWatcher.waitForFinished();
@@ -217,10 +219,14 @@ MainWindow::~MainWindow() {
         m_autosaveTimer->stop();
         delete m_autosaveTimer;
     }
+
     if (m_session && !m_session->frameListPath.isEmpty()) {
         QFile::remove(m_session->frameListPath);
         m_session->frameListPath.clear();
     }
+
+    // Temporary folders are managed by ProjectSession and cleaned up automatically
+    // via QTemporaryDir destructor, so no explicit cleanup needed here
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
@@ -529,6 +535,7 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
 void MainWindow::onSettingsClicked() {
     SettingsDialog dlg(m_settings, m_cliPaths, this);
     connect(&dlg, &SettingsDialog::installCliToolsRequested, this, &MainWindow::installCliTools);
+    connect(&dlg, &SettingsDialog::syncNowRequested, this, &MainWindow::onSyncNowRequested);
     if (dlg.exec() == QDialog::Accepted) {
         m_settings = dlg.getSettings();
         m_cliPaths = dlg.getCliPaths();
@@ -569,9 +576,24 @@ void MainWindow::applySettings() {
     // Update source folder watcher based on sync mode
     if (m_settings.syncMode == SyncMode::None) {
         cleanupSourceFolderWatcher();
-    } else if (m_settings.syncMode == SyncMode::Watch) {
+    } else {
+        // For all non-None modes (Manual and Watch), call initializeSourceFolderWatcher()
+        // which handles the mode internally via its own if branches
         initializeSourceFolderWatcher();
     }
+
+    // If sync was just enabled (None -> active) and a layout already exists,
+    // re-run layout to copy images into the sprites folder.
+    if (m_settings.syncMode != SyncMode::None
+        && m_appliedSyncMode == SyncMode::None
+        && m_session
+        && !m_session->layoutModels.isEmpty()
+        && m_canvas) {
+        onRunLayout();
+    }
+    m_appliedSyncMode = m_settings.syncMode;
+
+    updateOpenSourceFolderAction();
 }
 
 bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
@@ -611,36 +633,61 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
 // ===== Source Folder Sync Slots =====
 
 void MainWindow::onFolderWatcherFilesAdded(const QStringList& paths) {
+    qInfo() << "[Watch] Files added detected:" << paths.count() << "files";
+    qInfo() << "[Watch] Current sync mode:" << (int)m_settings.syncMode;
+
     if (m_settings.syncMode != SyncMode::Watch) {
+        qWarning() << "[Watch] Not in Watch mode, ignoring";
         return;
     }
+
+    qInfo() << "[Watch] Processing additions...";
     QString message = QString(tr("Detected %1 new sprite(s). Syncing...")).arg(paths.size());
     showSyncNotification(message);
-    performFolderSync();
+    performManualSync();
 }
 
 void MainWindow::onFolderWatcherFilesRemoved(const QStringList& paths) {
+    qInfo() << "[Watch] Files removed detected:" << paths.count() << "files";
+    qInfo() << "[Watch] Current sync mode:" << (int)m_settings.syncMode;
+
     if (m_settings.syncMode != SyncMode::Watch) {
+        qWarning() << "[Watch] Not in Watch mode, ignoring";
         return;
     }
-    QString message = QString(tr("Warning: %1 sprite(s) removed from source folder.")).arg(paths.size());
-    QMessageBox::warning(this, tr("Source Folder Changed"), message);
+
+    qInfo() << "[Watch] Processing removals...";
+    QString message = QString(tr("%1 sprite(s) removed from source folder.")).arg(paths.size());
+    showSyncNotification(message);
+    performManualSync();
 }
 
 void MainWindow::onFolderWatcherFilesModified(const QStringList& paths) {
+    qInfo() << "[Watch] Files modified detected:" << paths.count() << "files";
+    qInfo() << "[Watch] Current sync mode:" << (int)m_settings.syncMode;
+
     if (m_settings.syncMode != SyncMode::Watch) {
+        qWarning() << "[Watch] Not in Watch mode, ignoring";
         return;
     }
-    qDebug() << "Source folder files modified:" << paths.count();
-    // Could trigger a refresh of modified sprites, for now just log
+
+    qInfo() << "[Watch] Processing modifications...";
+    onRunLayout();
 }
 
 void MainWindow::onSyncNowRequested() {
+    qInfo() << "[SyncNow] Button clicked";
+    qInfo() << "[SyncNow] m_session->sourceFolder:" << m_session->sourceFolder;
+    qInfo() << "[SyncNow] m_session->sourceFolderIsTemp:" << m_sourceFolderIsTemp;
+
     if (m_session->sourceFolder.isEmpty()) {
+        qWarning() << "[SyncNow] Source folder is empty!";
         QMessageBox::information(this, tr("Sync"), tr("No source folder configured."));
         return;
     }
-    performFolderSync();
+
+    qInfo() << "[SyncNow] Calling performManualSync()";
+    performManualSync();
 }
 
 void MainWindow::performFolderSync() {
@@ -675,34 +722,285 @@ void MainWindow::performFolderSync() {
         return;
     }
 
+    // Update activeFramePaths to match the modified layout
+    populateActiveFrameListFromModel();
+
+    // Always regenerate frame list file after changes to keep it in sync
+    ensureFrameListInput();
+
     showSyncNotification(summary);
 
-    // Re-run layout to position new sprites
-    if (!syncResult.newImagePaths.isEmpty()) {
-        m_statusLabel->setText(tr("Re-generating layout with new sprites..."));
-        onRunLayout();
+    // Re-run layout to position new sprites or remove deleted ones
+    if (!syncResult.newImagePaths.isEmpty() || !syncResult.deletedImagePaths.isEmpty()) {
+        if (!m_session->activeFramePaths.isEmpty()) {
+            if (!syncResult.newImagePaths.isEmpty()) {
+                m_statusLabel->setText(tr("Re-generating layout with new sprites..."));
+            } else {
+                m_statusLabel->setText(tr("Re-generating layout..."));
+            }
+            onRunLayout();
+        } else if (!syncResult.deletedImagePaths.isEmpty()) {
+            // All frames were deleted
+            m_statusLabel->setText(tr("All sprites removed."));
+        }
     }
 }
 
-void MainWindow::initializeSourceFolderWatcher() {
-    if (!m_session || m_session->sourceFolder.isEmpty()) {
+void MainWindow::performManualSync() {
+    qInfo() << "[Sync] Starting manual sync...";
+
+    if (!m_session) {
+        qWarning() << "[Sync] Session is null";
+        QMessageBox::warning(this, tr("Sync Error"), tr("No session."));
         return;
     }
 
-    if (m_settings.syncMode == SyncMode::Watch) {
-        m_folderWatcher->watchFolder(m_session->sourceFolder);
-        qInfo() << "Source folder watcher started:" << m_session->sourceFolder;
-    } else if (m_settings.syncMode == SyncMode::Manual) {
-        // Manual mode: don't watch, but folder is available for manual sync
-        qInfo() << "Source folder set for manual sync:" << m_session->sourceFolder;
+    if (m_session->layoutModels.isEmpty()) {
+        qWarning() << "[Sync] No layout models loaded";
+        QMessageBox::information(this, tr("Sync"), tr("No layout loaded."));
+        return;
     }
+
+    if (m_session->sourceFolder.isEmpty()) {
+        qWarning() << "[Sync] Source folder is empty";
+        QMessageBox::information(this, tr("Sync"), tr("No sprites folder configured."));
+        return;
+    }
+
+    QDir folderDir(m_session->sourceFolder);
+    if (!folderDir.exists()) {
+        qWarning() << "[Sync] Folder does not exist:" << m_session->sourceFolder;
+        QMessageBox::warning(this, tr("Sync Error"), tr("Sprites folder does not exist."));
+        return;
+    }
+
+    qInfo() << "[Sync] Using folder:" << m_session->sourceFolder;
+    qInfo() << "[Sync] Layout has" << m_session->layoutModels.first().sprites.size() << "sprites";
+
+    LayoutModel& layout = m_session->layoutModels.first();
+    int removedCount = 0;
+    int addedCount = 0;
+
+    // Step 1: Traverse layout sprites - remove missing
+    qInfo() << "[Sync] Step 1: Checking layout sprites...";
+    for (int i = layout.sprites.size() - 1; i >= 0; --i) {
+        const auto& sprite = layout.sprites[i];
+        if (!sprite) continue;
+
+        QFileInfo fileInfo(sprite->path);
+        qInfo() << "[Sync]   Sprite:" << sprite->name << "Path:" << sprite->path << "Exists:" << fileInfo.exists();
+
+        // If file doesn't exist in folder, remove sprite
+        if (!fileInfo.exists()) {
+            qInfo() << "[Sync]   Removing sprite" << sprite->name;
+            layout.sprites.removeAt(i);
+            removedCount++;
+        }
+    }
+
+    // Step 2: Traverse folder images - add missing ones
+    qInfo() << "[Sync] Step 2: Checking folder images...";
+    QStringList folderImages = FolderSyncService::getImageFilesInFolder(m_session->sourceFolder);
+    qInfo() << "[Sync]   Found" << folderImages.size() << "images in folder";
+
+    for (const QString& imagePath : folderImages) {
+        QFileInfo imageInfo(imagePath);
+        const QString baseName = imageInfo.baseName();
+        qInfo() << "[Sync]   Image:" << baseName;
+
+        // Check if image is already in layout
+        bool found = false;
+        for (const auto& sprite : layout.sprites) {
+            if (sprite && QFileInfo(sprite->path).baseName() == baseName) {
+                found = true;
+                qInfo() << "[Sync]     Found in layout";
+                break;
+            }
+        }
+
+        // If not found, add new sprite
+        if (!found) {
+            qInfo() << "[Sync]     Adding to layout";
+            auto newSprite = std::make_shared<Sprite>();
+            newSprite->path = imagePath;
+            newSprite->name = baseName;
+            newSprite->rect = QRect(0, 0, 0, 0);
+            newSprite->trimmed = false;
+            newSprite->rotated = false;
+            newSprite->pivotX = 0;
+            newSprite->pivotY = 0;
+
+            layout.sprites.append(newSprite);
+            addedCount++;
+        }
+    }
+
+    qInfo() << "[Sync] Step 3: Updating layout data...";
+    qInfo() << "[Sync]   Removed:" << removedCount << "Added:" << addedCount;
+
+    // Step 3: Update activeFramePaths and frame list
+    populateActiveFrameListFromModel();
+    qInfo() << "[Sync]   activeFramePaths now has" << m_session->activeFramePaths.size() << "items";
+
+    ensureFrameListInput();
+    qInfo() << "[Sync]   Frame list updated, layoutSourcePath:" << m_session->layoutSourcePath;
+
+    // Show summary
+    QString summary = QString(tr("Sync complete: %1 removed, %2 added"))
+        .arg(removedCount).arg(addedCount);
+    showSyncNotification(summary);
+
+    // Step 4: Refresh layout
+    qInfo() << "[Sync] Step 4: Refreshing layout...";
+    if (!m_session->activeFramePaths.isEmpty()) {
+        qInfo() << "[Sync]   Running layout...";
+        m_statusLabel->setText(tr("Regenerating layout..."));
+        onRunLayout();
+    } else {
+        qWarning() << "[Sync]   No sprites left!";
+        m_statusLabel->setText(tr("No sprites to display."));
+    }
+
+    qInfo() << "[Sync] Manual sync complete";
+}
+
+void MainWindow::initializeSourceFolderWatcher() {
+    qInfo() << "[Watcher] Initializing source folder watcher, mode:" << (int)m_settings.syncMode;
+    ensureSourceFolder();
+
+    if (!m_session) {
+        qWarning() << "[Watcher] Session is null";
+        return;
+    }
+
+    if (m_session->sourceFolder.isEmpty()) {
+        qWarning() << "[Watcher] Source folder is empty";
+        return;
+    }
+
+    if (!m_folderWatcher) {
+        qWarning() << "[Watcher] Folder watcher is null";
+        return;
+    }
+
+    qInfo() << "[Watcher] Source folder:" << m_session->sourceFolder;
+
+    if (m_settings.syncMode == SyncMode::Watch) {
+        qInfo() << "[Watcher] Starting watch mode...";
+        m_folderWatcher->watchFolder(m_session->sourceFolder);
+        qInfo() << "[Watcher] Watch mode started for:" << m_session->sourceFolder;
+    } else if (m_settings.syncMode == SyncMode::Manual) {
+        qInfo() << "[Watcher] Manual mode - folder ready for manual sync:" << m_session->sourceFolder;
+    }
+
+    updateOpenSourceFolderAction();
 }
 
 void MainWindow::cleanupSourceFolderWatcher() {
-    if (m_folderWatcher && m_folderWatcher->isWatching()) {
+    if (!m_folderWatcher) {
+        return;
+    }
+    if (m_folderWatcher->isWatching()) {
         m_folderWatcher->stopWatching();
         qInfo() << "Source folder watcher stopped";
     }
+
+    updateOpenSourceFolderAction();
+}
+
+void MainWindow::ensureSourceFolder() {
+    if (!m_session->sourceFolder.isEmpty()) return;
+
+    auto tempDir = std::make_unique<QTemporaryDir>();
+    if (tempDir->isValid()) {
+        m_session->sourceFolder = tempDir->path();
+        m_sourceFolderIsTemp = true;
+        m_session->addTempDir(std::move(tempDir));
+    }
+}
+
+void MainWindow::onOpenSourceFolderClicked() {
+    const QString folder = m_session ? m_session->sourceFolder : QString();
+    if (folder.isEmpty()) return;
+    QDir().mkpath(folder);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+}
+
+void MainWindow::updateOpenSourceFolderAction() {
+    if (!m_openSourceFolderAction) return;
+    const bool enabled = m_session
+        && m_settings.syncMode != SyncMode::None
+        && !m_session->sourceFolder.isEmpty();
+    m_openSourceFolderAction->setEnabled(enabled);
+}
+
+bool MainWindow::activeFramesAreInSourceFolder() const {
+    if (m_session->sourceFolder.isEmpty() || m_session->activeFramePaths.isEmpty()) {
+        return false;
+    }
+    const QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+    for (const QString& path : m_session->activeFramePaths) {
+        if (QFileInfo(path).absolutePath() != canonicalFolder) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void MainWindow::copyActiveFramesToSourceFolder() {
+    if (m_session->activeFramePaths.isEmpty() || m_session->sourceFolder.isEmpty()) {
+        return;
+    }
+    QDir().mkpath(m_session->sourceFolder);
+    const QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+
+    QStringList newPaths;
+    newPaths.reserve(m_session->activeFramePaths.size());
+
+    for (const QString& path : m_session->activeFramePaths) {
+        const QFileInfo srcInfo(path);
+
+        // Already in source folder — keep as-is.
+        if (srcInfo.absolutePath() == canonicalFolder) {
+            newPaths.append(path);
+            continue;
+        }
+
+        QString dst = QDir(m_session->sourceFolder).filePath(srcInfo.fileName());
+
+        // Resolve name conflicts: try baseName_1, baseName_2, ..., baseName_99.
+        if (QFileInfo::exists(dst)) {
+            const QString baseName = srcInfo.completeBaseName();
+            const QString suffix   = srcInfo.suffix();
+            bool resolved = false;
+            for (int i = 1; i <= 99; ++i) {
+                const QString candidate = QDir(m_session->sourceFolder).filePath(
+                    QString("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
+                if (!QFileInfo::exists(candidate)) {
+                    dst = candidate;
+                    resolved = true;
+                    break;
+                }
+            }
+            if (!resolved) {
+                qWarning() << "copyActiveFramesToSourceFolder: conflict unresolvable for"
+                           << srcInfo.fileName() << "- skipping";
+                newPaths.append(path);
+                continue;
+            }
+        }
+
+        if (!QFile::copy(path, dst)) {
+            qWarning() << "copyActiveFramesToSourceFolder: copy failed" << path << "->" << dst;
+            newPaths.append(path);
+            continue;
+        }
+
+        newPaths.append(dst);
+    }
+
+    m_session->activeFramePaths = newPaths;
+    ensureFrameListInput(); // writes frame list .txt, sets layoutSourcePath & layoutSourceIsList
 }
 
 void MainWindow::showSyncNotification(const QString& message) {

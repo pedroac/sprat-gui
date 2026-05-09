@@ -4,6 +4,7 @@
 #include <QLocale>
 #include <QTranslator>
 #include <QTimer>
+#include <QStyleFactory>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
 
@@ -30,6 +31,10 @@ extern "C" {
 #endif
 
 int main(int argc, char *argv[]) {
+    // Force a safe style to avoid crashes from unavailable styles like 'kvantum'
+    // This must be done before QApplication is created
+    qputenv("QT_STYLE_OVERRIDE", "Fusion");
+
     QApplication app(argc, argv);
 
 #ifdef __EMSCRIPTEN__
@@ -60,7 +65,7 @@ int main(int argc, char *argv[]) {
     const QString systemLocale = QLocale::system().name();
     const QString translationBaseName = QString("sprat-gui_%1").arg(systemLocale);
     app.installTranslator(&translator);
-    
+
     const QStringList translationDirectories = {
         ":/i18n",
         QCoreApplication::applicationDirPath() + "/i18n",

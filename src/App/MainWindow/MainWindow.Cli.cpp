@@ -295,6 +295,8 @@ void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& resul
     if (action == DropAction::Merge) {
         m_session->activeFramePaths.append(absolutePaths);
     } else {
+        m_projectFilePath.clear();
+        m_sourceFolderIsTemp = false;
         m_session->currentFolder = targetPath;
         m_folderLabel->setText(tr("Folder: ") + QDir(targetPath).absolutePath());
         m_session->layoutSourcePath = QDir(targetPath).absolutePath();

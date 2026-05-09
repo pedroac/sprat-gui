@@ -102,20 +102,6 @@ void SettingsDialog::setupUi() {
     spritesheetForm->addRow(tr("Deduplicate Sprites:"), m_deduplicateModeCombo);
 
     // Sync controls
-    QHBoxLayout* sourceFolderLayout = new QHBoxLayout();
-    m_sourceFolderEdit = new QLineEdit(this);
-    m_sourceFolderEdit->setReadOnly(true);
-    m_sourceFolderEdit->setPlaceholderText(tr("No source folder selected"));
-    m_sourceFolderEdit->setToolTip(tr("Folder to synchronize sprites from"));
-    m_sourceFolderEdit->setAccessibleName(tr("Source folder path"));
-    m_browseFolderBtn = new QPushButton(tr("Browse..."), this);
-    m_browseFolderBtn->setToolTip(tr("Browse for source folder"));
-    m_browseFolderBtn->setAccessibleName(tr("Browse source folder"));
-    connect(m_browseFolderBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
-    sourceFolderLayout->addWidget(m_sourceFolderEdit);
-    sourceFolderLayout->addWidget(m_browseFolderBtn);
-    spritesheetForm->addRow(tr("Source Folder:"), sourceFolderLayout);
-
     m_syncModeCombo = new QComboBox(this);
     m_syncModeCombo->addItem(tr("None (no sync)"), (int)SyncMode::None);
     m_syncModeCombo->addItem(tr("Manual (sync on demand)"), (int)SyncMode::Manual);
@@ -254,6 +240,6 @@ void SettingsDialog::onSyncModeChanged(int index) {
 }
 
 void SettingsDialog::onSyncNowClicked() {
-    // Emit signal or perform sync - for now just acknowledge
-    // The MainWindow will handle the actual sync operation
+    qInfo() << "[SettingsDialog] Sync Now clicked, emitting signal";
+    emit syncNowRequested();
 }

@@ -449,6 +449,13 @@ void MainWindow::setupToolbar() {
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettingsClicked);
 
     toolbar->addSeparator();
+    m_openSourceFolderAction = toolbar->addAction(tr("Open Sprites Folder"));
+    m_openSourceFolderAction->setToolTip(tr("Open the sprites source folder in the file manager"));
+    m_openSourceFolderAction->setEnabled(false);
+    connect(m_openSourceFolderAction, &QAction::triggered,
+            this, &MainWindow::onOpenSourceFolderClicked);
+
+    toolbar->addSeparator();
     m_folderLabel = new QLabel(tr("Folder: none"), this);
     m_folderLabel->setStyleSheet("padding-left: 10px;");
     toolbar->addWidget(m_folderLabel);
