@@ -145,10 +145,110 @@ jobs:
             sprat-gui-windows.zip
             sprat-gui-macos.dmg
 
+  build-wasm:
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/release') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      EM_CACHE: ${{ github.workspace }}/build_wasm/emsdk_cache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt WASM
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.10.2'
+          arch: 'wasm_multithread'
+
+      - name: Setup Emscripten 4.0.7
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '4.0.7'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Build EGL stub
+        run: |
+          mkdir -p build_wasm/wasm_deps build_wasm/emsdk_cache/symbol_lists
+          emcc wasm/egl_stub.c -c -o build_wasm/wasm_deps/egl_stub.o
+          emar rcs build_wasm/wasm_deps/libegl.a build_wasm/wasm_deps/egl_stub.o
+
+      - name: Configure WASM
+        run: |
+          QT_WASM=$(find "$HOME/Qt" -maxdepth 2 -type d -name 'wasm_multithread' | head -1)
+          emcmake cmake -B build_wasm -S . \
+            -DCMAKE_PREFIX_PATH="$QT_WASM" \
+            -DCMAKE_FIND_ROOT_PATH="$QT_WASM" \
+            -DCMAKE_MODULE_PATH="$QT_WASM/lib/cmake/Qt6" \
+            -DSPRAT_WASM_DEBUG=OFF \
+            -DSPRAT_WASM_JSPI=OFF \
+            -DEGL_INCLUDE_DIR="$(em-config EMSCRIPTEN_ROOT)/system/include" \
+            -DEGL_LIBRARY="$(pwd)/build_wasm/wasm_deps/libegl.a" \
+            -DCMAKE_CXX_FLAGS="-DNDEBUG -DEMSCRIPTEN_DISABLE_ASSERTS=1" \
+            -DCMAKE_C_FLAGS="-DNDEBUG -DEMSCRIPTEN_DISABLE_ASSERTS=1"
+
+      - name: Build WASM
+        run: |
+          export EMFLAGS="-sASSERTIONS=0"
+          cmake --build build_wasm --parallel
+
+      - name: Package WASM
+        run: |
+          mkdir sprat-gui-web
+          cp build_wasm/sprat-gui.{html,js,wasm,data} \
+             build_wasm/qtloader.js \
+             sprat-gui-web/
+          zip -r sprat-gui-web.zip sprat-gui-web/
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprat-gui-wasm
+          path: sprat-gui-web.zip
+
+  deploy-itchio:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-latest
+    needs: build-wasm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "tag=$(cat VERSION | xargs)" >> $GITHUB_OUTPUT
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sprat-gui-wasm
+          path: dist
+
+      - name: Extract WASM package
+        run: unzip dist/sprat-gui-web.zip -d .
+
+      - name: Download butler
+        run: |
+          curl -fsSL -o butler.zip \
+            "https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default"
+          unzip butler.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          ./butler push sprat-gui-web/ pedroac/sprat-gui:web \
+            --userversion ${{ steps.version.outputs.tag }}
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, build-wasm]
     permissions:
       contents: write
     steps:
@@ -176,6 +276,7 @@ jobs:
             dist/sprat-gui-linux.tar.gz
             dist/sprat-gui-windows.zip
             dist/sprat-gui-macos.dmg
+            dist/sprat-gui-web.zip
           generate_release_notes: true
           draft: false
           prerelease: false

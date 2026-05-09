@@ -51,7 +51,13 @@ if [ "$BUILD_TYPE" == "wasm" ]; then
     echo "Building for WASM..."
     export EMFLAGS="-sASSERTIONS=0"
     cmake --build build_wasm --parallel
-    
+
+    echo "Compressing WASM build..."
+    cd build_wasm
+    rm -f sprat-gui-wasm.zip
+    zip -j sprat-gui-wasm.zip index.html qtloader.js qtlogo.svg sprat-gui.data sprat-gui.js sprat-gui.wasm
+    cd ..
+
     echo "WASM build complete in build_wasm/"
 else
     echo "Configuring for host..."

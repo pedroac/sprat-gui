@@ -33,3 +33,4 @@ build_wasm/
 compile_commands.json
 *.qm
 *.log
+sprat-gui-wasm.zip
