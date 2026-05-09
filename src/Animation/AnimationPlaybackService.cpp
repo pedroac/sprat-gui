@@ -54,7 +54,7 @@ bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>&
     playing = !playing;
     playPauseButton->setText(playing ? trAnimationPlayback("Pause") : trAnimationPlayback("Play"));
     if (playing) {
-        timer->start(1000 / fps);
+        timer->start(qRound(1000.0 / fps));
     } else {
         timer->stop();
     }

@@ -53,6 +53,10 @@ signals:
     void markerSelected(const QString& name);
     void applyPivotToSelectedFramesRequested();
     void applyMarkerToSelectedFramesRequested(const QString& markerName);
+    /**
+     * @brief Emitted when pivot drag finishes on canvas.
+     */
+    void pivotDragFinished(int oldX, int oldY, int newX, int newY);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
@@ -66,8 +70,9 @@ private:
     QSize m_sceneSize;
     QString m_selectedMarkerName;
     int m_selectedVertexIndex = -1;
-    
+
     bool m_draggingPivot = false;
+    QPoint m_pivotBeforeDrag;
     
     // Marker Drag State
     enum DragMode { None, Point, CircleRadius, RectMove, RectResize, PolyVertex, PolyMove };

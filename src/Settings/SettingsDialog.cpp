@@ -25,22 +25,32 @@ void SettingsDialog::setupUi() {
     QFormLayout* stylesForm = new QFormLayout(stylesGroup);
 
     m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
+    m_canvasColorBtn->setToolTip(tr("Color of the workspace area outside sprites"));
+    m_canvasColorBtn->setAccessibleName(tr("Workspace color"));
     connect(m_canvasColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_canvasColorBtn, m_settings.workspaceColor); });
     stylesForm->addRow(tr("Workspace Background:"), m_canvasColorBtn);
 
     m_frameColorBtn = createColorButton(m_settings.spriteFrameColor);
+    m_frameColorBtn->setToolTip(tr("Background color of sprite frames"));
+    m_frameColorBtn->setAccessibleName(tr("Sprite frame color"));
     connect(m_frameColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_frameColorBtn, m_settings.spriteFrameColor); });
     stylesForm->addRow(tr("Sprite Frame Background:"), m_frameColorBtn);
 
     m_checkerboardCheck = new QCheckBox(tr("Show Transparency Checkerboard"), this);
     m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
+    m_checkerboardCheck->setToolTip(tr("Show checkerboard pattern for transparent areas"));
+    m_checkerboardCheck->setAccessibleName(tr("Transparency checkerboard"));
     stylesForm->addRow("", m_checkerboardCheck);
 
     m_borderColorBtn = createColorButton(m_settings.borderColor);
+    m_borderColorBtn->setToolTip(tr("Color of borders around sprites"));
+    m_borderColorBtn->setAccessibleName(tr("Border color"));
     connect(m_borderColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_borderColorBtn, m_settings.borderColor); });
     stylesForm->addRow(tr("Border Color:"), m_borderColorBtn);
 
     m_detectionSelectedColorBtn = createColorButton(m_settings.detectionSelectedColor);
+    m_detectionSelectedColorBtn->setToolTip(tr("Color for frames selected in detection dialog"));
+    m_detectionSelectedColorBtn->setAccessibleName(tr("Detection selected color"));
     connect(m_detectionSelectedColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor); });
     stylesForm->addRow(tr("Detection Selected Color:"), m_detectionSelectedColorBtn);
 
@@ -57,7 +67,19 @@ void SettingsDialog::setupUi() {
         m_borderStyleCombo->setCurrentIndex(index);
     }
 
+    m_borderStyleCombo->setToolTip(tr("Visual style for sprite borders"));
+    m_borderStyleCombo->setAccessibleName(tr("Border style"));
     stylesForm->addRow(tr("Border Style:"), m_borderStyleCombo);
+
+    m_themeCombo = new QComboBox(this);
+    m_themeCombo->addItem(tr("System (follow OS)"), "system");
+    m_themeCombo->addItem(tr("Light"), "light");
+    m_themeCombo->addItem(tr("Dark"), "dark");
+    int themeIndex = m_themeCombo->findData(m_settings.theme);
+    m_themeCombo->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
+    m_themeCombo->setToolTip(tr("Choose the application color theme (desktop only)"));
+    m_themeCombo->setAccessibleName(tr("Application theme"));
+    stylesForm->addRow(tr("Theme:"), m_themeCombo);
 
     layout->addWidget(stylesGroup);
 
@@ -75,6 +97,8 @@ void SettingsDialog::setupUi() {
         m_deduplicateModeCombo->setCurrentIndex(deducateIndex);
     }
 
+    m_deduplicateModeCombo->setToolTip(tr("Remove duplicate sprites from the layout"));
+    m_deduplicateModeCombo->setAccessibleName(tr("Deduplicate mode"));
     spritesheetForm->addRow(tr("Deduplicate Sprites:"), m_deduplicateModeCombo);
 
     // Sync controls
@@ -82,7 +106,11 @@ void SettingsDialog::setupUi() {
     m_sourceFolderEdit = new QLineEdit(this);
     m_sourceFolderEdit->setReadOnly(true);
     m_sourceFolderEdit->setPlaceholderText(tr("No source folder selected"));
+    m_sourceFolderEdit->setToolTip(tr("Folder to synchronize sprites from"));
+    m_sourceFolderEdit->setAccessibleName(tr("Source folder path"));
     m_browseFolderBtn = new QPushButton(tr("Browse..."), this);
+    m_browseFolderBtn->setToolTip(tr("Browse for source folder"));
+    m_browseFolderBtn->setAccessibleName(tr("Browse source folder"));
     connect(m_browseFolderBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
     sourceFolderLayout->addWidget(m_sourceFolderEdit);
     sourceFolderLayout->addWidget(m_browseFolderBtn);
@@ -96,6 +124,8 @@ void SettingsDialog::setupUi() {
     if (syncIndex >= 0) {
         m_syncModeCombo->setCurrentIndex(syncIndex);
     }
+    m_syncModeCombo->setToolTip(tr("How to synchronize source folder with project"));
+    m_syncModeCombo->setAccessibleName(tr("Sync mode"));
     connect(m_syncModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SettingsDialog::onSyncModeChanged);
     spritesheetForm->addRow(tr("Sync Mode:"), m_syncModeCombo);
@@ -197,6 +227,9 @@ void SettingsDialog::resetToDefaults() {
     if (index >= 0) {
         m_borderStyleCombo->setCurrentIndex(index);
     }
+
+    int themeIndex = m_themeCombo->findData(m_settings.theme);
+    m_themeCombo->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
 }
 
 AppSettings SettingsDialog::getSettings() const {
@@ -205,6 +238,7 @@ AppSettings SettingsDialog::getSettings() const {
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
     s.syncMode = (SyncMode)m_syncModeCombo->currentData().toInt();
+    s.theme = m_themeCombo->currentData().toString();
     return s;
 }
 

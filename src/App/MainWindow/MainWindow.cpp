@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "UndoCommands.h"
 #include "AnimationCanvas.h"
 #include "MarkersDialog.h"
 #include "SettingsDialog.h"
@@ -48,6 +49,10 @@
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QThread>
+#include <QUndoStack>
+#include <QShortcut>
+#include <QToolButton>
+#include <QMenu>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -74,6 +79,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_settings = CliToolsConfig::loadAppSettings();
     m_cliPaths = CliToolsConfig::loadCliPaths();
     setupUi();
+    setupKeyboardShortcuts();
+
+    // Initialize undo stack and connect pivot drag signal
+    m_undoStack = new QUndoStack(this);
+    m_undoStack->setUndoLimit(50);
+    if (m_previewView && m_previewView->overlay()) {
+        connect(m_previewView->overlay(), &EditorOverlayItem::pivotDragFinished,
+                this, [this](int oldX, int oldY, int newX, int newY) {
+            if (!m_session->selectedSprite) return;
+            m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
+                                                  oldX, oldY, newX, newY, true));
+        });
+    }
+
+    // Load recent projects
+    m_recentProjects = CliToolsConfig::loadRecentProjects();
+    updateRecentProjectsMenu();
+
+    // Apply theme on startup
+    SettingsCoordinator::applyTheme(m_settings.theme);
+
     setupCliInstallOverlay();
 #ifdef Q_OS_WASM
     s_wasmInstance = this;
@@ -684,4 +710,16 @@ void MainWindow::showSyncNotification(const QString& message) {
         m_statusLabel->setText(message);
     }
     qInfo() << "Sync:" << message;
+}
+
+void MainWindow::onUndo() {
+    if (!m_undoStack) return;
+    m_undoStack->undo();
+    syncPivotSpinsFromSprite();
+}
+
+void MainWindow::onRedo() {
+    if (!m_undoStack) return;
+    m_undoStack->redo();
+    syncPivotSpinsFromSprite();
 }

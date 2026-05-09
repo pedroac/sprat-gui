@@ -3,6 +3,7 @@
 #include "ResolutionsConfig.h"
 #include "ResolutionUtils.h"
 #include "AnimationCanvas.h"
+#include "CliToolsConfig.h"
 
 #include <QAction>
 #include <QApplication>
@@ -17,6 +18,8 @@
 #include <QFrame>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSpinBox>
@@ -26,7 +29,9 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QVBoxLayout>
+#include <QFileInfo>
 
 void MainWindow::setupUi() {
     resize(1400, 860);
@@ -74,11 +79,14 @@ void MainWindow::setupUi() {
     profileSelectLayout->setContentsMargins(0, 0, 0, 0);
     profileSelectLayout->setSpacing(4);
     m_profileCombo = new QComboBox(profileSelectPage);
+    m_profileCombo->setToolTip(tr("Select the output layout profile"));
+    m_profileCombo->setAccessibleName(tr("Layout profile"));
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
     profileSelectLayout->addWidget(m_profileCombo);
     QIcon profileManageIcon = QIcon::fromTheme("preferences-system");
     m_manageProfilesBtn = new QPushButton(profileManageIcon, profileManageIcon.isNull() ? tr("Manage") : "", profileSelectPage);
     m_manageProfilesBtn->setToolTip(tr("Manage Profiles"));
+    m_manageProfilesBtn->setAccessibleName(tr("Manage profiles"));
     m_manageProfilesBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     connect(m_manageProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
     profileSelectLayout->addWidget(m_manageProfilesBtn);
@@ -99,6 +107,8 @@ void MainWindow::setupUi() {
     canvasControls->addSpacing(8);
     canvasControls->addWidget(new QLabel(tr("Source resolution:")));
     m_sourceResolutionCombo = new QComboBox(canvasControlsWidget);
+    m_sourceResolutionCombo->setToolTip(tr("Target source resolution for layout"));
+    m_sourceResolutionCombo->setAccessibleName(tr("Source resolution"));
     m_sourceResolutionCombo->addItems(ResolutionsConfig::loadResolutionOptions());
     if (m_sourceResolutionCombo->count() == 0) {
         m_sourceResolutionCombo->addItem("1024x768");
@@ -208,6 +218,8 @@ void MainWindow::setupUi() {
     m_timelineFpsSpin->setRange(1, 60);
     m_timelineFpsSpin->setValue(8);
     m_timelineFpsSpin->setEnabled(false);
+    m_timelineFpsSpin->setToolTip(tr("Frames per second for animation playback"));
+    m_timelineFpsSpin->setAccessibleName(tr("Timeline FPS"));
     connect(m_timelineFpsSpin, &QSpinBox::valueChanged, this, &MainWindow::onTimelineFpsChanged);
     timelineNameLayout->addWidget(m_timelineFpsSpin);
     QPushButton* removeTimelineBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove"), this);
@@ -265,23 +277,30 @@ void MainWindow::setupUi() {
     pivotRow->addWidget(new QLabel(tr("Handle:")));
     m_handleCombo = new QComboBox(this);
     m_handleCombo->addItem(tr("pivot"));
+    m_handleCombo->setToolTip(tr("Select pivot or a named marker to edit"));
+    m_handleCombo->setAccessibleName(tr("Handle selector"));
     pivotRow->addWidget(m_handleCombo);
     connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
     pivotRow->addWidget(new QLabel(tr("X:")));
     m_pivotXSpin = new QSpinBox(this);
     m_pivotXSpin->setEnabled(false);
     m_pivotXSpin->setRange(0, 9999);
+    m_pivotXSpin->setToolTip(tr("Pivot X: horizontal origin for sprite rotation"));
+    m_pivotXSpin->setAccessibleName(tr("Pivot X"));
     connect(m_pivotXSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
     pivotRow->addWidget(m_pivotXSpin);
     pivotRow->addWidget(new QLabel(tr("Y:")));
     m_pivotYSpin = new QSpinBox(this);
     m_pivotYSpin->setEnabled(false);
     m_pivotYSpin->setRange(0, 9999);
+    m_pivotYSpin->setToolTip(tr("Pivot Y: vertical origin for sprite rotation"));
+    m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
     connect(m_pivotYSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
     pivotRow->addWidget(m_pivotYSpin);
     QIcon manageIcon = QIcon::fromTheme("preferences-system");
     m_configPointsBtn = new QPushButton(manageIcon, manageIcon.isNull() ? tr("Manage") : "", this);
     m_configPointsBtn->setToolTip(tr("Manage Markers"));
+    m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     connect(m_configPointsBtn, &QPushButton::clicked, this, &MainWindow::onPointsConfigClicked);
     pivotRow->addWidget(m_configPointsBtn);
     m_configPointsBtn->setEnabled(false);
@@ -313,12 +332,18 @@ void MainWindow::setupUi() {
 
     QHBoxLayout* animControls = new QHBoxLayout();
     m_animPrevBtn = new QPushButton("<");
+    m_animPrevBtn->setToolTip(tr("Step to previous frame"));
+    m_animPrevBtn->setAccessibleName(tr("Previous frame"));
     connect(m_animPrevBtn, &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
     animControls->addWidget(m_animPrevBtn);
     m_animPlayPauseBtn = new QPushButton(tr("Play"));
+    m_animPlayPauseBtn->setToolTip(tr("Play or pause animation"));
+    m_animPlayPauseBtn->setAccessibleName(tr("Play or pause"));
     connect(m_animPlayPauseBtn, &QPushButton::clicked, this, &MainWindow::onAnimPlayPauseClicked);
     animControls->addWidget(m_animPlayPauseBtn);
     m_animNextBtn = new QPushButton(">");
+    m_animNextBtn->setToolTip(tr("Step to next frame"));
+    m_animNextBtn->setAccessibleName(tr("Next frame"));
     connect(m_animNextBtn, &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
     animControls->addWidget(m_animNextBtn);
     animControls->addStretch();
@@ -328,6 +353,8 @@ void MainWindow::setupUi() {
     m_animZoomSpin->setValue(200.0);
     m_animZoomSpin->setSuffix("%");
     m_animZoomSpin->setSingleStep(10.0);
+    m_animZoomSpin->setToolTip(tr("Zoom level for animation preview"));
+    m_animZoomSpin->setAccessibleName(tr("Animation zoom"));
     connect(m_animZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onAnimZoomChanged);
     animControls->addWidget(m_animZoomSpin);
     animLayout->addLayout(animControls);
@@ -393,16 +420,32 @@ void MainWindow::setupToolbar() {
     toolbar->setMovable(true);
 
     m_loadAction = toolbar->addAction(tr("Load Images Folder"));
+    m_loadAction->setToolTip(tr("Load a folder of sprite images"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
 
     toolbar->addSeparator();
     QAction* loadProjectAction = toolbar->addAction(tr("Load..."));
+    loadProjectAction->setToolTip(tr("Load a project or archive file"));
     connect(loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
+
     m_saveAction = toolbar->addAction(tr("Save..."));
     m_saveAction->setEnabled(false);
+    m_saveAction->setToolTip(tr("Save the current project (Ctrl+S)"));
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveClicked);
 
+    toolbar->addSeparator();
+    m_recentProjectsBtn = new QToolButton(this);
+    m_recentProjectsBtn->setText(tr("Recent"));
+    m_recentProjectsBtn->setToolTip(tr("Open a recently loaded project"));
+    m_recentProjectsBtn->setAccessibleName(tr("Recent projects"));
+    m_recentProjectsMenu = new QMenu(m_recentProjectsBtn);
+    m_recentProjectsBtn->setMenu(m_recentProjectsMenu);
+    m_recentProjectsBtn->setPopupMode(QToolButton::InstantPopup);
+    toolbar->addWidget(m_recentProjectsBtn);
+
+    toolbar->addSeparator();
     QAction* settingsAction = toolbar->addAction(tr("Settings"));
+    settingsAction->setToolTip(tr("Open application settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettingsClicked);
 
     toolbar->addSeparator();
@@ -412,6 +455,14 @@ void MainWindow::setupToolbar() {
 }
 
 void MainWindow::setupStatusBarUi() {
+    m_statusProgressBar = new QProgressBar(this);
+    m_statusProgressBar->setRange(0, 0);        // indeterminate (busy) mode
+    m_statusProgressBar->setFixedWidth(120);
+    m_statusProgressBar->setMaximumHeight(14);
+    m_statusProgressBar->setVisible(false);     // hidden by default
+    m_statusProgressBar->setAccessibleName(tr("Operation progress"));
+    statusBar()->addPermanentWidget(m_statusProgressBar);
+
     m_statusLabel = new QLabel(tr("Idle"), this);
     m_statusLabel->setContentsMargins(0, 0, 12, 0);
     statusBar()->addPermanentWidget(m_statusLabel);
@@ -453,6 +504,20 @@ void MainWindow::setupZoomShortcuts() {
     connect(zoomOut, &QShortcut::activated, this, [performZoom]() { performZoom(false); });
 }
 
+void MainWindow::setupKeyboardShortcuts() {
+    // Ctrl+S → Save
+    QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
+    connect(saveShortcut, &QShortcut::activated, this, &MainWindow::onSaveClicked);
+
+    // Ctrl+Z → Undo
+    QShortcut* undoShortcut = new QShortcut(QKeySequence::Undo, this);
+    connect(undoShortcut, &QShortcut::activated, this, &MainWindow::onUndo);
+
+    // Ctrl+Y (or Ctrl+Shift+Z on Mac) → Redo
+    QShortcut* redoShortcut = new QShortcut(QKeySequence::Redo, this);
+    connect(redoShortcut, &QShortcut::activated, this, &MainWindow::onRedo);
+}
+
 void MainWindow::updateUiState() {
     const bool enabled = m_cliReady && !m_isLoading;
     MainWindowUiState::apply(
@@ -476,4 +541,40 @@ void MainWindow::updateUiState() {
 void MainWindow::updateMainContentView() {
     bool hasLayout = m_canvas && m_canvas->scene() && !m_canvas->scene()->items().isEmpty();
     m_mainStack->setCurrentWidget(hasLayout ? m_editorPage : m_welcomePage);
+}
+
+void MainWindow::updateRecentProjectsMenu() {
+    if (!m_recentProjectsMenu) return;
+    m_recentProjectsMenu->clear();
+    if (m_recentProjects.isEmpty()) {
+        QAction* emptyAction = m_recentProjectsMenu->addAction(tr("(No recent projects)"));
+        emptyAction->setEnabled(false);
+        return;
+    }
+    for (const QString& path : m_recentProjects) {
+        QAction* action = m_recentProjectsMenu->addAction(QFileInfo(path).fileName());
+        action->setToolTip(path);
+        connect(action, &QAction::triggered, this, [this, path]() { loadProject(path); });
+    }
+}
+
+void MainWindow::addToRecentProjects(const QString& path) {
+    m_recentProjects.removeAll(path);
+    m_recentProjects.prepend(path);
+    while (m_recentProjects.size() > 5)
+        m_recentProjects.removeLast();
+    CliToolsConfig::saveRecentProjects(m_recentProjects);
+    updateRecentProjectsMenu();
+}
+
+void MainWindow::syncPivotSpinsFromSprite() {
+    if (!m_session->selectedSprite) return;
+    m_pivotXSpin->blockSignals(true);
+    m_pivotYSpin->blockSignals(true);
+    m_pivotXSpin->setValue(m_session->selectedSprite->pivotX);
+    m_pivotYSpin->setValue(m_session->selectedSprite->pivotY);
+    m_pivotXSpin->blockSignals(false);
+    m_pivotYSpin->blockSignals(false);
+    if (m_previewView && m_previewView->overlay())
+        m_previewView->overlay()->updateLayout();
 }

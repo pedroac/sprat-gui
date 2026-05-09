@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "UndoCommands.h"
 
 #include "MarkersDialog.h"
 
@@ -33,8 +34,14 @@ void MainWindow::onPivotSpinChanged() {
     if (!m_session->selectedSprite) {
         return;
     }
-    m_session->selectedSprite->pivotX = m_pivotXSpin->value();
-    m_session->selectedSprite->pivotY = m_pivotYSpin->value();
+    const int oldX = m_session->selectedSprite->pivotX;
+    const int oldY = m_session->selectedSprite->pivotY;
+    const int newX = m_pivotXSpin->value();
+    const int newY = m_pivotYSpin->value();
+    if (oldX == newX && oldY == newY) return;
+
+    m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
+                                          oldX, oldY, newX, newY));
     m_previewView->overlay()->updateLayout();
 }
 

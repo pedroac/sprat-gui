@@ -53,6 +53,8 @@ AppSettings CliToolsConfig::loadAppSettings() {
         settings.value("settings/border_style", static_cast<int>(out.borderStyle)).toInt());
     out.deduplicateMode = settings.value("settings/deduplicate_mode", out.deduplicateMode).toString();
     out.syncMode = syncModeFromString(settings.value("settings/sync_mode", syncModeToString(out.syncMode)).toString());
+    out.theme = settings.value("settings/theme", out.theme).toString();
+    out.recentProjects = settings.value("recent/projects", out.recentProjects).toStringList();
     return out;
 }
 
@@ -86,6 +88,7 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/border_style", static_cast<int>(settings.borderStyle));
     qsettings.setValue("settings/deduplicate_mode", settings.deduplicateMode);
     qsettings.setValue("settings/sync_mode", syncModeToString(settings.syncMode));
+    qsettings.setValue("settings/theme", settings.theme);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 
@@ -194,4 +197,15 @@ void CliToolsConfig::saveInstalledCliVersion(const QString& version) {
 QString CliToolsConfig::loadInstalledCliVersion() {
     QSettings settings(configPath(), QSettings::IniFormat);
     return settings.value("cli/installed_version", QString()).toString();
+}
+
+QStringList CliToolsConfig::loadRecentProjects() {
+    QSettings s(configPath(), QSettings::IniFormat);
+    return s.value("recent/projects").toStringList();
+}
+
+void CliToolsConfig::saveRecentProjects(const QStringList& recent) {
+    QSettings s(configPath(), QSettings::IniFormat);
+    s.setValue("recent/projects", recent);
+    s.sync();
 }

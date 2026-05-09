@@ -433,6 +433,16 @@ struct AppSettings {
      */
     SyncMode syncMode = SyncMode::None;
 
+    /**
+     * @brief Recently opened project file paths (most recent first, max 5)
+     */
+    QStringList recentProjects;
+
+    /**
+     * @brief Application color theme. Options: "system" (default), "light", "dark"
+     */
+    QString theme = "system";
+
 };
 
 /**

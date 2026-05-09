@@ -459,7 +459,10 @@ void MainWindow::onProjectLoadFinished() {
         QMessageBox::warning(this, tr("Load Failed"), result.error);
         return;
     }
-    
+
+    // Add to recent projects
+    addToRecentProjects(path);
+
     QJsonObject root = result.root;
     QJsonObject layoutInfo = root["layout"].toObject();
     QString folder = layoutInfo["folder"].toString();

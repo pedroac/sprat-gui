@@ -15,4 +15,6 @@ public:
     static void ensureConfigExists();
     static void saveInstalledCliVersion(const QString& version);
     static QString loadInstalledCliVersion();
+    static QStringList loadRecentProjects();
+    static void saveRecentProjects(const QStringList& recent);
 };

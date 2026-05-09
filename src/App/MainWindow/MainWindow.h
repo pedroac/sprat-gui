@@ -50,6 +50,9 @@ class QDockWidget;
 class QTextEdit;
 class QPlainTextEdit;
 class QAction;
+class QToolButton;
+class QMenu;
+class QUndoStack;
 
 // Forward declarations for custom classes
 class FrameDetectionDialog;
@@ -380,6 +383,10 @@ private:
     struct ProjectSaveResult;
 
 private slots:
+    // === Undo/Redo ===
+    void onUndo();
+    void onRedo();
+
     // === Asynchronous Loading Slots ===
     void onFolderDiscoveryFinished();
     void onProjectLoadFinished();
@@ -522,6 +529,28 @@ private:
      * @brief Sets up zoom shortcuts.
      */
     void setupZoomShortcuts();
+
+    /**
+     * @brief Sets up keyboard shortcuts (Ctrl+S, Ctrl+Z/Y).
+     */
+    void setupKeyboardShortcuts();
+
+    /**
+     * @brief Syncs pivot spin boxes with current sprite pivot.
+     */
+    void syncPivotSpinsFromSprite();
+
+    /**
+     * @brief Adds project to recent projects list.
+     *
+     * @param path Path to project file
+     */
+    void addToRecentProjects(const QString& path);
+
+    /**
+     * @brief Updates the recent projects menu.
+     */
+    void updateRecentProjectsMenu();
 
     /**
      * @brief Checks CLI tools availability.
@@ -930,6 +959,9 @@ private:
     QAction* m_loadAction;
     QAction* m_saveAction;
     QLabel* m_statusLabel;
+    QProgressBar* m_statusProgressBar = nullptr;
+    QToolButton* m_recentProjectsBtn = nullptr;
+    QMenu* m_recentProjectsMenu = nullptr;
 
     // === Data Models ===
     ProjectSession* m_session;
@@ -962,7 +994,11 @@ private:
     QPushButton* m_cancelLoadingButton = nullptr;
     QPlainTextEdit* m_cliInstallLog = nullptr;
     QString m_loadingUiMessage = "Loading...";
-    
+
+    // === Undo/Redo & Recent Projects ===
+    QUndoStack* m_undoStack = nullptr;
+    QStringList m_recentProjects;
+
     // === Async Loading Helpers ===
     struct FolderDiscoveryResult {
         QString root;

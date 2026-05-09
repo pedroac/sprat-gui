@@ -330,6 +330,9 @@ void MainWindow::setLoading(bool loading) {
         }
         m_loadingUiMessage = tr("Loading...");
     }
+    if (m_statusProgressBar) {
+        m_statusProgressBar->setVisible(loading);
+    }
     setCursor(loading ? Qt::WaitCursor : Qt::ArrowCursor);
     updateUiState();
 }

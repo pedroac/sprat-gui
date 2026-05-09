@@ -465,6 +465,8 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         }
     }
 
+    if (!m_sprites.isEmpty())
+        m_pivotBeforeDrag = QPoint(m_sprites.last()->pivotX, m_sprites.last()->pivotY);
     m_draggingPivot = true;
     setCursor(Qt::SizeAllCursor);
     for (auto& sprite : m_sprites) { sprite->pivotX = qRound(pos.x()); sprite->pivotY = qRound(pos.y()); }
@@ -514,7 +516,17 @@ void EditorOverlayItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void EditorOverlayItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
-    m_draggingPivot = false; m_dragMode = None; Q_UNUSED(event); unsetCursor();
+    bool wasDraggingPivot = m_draggingPivot;
+    m_draggingPivot = false;
+    m_dragMode = None;
+    Q_UNUSED(event);
+    unsetCursor();
+    if (wasDraggingPivot && !m_sprites.isEmpty()) {
+        auto s = m_sprites.last();
+        if (s->pivotX != m_pivotBeforeDrag.x() || s->pivotY != m_pivotBeforeDrag.y())
+            emit pivotDragFinished(m_pivotBeforeDrag.x(), m_pivotBeforeDrag.y(),
+                                   s->pivotX, s->pivotY);
+    }
 }
 
 EditorOverlayItem::ResizeHandle EditorOverlayItem::getResizeHandle(const QPointF& p, const QRectF& r) const {
