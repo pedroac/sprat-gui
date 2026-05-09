@@ -636,7 +636,7 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                 QRectF itemRect(item->pos(), item->pixmap().size());
                 if (itemRect.contains(scenePos)) {
                     m_splitItemIndex = i;
-                    m_splitOrientation = (event->modifiers() & Qt::ShiftModifier)
+                    m_splitOrientation = (event->modifiers() & Qt::AltModifier)
                                              ? Qt::Vertical
                                              : Qt::Horizontal;
                     if (m_splitOrientation == Qt::Horizontal) {
@@ -987,9 +987,10 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
     }
 
     menu.addSeparator();
-    QAction* splitAction = menu.addAction(tr("Split Mode"));
+    QAction* splitAction = menu.addAction(tr("Split Mode (S)"));
     splitAction->setCheckable(true);
     splitAction->setChecked(m_splitMode);
+    splitAction->setToolTip(tr("Toggle split mode. Hold ALT while hovering to switch between horizontal and vertical split."));
     connect(splitAction, &QAction::triggered, this, &LayoutCanvas::setSplitMode);
 
     menu.exec(event->globalPos());

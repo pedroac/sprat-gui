@@ -71,16 +71,6 @@ void SettingsDialog::setupUi() {
     m_borderStyleCombo->setAccessibleName(tr("Border style"));
     stylesForm->addRow(tr("Border Style:"), m_borderStyleCombo);
 
-    m_themeCombo = new QComboBox(this);
-    m_themeCombo->addItem(tr("System (follow OS)"), "system");
-    m_themeCombo->addItem(tr("Light"), "light");
-    m_themeCombo->addItem(tr("Dark"), "dark");
-    int themeIndex = m_themeCombo->findData(m_settings.theme);
-    m_themeCombo->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
-    m_themeCombo->setToolTip(tr("Choose the application color theme (desktop only)"));
-    m_themeCombo->setAccessibleName(tr("Application theme"));
-    stylesForm->addRow(tr("Theme:"), m_themeCombo);
-
     layout->addWidget(stylesGroup);
 
     // Spritesheet Group
@@ -213,9 +203,6 @@ void SettingsDialog::resetToDefaults() {
     if (index >= 0) {
         m_borderStyleCombo->setCurrentIndex(index);
     }
-
-    int themeIndex = m_themeCombo->findData(m_settings.theme);
-    m_themeCombo->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
 }
 
 AppSettings SettingsDialog::getSettings() const {
@@ -224,7 +211,6 @@ AppSettings SettingsDialog::getSettings() const {
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
     s.syncMode = (SyncMode)m_syncModeCombo->currentData().toInt();
-    s.theme = m_themeCombo->currentData().toString();
     return s;
 }
 
