@@ -33,7 +33,8 @@ int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selecte
 void MainWindow::refreshTimelineList() {
     m_timelineList->clear();
     for (const auto& timeline : m_session->timelines) {
-        m_timelineList->addItem(timeline.name);
+        m_timelineList->addItem(
+            QStringLiteral("%1 (%2)").arg(timeline.name).arg(timeline.frames.size()));
     }
     m_timelineList->setVisible(!m_session->timelines.isEmpty());
 }
@@ -239,7 +240,7 @@ void MainWindow::refreshAnimationTest() {
 
     if (playing != m_animPlaying) {
         m_animPlaying = playing;
-        m_animPlayPauseBtn->setText(tr("Play"));
+        m_animPlayPauseBtn->setIcon(QIcon::fromTheme("media-playback-start"));
     }
 
     m_animStatusLabel->setText(statusText);

@@ -1,6 +1,7 @@
 #include "AnimationPlaybackService.h"
 
 #include <QCoreApplication>
+#include <QIcon>
 #include <QPushButton>
 #include <QTimer>
 #include "AnimationTestOps.h"
@@ -20,7 +21,8 @@ bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines,
     }
     playing = false;
     timer->stop();
-    playPauseButton->setText(trAnimationPlayback("Play"));
+    playPauseButton->setIcon(QIcon::fromTheme("media-playback-start"));
+    playPauseButton->setText("▶");  // Show play symbol
     return true;
 }
 
@@ -33,7 +35,8 @@ bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines,
     }
     playing = false;
     timer->stop();
-    playPauseButton->setText(trAnimationPlayback("Play"));
+    playPauseButton->setIcon(QIcon::fromTheme("media-playback-start"));
+    playPauseButton->setText("▶");  // Show play symbol
     return true;
 }
 
@@ -52,7 +55,8 @@ bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>&
         return false;
     }
     playing = !playing;
-    playPauseButton->setText(playing ? trAnimationPlayback("Pause") : trAnimationPlayback("Play"));
+    playPauseButton->setIcon(playing ? QIcon::fromTheme("media-playback-pause") : QIcon::fromTheme("media-playback-start"));
+    playPauseButton->setText(playing ? "⏸" : "▶");  // Unicode pause and play symbols as visual feedback
     if (playing) {
         timer->start(qRound(1000.0 / fps));
     } else {

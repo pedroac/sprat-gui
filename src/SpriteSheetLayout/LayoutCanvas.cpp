@@ -18,6 +18,12 @@
 #include <QSet>
 #include <QKeySequence>
 #include <QtConcurrent>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QSpinBox>
 #include <QThreadPool>
 #include <QElapsedTimer>
 #include <QDebug>
@@ -889,6 +895,25 @@ void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
+    // Handle Delete key to remove selected sprites
+    if (event->key() == Qt::Key_Delete) {
+        QList<SpriteItem*> selectedItems;
+        for (auto* item : m_items) {
+            if (item->isSelectedState()) {
+                selectedItems.append(item);
+            }
+        }
+        if (!selectedItems.isEmpty()) {
+            QStringList paths;
+            for (auto* item : selectedItems) {
+                paths << item->getData()->path;
+            }
+            emit removeFramesRequested(paths);
+            event->accept();
+            return;
+        }
+    }
+
     ZoomableGraphicsView::keyPressEvent(event);
 }
 
@@ -975,6 +1000,9 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
         emit removeFramesRequested(paths);
     });
 
+    QAction* removeSmallAction = menu.addAction(tr("Remove Small..."));
+    connect(removeSmallAction, &QAction::triggered, this, &LayoutCanvas::onRemoveSmallTriggered);
+
     if (target) {
         menu.addSeparator();
         m_contextMenuTargetPath = target->getData()->path;
@@ -997,6 +1025,64 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
     connect(splitAction, &QAction::triggered, this, &LayoutCanvas::setSplitMode);
 
     menu.exec(event->globalPos());
+}
+
+void LayoutCanvas::onRemoveSmallTriggered() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Remove Small Frames"));
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+
+    QLabel* label = new QLabel(tr("Remove frames smaller than:"), &dialog);
+    layout->addWidget(label);
+
+    QHBoxLayout* inputLayout = new QHBoxLayout();
+
+    QLabel* widthLabel = new QLabel(tr("Width:"), &dialog);
+    QSpinBox* widthSpin = new QSpinBox(&dialog);
+    widthSpin->setMinimum(1);
+    widthSpin->setMaximum(9999);
+    widthSpin->setValue(10);
+    inputLayout->addWidget(widthLabel);
+    inputLayout->addWidget(widthSpin);
+
+    QLabel* heightLabel = new QLabel(tr("Height:"), &dialog);
+    QSpinBox* heightSpin = new QSpinBox(&dialog);
+    heightSpin->setMinimum(1);
+    heightSpin->setMaximum(9999);
+    heightSpin->setValue(10);
+    inputLayout->addWidget(heightLabel);
+    inputLayout->addWidget(heightSpin);
+
+    layout->addLayout(inputLayout);
+
+    QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttonBox);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        removeFramesSmallerThan(widthSpin->value(), heightSpin->value());
+    }
+}
+
+void LayoutCanvas::removeFramesSmallerThan(int minW, int minH) {
+    QStringList removedPaths;
+
+    for (int i = m_items.size() - 1; i >= 0; --i) {
+        auto* item = m_items[i];
+        const auto& sprite = item->getData();
+        if (sprite->rect.width() < minW || sprite->rect.height() < minH) {
+            removedPaths.append(sprite->path);
+            delete item;
+            m_items.removeAt(i);
+        }
+    }
+
+    if (!removedPaths.isEmpty()) {
+        m_baseSelectionPaths.clear();
+        emit removeFramesRequested(removedPaths);
+        viewport()->update();
+    }
 }
 
 void LayoutCanvas::updateSearch() {

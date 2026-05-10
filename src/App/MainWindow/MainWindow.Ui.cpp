@@ -83,7 +83,7 @@ void MainWindow::setupUi() {
     m_profileCombo->setAccessibleName(tr("Layout profile"));
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
     profileSelectLayout->addWidget(m_profileCombo);
-    QIcon profileManageIcon = QIcon::fromTheme("preferences-system");
+    QIcon profileManageIcon = QIcon::fromTheme("document-properties");
     m_manageProfilesBtn = new QPushButton(profileManageIcon, profileManageIcon.isNull() ? tr("Manage") : "", profileSelectPage);
     m_manageProfilesBtn->setToolTip(tr("Manage Profiles"));
     m_manageProfilesBtn->setAccessibleName(tr("Manage profiles"));
@@ -97,6 +97,7 @@ void MainWindow::setupUi() {
     addProfilesLayout->setContentsMargins(0, 0, 0, 0);
     addProfilesLayout->setSpacing(0);
     m_addProfilesBtn = new QPushButton(tr("Add Profiles"), addProfilesPage);
+    m_addProfilesBtn->setIcon(QIcon::fromTheme("document-new"));
     connect(m_addProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
     addProfilesLayout->addWidget(m_addProfilesBtn);
     m_profileSelectorStack->addWidget(addProfilesPage);
@@ -298,7 +299,7 @@ void MainWindow::setupUi() {
     m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
     connect(m_pivotYSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
     pivotRow->addWidget(m_pivotYSpin);
-    QIcon manageIcon = QIcon::fromTheme("preferences-system");
+    QIcon manageIcon = QIcon::fromTheme("document-properties");
     m_configPointsBtn = new QPushButton(manageIcon, manageIcon.isNull() ? tr("Manage") : "", this);
     m_configPointsBtn->setToolTip(tr("Manage Markers"));
     m_configPointsBtn->setAccessibleName(tr("Configure markers"));
@@ -332,17 +333,20 @@ void MainWindow::setupUi() {
     animLayout->setContentsMargins(10, 10, 10, 10);
 
     QHBoxLayout* animControls = new QHBoxLayout();
-    m_animPrevBtn = new QPushButton("<");
+    m_animPrevBtn = new QPushButton(tr("◀◀"));
+    m_animPrevBtn->setIcon(QIcon::fromTheme("media-skip-backward"));
     m_animPrevBtn->setToolTip(tr("Step to previous frame"));
     m_animPrevBtn->setAccessibleName(tr("Previous frame"));
     connect(m_animPrevBtn, &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
     animControls->addWidget(m_animPrevBtn);
-    m_animPlayPauseBtn = new QPushButton(tr("Play"));
+    m_animPlayPauseBtn = new QPushButton(tr("▶"));
+    m_animPlayPauseBtn->setIcon(QIcon::fromTheme("media-playback-start"));
     m_animPlayPauseBtn->setToolTip(tr("Play or pause animation"));
     m_animPlayPauseBtn->setAccessibleName(tr("Play or pause"));
     connect(m_animPlayPauseBtn, &QPushButton::clicked, this, &MainWindow::onAnimPlayPauseClicked);
     animControls->addWidget(m_animPlayPauseBtn);
-    m_animNextBtn = new QPushButton(">");
+    m_animNextBtn = new QPushButton(tr("▶▶"));
+    m_animNextBtn->setIcon(QIcon::fromTheme("media-skip-forward"));
     m_animNextBtn->setToolTip(tr("Step to next frame"));
     m_animNextBtn->setAccessibleName(tr("Next frame"));
     connect(m_animNextBtn, &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
@@ -510,6 +514,28 @@ void MainWindow::setupZoomShortcuts() {
     connect(zoomInEq, &QShortcut::activated, this, [performZoom]() { performZoom(true); });
     QShortcut* zoomOut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus), this);
     connect(zoomOut, &QShortcut::activated, this, [performZoom]() { performZoom(false); });
+
+    // Helper lambda to apply 100% or fit to the focused canvas
+    auto applyZoomPreset = [this](bool fitToContent) {
+        QWidget* fw = QApplication::focusWidget();
+        if (!fw) return;
+        if (m_canvas && (fw == m_canvas || m_canvas->isAncestorOf(fw))) {
+            if (fitToContent) { m_canvas->setZoomManual(false); m_canvas->initialFit(); }
+            else              { m_canvas->setZoomManual(true);  m_layoutZoomSpin->setValue(100.0); }
+        } else if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
+            if (fitToContent) { m_previewView->setZoomManual(false); m_previewView->initialFit(); }
+            else              { m_previewView->setZoomManual(true);  m_previewZoomSpin->setValue(100.0); }
+        } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
+            if (fitToContent) { m_animCanvas->setZoomManual(false); m_animCanvas->initialFit(); }
+            else              { m_animCanvas->setZoomManual(true);  m_animZoomSpin->setValue(100.0); }
+        }
+    };
+
+    QShortcut* zoom100 = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_1), this);
+    connect(zoom100, &QShortcut::activated, this, [applyZoomPreset]() { applyZoomPreset(false); });
+
+    QShortcut* zoomFit = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_0), this);
+    connect(zoomFit, &QShortcut::activated, this, [applyZoomPreset]() { applyZoomPreset(true); });
 }
 
 void MainWindow::setupKeyboardShortcuts() {

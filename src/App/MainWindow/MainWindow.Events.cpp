@@ -14,6 +14,7 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QMessageBox>
+#include <QIcon>
 #include <QPushButton>
 #include <QPixmapCache>
 #include <QStandardPaths>
@@ -116,10 +117,13 @@ MainWindow::DropAction MainWindow::confirmDropAction(const QString& path) {
     QMessageBox msg(this);
     msg.setWindowTitle(tr("Layout Already Loaded"));
     msg.setText(QString(tr("A layout is already loaded. What would you like to do with '%1'?")).arg(QFileInfo(path).fileName()));
-    
+
     QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+    replaceBtn->setIcon(QIcon::fromTheme("document-save"));
     QPushButton* mergeBtn = msg.addButton(tr("Merge"), QMessageBox::AcceptRole);
-    msg.addButton(tr("Cancel"), QMessageBox::RejectRole);
+    mergeBtn->setIcon(QIcon::fromTheme("edit-paste"));
+    QPushButton* cancelBtn = msg.addButton(tr("Cancel"), QMessageBox::RejectRole);
+    cancelBtn->setIcon(QIcon::fromTheme("process-stop"));
     
     msg.exec();
     

@@ -63,6 +63,19 @@ public:
      */
     void clearTempDirs();
 
+    /**
+     * @brief Sets the temporary directory for the source folder (sprites folder).
+     *
+     * This directory is kept separate and not cleared by clearTempDirs(),
+     * allowing sprite files to persist while the layout is active.
+     */
+    void setSourceFolderTempDir(std::unique_ptr<QTemporaryDir> dir);
+
+    /**
+     * @brief Clears the source folder temporary directory.
+     */
+    void clearSourceFolderTempDir();
+
 signals:
     void changed();
     void layoutChanged();
@@ -71,4 +84,5 @@ signals:
 
 private:
     std::vector<std::unique_ptr<QTemporaryDir>> m_tempDirs;
+    std::unique_ptr<QTemporaryDir> m_sourceFolderTempDir;  // Persistent sprite folder temp dir
 };

@@ -203,6 +203,16 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
  * @brief Destroy the Main Window:: Main Window object
  * 
  */
+void MainWindow::closeEvent(QCloseEvent* event) {
+    // Clean up temporary folders before closing
+    if (m_session) {
+        m_session->clearTempDirs();
+    }
+
+    // Allow the close event to proceed
+    QMainWindow::closeEvent(event);
+}
+
 MainWindow::~MainWindow() {
     m_isCanceled = true;
 
@@ -225,8 +235,11 @@ MainWindow::~MainWindow() {
         m_session->frameListPath.clear();
     }
 
-    // Temporary folders are managed by ProjectSession and cleaned up automatically
-    // via QTemporaryDir destructor, so no explicit cleanup needed here
+    // Explicitly clean up temporary folders (from ZIP extraction, etc.)
+    // when the app is closing (as a safety measure in case closeEvent wasn't called)
+    if (m_session) {
+        m_session->clearTempDirs();
+    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
@@ -481,6 +494,24 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
             refreshAnimationTest();
         }
 
+        // Remove animations that became empty because their sprites were removed from layout
+        for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
+            if (m_session->timelines[i].frames.isEmpty()) {
+                m_session->timelines.removeAt(i);
+                if (m_session->selectedTimelineIndex > i) {
+                    --m_session->selectedTimelineIndex;
+                } else if (m_session->selectedTimelineIndex == i) {
+                    m_session->selectedTimelineIndex = -1;
+                }
+                timelineChanged = true;
+            }
+        }
+        if (timelineChanged) {
+            refreshTimelineList();
+            refreshTimelineFrames();
+            refreshAnimationTest();
+        }
+
         m_session->activeFramePaths.clear();
         m_session->layoutSourcePath.clear();
         m_session->layoutSourceIsList = false;
@@ -521,6 +552,24 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         }
     }
     if (timelineChanged) {
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    }
+
+    // Remove animations that became empty because their sprites were removed from layout
+    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
+        if (m_session->timelines[i].frames.isEmpty()) {
+            m_session->timelines.removeAt(i);
+            if (m_session->selectedTimelineIndex > i) {
+                --m_session->selectedTimelineIndex;
+            } else if (m_session->selectedTimelineIndex == i) {
+                m_session->selectedTimelineIndex = -1;
+            }
+            timelineChanged = true;
+        }
+    }
+    if (timelineChanged) {
+        refreshTimelineList();
         refreshTimelineFrames();
         refreshAnimationTest();
     }
@@ -669,6 +718,17 @@ void MainWindow::applySettings() {
         // For all non-None modes (Manual and Watch), call initializeSourceFolderWatcher()
         // which handles the mode internally via its own if branches
         initializeSourceFolderWatcher();
+
+        // Set up periodic check for Watch mode to detect file deletions
+        if (m_settings.syncMode == SyncMode::Watch) {
+            if (!m_watchModePeriodicCheckTimer) {
+                m_watchModePeriodicCheckTimer = new QTimer(this);
+                connect(m_watchModePeriodicCheckTimer, &QTimer::timeout,
+                        this, &MainWindow::onWatchModePeriodicCheck);
+            }
+            // Check every 2 seconds for deleted files
+            m_watchModePeriodicCheckTimer->start(2000);
+        }
     }
 
     // If sync was just enabled (None -> active) and a layout already exists,
@@ -953,6 +1013,55 @@ void MainWindow::performManualSync() {
     qInfo() << "[Sync] Manual sync complete";
 }
 
+void MainWindow::onWatchModePeriodicCheck() {
+    // Periodic check in Watch mode to detect file removals
+    // This handles cases where directoryChanged signal is not reliably emitted
+
+    // Stop timer if not in Watch mode
+    if (m_settings.syncMode != SyncMode::Watch) {
+        if (m_watchModePeriodicCheckTimer) {
+            m_watchModePeriodicCheckTimer->stop();
+        }
+        return;
+    }
+
+    // Validate session and basic state
+    if (!m_session || m_session->layoutModels.isEmpty() || m_session->sourceFolder.isEmpty()) {
+        return;
+    }
+
+    // Verify sprites folder still exists
+    if (!QDir(m_session->sourceFolder).exists()) {
+        qWarning() << "[Watch] Sprites folder no longer exists:" << m_session->sourceFolder;
+        m_session->sourceFolder.clear();
+        cleanupSourceFolderWatcher();
+        return;
+    }
+
+    LayoutModel& layout = m_session->layoutModels.first();
+    bool spriteRemoved = false;
+
+    // Check if any sprites reference files that no longer exist
+    for (int i = layout.sprites.size() - 1; i >= 0; --i) {
+        const auto& sprite = layout.sprites[i];
+        if (sprite && !QFileInfo::exists(sprite->path)) {
+            qInfo() << "[Watch] Removing missing sprite:" << sprite->name;
+            layout.sprites.removeAt(i);
+            spriteRemoved = true;
+        }
+    }
+
+    // If any sprites were removed, update the UI
+    if (spriteRemoved && m_canvas) {
+        qInfo() << "[Watch] Periodic check detected removed sprites, updating UI";
+        m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this]() {
+            if (!m_isCanceled) {
+                updateUiState();
+            }
+        });
+    }
+}
+
 void MainWindow::initializeSourceFolderWatcher() {
     qInfo() << "[Watcher] Initializing source folder watcher, mode:" << (int)m_settings.syncMode;
     ensureSourceFolder();
@@ -993,6 +1102,11 @@ void MainWindow::cleanupSourceFolderWatcher() {
         qInfo() << "Source folder watcher stopped";
     }
 
+    // Stop periodic check timer
+    if (m_watchModePeriodicCheckTimer) {
+        m_watchModePeriodicCheckTimer->stop();
+    }
+
     updateOpenSourceFolderAction();
 }
 
@@ -1003,7 +1117,10 @@ void MainWindow::ensureSourceFolder() {
     if (tempDir->isValid()) {
         m_session->sourceFolder = tempDir->path();
         m_sourceFolderIsTemp = true;
-        m_session->addTempDir(std::move(tempDir));
+        // Store temp dir in session separately - it must persist while sprites
+        // reference files in it. Not added to tempDirs list which is cleared
+        // during layout operations.
+        m_session->setSourceFolderTempDir(std::move(tempDir));
     }
 }
 
@@ -1035,7 +1152,7 @@ bool MainWindow::activeFramesAreInSourceFolder() const {
     return true;
 }
 
-void MainWindow::copyActiveFramesToSourceFolder() {
+void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
     if (m_session->activeFramePaths.isEmpty() || m_session->sourceFolder.isEmpty()) {
         return;
     }
@@ -1056,25 +1173,31 @@ void MainWindow::copyActiveFramesToSourceFolder() {
 
         QString dst = QDir(m_session->sourceFolder).filePath(srcInfo.fileName());
 
-        // Resolve name conflicts: try baseName_1, baseName_2, ..., baseName_99.
+        // Handle existing files
         if (QFileInfo::exists(dst)) {
-            const QString baseName = srcInfo.completeBaseName();
-            const QString suffix   = srcInfo.suffix();
-            bool resolved = false;
-            for (int i = 1; i <= 99; ++i) {
-                const QString candidate = QDir(m_session->sourceFolder).filePath(
-                    QString("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
-                if (!QFileInfo::exists(candidate)) {
-                    dst = candidate;
-                    resolved = true;
-                    break;
+            if (overwriteDuplicates) {
+                // Replace the existing file
+                QFile::remove(dst);
+            } else {
+                // Resolve name conflicts: try baseName_1, baseName_2, ..., baseName_99.
+                const QString baseName = srcInfo.completeBaseName();
+                const QString suffix   = srcInfo.suffix();
+                bool resolved = false;
+                for (int i = 1; i <= 99; ++i) {
+                    const QString candidate = QDir(m_session->sourceFolder).filePath(
+                        QString("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
+                    if (!QFileInfo::exists(candidate)) {
+                        dst = candidate;
+                        resolved = true;
+                        break;
+                    }
                 }
-            }
-            if (!resolved) {
-                qWarning() << "copyActiveFramesToSourceFolder: conflict unresolvable for"
-                           << srcInfo.fileName() << "- skipping";
-                newPaths.append(path);
-                continue;
+                if (!resolved) {
+                    qWarning() << "copyActiveFramesToSourceFolder: conflict unresolvable for"
+                               << srcInfo.fileName() << "- skipping";
+                    newPaths.append(path);
+                    continue;
+                }
             }
         }
 
@@ -1089,6 +1212,22 @@ void MainWindow::copyActiveFramesToSourceFolder() {
 
     m_session->activeFramePaths = newPaths;
     ensureFrameListInput(); // writes frame list .txt, sets layoutSourcePath & layoutSourceIsList
+}
+
+void MainWindow::clearSourceFolderImages(const QString& excludePath) {
+    if (m_session->sourceFolder.isEmpty()) return;
+    const QString canonicalSource = QDir(m_session->sourceFolder).absolutePath();
+    if (!excludePath.isEmpty() &&
+        QDir(excludePath).absolutePath() == canonicalSource) {
+        return; // Don't erase the folder we're about to load from
+    }
+    static const QStringList imageExts = {
+        "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif", "*.webp", "*.tga", "*.dds"
+    };
+    QDir dir(canonicalSource);
+    for (const QString& fileName : dir.entryList(imageExts, QDir::Files)) {
+        dir.remove(fileName);
+    }
 }
 
 void MainWindow::showSyncNotification(const QString& message) {

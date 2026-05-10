@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QFileDialog>
 #include <QCheckBox>
+#include <QIcon>
 
 SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent)
     : QDialog(parent), m_settings(settings), m_cliPaths(cliPaths) {
@@ -107,6 +108,7 @@ void SettingsDialog::setupUi() {
     spritesheetForm->addRow(tr("Sync Mode:"), m_syncModeCombo);
 
     m_syncNowBtn = new QPushButton(tr("Sync Now"), this);
+    m_syncNowBtn->setIcon(QIcon::fromTheme("edit-paste", QIcon::fromTheme("document-save")));
     m_syncNowBtn->setEnabled(m_settings.syncMode != SyncMode::None);
     connect(m_syncNowBtn, &QPushButton::clicked, this, &SettingsDialog::onSyncNowClicked);
     spritesheetForm->addRow("", m_syncNowBtn);
@@ -116,17 +118,19 @@ void SettingsDialog::setupUi() {
 #ifndef Q_OS_WASM
     QGroupBox* cliGroup = new QGroupBox(tr("CLI Tools"), this);
     QFormLayout* cliForm = new QFormLayout(cliGroup);
-    
+
     QHBoxLayout* baseDirLayout = new QHBoxLayout();
     m_cliBaseDirEdit = new QLineEdit(m_cliPaths.baseDir, this);
     m_cliBaseDirEdit->setReadOnly(true);
     m_cliBaseDirBtn = new QPushButton(tr("Change..."), this);
+    m_cliBaseDirBtn->setIcon(QIcon::fromTheme("document-open-folder", QIcon::fromTheme("document-open")));
     connect(m_cliBaseDirBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
     baseDirLayout->addWidget(m_cliBaseDirEdit);
     baseDirLayout->addWidget(m_cliBaseDirBtn);
     cliForm->addRow(tr("Base Directory:"), baseDirLayout);
 
     m_installCliBtn = new QPushButton(tr("Install CLI Tools"), this);
+    m_installCliBtn->setIcon(QIcon::fromTheme("document-save"));
     connect(m_installCliBtn, &QPushButton::clicked, this, &SettingsDialog::installCliToolsRequested);
     cliForm->addRow("", m_installCliBtn);
     
@@ -137,6 +141,7 @@ void SettingsDialog::setupUi() {
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton* resetBtn = buttons->addButton(tr("Reset"), QDialogButtonBox::ResetRole);
+    resetBtn->setIcon(QIcon::fromTheme("edit-undo"));
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -199,9 +204,14 @@ void SettingsDialog::resetToDefaults() {
         m_deduplicateModeCombo->setCurrentIndex(deduplicateIndex);
     }
 
-    int index = m_borderStyleCombo->findData((int)m_settings.borderStyle);
-    if (index >= 0) {
-        m_borderStyleCombo->setCurrentIndex(index);
+    int borderIndex = m_borderStyleCombo->findData((int)m_settings.borderStyle);
+    if (borderIndex >= 0) {
+        m_borderStyleCombo->setCurrentIndex(borderIndex);
+    }
+
+    int syncIndex = m_syncModeCombo->findData((int)m_settings.syncMode);
+    if (syncIndex >= 0) {
+        m_syncModeCombo->setCurrentIndex(syncIndex);
     }
 }
 

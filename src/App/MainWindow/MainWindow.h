@@ -419,6 +419,7 @@ private slots:
     void ensureSourceFolder();             // creates temp dir if needed
     void promoteSourceFolderAfterSave(const QString& saveDestination);
     void updateOpenSourceFolderAction();   // enable/disable based on state
+    void onWatchModePeriodicCheck();       // periodic file removal detection in Watch mode
 
 protected:
     // === Event Handling ===
@@ -445,6 +446,13 @@ protected:
      */
     bool eventFilter(QObject* watched, QEvent* event) override;
 
+    /**
+     * @brief Handles window close events.
+     *
+     * @param event Close event
+     */
+    void closeEvent(QCloseEvent* event) override;
+
 private:
     // === Helper Methods ===
     /**
@@ -468,8 +476,17 @@ private:
 
     /**
      * @brief Copies active frames to the source folder.
+     *
+     * @param overwriteDuplicates If true, replace existing files with the same name; if false, rename to avoid conflicts
      */
-    void copyActiveFramesToSourceFolder();
+    void copyActiveFramesToSourceFolder(bool overwriteDuplicates = true);
+
+    /**
+     * @brief Clears image files from the source folder.
+     *
+     * @param excludePath If provided, skips clearing if the folder path matches (prevents erasing folder we're about to load from)
+     */
+    void clearSourceFolderImages(const QString& excludePath = QString());
 
     /**
      * @brief Performs manual sync: compares layout sprites with folder images.
@@ -512,10 +529,17 @@ private:
 
     /**
      * @brief Handles profile failure.
-     * 
+     *
      * @param failedProfile Name of failed profile
      */
     void handleProfileFailure(const QString& failedProfile);
+
+    /**
+     * @brief Handles sprite dimensions exceed error with auto-retry.
+     *
+     * @param failedProfile Name of failed profile
+     */
+    void handleDimensionsError(const QString& failedProfile);
 
     /**
      * @brief Checks if a profile is enabled.
@@ -1029,6 +1053,9 @@ private:
     QPushButton* m_cancelLoadingButton = nullptr;
     QPlainTextEdit* m_cliInstallLog = nullptr;
     QString m_loadingUiMessage = "Loading...";
+    bool m_shouldClearSpritesFolder = false;
+    bool m_mergeReplaceAllDuplicates = true;
+    QTimer* m_watchModePeriodicCheckTimer = nullptr;
 
     // === Undo/Redo & Recent Projects ===
     QUndoStack* m_undoStack = nullptr;

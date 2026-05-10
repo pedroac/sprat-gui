@@ -2,8 +2,12 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QIcon>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QShortcut>
+#include <QDialog>
+#include <QSpinBox>
 
 FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& detectedFrames, const AppSettings& settings, const QColor& backgroundColor, QWidget* parent)
     : QDialog(parent)
@@ -41,13 +45,16 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     topBarLayout->addWidget(m_zoomSpin);
 
     m_acceptBtn = new QPushButton(tr("Accept Frames"), this);
+    m_acceptBtn->setIcon(QIcon::fromTheme("document-save"));
     m_rejectBtn = new QPushButton(tr("Use as Single Frame"), this);
+    m_rejectBtn->setIcon(QIcon::fromTheme("document-new"));
     m_cancelBtn = new QPushButton(tr("Cancel"), this);
-    
+    m_cancelBtn->setIcon(QIcon::fromTheme("process-stop"));
+
     connect(m_acceptBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onAcceptClicked);
     connect(m_rejectBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onRejectClicked);
     connect(m_cancelBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onCancelClicked);
-    
+
     // Layout
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch();
@@ -59,8 +66,21 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     mainLayout->addLayout(topBarLayout);
     mainLayout->addWidget(m_canvas);
     mainLayout->addLayout(buttonLayout);
-    
+
     setLayout(mainLayout);
+
+    // Add zoom shortcuts
+    QShortcut* s100 = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_1), this);
+    connect(s100, &QShortcut::activated, this, [this]() {
+        m_canvas->setZoomManual(true);
+        m_zoomSpin->setValue(100.0);
+    });
+
+    QShortcut* sFit = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_0), this);
+    connect(sFit, &QShortcut::activated, this, [this]() {
+        m_canvas->setZoomManual(false);
+        m_canvas->initialFit();
+    });
 }
 
 FrameDetectionDialog::~FrameDetectionDialog() = default;

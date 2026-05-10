@@ -24,11 +24,12 @@
 #include "ArchiveExtractor.h"
 
 void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
-    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+    if (action == DropAction::Cancel) {
         return;
     }
-    
-    if (action == DropAction::Cancel) {
+
+    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
+    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
         return;
     }
 
@@ -166,11 +167,12 @@ void MainWindow::processFrameExtractionResult(const FrameExtractionResult& resul
 }
 
 void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
-    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+    if (action == DropAction::Cancel) {
         return;
     }
-    
-    if (action == DropAction::Cancel) {
+
+    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
+    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
         return;
     }
     
@@ -409,18 +411,53 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     }
 
     if (action == DropAction::Merge) {
+        // Ask if files with same names should be replaced
+        QMessageBox msg(this);
+        msg.setWindowTitle(tr("Merge with duplicates"));
+        msg.setText(tr("When merging, what should happen to files with the same name?"));
+        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
+        msg.exec();
+        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
+
         m_session->activeFramePaths.append(finalPath);
+        // Copy the image to source folder so it persists after temp dir cleanup
+        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        m_shouldClearSpritesFolder = false;
         onRunLayout();
         return;
     }
 
+    // On Replace, delete all files from sprites folder
+    if (!m_session->sourceFolder.isEmpty()) {
+        QDir dir(m_session->sourceFolder);
+        for (const QString& file : dir.entryList(QDir::Files)) {
+            dir.remove(file);
+        }
+    }
+
+    m_session->sourceFolder.clear();
+    m_session->clearSourceFolderTempDir();
+    ensureSourceFolder();
+    m_session->timelines.clear();
+    m_session->selectedTimelineIndex = -1;
+    refreshTimelineList();
+    refreshAnimationTest();
+
+    // Copy the single image to source folder on Replace
+    m_session->activeFramePaths = { finalPath };
+    copyActiveFramesToSourceFolder();
+    m_shouldClearSpritesFolder = false;
+    // After copying, update to the copied path
+    QString copiedPath = m_session->activeFramePaths.first();
+
     // For a single image, we need to create a simple layout model
     LayoutModel singleImageModel;
     singleImageModel.scale = 1.0;
-    
+
     // Create a sprite for the single image
     SpritePtr sprite = std::make_shared<Sprite>();
-    sprite->path = finalPath;
+    sprite->path = copiedPath;
     sprite->name = QFileInfo(imagePath).baseName();
     
     // Get image dimensions
@@ -509,14 +546,44 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     }
     
     if (action == DropAction::Merge) {
+        // Ask if files with same names should be replaced
+        QMessageBox msg(this);
+        msg.setWindowTitle(tr("Merge with duplicates"));
+        msg.setText(tr("When merging, what should happen to files with the same name?"));
+        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
+        msg.exec();
+        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
+
         m_session->activeFramePaths.append(framePaths);
+        // Copy extracted frames to source folder so they persist after temp dir cleanup
+        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        m_shouldClearSpritesFolder = false;
     } else {
+        // On Replace, delete all files from sprites folder
+        if (!m_session->sourceFolder.isEmpty()) {
+            QDir dir(m_session->sourceFolder);
+            for (const QString& file : dir.entryList(QDir::Files)) {
+                dir.remove(file);
+            }
+        }
+
+        m_session->sourceFolder.clear();
+        m_session->clearSourceFolderTempDir();
+        ensureSourceFolder();
+        m_session->timelines.clear();
+        m_session->selectedTimelineIndex = -1;
+        refreshTimelineList();
+        refreshAnimationTest();
         m_projectFilePath.clear();
         m_sourceFolderIsTemp = false;
         m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;
         m_session->layoutSourceIsList = false;
         m_session->currentFolder = QFileInfo(sourcePath).absoluteDir().absolutePath();
+        // Copy sprites to source folder on Replace
+        copyActiveFramesToSourceFolder();
+        m_shouldClearSpritesFolder = false;
     }
     
     if (!m_session->frameListPath.isEmpty()) {

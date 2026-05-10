@@ -37,6 +37,10 @@ public:
     void deleteSelectedFrames();
     void setSettings(const AppSettings& settings);
 
+    void highlightSmallFrames(int minW, int minH);
+    void clearSmallFrameHighlights();
+    void removeFramesSmallerThan(int minW, int minH);
+
 protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -55,23 +59,28 @@ private:
     void updateResizeCursor(ResizeHandle handle);
     void splitFrame(int index, Qt::Orientation orientation, int pos);
     int findFrameAt(const QPoint& pos);
+    void onRemoveSmallTriggered();
 
     QPixmap m_image;
     QColor m_transparentColor;
     QVector<QRect> m_frames;
     QVector<bool> m_selected;
     QVector<bool> m_hovered;
+    QVector<bool> m_markedForRemoval;
 
     QGraphicsScene* m_scene;
     QGraphicsPixmapItem* m_imageItem = nullptr;
     QVector<QGraphicsRectItem*> m_frameItems;
     QGraphicsLineItem* m_splitLineItem = nullptr;
+    QGraphicsRectItem* m_rubberBandItem = nullptr;
 
     bool m_dragging = false;
     bool m_isResizing = false;
+    bool m_isRubberBanding = false;
     int m_draggedFrameIndex = -1;
     QRect m_dragOriginalRect;
     QPointF m_dragStartScenePos;
+    QPointF m_rubberBandStart;
     QPoint m_dragStartPos;
     ResizeHandle m_resizeHandle = NoHandle;
 

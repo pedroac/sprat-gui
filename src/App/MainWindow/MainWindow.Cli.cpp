@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QIcon>
 #include <QInputDialog>
 #include <QLabel>
 #include <QElapsedTimer>
@@ -197,10 +198,12 @@ void MainWindow::installCliTools() {
 }
 
 void MainWindow::loadFolder(const QString& path, DropAction action) {
-    if (action == DropAction::Replace && !confirmLayoutReplacement()) {
+    if (action == DropAction::Cancel) {
         return;
     }
-    if (action == DropAction::Cancel) {
+
+    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
+    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
         return;
     }
 
@@ -293,8 +296,32 @@ void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& resul
             << "count=" << absolutePaths.size()
             << "ms=" << loadTimer.elapsed();
     if (action == DropAction::Merge) {
+        // Ask if files with same names should be replaced
+        QMessageBox msg(this);
+        msg.setWindowTitle(tr("Merge with duplicates"));
+        msg.setText(tr("When merging, what should happen to files with the same name?"));
+        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
+        msg.exec();
+        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
+
         m_session->activeFramePaths.append(absolutePaths);
+        m_shouldClearSpritesFolder = false;
     } else {
+        // On Replace, delete all files from sprites folder
+        if (!m_session->sourceFolder.isEmpty()) {
+            QDir dir(m_session->sourceFolder);
+            for (const QString& file : dir.entryList(QDir::Files)) {
+                dir.remove(file);
+            }
+        }
+
+        m_session->sourceFolder.clear();
+        ensureSourceFolder();
+        m_session->timelines.clear();
+        m_session->selectedTimelineIndex = -1;
+        refreshTimelineList();
+        refreshAnimationTest();
         m_projectFilePath.clear();
         m_sourceFolderIsTemp = false;
         m_session->currentFolder = targetPath;
@@ -304,6 +331,9 @@ void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& resul
         m_session->cachedLayoutOutput.clear();
         m_session->cachedLayoutScale = 1.0;
         m_session->activeFramePaths = absolutePaths;
+        // Copy sprites to source folder on Replace
+        copyActiveFramesToSourceFolder();
+        m_shouldClearSpritesFolder = false;
     }
     
     if (!m_session->frameListPath.isEmpty()) {
@@ -351,7 +381,9 @@ bool MainWindow::confirmLayoutReplacement() {
     msg.setWindowTitle(tr("Layout Already Loaded"));
     msg.setText(tr("A layout is already loaded. Do you want to replace it?"));
     QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-    msg.addButton(tr("Ignore"), QMessageBox::RejectRole);
+    replaceBtn->setIcon(QIcon::fromTheme("document-save"));
+    QPushButton* ignoreBtn = msg.addButton(tr("Ignore"), QMessageBox::RejectRole);
+    ignoreBtn->setIcon(QIcon::fromTheme("process-stop"));
     msg.exec();
     return msg.clickedButton() == replaceBtn;
 }
@@ -464,6 +496,7 @@ void MainWindow::setupCliInstallOverlay() {
     layout->addWidget(m_cliInstallLog);
 
     m_cancelLoadingButton = new QPushButton(tr("Cancel"), m_cliInstallOverlay);
+    m_cancelLoadingButton->setIcon(QIcon::fromTheme("process-stop"));
     m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 4px 8px; font-weight: bold; font-size: 11px;");
     m_cancelLoadingButton->setCursor(Qt::PointingHandCursor);
     m_cancelLoadingButton->setMaximumWidth(80);

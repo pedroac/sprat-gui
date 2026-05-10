@@ -2,6 +2,7 @@
 
 #include "ImageDiscoveryService.h"
 
+#include <QApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -85,6 +86,27 @@ bool ImageFolderSelectionDialog::pickMultipleFoldersWithImages(QWidget* parent, 
     QTreeWidget* tree = new QTreeWidget(&dialog);
     tree->setHeaderLabel(tr("Folders"));
     tree->setSelectionMode(QAbstractItemView::NoSelection);
+
+    // Apply stylesheet to ensure checkbox visibility in dark mode
+    const QPalette& appPalette = QApplication::palette();
+    const QString bgColor = appPalette.color(QPalette::Base).name();
+    const QString textColor = appPalette.color(QPalette::Text).name();
+    const QString borderColor = appPalette.color(QPalette::Mid).name();
+
+    tree->setStyleSheet(QString(
+        "QTreeView { background-color: %1; color: %2; } "
+        "QTreeView::indicator { width: 18px; height: 18px; margin: 2px; } "
+        "QTreeView::indicator:unchecked { "
+        "  background-color: %1; border: 2px solid %3; "
+        "} "
+        "QTreeView::indicator:checked { "
+        "  background-color: #0066cc; border: 2px solid #0066cc; "
+        "} "
+        "QTreeView::indicator:indeterminate { "
+        "  background-color: %1; border: 2px solid %3; image: none; "
+        "}"
+    ).arg(bgColor, textColor, borderColor));
+
     layout->addWidget(tree, 1);
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -102,6 +124,7 @@ bool ImageFolderSelectionDialog::pickMultipleFoldersWithImages(QWidget* parent, 
     rootItem->setData(0, Qt::UserRole, QString());
     rootItem->setFlags(rootItem->flags() | Qt::ItemIsUserCheckable);
     rootItem->setCheckState(0, Qt::Unchecked);
+    rootItem->setForeground(0, tree->palette().text());
     itemsByRelativePath.insert(QString(), rootItem);
 
     auto ensureItem = [&](const QString& relativePath) {
@@ -123,6 +146,7 @@ bool ImageFolderSelectionDialog::pickMultipleFoldersWithImages(QWidget* parent, 
                 item->setData(0, Qt::UserRole, currentPath);
                 item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
                 item->setCheckState(0, Qt::Unchecked);
+                item->setForeground(0, tree->palette().text());
                 itemsByRelativePath.insert(currentPath, item);
             }
             parentItem = itemsByRelativePath.value(currentPath);

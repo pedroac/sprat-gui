@@ -64,6 +64,11 @@ public:
      */
     bool isSplitMode() const { return m_splitMode; }
 
+    /**
+     * @brief Removes sprites smaller than the given dimensions.
+     */
+    void removeFramesSmallerThan(int minW, int minH);
+
 signals:
     /**
      * @brief Emitted when the sprite selection changes.
@@ -111,6 +116,9 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
     void drawForeground(QPainter* painter, const QRectF& rect) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+
+private slots:
+    void onRemoveSmallTriggered();
 
 private:
     void updateSearch();

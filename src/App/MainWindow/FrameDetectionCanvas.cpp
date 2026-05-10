@@ -7,6 +7,12 @@
 #include <QApplication>
 #include <QToolTip>
 #include <QPainter>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QSpinBox>
 #include "ViewUtils.h"
 #include "SplitModeUtils.h"
 
@@ -14,9 +20,9 @@ FrameDetectionCanvas::FrameDetectionCanvas(QWidget* parent) : ZoomableGraphicsVi
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
     setMouseTracking(true);
-    
+
     setBackgroundBrush(QBrush(createCheckerboardPixmap()));
-    
+
     setZoomRange(0.1, 50.0);
 
     m_splitLineItem = new QGraphicsLineItem();
@@ -25,6 +31,14 @@ FrameDetectionCanvas::FrameDetectionCanvas(QWidget* parent) : ZoomableGraphicsVi
     m_splitLineItem->setZValue(2.0);
     m_splitLineItem->hide();
     m_scene->addItem(m_splitLineItem);
+
+    m_rubberBandItem = new QGraphicsRectItem();
+    QPen rbPen(Qt::white, 1, Qt::DashLine);
+    m_rubberBandItem->setPen(rbPen);
+    m_rubberBandItem->setBrush(QBrush(QColor(255, 255, 255, 30)));
+    m_rubberBandItem->setZValue(3.0);
+    m_rubberBandItem->hide();
+    m_scene->addItem(m_rubberBandItem);
 }
 
 void FrameDetectionCanvas::setTransparentColor(const QColor& color) {
@@ -74,6 +88,7 @@ void FrameDetectionCanvas::setFrames(const QVector<QRect>& frames) {
     m_frames = frames;
     m_selected.fill(false, frames.size());
     m_hovered.fill(false, frames.size());
+    m_markedForRemoval.fill(false, frames.size());
     drawFrameRectangles();
 }
 
@@ -105,14 +120,19 @@ void FrameDetectionCanvas::drawFrameRectangles() {
 
 void FrameDetectionCanvas::updateFrameVisuals() {
     for (int i = 0; i < m_frameItems.size(); ++i) {
-        QColor color = m_selected[i] ? m_settings.detectionSelectedColor : m_settings.borderColor;
+        QColor color;
+        if (m_markedForRemoval[i]) {
+            color = QColor(255, 128, 0); // Orange for marked-for-removal
+        } else {
+            color = m_selected[i] ? m_settings.detectionSelectedColor : m_settings.borderColor;
+        }
         Qt::PenStyle style = m_settings.borderStyle;
-        
+
         // If hovered, toggle between solid and dashed (or just use dash if default is solid)
         if (m_hovered[i]) {
             style = (style == Qt::SolidLine) ? Qt::DashLine : Qt::SolidLine;
         }
-        
+
         QPen pen(color, 3, style);
         pen.setCosmetic(true);
         m_frameItems[i]->setPen(pen);
@@ -162,7 +182,7 @@ void FrameDetectionCanvas::mousePressEvent(QMouseEvent* event) {
         QGraphicsItem* item = m_scene->itemAt(scenePos, transform());
         if (auto* rectItem = dynamic_cast<QGraphicsRectItem*>(item)) {
             int idx = rectItem->data(0).toInt();
-            if (event->modifiers() & Qt::ControlModifier) {
+            if (event->modifiers() & Qt::ShiftModifier) {
                 m_selected[idx] = !m_selected[idx];
             } else {
                 m_selected.fill(false);
@@ -178,7 +198,10 @@ void FrameDetectionCanvas::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
-        createFrame(scenePos);
+        m_isRubberBanding = true;
+        m_rubberBandStart = scenePos;
+        m_rubberBandItem->setRect(QRectF(scenePos, QSizeF(0, 0)));
+        m_rubberBandItem->show();
         return;
     }
 }
@@ -188,6 +211,11 @@ void FrameDetectionCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (m_isPanning) return;
 
     QPointF scenePos = mapToScene(event->pos());
+
+    if (m_isRubberBanding) {
+        m_rubberBandItem->setRect(QRectF(m_rubberBandStart, scenePos).normalized());
+        return;
+    }
 
     if (m_dragging && m_draggedFrameIndex >= 0) {
         if (m_isResizing) resizeFrame(m_draggedFrameIndex, m_resizeHandle, scenePos);
@@ -242,6 +270,23 @@ void FrameDetectionCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void FrameDetectionCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (m_isRubberBanding) {
+        m_isRubberBanding = false;
+        m_rubberBandItem->hide();
+        const QRectF sel = m_rubberBandItem->rect();
+        bool any = false;
+        if (!(event->modifiers() & Qt::ShiftModifier)) {
+            m_selected.fill(false);
+        }
+        for (int i = 0; i < m_frames.size(); ++i) {
+            if (sel.intersects(QRectF(m_frames[i]))) {
+                m_selected[i] = true;
+                any = true;
+            }
+        }
+        if (any) updateFrameVisuals();
+        return;
+    }
     if (m_dragging) {
         m_dragging = false;
         m_draggedFrameIndex = -1;
@@ -273,6 +318,9 @@ void FrameDetectionCanvas::contextMenuEvent(QContextMenuEvent* event) {
     deleteAction->setEnabled(hasSelection);
     connect(deleteAction, &QAction::triggered, this, &FrameDetectionCanvas::deleteSelectedFrames);
 
+    QAction* removeSmallAction = menu.addAction(tr("Remove Small..."));
+    connect(removeSmallAction, &QAction::triggered, this, &FrameDetectionCanvas::onRemoveSmallTriggered);
+
     menu.addSeparator();
     QAction* splitAction = menu.addAction(tr("Split Mode (S)"));
     splitAction->setCheckable(true);
@@ -285,6 +333,44 @@ void FrameDetectionCanvas::contextMenuEvent(QContextMenuEvent* event) {
     connect(createAction, &QAction::triggered, this, [this, scenePos](){ createDefaultFrame(scenePos); });
 
     menu.exec(event->globalPos());
+}
+
+void FrameDetectionCanvas::onRemoveSmallTriggered() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Remove Small Frames"));
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+
+    QLabel* label = new QLabel(tr("Remove frames smaller than:"), &dialog);
+    layout->addWidget(label);
+
+    QHBoxLayout* inputLayout = new QHBoxLayout();
+
+    QLabel* widthLabel = new QLabel(tr("Width:"), &dialog);
+    QSpinBox* widthSpin = new QSpinBox(&dialog);
+    widthSpin->setMinimum(1);
+    widthSpin->setMaximum(9999);
+    widthSpin->setValue(10);
+    inputLayout->addWidget(widthLabel);
+    inputLayout->addWidget(widthSpin);
+
+    QLabel* heightLabel = new QLabel(tr("Height:"), &dialog);
+    QSpinBox* heightSpin = new QSpinBox(&dialog);
+    heightSpin->setMinimum(1);
+    heightSpin->setMaximum(9999);
+    heightSpin->setValue(10);
+    inputLayout->addWidget(heightLabel);
+    inputLayout->addWidget(heightSpin);
+
+    layout->addLayout(inputLayout);
+
+    QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttonBox);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        removeFramesSmallerThan(widthSpin->value(), heightSpin->value());
+    }
 }
 
 void FrameDetectionCanvas::splitFrame(int index, Qt::Orientation orientation, int pos) {
@@ -302,8 +388,9 @@ void FrameDetectionCanvas::splitFrame(int index, Qt::Orientation orientation, in
     m_frames.removeAt(index);
     m_selected.removeAt(index);
     m_hovered.removeAt(index);
-    m_frames.append(first); m_selected.append(true); m_hovered.append(false);
-    m_frames.append(second); m_selected.append(true); m_hovered.append(false);
+    m_markedForRemoval.removeAt(index);
+    m_frames.append(first); m_selected.append(true); m_hovered.append(false); m_markedForRemoval.append(false);
+    m_frames.append(second); m_selected.append(true); m_hovered.append(false); m_markedForRemoval.append(false);
     drawFrameRectangles();
 }
 
@@ -313,6 +400,7 @@ void FrameDetectionCanvas::createFrame(const QPointF& scenePos) {
     m_frames.append(r);
     m_selected.append(true);
     m_hovered.append(false);
+    m_markedForRemoval.append(false);
     drawFrameRectangles();
     m_draggedFrameIndex = m_frames.size() - 1;
     m_dragOriginalRect = r;
@@ -332,6 +420,7 @@ void FrameDetectionCanvas::createDefaultFrame(const QPointF& center) {
     m_frames.append(r);
     m_selected.append(true);
     m_hovered.append(false);
+    m_markedForRemoval.append(false);
     drawFrameRectangles();
 }
 
@@ -341,6 +430,7 @@ void FrameDetectionCanvas::deleteSelectedFrames() {
             m_frames.removeAt(i);
             m_selected.removeAt(i);
             m_hovered.removeAt(i);
+            m_markedForRemoval.removeAt(i);
         }
     }
     drawFrameRectangles();
@@ -397,4 +487,31 @@ void FrameDetectionCanvas::updateResizeCursor(ResizeHandle h) {
 int FrameDetectionCanvas::findFrameAt(const QPoint& p) {
     for (int i = 0; i < m_frames.size(); ++i) if (m_frames[i].contains(p)) return i;
     return -1;
+}
+
+void FrameDetectionCanvas::highlightSmallFrames(int minW, int minH) {
+    m_markedForRemoval.fill(false);
+    for (int i = 0; i < m_frames.size(); ++i) {
+        if (m_frames[i].width() < minW || m_frames[i].height() < minH) {
+            m_markedForRemoval[i] = true;
+        }
+    }
+    updateFrameVisuals();
+}
+
+void FrameDetectionCanvas::clearSmallFrameHighlights() {
+    m_markedForRemoval.fill(false);
+    updateFrameVisuals();
+}
+
+void FrameDetectionCanvas::removeFramesSmallerThan(int minW, int minH) {
+    for (int i = m_frames.size() - 1; i >= 0; --i) {
+        if (m_frames[i].width() < minW || m_frames[i].height() < minH) {
+            m_frames.removeAt(i);
+            m_selected.removeAt(i);
+            m_hovered.removeAt(i);
+            m_markedForRemoval.removeAt(i);
+        }
+    }
+    drawFrameRectangles();
 }

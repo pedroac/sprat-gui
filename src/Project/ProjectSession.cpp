@@ -5,6 +5,7 @@ ProjectSession::ProjectSession(QObject* parent) : QObject(parent) {
 
 void ProjectSession::clear() {
     clearTempDirs();
+    clearSourceFolderTempDir();
     currentFolder.clear();
     layoutSourcePath.clear();
     layoutSourceIsList = false;
@@ -39,4 +40,12 @@ void ProjectSession::addTempDir(std::unique_ptr<QTemporaryDir> dir) {
 
 void ProjectSession::clearTempDirs() {
     m_tempDirs.clear();
+}
+
+void ProjectSession::setSourceFolderTempDir(std::unique_ptr<QTemporaryDir> dir) {
+    m_sourceFolderTempDir = std::move(dir);
+}
+
+void ProjectSession::clearSourceFolderTempDir() {
+    m_sourceFolderTempDir.reset();
 }

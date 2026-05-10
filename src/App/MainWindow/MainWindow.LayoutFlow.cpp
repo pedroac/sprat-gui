@@ -36,7 +36,7 @@ void MainWindow::onRunLayout() {
         && !m_session->sourceFolder.isEmpty()
         && !m_session->activeFramePaths.isEmpty()
         && !activeFramesAreInSourceFolder()) {
-        copyActiveFramesToSourceFolder();
+        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
     }
 
     if (m_session->layoutSourcePath.isEmpty()) {
@@ -75,7 +75,7 @@ void MainWindow::onRunLayout() {
     config.deduplicateMode = m_settings.deduplicateMode;
 
     m_session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
-    m_runningLayoutProfile.clear();
+    m_runningLayoutProfile = requestedProfile;
     m_loadingUiMessage = tr("Building layout...");
     m_statusLabel->setText(tr("Running spratlayout..."));
     m_isCanceled = false;
@@ -88,9 +88,16 @@ void MainWindow::onRunLayout() {
 void MainWindow::onLayoutFinished(const LayoutResult& result) {
     if (!result.success) {
         setLoading(false);
-        m_runningLayoutProfile.clear();
-        
+
         const QString combined = (result.error + "\n" + result.output).toLower();
+
+        if (combined.contains("sprite dimensions exceed")) {
+            handleDimensionsError(m_runningLayoutProfile);
+            m_runningLayoutProfile.clear();
+            return;
+        }
+
+        m_runningLayoutProfile.clear();
         if (!m_retryWithoutTrimOnFailure &&
             !m_layoutRunPending &&
             m_session->lastRunUsedTrim &&
@@ -188,8 +195,15 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
             m_statusLabel->setText(tr("Loading images canceled"));
             return;
         }
-        m_canvas->setZoomManual(false);
-        QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+
+        // Only reset viewport when profile changes, not when sprites are added/removed/modified
+        const QString currentProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
+        const bool profileChanged = m_session->lastSuccessfulProfile != currentProfile;
+
+        if (profileChanged) {
+            m_canvas->setZoomManual(false);
+            QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+        }
 
         m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
             .arg(m_session->activeFramePaths.size())
@@ -210,7 +224,12 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
         updateMainContentView();
         updateUiState();
-        
+
+        // Clear temporary folders used for ZIP extraction - they're no longer needed
+        // since images have been loaded into the layout and (if sync is active)
+        // copied to the sprites folder
+        m_session->clearTempDirs();
+
         setLoading(false);
         qInfo() << "[WASM] setModelsAsync finished";
 
@@ -376,4 +395,75 @@ void MainWindow::onLayoutZoomChanged(double value) {
     if (m_canvas) {
         m_canvas->setZoom(value / 100.0);
     }
+}
+
+void MainWindow::handleDimensionsError(const QString& failedProfile) {
+    const QVector<SpratProfile> allProfiles = configuredProfiles();
+
+    // Determine failed profile's properties
+    bool failedHasMultipack = false;
+    int failedArea = 0;
+    for (const SpratProfile& p : allProfiles) {
+        if (p.name.trimmed() == failedProfile) {
+            failedHasMultipack = p.multipack;
+            failedArea = p.maxWidth * p.maxHeight;
+            break;
+        }
+    }
+
+    auto profileDef = [&](const QString& name) -> const SpratProfile* {
+        for (const SpratProfile& p : allProfiles)
+            if (p.name.trimmed() == name) return &p;
+        return nullptr;
+    };
+
+    QString fallback;
+
+    // Pass 1: prefer multipack=true if failed profile had multipack=false
+    if (!failedHasMultipack) {
+        for (int i = 0; i < m_profileCombo->count() && fallback.isEmpty(); ++i) {
+            const QString c = m_profileCombo->itemText(i).trimmed();
+            if (c == failedProfile || !isProfileEnabled(c)) continue;
+            if (const SpratProfile* d = profileDef(c); d && d->multipack)
+                fallback = c;
+        }
+    }
+
+    // Pass 2: prefer profile with larger atlas area
+    if (fallback.isEmpty()) {
+        int bestArea = failedArea;
+        for (int i = 0; i < m_profileCombo->count(); ++i) {
+            const QString c = m_profileCombo->itemText(i).trimmed();
+            if (c == failedProfile || !isProfileEnabled(c)) continue;
+            if (const SpratProfile* d = profileDef(c)) {
+                int area = d->maxWidth * d->maxHeight;
+                if (area > bestArea) { bestArea = area; fallback = c; }
+            }
+        }
+    }
+
+    // Pass 3: any other enabled profile
+    if (fallback.isEmpty()) {
+        for (int i = 0; i < m_profileCombo->count() && fallback.isEmpty(); ++i) {
+            const QString c = m_profileCombo->itemText(i).trimmed();
+            if (c != failedProfile && isProfileEnabled(c)) fallback = c;
+        }
+    }
+
+    if (fallback.isEmpty()) {
+        m_statusLabel->setText(tr("Error running layout"));
+        QMessageBox::critical(this, tr("Error"),
+            tr("Sprite dimensions exceed atlas limits and no suitable fallback profile is available."));
+        m_layoutFailureDialogShown = true;
+        return;
+    }
+
+    m_statusLabel->setText(
+        tr("Profile '%1' failed (sprite too large), retrying with '%2'...")
+            .arg(failedProfile, fallback));
+
+    if (m_profileCombo->currentText().trimmed() == fallback)
+        onRunLayout();
+    else
+        m_profileCombo->setCurrentText(fallback);
 }

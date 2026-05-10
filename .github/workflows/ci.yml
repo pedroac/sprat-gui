@@ -197,9 +197,10 @@ jobs:
       - name: Package WASM
         run: |
           mkdir sprat-gui-web
-          cp build_wasm/sprat-gui.{html,js,wasm,data} \
+          cp build_wasm/sprat-gui.{js,wasm,data} \
              build_wasm/qtloader.js \
              sprat-gui-web/
+          cp build_wasm/sprat-gui.html sprat-gui-web/index.html
           zip -r sprat-gui-web.zip sprat-gui-web/
 
       - name: Upload WASM artifact
