@@ -23,6 +23,7 @@ build_wasm/
 *.a
 *.lib
 *.dll
+*.exe
 *.exp
 *.pdb
 *.so
