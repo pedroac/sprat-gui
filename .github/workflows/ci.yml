@@ -159,32 +159,42 @@ jobs:
 
       - name: Install Qt WASM
         uses: jurplel/install-qt-action@v3
+        continue-on-error: true
         with:
           version: '6.6.3'
           arch: 'wasm_multithread'
 
+      - name: Check Qt WASM availability
+        id: check_qt_wasm
+        run: |
+          QT_WASM=$(find "$HOME/Qt" -maxdepth 3 -type d -name 'wasm_multithread' 2>/dev/null | head -1)
+          if [ -z "$QT_WASM" ]; then
+            echo "Qt WASM not found, skipping WASM build"
+            echo "wasm_available=false" >> $GITHUB_OUTPUT
+          else
+            echo "Qt WASM found at: $QT_WASM"
+            echo "wasm_available=true" >> $GITHUB_OUTPUT
+            echo "qt_wasm_path=$QT_WASM" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Emscripten 4.0.7
+        if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: '4.0.7'
           actions-cache-folder: 'emsdk-cache'
 
       - name: Build EGL stub
+        if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         run: |
           mkdir -p build_wasm/wasm_deps build_wasm/emsdk_cache/symbol_lists
           emcc wasm/egl_stub.c -c -o build_wasm/wasm_deps/egl_stub.o
           emar rcs build_wasm/wasm_deps/libegl.a build_wasm/wasm_deps/egl_stub.o
 
       - name: Configure WASM
+        if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         run: |
-          QT_WASM=$(find "$HOME/Qt" -maxdepth 3 -type d -name 'wasm_multithread' 2>/dev/null | head -1)
-          if [ -z "$QT_WASM" ]; then
-            echo "ERROR: Qt WASM (wasm_multithread) not found in $HOME/Qt"
-            echo "Available Qt directories:"
-            find "$HOME/Qt" -maxdepth 3 -type d 2>/dev/null | head -20
-            exit 1
-          fi
-          echo "Found Qt WASM at: $QT_WASM"
+          QT_WASM="${{ steps.check_qt_wasm.outputs.qt_wasm_path }}"
           emcmake cmake -B build_wasm -S . \
             -DCMAKE_PREFIX_PATH="$QT_WASM" \
             -DCMAKE_FIND_ROOT_PATH="$QT_WASM" \
@@ -197,11 +207,13 @@ jobs:
             -DCMAKE_C_FLAGS="-DNDEBUG -DEMSCRIPTEN_DISABLE_ASSERTS=1"
 
       - name: Build WASM
+        if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         run: |
           export EMFLAGS="-sASSERTIONS=0"
           cmake --build build_wasm --parallel
 
       - name: Package WASM
+        if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         run: |
           mkdir sprat-gui-web
           cp build_wasm/sprat-gui.{js,wasm,data} \
@@ -211,10 +223,15 @@ jobs:
           zip -r sprat-gui-web.zip sprat-gui-web/
 
       - name: Upload WASM artifact
+        if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: sprat-gui-wasm
           path: sprat-gui-web.zip
+
+      - name: WASM build skipped
+        if: steps.check_qt_wasm.outputs.wasm_available != 'true'
+        run: echo "⚠️ Qt WASM not available in aqtinstall, skipping WASM build"
 
   deploy-itchio:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
@@ -230,12 +247,14 @@ jobs:
         run: echo "tag=$(cat VERSION | xargs)" >> $GITHUB_OUTPUT
 
       - name: Download WASM artifact
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: sprat-gui-wasm
           path: dist
 
       - name: Extract WASM package
+        if: hashFiles('dist/sprat-gui-web.zip') != ''
         run: unzip dist/sprat-gui-web.zip -d .
 
       - name: Download butler
@@ -247,11 +266,16 @@ jobs:
           ./butler -V
 
       - name: Push to itch.io
+        if: hashFiles('sprat-gui-web/') != ''
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
         run: |
           ./butler push sprat-gui-web/ pedroac/sprat-gui:web \
             --userversion ${{ steps.version.outputs.tag }}
+
+      - name: itch.io push skipped
+        if: hashFiles('sprat-gui-web/') == ''
+        run: echo "⚠️ WASM build not available, itch.io push skipped"
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
@@ -285,6 +309,5 @@ jobs:
             dist/sprat-gui-windows.zip
             dist/sprat-gui-macos.dmg
             dist/sprat-gui-web.zip
-          generate_release_notes: true
           draft: false
           prerelease: false
