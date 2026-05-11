@@ -160,7 +160,7 @@ jobs:
       - name: Install Qt WASM
         uses: jurplel/install-qt-action@v3
         with:
-          version: '6.10.2'
+          version: '6.5.*'
           arch: 'wasm_multithread'
 
       - name: Setup Emscripten 4.0.7
