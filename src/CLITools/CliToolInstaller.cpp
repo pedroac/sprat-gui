@@ -235,13 +235,8 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "echo \"---\"\n"
                              "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(filePath, appDir, expectedVersion);
     m_installProcess->start("bash", QStringList() << "-c" << script);
-#else
-    // Unsupported platform for CLI installation
-    emit installLog("CLI installation not supported on this platform");
-    emit installFinished(-1, QProcess::CrashExit);
 #endif
-
-#else  // SPRAT_EMBEDDED_CLI
+#else
     Q_UNUSED(filePath);
 #endif
 }
