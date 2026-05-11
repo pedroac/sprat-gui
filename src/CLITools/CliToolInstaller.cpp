@@ -236,8 +236,6 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(filePath, appDir, expectedVersion);
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
-#else
-    Q_UNUSED(filePath);
 #endif
 }
 
