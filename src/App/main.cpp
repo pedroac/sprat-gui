@@ -46,6 +46,82 @@ int main(int argc, char *argv[]) {
             Asyncify.whenDone = () => Promise.resolve();
             console.log("[Sprat] Asyncify checks disabled");
         }
+        // Add global error handler to catch exceptions before they crash
+        window.addEventListener('error', function(e) {
+            console.error('[sprat] Uncaught error:', e.error, e.message);
+            e.preventDefault();
+            return true;
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('[sprat] Unhandled promise rejection:', e.reason);
+            e.preventDefault();
+            return true;
+        }, true);
+        // Ensure keyboard input focus and forward regular keys to Qt
+        function ensureCanvasFocus() {
+            if (Module.canvas) {
+                Module.canvas.focus();
+                // Remove focus from any input elements to ensure canvas gets key events
+                if (document.activeElement && document.activeElement !== Module.canvas) {
+                    if (document.activeElement.blur) {
+                        document.activeElement.blur();
+                    }
+                }
+            }
+        }
+        // Attach listeners directly to the canvas to catch events before Qt consumes them
+        if (Module.canvas) {
+            Module.canvas.addEventListener('click', function(e) {
+                console.log("[Click] on canvas");
+                setTimeout(ensureCanvasFocus, 0);
+            }, true);
+
+            Module.canvas.addEventListener('mousedown', function(e) {
+                console.log("[MouseDown] on canvas");
+                setTimeout(ensureCanvasFocus, 0);
+            }, true);
+        }
+
+        document.addEventListener('click', function(e) {
+            console.log("[Click] on document");
+            setTimeout(ensureCanvasFocus, 0);
+        }, true);
+        document.addEventListener('focus', function() {
+            setTimeout(ensureCanvasFocus, 0);
+        }, true);
+        window.addEventListener('focus', ensureCanvasFocus, true);
+
+        // Workaround: Forward non-modifier keys that Qt doesn't receive and prevent browser defaults
+        document.addEventListener('keydown', function(e) {
+            var key = e.key;
+            var code = e.code;
+            var isModifier = /^(Control|Shift|Alt|Meta)/.test(key);
+
+            console.log("[KeyDown] key=" + key + " code=" + code);
+
+            // Keys that we always want to prevent browser defaults for
+            var keysToPrevent = [
+                'Delete', 'Backspace',
+                'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                'Home', 'End', 'Enter', 'Escape', ' '
+            ];
+            var shouldPrevent = keysToPrevent.indexOf(key) !== -1;
+
+            // Prevent browser defaults for keys the app handles
+            if (shouldPrevent) {
+                e.preventDefault();
+            }
+
+            // Prevent browser zoom shortcuts (Ctrl+0, Ctrl+1, etc)
+            if ((e.ctrlKey || e.metaKey) && /^[0-9\-=]/.test(key)) {
+                e.preventDefault();
+            }
+
+            // Ensure canvas has focus
+            if (!isModifier && Module.canvas && document.activeElement !== Module.canvas) {
+                setTimeout(ensureCanvasFocus, 0);
+            }
+        }, true);
     );
 #endif
 
@@ -82,8 +158,12 @@ int main(int argc, char *argv[]) {
     // Create main window
     MainWindow mainWindow;
 
-    // Show window after event loop starts with a small delay
-    QTimer::singleShot(100, &mainWindow, &MainWindow::show);
+    // Show window and ensure it has focus for keyboard input
+    QTimer::singleShot(100, &mainWindow, [&mainWindow]() {
+        mainWindow.show();
+        mainWindow.setFocus();
+        mainWindow.activateWindow();
+    });
 
     // Start Qt event loop
     return app.exec();

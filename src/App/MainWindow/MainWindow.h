@@ -10,6 +10,8 @@
 #include <QFutureWatcher>
 #include <QMutex>
 #include <QElapsedTimer>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
@@ -199,6 +201,7 @@ private slots:
      * @param bytesTotal Total bytes to receive
      */
     void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
+
     /**
      * @brief Handles sprite selection from the layout canvas.
      * 
@@ -699,7 +702,7 @@ private:
 
     /**
      * @brief Tries to handle a dropped path.
-     * 
+     *
      * @param path Path that was dropped
      * @param action Action to take (Replace or Merge)
      * @return bool True if path was handled
@@ -707,6 +710,8 @@ private:
     bool tryHandleDroppedPath(const QString& path, DropAction action = DropAction::Replace);
 
     /**
+     * @brief Downloads a URL from a drag-and-drop operation.
+     *
      * @brief Handles animation preview events.
      * 
      * @param event Event to handle

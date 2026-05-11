@@ -441,6 +441,12 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     ensureSourceFolder();
     m_session->timelines.clear();
     m_session->selectedTimelineIndex = -1;
+    // Clear selection state when loading new image to avoid stale pointers
+    m_session->selectedSprite.reset();
+    m_session->selectedSprites.clear();
+    m_session->selectedPointName.clear();
+    // Update UI to clear sprite selection display
+    onSpriteSelected(SpritePtr());
     refreshTimelineList();
     refreshAnimationTest();
 
@@ -573,6 +579,12 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         ensureSourceFolder();
         m_session->timelines.clear();
         m_session->selectedTimelineIndex = -1;
+        // Clear selection state when loading new frames to avoid stale pointers
+        m_session->selectedSprite.reset();
+        m_session->selectedSprites.clear();
+        m_session->selectedPointName.clear();
+        // Update UI to clear sprite selection display
+        onSpriteSelected(SpritePtr());
         refreshTimelineList();
         refreshAnimationTest();
         m_projectFilePath.clear();

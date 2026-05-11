@@ -240,7 +240,10 @@ void MainWindow::refreshAnimationTest() {
 
     if (playing != m_animPlaying) {
         m_animPlaying = playing;
-        m_animPlayPauseBtn->setIcon(QIcon::fromTheme("media-playback-start"));
+    }
+    // Update button icon to reflect current playing state
+    if (m_animPlayPauseBtn) {
+        m_animPlayPauseBtn->setIcon(m_animPlaying ? QIcon::fromTheme("media-playback-pause") : QIcon::fromTheme("media-playback-start"));
     }
 
     m_animStatusLabel->setText(statusText);

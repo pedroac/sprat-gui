@@ -25,6 +25,7 @@
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
 #endif
+#include <algorithm>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDir>
@@ -106,7 +107,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 #ifdef Q_OS_WASM
     s_wasmInstance = this;
     setAcceptDrops(false);
-    QTimer::singleShot(500, []() { wasmInstallDropHandlers(); });
+    // Block all drag events to prevent Qt WASM segfaults
+    QTimer::singleShot(0, []() { wasmBlockAllDrags(); });
+    // Fix Qt 6.10 WASM keyboard focus issue (DEL, shortcuts, etc.)
+    QTimer::singleShot(100, []() { wasmSetupKeyboardFocus(); });
 #else
     setAcceptDrops(true);
 #endif
@@ -474,6 +478,16 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         }
     }
 
+    // Deselect sprite if it's being removed
+    if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path)) {
+        m_session->selectedSprite.reset();
+    }
+    m_session->selectedSprites.erase(
+        std::remove_if(m_session->selectedSprites.begin(), m_session->selectedSprites.end(),
+            [&targets](const SpritePtr& sprite) { return sprite && targets.contains(sprite->path); }),
+        m_session->selectedSprites.end()
+    );
+
     QStringList remainingFramePaths = m_session->activeFramePaths;
     for (const QString& path : targets) {
         remainingFramePaths.removeAll(path);
@@ -525,6 +539,11 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         }
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
+
+        // Delete the image files for removed sprites
+        for (const QString& path : targets) {
+            QFile(path).remove();
+        }
         m_statusLabel->setText(tr("No frames loaded"));
         m_folderLabel->setText(tr("Folder: none"));
         m_session->cachedLayoutOutput.clear();
@@ -572,6 +591,11 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         refreshTimelineList();
         refreshTimelineFrames();
         refreshAnimationTest();
+    }
+
+    // Delete the image files for removed sprites
+    for (const QString& path : targets) {
+        QFile(path).remove();
     }
 
     m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));

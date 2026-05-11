@@ -405,17 +405,17 @@ if(EMSCRIPTEN)
     )
     if(SPRAT_WASM_JSPI)
         target_link_options(sprat-gui PRIVATE "SHELL:-sJSPI")
+        set_property(TARGET sprat-gui PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ccall,cwrap")
     else()
         target_link_options(sprat-gui PRIVATE
             "-sASYNCIFY"
-            "-sASYNCIFY_STACK_SIZE=128000"
+            "-sASYNCIFY_STACK_SIZE=2097152"
             "-sASSERTIONS=1"
             "-sASYNCIFY_IMPORTS=[invoke_iii,invoke_vii,invoke_iiii,invoke_diiiii]"
+            "-sINITIAL_MEMORY=536870912"
         )
+        set_property(TARGET sprat-gui PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ccall,cwrap,Asyncify")
     endif()
-    # Let Qt's wasm macros append these to its default exported methods.
-    # NOTE: This must be a single comma-separated string; a CMake list would be split into extra args.
-    set_property(TARGET sprat-gui PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ccall,cwrap,Asyncify")
     target_link_options(sprat-gui PRIVATE "SHELL:-sEXPORTED_FUNCTIONS=[_main,_jsIsAsyncBusy,_jsHaveAsyncify,_jsHaveJspi,_sprat_on_file_picked]")
 
     # Explicitly include embind/emval JS libraries (some toolchains don't auto-add them).

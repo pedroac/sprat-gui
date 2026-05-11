@@ -35,14 +35,20 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - **Animation export**  
   Exports to GIF (ImageMagick) and video formats (FFmpeg) for quick validation and sharing.
 
-- **Project persistence**  
-  Save and load full project state (layout options, markers, timelines) to continue work later.
+- **Project persistence & Autosave**  
+  Save and load full project state (layout options, markers, timelines). The app automatically performs a background autosave every 5 minutes to prevent data loss.
+
+- **Project synchronization**  
+  Sync your project with the source folder manually or via live file system monitoring (Watch mode) to pick up new or changed assets automatically.
 
 - **CLI tools configuration/installation UI**
   Configure binary paths in Settings or install required CLI tools from the app.
 
 - **Advanced output processing**
-  Per-profile GPU texture compression (DXT1/DXT5), artifact reduction via pixel dilation, and sprite deduplication via hash detection.
+  Per-profile GPU texture compression (DXT1/DXT5), artifact reduction via pixel dilation, and sprite deduplication (Exact or Perceptual modes).
+
+- **Visual customization**
+  Customize workspace and sprite frame background colors, toggle transparency checkerboard, and configure sprite border styles.
 
 ## Requirements
 
@@ -146,7 +152,8 @@ Run:
 
 - **CLI Tools / Settings**
   - On first launch the toolbar shows “CLI missing”; click Settings to point to `spratframes`, `spratlayout`, `spratpack`, and optionally `spratconvert`, or use the “Install CLI Tools” button to download/build into `~/.local/bin`.
-  - Settings also exposes canvas/marker colors, border styles, and sprite deduplication options that apply immediately and persist.
+  - **Visual Customization**: Configure workspace and sprite frame background colors, toggle the transparency checkerboard, and set the color and style (Solid, Dash, etc.) of sprite borders.
+  - **Synchronization**: Choose between **None**, **Manual** (sync on demand), or **Watch** (live file system monitoring) to keep your project in sync with the source images folder.
   - ![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
 
 - **Profile management with output processing**
@@ -155,7 +162,7 @@ Run:
     - **GPU Compression**: Choose None, DXT1 (RGB, no alpha), or DXT5 (RGBA) for hardware texture compression. Output is saved as `.dds` when enabled.
     - **Dilate (Artifact Reduction)**: Apply pixel dilation passes (0–16) to bleed opaque pixels into transparent neighbors, reducing dark halos around trimmed sprites.
   - These settings are profile-specific; different targets can use different compression formats.
-  - **Global Deduplicate**: Enable “Deduplicate identical sprites” in Settings to use hash-based detection and create aliases for duplicate sprites during layout generation.
+  - **Global Deduplicate**: Enable deduplication in Settings using **Exact** (byte-for-byte identical) or **Perceptual** (visually similar) modes to create aliases for duplicate sprites during layout generation.
 
 - **Loading frame folders**
   - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.
@@ -206,29 +213,56 @@ Run:
 - **Project save/load**
   - Save projects as `.json` or `.zip` and pick exactly which data blocks to persist.
   - Use load actions to resume layout, timelines, and editor context from a saved project.
+  - **Autosave**: The application automatically saves a recovery snapshot of your project every 5 minutes. If the app is closed unexpectedly, it will offer to restore the autosaved state upon the next launch.
   - ![Save dialog](README_assets/save.png)
 
 ## Keyboard and pointer controls
 
-- **Layout canvas selection**
-  - `Ctrl + A`: select all sprites in the canvas.
-  - `Left/Right/Up/Down`: navigate selection from the current sprite.
-  - `Shift + Arrows`: extend selection while navigating.
-  - Arrow navigation does not wrap at edges.
-  - If there is no valid frame in the pressed direction, selection does not change.
-  - `Home` / `End`: jump to the first / last frame in the current row.
+### **General Application**
+- `Ctrl + S`: Save project.
+- `Ctrl + Z`: Undo.
+- `Ctrl + Y` (or `Ctrl + Shift + Z`): Redo.
+- `Ctrl + +` / `Ctrl + =`: Zoom In.
+- `Ctrl + -`: Zoom Out.
+- `Ctrl + 1`: Reset zoom to 100%.
+- `Ctrl + 0`: Fit to screen.
 
-- **Selected frame editor**
-  - `Right Click` on pivot/marker: opens context actions for alignment/apply operations.
-  - `Delete/Backspace`: removes selected polygon vertex when applicable.
-  - `Ctrl + Wheel`: zoom selected frame preview.
-  - `Space + Drag` or `Middle Mouse Drag`: pan selected frame preview.
+### **Navigation & Selection (Canvases / Lists)**
+- `Space (Hold) + Mouse Drag`: Pan (move) the view.
+- `Ctrl + A`: Select all items.
+- `Arrow Keys`: Navigate selection.
+- `Shift + Arrow Keys`: Extend selection while navigating.
+- `Delete` / `Backspace`: Remove selected items.
 
-- **Animation test preview**
-  - `Wheel`: scroll preview viewport.
-  - `Ctrl + Wheel`: change animation preview zoom.
-  - `Space + Left Drag` or `Middle Mouse Drag`: pan preview viewport.
-  - `Right Click`: export/copy frame menu.
+### **Layout Canvas**
+- `Alt (Hold)`: Temporarily enable **Split Mode**.
+- `Any Printable Character`: Start searching for sprites by name.
+- `Backspace`: Delete last character of search query.
+- `Escape`: Clear search query.
+- `Home` / `End`: Jump to the first / last frame in the current row.
+
+### **Selected Frame Editor (Preview)**
+- `Right Click` on pivot/marker: Opens context actions.
+- `Delete` / `Backspace`: Remove selected polygon vertex or marker.
+- `Ctrl + Wheel`: Zoom preview.
+- `Space + Drag` or `Middle Mouse Drag`: Pan preview.
+
+### **Animation Test Preview**
+- `Wheel`: Scroll preview viewport.
+- `Ctrl + Wheel`: Change animation preview zoom.
+- `Space + Left Drag` or `Middle Mouse Drag`: Pan preview.
+- `Right Click`: Export/copy frame menu.
+
+### **Frame Detection Dialog**
+- `Alt (Hold)`: Temporarily enable **Split Mode**.
+- `Delete` / `Backspace`: Delete selected detected frames.
+- `Ctrl + 1`: Zoom 100%.
+- `Ctrl + 0`: Zoom Fit.
+- `Ctrl + Mouse Wheel`: Zoom at mouse position.
+
+### **Animation Timeline List**
+- `Delete` / `Backspace`: Remove selected timeline(s).
+- `Ctrl + A`: Select all timelines.
 
 ## Timeline auto-generation naming
 
@@ -271,17 +305,29 @@ Generation behavior:
 
 ## Troubleshooting
 
-- **“CLI missing” at startup**  
+- **”CLI missing” at startup**
   Open Settings and set absolute paths for Sprat binaries (`spratframes`, `spratlayout`, `spratpack`, optional `spratconvert`), or install them from the app.
 
-- **Cannot save/load `.zip` project**  
+- **Cannot save/load `.zip` project**
   Ensure `zip`/`unzip` are installed and available in `PATH`.
 
-- **Animation export disabled or failing**  
+- **Animation export disabled or failing**
   Install ImageMagick and/or FFmpeg, then restart the app.
 
-- **Translations are not generated during build**  
+- **Translations are not generated during build**
   Install `Qt6 LinguistTools`. Without it, the app still builds, but automatic `.ts/.qm` generation is skipped.
+
+## WASM Limitations
+
+The web version has the following known limitations due to Qt 6.10.2 WASM constraints:
+
+- **No drag-and-drop for non-file content**
+  Dragging files/folders works, but dragging links or tabs causes a segfault in Qt's WASM event handling (Qt bug). **Workaround:** Use the **Load Images Folder** button in the toolbar to select files via the file picker instead.
+
+- **Keyboard shortcuts may not work**
+  This is a known Qt 6.10 WASM issue where the browser's active element doesn't properly focus the embedded Qt application. **Workaround:** Click on the canvas first to ensure focus, or use the UI buttons instead of keyboard shortcuts.
+
+These limitations may be resolved in future Qt versions. Consider upgrading to Qt 6.11+ if building from source, or file issues with the Qt project if you encounter them.
 
 ## Contributing
 

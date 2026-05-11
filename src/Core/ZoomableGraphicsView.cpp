@@ -5,6 +5,10 @@
 #include <QtGlobal>
 #include "ViewUtils.h"
 
+#ifdef Q_OS_WASM
+#include <emscripten.h>
+#endif
+
 ZoomableGraphicsView::ZoomableGraphicsView(QWidget* parent) : QGraphicsView(parent) {
     setRenderHint(QPainter::Antialiasing, false);
     setRenderHint(QPainter::SmoothPixmapTransform, false);
@@ -119,6 +123,13 @@ void ZoomableGraphicsView::focusOutEvent(QFocusEvent* event) {
 
 void ZoomableGraphicsView::mousePressEvent(QMouseEvent* event) {
     m_lastMousePos = event->pos();
+    setFocus();  // Ensure this widget receives keyboard focus
+    activateWindow();
+#ifdef Q_OS_WASM
+    EM_ASM({
+        console.log("[Focus] ZoomableGraphicsView clicked, setting focus. Widget: " + UTF8ToString($0));
+    }, metaObject()->className());
+#endif
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && m_spacePressed)) {
         m_isPanning = true;
         setCursor(Qt::ClosedHandCursor);

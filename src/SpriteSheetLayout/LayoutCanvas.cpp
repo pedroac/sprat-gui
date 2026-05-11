@@ -33,6 +33,10 @@
 #include "ViewUtils.h"
 #include "SplitModeUtils.h"
 
+#ifdef Q_OS_WASM
+#include <emscripten.h>
+#endif
+
 namespace {
     const QColor kSelectionColor(10, 125, 255);
     const QColor kContextTargetColor(255, 215, 0);
@@ -781,11 +785,11 @@ void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_S && !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier))) {
-        setSplitMode(!m_splitMode);
-        event->accept();
-        return;
-    }
+#ifdef Q_OS_WASM
+    EM_ASM({
+        console.log("[LayoutCanvas] keyPressEvent - Key: " + $0 + " Text: " + UTF8ToString($1));
+    }, event->key(), event->text().toStdString().c_str());
+#endif
 
     if (event->matches(QKeySequence::SelectAll)) {
         if (!m_items.isEmpty()) {

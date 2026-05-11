@@ -90,6 +90,12 @@ void MainWindow::loadAutosavedProject() {
 
     m_statusLabel->setText(tr("Loading autosaved project"));
     cacheLayoutOutputFromPayload(root);
+    // Clear selection state when loading autosaved project to avoid stale pointers
+    m_session->selectedSprite.reset();
+    m_session->selectedSprites.clear();
+    m_session->selectedPointName.clear();
+    // Update UI to clear sprite selection display
+    onSpriteSelected(SpritePtr());
     m_session->pendingProjectPayload = root;
     m_session->currentFolder = folder;
     const QString sourceMode = layoutInfo["source_mode"].toString();
@@ -500,6 +506,13 @@ void MainWindow::onProjectLoadFinished() {
         return;
     }
 
+    // Clear selection state when loading a new project to avoid stale pointers
+    m_session->selectedSprite.reset();
+    m_session->selectedSprites.clear();
+    m_session->selectedPointName.clear();
+    // Update UI to clear sprite selection display
+    onSpriteSelected(SpritePtr());
+
     m_session->pendingProjectPayload = root;
     cacheLayoutOutputFromPayload(root);
 
@@ -763,6 +776,12 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         m_session->activeFramePaths = absolutePaths;
         m_session->timelines.clear();
         m_session->selectedTimelineIndex = -1;
+        // Clear selection state when loading new images to avoid stale pointers
+        m_session->selectedSprite.reset();
+        m_session->selectedSprites.clear();
+        m_session->selectedPointName.clear();
+        // Update UI to clear sprite selection display
+        onSpriteSelected(SpritePtr());
         refreshTimelineList();
         refreshAnimationTest();
         // Copy extracted images to source folder on Replace

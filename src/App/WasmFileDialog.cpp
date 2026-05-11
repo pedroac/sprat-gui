@@ -177,6 +177,65 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
     input.click();
 });
 
+EM_JS(void, sprat_setup_keyboard_focus, (), {
+    console.log('[sprat] sprat_setup_keyboard_focus called!');
+
+    // Fix Qt 6.10 WASM keyboard focus issue
+    // Based on: https://forum.qt.io/topic/159639/wasm-apparently-doesn-t-handle-keyboard-shortcuts/12
+
+    function ensureFocus() {
+        try {
+            const shadowContainer = document.getElementById('qt-shadow-container');
+            if (!shadowContainer || !shadowContainer.shadowRoot) {
+                return false;
+            }
+            const button = shadowContainer.shadowRoot.querySelector('.hidden-visually-read-by-screen-reader');
+            if (button) {
+                button.focus();
+                console.log('[sprat] Keyboard focus restored');
+                return true;
+            }
+        } catch (e) {
+            // Shadow DOM might be closed or not ready
+        }
+        return false;
+    }
+
+    // Restore focus whenever an element loses focus with no replacement
+    document.addEventListener('focusout', function(event) {
+        if (event.relatedTarget === null) {
+            console.log('[sprat] focusout detected, restoring focus');
+            // Restore immediately and also with a small delay for stability
+            ensureFocus();
+            setTimeout(ensureFocus, 10);
+        }
+    }, true);
+
+    // Also restore on blur and regain on focus
+    window.addEventListener('blur', function() {
+        console.log('[sprat] Window blurred');
+    });
+
+    window.addEventListener('focus', function() {
+        console.log('[sprat] Window focused, restoring keyboard focus');
+        setTimeout(ensureFocus, 50);
+    });
+
+    // Attempt initial focus setup (Qt 6.10 may already do this, but doesn't hurt)
+    console.log('[sprat] Keyboard focus setup installed');
+});
+
+EM_JS(void, sprat_block_all_drags, (), {
+    // Block all drag/drop events to prevent Qt WASM segfaults
+    ['dragstart', 'dragenter', 'dragover', 'dragleave', 'drop'].forEach(function(eventType) {
+        document.addEventListener(eventType, function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }, true);
+    });
+});
+
 EM_JS(void, sprat_install_drop_handlers, (), {
     if (Module.spratDropHandlersInstalled) {
         return;
@@ -190,12 +249,30 @@ EM_JS(void, sprat_install_drop_handlers, (), {
 
     function hasFiles(dt) {
         if (!dt) return false;
-        if (dt.items) {
-            for (var i = 0; i < dt.items.length; i++) {
-                if (dt.items[i].kind === 'file') return true;
+        try {
+            // Safely check for files without triggering crashes on non-file drags
+            if (dt.types && Array.from(dt.types).indexOf('Files') >= 0) {
+                return true;
             }
+        } catch (e) {
+            console.warn('[sprat] Error checking dt.types:', e);
         }
-        return dt.files && dt.files.length > 0;
+        try {
+            if (dt.items) {
+                for (var i = 0; i < dt.items.length; i++) {
+                    if (dt.items[i].kind === 'file') return true;
+                }
+            }
+        } catch (e) {
+            console.warn('[sprat] Error checking dt.items:', e);
+            return false;
+        }
+        try {
+            return dt.files && dt.files.length > 0;
+        } catch (e) {
+            console.warn('[sprat] Error checking dt.files:', e);
+            return false;
+        }
     }
 
     function collectFiles(dt, onDone) {
@@ -415,40 +492,88 @@ EM_JS(void, sprat_install_drop_handlers, (), {
         }
     }
 
-    document.addEventListener('dragenter', function (e) {
-        if (!hasFiles(e.dataTransfer)) return;
-        Module.spratDropDragDepth++;
-        showOverlay();
-        e.preventDefault();
-        e.stopPropagation();
-    }, true);
-
-    document.addEventListener('dragover', function (e) {
-        if (!hasFiles(e.dataTransfer)) return;
-        e.preventDefault();
-        e.stopPropagation();
-    }, true);
-
-    document.addEventListener('dragleave', function (e) {
-        if (!hasFiles(e.dataTransfer)) return;
-        Module.spratDropDragDepth = Math.max(0, Module.spratDropDragDepth - 1);
-        if (Module.spratDropDragDepth === 0) {
-            hideOverlay();
+    // Use event handler properties (higher priority than addEventListener)
+    // to block drag events from reaching Qt
+    document.ondragenter = function (e) {
+        try {
+            if (!e || !e.dataTransfer) return false;
+            // Always prevent default to block Qt from processing
+            e.preventDefault();
+            e.stopPropagation();
+            if (!hasFiles(e.dataTransfer)) return false;
+            try {
+                Module.spratDropDragDepth++;
+                showOverlay();
+            } catch (ex) {
+                console.warn('[sprat] dragenter WASM error:', ex);
+                return false;
+            }
+            return false;
+        } catch (ex) {
+            console.warn('[sprat] dragenter error:', ex);
+            return false;
         }
-        e.preventDefault();
-        e.stopPropagation();
-    }, true);
+    };
 
-    document.addEventListener('drop', function (e) {
-        if (!hasFiles(e.dataTransfer)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        Module.spratDropDragDepth = 0;
-        hideOverlay();
-        if (Module.spratDropInProgress) return;
-        Module.spratDropInProgress = true;
-        console.log('[sprat] Drop received');
-        collectFiles(e.dataTransfer, function (files) {
+    document.ondragover = function (e) {
+        try {
+            if (!e || !e.dataTransfer) return false;
+            // Always prevent default to block Qt from processing
+            e.preventDefault();
+            e.stopPropagation();
+            if (!hasFiles(e.dataTransfer)) return false;
+            return false;
+        } catch (ex) {
+            console.warn('[sprat] dragover error:', ex);
+            return false;
+        }
+    };
+
+    document.ondragleave = function (e) {
+        try {
+            if (!e || !e.dataTransfer) return false;
+            // Always prevent default to block Qt from processing
+            e.preventDefault();
+            e.stopPropagation();
+            if (!hasFiles(e.dataTransfer)) return false;
+            try {
+                Module.spratDropDragDepth = Math.max(0, Module.spratDropDragDepth - 1);
+                if (Module.spratDropDragDepth === 0) {
+                    hideOverlay();
+                }
+            } catch (ex) {
+                console.warn('[sprat] dragleave WASM error:', ex);
+            }
+            return false;
+        } catch (ex) {
+            console.warn('[sprat] dragleave error:', ex);
+            return false;
+        }
+    };
+
+    document.ondrop = function (e) {
+        try {
+            if (!e || !e.dataTransfer) {
+                return false;
+            }
+            // Always prevent default to block Qt from processing
+            e.preventDefault();
+            e.stopPropagation();
+            var hasFilesResult = hasFiles(e.dataTransfer);
+            if (!hasFilesResult) {
+                return false;
+            }
+        } catch (ex) {
+            console.warn('[sprat] drop event error:', ex);
+            return false;
+        }
+        try {
+            Module.spratDropDragDepth = 0;
+            hideOverlay();
+            if (Module.spratDropInProgress) return false;
+            Module.spratDropInProgress = true;
+            console.log('[sprat] Drop received');
+            collectFiles(e.dataTransfer, function (files) {
             if (!files.length) {
                 if (!supportsDirectoryDrop) {
                     showToast('Folder drop not supported. Use Load Images Folder.');
@@ -552,7 +677,12 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             }
             next();
         });
-    }, false);
+        } catch (ex) {
+            console.warn('[sprat] drop processing error:', ex);
+            Module.spratDropInProgress = false;
+        }
+        return false;
+    };
 
     if (!Module.spratResizeGuardInstalled) {
         Module.spratResizeGuardInstalled = true;
@@ -573,9 +703,15 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             if (!isAsyncBusy()) {
                 return;
             }
+            if (e) {
+                try {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                } catch (ex) {
+                    console.warn('[sprat] resize event handling error:', ex);
+                }
+            }
             Module.spratPendingResize = true;
-            e.preventDefault();
-            e.stopImmediatePropagation();
             setTimeout(scheduleResizeReplay, 100);
         }, true);
     }
@@ -611,6 +747,14 @@ void wasmOpenFileDialog(bool selectFolder) {
 
 void wasmInstallDropHandlers() {
     sprat_install_drop_handlers();
+}
+
+void wasmSetupKeyboardFocus() {
+    sprat_setup_keyboard_focus();
+}
+
+void wasmBlockAllDrags() {
+    sprat_block_all_drags();
 }
 
 void wasmHandleFilePicked(const QString& path, int mode) {

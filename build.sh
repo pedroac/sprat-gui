@@ -50,7 +50,7 @@ if [ "$BUILD_TYPE" == "wasm" ]; then
     
     echo "Building for WASM..."
     export EMFLAGS="-sASSERTIONS=0"
-    cmake --build build_wasm --parallel
+    cmake --build build_wasm --parallel 2
 
     echo "Compressing WASM build..."
     cd build_wasm

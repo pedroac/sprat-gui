@@ -10,6 +10,11 @@ void wasmOpenFileDialog(bool selectFolder);
 // Install HTML5 drag-and-drop handlers that upload files into the virtual FS.
 void wasmInstallDropHandlers();
 
+// Setup keyboard focus to fix Qt 6.10 WASM keyboard event handling.
+void wasmSetupKeyboardFocus();
+
+// Block all drag-drop events to prevent Qt WASM segfaults.
+void wasmBlockAllDrags();
 
 // Called after JS file picker writes files into the virtual FS.
 void wasmHandleFilePicked(const QString& path, int mode);

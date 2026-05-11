@@ -39,18 +39,12 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
     if (urls.count() != 1) {
         return;
     }
-#ifndef Q_OS_WASM
-    if (!urls.first().isLocalFile()) {
-        return;
-    }
-#endif
-    const QString localPath = urls.first().toLocalFile();
-    bool supported = isSupportedDropPath(localPath);
-#ifdef Q_OS_WASM
-    supported = true; // Trust the browser's drop event
-#endif
-    if (supported) {
-        event->acceptProposedAction();
+    const QUrl url = urls.first();
+    if (url.isLocalFile()) {
+        const QString localPath = url.toLocalFile();
+        if (isSupportedDropPath(localPath)) {
+            event->acceptProposedAction();
+        }
     }
 }
 
@@ -63,26 +57,14 @@ void MainWindow::dropEvent(QDropEvent* event) {
     if (urls.count() != 1) {
         return;
     }
-#ifndef Q_OS_WASM
-    if (!urls.first().isLocalFile()) {
-        return;
-    }
-#endif
-    const QString localPath = urls.first().toLocalFile();
-#ifdef Q_OS_WASM
-    if (localPath.isEmpty() || !QFileInfo::exists(localPath)) {
-        QMessageBox::information(this, tr("Drop Not Supported"),
-                                 tr("Drag-and-drop from the host OS is not supported in the Web build. "
-                                    "Please use the Load button."));
-        return;
-    }
-#endif
-    if (localPath.isEmpty()) {
-        return;
-    }
-    DropAction action = confirmDropAction(localPath);
-    if (action != DropAction::Cancel) {
-        if (tryHandleDroppedPath(localPath, action)) {
+    const QUrl url = urls.first();
+    if (url.isLocalFile()) {
+        const QString localPath = url.toLocalFile();
+        if (localPath.isEmpty()) {
+            return;
+        }
+        DropAction action = confirmDropAction(localPath);
+        if (action != DropAction::Cancel && tryHandleDroppedPath(localPath, action)) {
             event->acceptProposedAction();
         }
     }

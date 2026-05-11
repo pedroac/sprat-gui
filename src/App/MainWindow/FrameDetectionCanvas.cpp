@@ -182,9 +182,17 @@ void FrameDetectionCanvas::mousePressEvent(QMouseEvent* event) {
         QGraphicsItem* item = m_scene->itemAt(scenePos, transform());
         if (auto* rectItem = dynamic_cast<QGraphicsRectItem*>(item)) {
             int idx = rectItem->data(0).toInt();
-            if (event->modifiers() & Qt::ShiftModifier) {
+            const bool hasCtrl = event->modifiers() & Qt::ControlModifier;
+            const bool hasShift = event->modifiers() & Qt::ShiftModifier;
+
+            if (hasCtrl) {
+                // CTRL: Add/remove from selection without clearing others
+                m_selected[idx] = !m_selected[idx];
+            } else if (hasShift) {
+                // SHIFT: Toggle without clearing others
                 m_selected[idx] = !m_selected[idx];
             } else {
+                // No modifiers: Clear all and select one
                 m_selected.fill(false);
                 m_selected[idx] = true;
             }
@@ -297,11 +305,6 @@ void FrameDetectionCanvas::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void FrameDetectionCanvas::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_S && !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier))) {
-        setSplitMode(!m_splitMode);
-        event->accept();
-        return;
-    }
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         deleteSelectedFrames();
         return;
