@@ -160,7 +160,7 @@ jobs:
       - name: Install Qt WASM
         uses: jurplel/install-qt-action@v3
         with:
-          version: '6.7.2'
+          version: '6.6.3'
           arch: 'wasm_multithread'
 
       - name: Setup Emscripten 4.0.7
@@ -177,10 +177,11 @@ jobs:
 
       - name: Configure WASM
         run: |
-          QT_WASM=$(find "$HOME/Qt" -maxdepth 2 -type d -name 'wasm_multithread' | head -1)
+          QT_WASM=$(find "$HOME/Qt" -maxdepth 3 -type d -name 'wasm_multithread' 2>/dev/null | head -1)
           if [ -z "$QT_WASM" ]; then
-            echo "ERROR: Qt WASM not found in $HOME/Qt"
-            find "$HOME/Qt" -type d -name '*wasm*' 2>/dev/null || echo "No wasm directories found"
+            echo "ERROR: Qt WASM (wasm_multithread) not found in $HOME/Qt"
+            echo "Available Qt directories:"
+            find "$HOME/Qt" -maxdepth 3 -type d 2>/dev/null | head -20
             exit 1
           fi
           echo "Found Qt WASM at: $QT_WASM"
