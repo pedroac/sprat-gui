@@ -248,16 +248,27 @@ jobs:
 
       - name: Download WASM artifact
         continue-on-error: true
+        id: download_wasm
         uses: actions/download-artifact@v4
         with:
           name: sprat-gui-wasm
           path: dist
 
+      - name: Check if WASM artifact exists
+        id: check_wasm
+        run: |
+          if [ -f "dist/sprat-gui-web.zip" ]; then
+            echo "wasm_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "wasm_exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Extract WASM package
-        if: hashFiles('dist/sprat-gui-web.zip') != ''
+        if: steps.check_wasm.outputs.wasm_exists == 'true'
         run: unzip dist/sprat-gui-web.zip -d .
 
       - name: Download butler
+        if: steps.check_wasm.outputs.wasm_exists == 'true'
         run: |
           curl -fsSL -o butler.zip \
             "https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default"
@@ -266,16 +277,16 @@ jobs:
           ./butler -V
 
       - name: Push to itch.io
-        if: hashFiles('sprat-gui-web/') != ''
+        if: steps.check_wasm.outputs.wasm_exists == 'true'
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
         run: |
           ./butler push sprat-gui-web/ pedroac/sprat-gui:web \
             --userversion ${{ steps.version.outputs.tag }}
 
-      - name: itch.io push skipped
-        if: hashFiles('sprat-gui-web/') == ''
-        run: echo "⚠️ WASM build not available, itch.io push skipped"
+      - name: itch.io deployment skipped
+        if: steps.check_wasm.outputs.wasm_exists != 'true'
+        run: echo "⚠️ WASM build not available, itch.io deployment skipped"
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
