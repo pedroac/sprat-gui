@@ -66,6 +66,19 @@ Q_LOGGING_CATEGORY(cli, "cli")
 Q_LOGGING_CATEGORY(project, "project")
 Q_LOGGING_CATEGORY(autosave, "autosave")
 
+void MainWindow::openSettingsDialogForSection(SettingsDialog::Section section) {
+    SettingsDialog dlg(m_settings, m_cliPaths, this, section);
+    QObject::connect(&dlg, &SettingsDialog::installCliToolsRequested, this, &MainWindow::installCliTools);
+    QObject::connect(&dlg, &SettingsDialog::syncNowRequested, this, &MainWindow::onSyncNowRequested);
+    if (dlg.exec() == QDialog::Accepted) {
+        m_settings = dlg.getSettings();
+        m_cliPaths = dlg.getCliPaths();
+        applySettings();
+        CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+        checkCliTools();
+    }
+}
+
 #ifdef Q_OS_WASM
 MainWindow* MainWindow::s_wasmInstance = nullptr;
 #endif
@@ -695,16 +708,19 @@ void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orient
  * @brief Opens the settings dialog.
  */
 void MainWindow::onSettingsClicked() {
-    SettingsDialog dlg(m_settings, m_cliPaths, this);
-    connect(&dlg, &SettingsDialog::installCliToolsRequested, this, &MainWindow::installCliTools);
-    connect(&dlg, &SettingsDialog::syncNowRequested, this, &MainWindow::onSyncNowRequested);
-    if (dlg.exec() == QDialog::Accepted) {
-        m_settings = dlg.getSettings();
-        m_cliPaths = dlg.getCliPaths();
-        applySettings();
-        CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
-        checkCliTools();
-    }
+    openSettingsDialogForSection(SettingsDialog::Section::Styles);
+}
+
+void MainWindow::onSettingsStylesClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::Styles);
+}
+
+void MainWindow::onSettingsSpritesheetClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::Spritesheet);
+}
+
+void MainWindow::onSettingsCliToolsClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::CliTools);
 }
 
 void MainWindow::onManageProfiles() {

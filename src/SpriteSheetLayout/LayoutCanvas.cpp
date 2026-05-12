@@ -215,7 +215,7 @@ void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
         if (urls.count() == 1) {
 #ifndef Q_OS_WASM
             if (!urls.first().isLocalFile()) {
-                ZoomableGraphicsView::dragEnterEvent(event);
+                event->acceptProposedAction();
                 return;
             }
 #endif
@@ -245,7 +245,8 @@ void LayoutCanvas::dropEvent(QDropEvent* event) {
         if (urls.count() == 1) {
 #ifndef Q_OS_WASM
             if (!urls.first().isLocalFile()) {
-                ZoomableGraphicsView::dropEvent(event);
+                emit externalPathDropped(urls.first().toString());
+                event->acceptProposedAction();
                 return;
             }
 #endif

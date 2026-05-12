@@ -1,8 +1,11 @@
 #include "ProjectTests.h"
+#include "AnimatedImageImport.h"
 #include "AutosaveProjectStore.h"
+#include "ImportPathSupport.h"
 #include "ProjectFileLoader.h"
 #include "ProjectPayloadCodec.h"
 
+#include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -113,4 +116,42 @@ void ProjectTests::testAutosaveProjectStoreCreatesMissingParentDir() {
     QVERIFY2(AutosaveProjectStore::load(autosavePath, loadedRoot, error), qPrintable(error));
     QCOMPARE(loadedRoot.value("version").toInt(), 2);
     QCOMPARE(loadedRoot.value("project").toString(), QString("autosave"));
+}
+
+void ProjectTests::testMainWindowImportPathSupport() {
+    QVERIFY(ImportPathSupport::isSupportedLocalImportPath("/tmp/sprites/archive.tar.gz"));
+    QVERIFY(ImportPathSupport::isSupportedLocalImportPath("/tmp/sprites/archive.tar.bz2"));
+    QVERIFY(ImportPathSupport::isSupportedLocalImportPath("/tmp/sprites/project archive.zip"));
+    QVERIFY(ImportPathSupport::isSupportedLocalImportPath("/tmp/sprites/sheet.png"));
+    QVERIFY(!ImportPathSupport::isSupportedLocalImportPath("/tmp/sprites/readme.txt"));
+
+    QVERIFY(ImportPathSupport::isSupportedRemoteImportUrl(QUrl("https://example.com/sheet.png")));
+    QVERIFY(ImportPathSupport::isSupportedRemoteImportUrl(QUrl("https://example.com/archive.tar.gz")));
+    QVERIFY(!ImportPathSupport::isSupportedRemoteImportUrl(QUrl("ftp://example.com/sheet.png")));
+}
+
+void ProjectTests::testAnimatedGifFrameExtraction() {
+    static const QByteArray animatedGif = QByteArray::fromBase64(
+        "R0lGODlhAgACAPAAAP8AAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAgACAAACAoRRACH5BAAKAAAALAAAAAACAAIAgAAA/////wIChFEAOw==");
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString gifPath = QDir(tempDir.path()).filePath("animated.gif");
+    QFile gifFile(gifPath);
+    QVERIFY(gifFile.open(QIODevice::WriteOnly));
+    QVERIFY(gifFile.write(animatedGif) == animatedGif.size());
+    gifFile.close();
+
+    QVERIFY(AnimatedImageImport::isAnimatedGif(gifPath));
+
+    const QString outputDir = QDir(tempDir.path()).filePath("frames");
+    QString error;
+    QVERIFY2(AnimatedImageImport::extractAnimatedFrames(gifPath, outputDir, &error), qPrintable(error));
+
+    QDir framesDir(outputDir);
+    const QStringList frameFiles = framesDir.entryList(QStringList() << "*.png", QDir::Files, QDir::Name);
+    QCOMPARE(frameFiles.size(), 2);
+    QVERIFY(QFile::exists(framesDir.filePath("frame_0000.png")));
+    QVERIFY(QFile::exists(framesDir.filePath("frame_0001.png")));
 }

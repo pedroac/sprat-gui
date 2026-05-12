@@ -11,19 +11,30 @@
 #include <QFileDialog>
 #include <QCheckBox>
 #include <QIcon>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QTimer>
 
-SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent)
-    : QDialog(parent), m_settings(settings), m_cliPaths(cliPaths) {
+SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent, Section section)
+    : QDialog(parent), m_settings(settings), m_cliPaths(cliPaths), m_initialSection(section) {
     setupUi();
 }
 
 void SettingsDialog::setupUi() {
-    setWindowTitle(tr("Settings"));
+    switch (m_initialSection) {
+        case Section::Styles: setWindowTitle(tr("Style Settings")); break;
+        case Section::Spritesheet: setWindowTitle(tr("Spritesheet Settings")); break;
+        case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
+    }
+
     QVBoxLayout* layout = new QVBoxLayout(this);
 
+    QWidget* content = new QWidget(this);
+    QVBoxLayout* contentLayout = new QVBoxLayout(content);
+
     // Styles Group
-    QGroupBox* stylesGroup = new QGroupBox(tr("Styles"), this);
-    QFormLayout* stylesForm = new QFormLayout(stylesGroup);
+    m_stylesGroup = new QGroupBox(tr("Styles"), content);
+    QFormLayout* stylesForm = new QFormLayout(m_stylesGroup);
 
     m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
     m_canvasColorBtn->setToolTip(tr("Color of the workspace area outside sprites"));
@@ -72,11 +83,12 @@ void SettingsDialog::setupUi() {
     m_borderStyleCombo->setAccessibleName(tr("Border style"));
     stylesForm->addRow(tr("Border Style:"), m_borderStyleCombo);
 
-    layout->addWidget(stylesGroup);
+    contentLayout->addWidget(m_stylesGroup);
+    m_stylesGroup->setVisible(m_initialSection == Section::Styles);
 
     // Spritesheet Group
-    QGroupBox* spritesheetGroup = new QGroupBox(tr("Spritesheet"), this);
-    QFormLayout* spritesheetForm = new QFormLayout(spritesheetGroup);
+    m_spritesheetGroup = new QGroupBox(tr("Spritesheet"), content);
+    QFormLayout* spritesheetForm = new QFormLayout(m_spritesheetGroup);
 
     m_deduplicateModeCombo = new QComboBox(this);
     m_deduplicateModeCombo->addItem(tr("None (no deduplication)"), "none");
@@ -113,11 +125,12 @@ void SettingsDialog::setupUi() {
     connect(m_syncNowBtn, &QPushButton::clicked, this, &SettingsDialog::onSyncNowClicked);
     spritesheetForm->addRow("", m_syncNowBtn);
 
-    layout->addWidget(spritesheetGroup);
+    contentLayout->addWidget(m_spritesheetGroup);
+    m_spritesheetGroup->setVisible(m_initialSection == Section::Spritesheet);
 
 #ifndef Q_OS_WASM
-    QGroupBox* cliGroup = new QGroupBox(tr("CLI Tools"), this);
-    QFormLayout* cliForm = new QFormLayout(cliGroup);
+    m_cliGroup = new QGroupBox(tr("CLI Tools"), content);
+    QFormLayout* cliForm = new QFormLayout(m_cliGroup);
 
     QHBoxLayout* baseDirLayout = new QHBoxLayout();
     m_cliBaseDirEdit = new QLineEdit(m_cliPaths.baseDir, this);
@@ -134,10 +147,19 @@ void SettingsDialog::setupUi() {
     connect(m_installCliBtn, &QPushButton::clicked, this, &SettingsDialog::installCliToolsRequested);
     cliForm->addRow("", m_installCliBtn);
     
-    layout->addWidget(cliGroup);
+    contentLayout->addWidget(m_cliGroup);
+    m_cliGroup->setVisible(m_initialSection == Section::CliTools);
 
     updateCliUi();
 #endif
+
+    contentLayout->addStretch(1);
+
+    m_scrollArea = new QScrollArea(this);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
+    m_scrollArea->setWidget(content);
+    layout->addWidget(m_scrollArea, 1);
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton* resetBtn = buttons->addButton(tr("Reset"), QDialogButtonBox::ResetRole);
@@ -147,6 +169,10 @@ void SettingsDialog::setupUi() {
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(resetBtn, &QPushButton::clicked, this, &SettingsDialog::resetToDefaults);
     layout->addWidget(buttons);
+}
+
+void SettingsDialog::focusSection(Section section) {
+    Q_UNUSED(section);
 }
 
 QPushButton* SettingsDialog::createColorButton(const QColor& color) {

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "AnimationCanvas.h"
+#include "ImportPathSupport.h"
 
 #include <QAction>
 #include <QApplication>
@@ -45,6 +46,8 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
         if (isSupportedDropPath(localPath)) {
             event->acceptProposedAction();
         }
+    } else if (tryHandleRemoteUrl(url, DropAction::Cancel)) {
+        event->acceptProposedAction();
     }
 }
 
@@ -67,6 +70,11 @@ void MainWindow::dropEvent(QDropEvent* event) {
         if (action != DropAction::Cancel && tryHandleDroppedPath(localPath, action)) {
             event->acceptProposedAction();
         }
+    } else {
+        DropAction action = confirmDropAction(url.toString());
+        if (action != DropAction::Cancel && tryHandleRemoteUrl(url, action)) {
+            event->acceptProposedAction();
+        }
     }
 }
 
@@ -86,9 +94,7 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
     if (info.isDir()) {
         return true;
     }
-    const QString ext = info.suffix().toLower();
-    return ext == "zip" || ext == "json" || ext == "tar" || ext == "tar.gz" || ext == "tar.bz2" || ext == "tar.xz" ||
-           ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds";
+    return ImportPathSupport::isSupportedLocalImportPath(info.filePath());
 }
 
 MainWindow::DropAction MainWindow::confirmDropAction(const QString& path) {
@@ -130,13 +136,17 @@ bool MainWindow::tryHandleDroppedPath(const QString& path, DropAction action) {
         return true;
     }
     
-    const QString ext = info.suffix().toLower();
-    if (ext == "tar" || ext == "tar.gz" || ext == "tar.bz2" || ext == "tar.xz") {
+    const QString lowerPath = info.filePath().toLower();
+    if (lowerPath.endsWith(".tar") || lowerPath.endsWith(".tar.gz") ||
+        lowerPath.endsWith(".tar.bz2") || lowerPath.endsWith(".tar.xz")) {
         loadTarFile(path, action);
         return true;
     }
-    
-    if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds") {
+
+    if (lowerPath.endsWith(".png") || lowerPath.endsWith(".jpg") ||
+        lowerPath.endsWith(".jpeg") || lowerPath.endsWith(".bmp") ||
+        lowerPath.endsWith(".gif") || lowerPath.endsWith(".webp") ||
+        lowerPath.endsWith(".tga") || lowerPath.endsWith(".dds")) {
         loadImageWithFrameDetection(path, action);
         return true;
     }
@@ -148,6 +158,10 @@ bool MainWindow::tryHandleDroppedPath(const QString& path, DropAction action) {
 void MainWindow::onLayoutCanvasPathDropped(const QString& path) {
     DropAction action = confirmDropAction(path);
     if (action != DropAction::Cancel) {
+        const QUrl url(path);
+        if (url.isValid() && !url.scheme().isEmpty() && !url.isLocalFile() && tryHandleRemoteUrl(url, action)) {
+            return;
+        }
         tryHandleDroppedPath(path, action);
     }
 }

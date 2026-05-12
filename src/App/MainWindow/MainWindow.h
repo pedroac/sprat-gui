@@ -12,6 +12,9 @@
 #include <QElapsedTimer>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QPointer>
+#include <memory>
+#include <vector>
 
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
@@ -23,6 +26,7 @@
 #include "SaveDialog.h"
 #include "SpratProfilesConfig.h"
 #include "models.h"
+#include "SettingsDialog.h"
 
 // Forward declarations for Qt classes
 class QComboBox;
@@ -55,6 +59,9 @@ class QAction;
 class QToolButton;
 class QMenu;
 class QUndoStack;
+class QMimeData;
+class QImage;
+class QUrl;
 
 // Forward declarations for custom classes
 class FrameDetectionDialog;
@@ -135,6 +142,7 @@ private slots:
      * @brief Handles loading of a saved project.
      */
     void onLoadProject();
+    void onLoadFromUrl();
 
     /**
      * @brief Handles running the layout generation process.
@@ -390,6 +398,7 @@ private slots:
      * @brief Handles animation timer timeout.
      */
     void onAnimTimerTimeout();
+    void onPasteImport();
 
 private:
     struct ProjectSaveResult;
@@ -708,10 +717,14 @@ private:
      * @return bool True if path was handled
      */
     bool tryHandleDroppedPath(const QString& path, DropAction action = DropAction::Replace);
+    bool tryHandleRemoteUrl(const QUrl& url, DropAction action = DropAction::Replace);
+    bool tryImportClipboard(const QMimeData* mimeData, DropAction action = DropAction::Replace);
+    QString createManagedImportFile(const QString& suggestedName, const QByteArray& data, QString& error);
+    QString createManagedImportImageFile(const QImage& image, QString& error);
+    void finishImportedPath(const QString& path, DropAction action);
+    void openSettingsDialogForSection(SettingsDialog::Section section);
 
     /**
-     * @brief Downloads a URL from a drag-and-drop operation.
-     *
      * @brief Handles animation preview events.
      * 
      * @param event Event to handle
@@ -888,6 +901,9 @@ public:
      * @brief Handles settings button click.
      */
     void onSettingsClicked();
+    void onSettingsStylesClicked();
+    void onSettingsSpritesheetClicked();
+    void onSettingsCliToolsClicked();
 
     /**
      * @brief Applies settings to the UI.
@@ -1129,6 +1145,9 @@ private:
         bool canceled = false;
     };
     QFutureWatcher<ProjectSaveResult> m_projectSaveWatcher;
+    QNetworkAccessManager* m_importNetworkManager = nullptr;
+    QPointer<QNetworkReply> m_activeImportReply;
+    std::vector<std::unique_ptr<QTemporaryDir>> m_importTempDirs;
 
     QMutex m_toolMutex;
     QString m_runningLayoutProfile;

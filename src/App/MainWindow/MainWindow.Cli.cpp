@@ -202,11 +202,6 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         return;
     }
 
-    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
-    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
-        return;
-    }
-
     if (m_folderDiscoveryWatcher.isRunning()) {
         return;
     }
@@ -509,6 +504,9 @@ void MainWindow::setupCliInstallOverlay() {
 
 void MainWindow::onCancelLoading() {
     m_isCanceled = true;
+    if (m_activeImportReply) {
+        m_activeImportReply->abort();
+    }
     if (m_layoutRunner && m_layoutRunner->isRunning()) {
         m_layoutRunner->stop();
     }

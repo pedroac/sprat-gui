@@ -8,4 +8,6 @@ private slots:
     void testProjectFileLoaderLoad();
     void testProjectFileLoaderLoadZip();
     void testAutosaveProjectStoreCreatesMissingParentDir();
+    void testMainWindowImportPathSupport();
+    void testAnimatedGifFrameExtraction();
 };

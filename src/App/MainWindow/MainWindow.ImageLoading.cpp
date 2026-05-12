@@ -21,6 +21,7 @@
 
 #include "MainWindow.h"
 #include "FrameDetectionDialog.h"
+#include "AnimatedImageImport.h"
 #include "ArchiveExtractor.h"
 
 void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
@@ -28,8 +29,38 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         return;
     }
 
-    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
-    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
+    if (AnimatedImageImport::isAnimatedGif(imagePath)) {
+        if (!m_cliReady || m_isLoading) {
+            QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+            return;
+        }
+
+        m_loadingUiMessage = tr("Decoding animated GIF...");
+        setLoading(true);
+
+        if (action == DropAction::Replace) {
+            m_session->clearTempDirs();
+        }
+        auto tempDir = std::make_unique<QTemporaryDir>();
+        if (!tempDir->isValid()) {
+            m_statusLabel->setText(tr("Error: Could not create temporary directory"));
+            setLoading(false);
+            return;
+        }
+
+        const QString tempPath = tempDir->path();
+        m_session->addTempDir(std::move(tempDir));
+
+        QString error;
+        if (!AnimatedImageImport::extractAnimatedFrames(imagePath, tempPath, &error)) {
+            setLoading(false);
+            QMessageBox::warning(this, tr("Load Failed"), error.isEmpty() ? tr("Could not decode animated GIF.") : error);
+            return;
+        }
+
+        if (processExtractedFrames(tempPath, imagePath, action)) {
+            onRunLayout();
+        }
         return;
     }
 
@@ -168,11 +199,6 @@ void MainWindow::processFrameExtractionResult(const FrameExtractionResult& resul
 
 void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     if (action == DropAction::Cancel) {
-        return;
-    }
-
-    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
-    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
         return;
     }
     

@@ -18,6 +18,7 @@
 #include <QFrame>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenuBar>
 #include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
@@ -45,7 +46,7 @@ void MainWindow::setupUi() {
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);
     QVBoxLayout* welcomeLayout = new QVBoxLayout(m_welcomePage);
-    m_welcomeLabel = new QLabel(tr("Drag and drop a folder, image file, or archive (zip/tar)"), m_welcomePage);
+    m_welcomeLabel = new QLabel(tr("Drag and drop a folder, image file, archive (zip/tar), or URL"), m_welcomePage);
     m_welcomeLabel->setAlignment(Qt::AlignCenter);
     welcomeLayout->addWidget(m_welcomeLabel);
     m_mainStack->addWidget(m_welcomePage);
@@ -421,49 +422,58 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::setupToolbar() {
-    QToolBar* toolbar = addToolBar(tr("Main"));
-    toolbar->setMovable(true);
+    QMenuBar* mainMenuBar = menuBar();
+    QMenu* fileMenu = mainMenuBar->addMenu(tr("File"));
 
-    m_loadAction = toolbar->addAction(tr("Load Images Folder"));
+    m_loadAction = fileMenu->addAction(tr("Load Images Folder"));
     m_loadAction->setToolTip(tr("Load a folder of sprite images"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
 
-    toolbar->addSeparator();
-    QAction* loadProjectAction = toolbar->addAction(tr("Load..."));
+    QAction* loadProjectAction = fileMenu->addAction(tr("Load..."));
     loadProjectAction->setToolTip(tr("Load a project or archive file"));
     connect(loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
 
-    m_saveAction = toolbar->addAction(tr("Save..."));
+    QAction* loadUrlAction = fileMenu->addAction(tr("Load URL..."));
+    loadUrlAction->setToolTip(tr("Download and load an image, project, or archive from a URL"));
+    connect(loadUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
+
+    fileMenu->addSeparator();
+    m_saveAction = fileMenu->addAction(tr("Save..."));
     m_saveAction->setEnabled(false);
     m_saveAction->setToolTip(tr("Save the current project (Ctrl+S)"));
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveClicked);
 
-    toolbar->addSeparator();
-    m_recentProjectsBtn = new QToolButton(this);
-    m_recentProjectsBtn->setText(tr("Recent"));
-    m_recentProjectsBtn->setToolTip(tr("Open a recently loaded project"));
-    m_recentProjectsBtn->setAccessibleName(tr("Recent projects"));
-    m_recentProjectsMenu = new QMenu(m_recentProjectsBtn);
-    m_recentProjectsBtn->setMenu(m_recentProjectsMenu);
-    m_recentProjectsBtn->setPopupMode(QToolButton::InstantPopup);
-    toolbar->addWidget(m_recentProjectsBtn);
-
-    toolbar->addSeparator();
-    QAction* settingsAction = toolbar->addAction(tr("Settings"));
-    settingsAction->setToolTip(tr("Open application settings"));
-    connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettingsClicked);
-
-    toolbar->addSeparator();
-    m_openSourceFolderAction = toolbar->addAction(tr("Open Sprites Folder"));
+    fileMenu->addSeparator();
+    m_openSourceFolderAction = fileMenu->addAction(tr("Open Sprites Folder"));
     m_openSourceFolderAction->setToolTip(tr("Open the sprites source folder in the file manager"));
     m_openSourceFolderAction->setEnabled(false);
     connect(m_openSourceFolderAction, &QAction::triggered,
             this, &MainWindow::onOpenSourceFolderClicked);
 
-    toolbar->addSeparator();
-    m_folderLabel = new QLabel(tr("Folder: none"), this);
-    m_folderLabel->setStyleSheet("padding-left: 10px;");
-    toolbar->addWidget(m_folderLabel);
+    fileMenu->addSeparator();
+    m_recentProjectsMenu = fileMenu->addMenu(tr("Recent"));
+
+    QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
+    QAction* stylesAction = settingsMenu->addAction(tr("Styles..."));
+    stylesAction->setToolTip(tr("Open style settings"));
+    connect(stylesAction, &QAction::triggered, this, &MainWindow::onSettingsStylesClicked);
+
+    QAction* spritesheetAction = settingsMenu->addAction(tr("Spritesheet..."));
+    spritesheetAction->setToolTip(tr("Open spritesheet settings"));
+    connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
+
+    QAction* cliToolsAction = settingsMenu->addAction(tr("CLI Tools..."));
+    cliToolsAction->setToolTip(tr("Open CLI tools settings"));
+    connect(cliToolsAction, &QAction::triggered, this, &MainWindow::onSettingsCliToolsClicked);
+
+    QAction* manageProfilesAction = settingsMenu->addAction(tr("Manage Profiles..."));
+    manageProfilesAction->setToolTip(tr("Create and edit layout profiles"));
+    connect(manageProfilesAction, &QAction::triggered, this, &MainWindow::onManageProfiles);
+
+    settingsMenu->addSeparator();
+    QAction* installCliAction = settingsMenu->addAction(tr("Install CLI Tools..."));
+    installCliAction->setToolTip(tr("Download and install the sprat CLI tools"));
+    connect(installCliAction, &QAction::triggered, this, [this]() { installCliTools(); });
 }
 
 void MainWindow::setupStatusBarUi() {
@@ -474,6 +484,10 @@ void MainWindow::setupStatusBarUi() {
     m_statusProgressBar->setVisible(false);     // hidden by default
     m_statusProgressBar->setAccessibleName(tr("Operation progress"));
     statusBar()->addPermanentWidget(m_statusProgressBar);
+
+    m_folderLabel = new QLabel(tr("Folder: none"), this);
+    m_folderLabel->setContentsMargins(0, 0, 12, 0);
+    statusBar()->addPermanentWidget(m_folderLabel);
 
     m_statusLabel = new QLabel(tr("Idle"), this);
     m_statusLabel->setContentsMargins(0, 0, 12, 0);
@@ -550,6 +564,10 @@ void MainWindow::setupKeyboardShortcuts() {
     // Ctrl+Y (or Ctrl+Shift+Z on Mac) → Redo
     QShortcut* redoShortcut = new QShortcut(QKeySequence::Redo, this);
     connect(redoShortcut, &QShortcut::activated, this, &MainWindow::onRedo);
+
+    // Ctrl+V → Import image/file/URL from clipboard
+    QShortcut* pasteShortcut = new QShortcut(QKeySequence::Paste, this);
+    connect(pasteShortcut, &QShortcut::activated, this, &MainWindow::onPasteImport);
 }
 
 void MainWindow::updateUiState() {

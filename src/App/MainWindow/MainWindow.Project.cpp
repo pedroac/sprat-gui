@@ -14,8 +14,11 @@
 #include "CliToolsConfig.h"
 #include "ResolutionUtils.h"
 #include "FolderSyncService.h"
+#include "ImportPathSupport.h"
 
 #include <QComboBox>
+#include <QBuffer>
+#include <QClipboard>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QPushButton>
@@ -23,10 +26,17 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDoubleSpinBox>
+#include <QImage>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QMimeData>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QPixmap>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -47,6 +57,77 @@
 #endif
 
 namespace {
+QString extensionFromContentType(const QString& contentType) {
+    const QString lower = contentType.toLower();
+    if (lower.contains("png")) return ".png";
+    if (lower.contains("jpeg") || lower.contains("jpg")) return ".jpg";
+    if (lower.contains("bmp")) return ".bmp";
+    if (lower.contains("gif")) return ".gif";
+    if (lower.contains("webp")) return ".webp";
+    if (lower.contains("tga")) return ".tga";
+    if (lower.contains("dds")) return ".dds";
+    if (lower.contains("json")) return ".json";
+    if (lower.contains("zip")) return ".zip";
+    if (lower.contains("x-tar") || lower == "application/tar") return ".tar";
+    if (lower.contains("gzip")) return ".tar.gz";
+    if (lower.contains("bzip2")) return ".tar.bz2";
+    if (lower.contains("xz")) return ".tar.xz";
+    return QString();
+}
+
+QString sanitizedImportName(QString name) {
+    name = QFileInfo(name).fileName().trimmed();
+    if (name.isEmpty()) {
+        return QString();
+    }
+    for (QChar& ch : name) {
+        if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|') {
+            ch = '_';
+        }
+    }
+    return name;
+}
+
+QString suggestedNameFromReply(const QUrl& url, QNetworkReply* reply) {
+    QString fileName;
+    const QVariant disposition = reply->header(QNetworkRequest::ContentDispositionHeader);
+    if (disposition.isValid()) {
+        const QString dispositionText = disposition.toString();
+        const QStringList parts = dispositionText.split(';');
+        for (const QString& part : parts) {
+            const QString trimmed = part.trimmed();
+            if (trimmed.startsWith("filename=", Qt::CaseInsensitive)) {
+                fileName = trimmed.mid(QStringLiteral("filename=").size()).trimmed();
+                if (fileName.startsWith('"') && fileName.endsWith('"') && fileName.size() >= 2) {
+                    fileName = fileName.mid(1, fileName.size() - 2);
+                }
+                break;
+            }
+        }
+    }
+
+    if (fileName.isEmpty()) {
+        fileName = QFileInfo(url.path()).fileName();
+    }
+    if (fileName.isEmpty()) {
+        fileName = "download";
+    }
+
+    fileName = sanitizedImportName(fileName);
+    if (fileName.isEmpty()) {
+        fileName = "download";
+    }
+
+    if (!fileName.contains('.')) {
+        const QString suffix = extensionFromContentType(reply->header(QNetworkRequest::ContentTypeHeader).toString());
+        if (!suffix.isEmpty()) {
+            fileName += suffix;
+        }
+    }
+
+    return fileName;
+}
+
 void syncSourceResolutionPresetSelection(QComboBox* combo, int width, int height) {
     if (!combo) {
         return;
@@ -143,6 +224,272 @@ void MainWindow::onLoadProject() {
     if (!file.isEmpty()) {
         loadProject(file);
     }
+}
+
+void MainWindow::onLoadFromUrl() {
+    if (m_isLoading) {
+        return;
+    }
+
+    bool accepted = false;
+    const QString input = QInputDialog::getText(
+        this,
+        tr("Load From URL"),
+        tr("Enter an image, project, or archive URL:"),
+        QLineEdit::Normal,
+        QString(),
+        &accepted);
+    if (!accepted) {
+        return;
+    }
+
+    const QString trimmed = input.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+
+    const QUrl url = QUrl::fromUserInput(trimmed);
+    if (!url.isValid()) {
+        QMessageBox::warning(this, tr("Invalid URL"), tr("The provided URL is not valid."));
+        return;
+    }
+
+    DropAction action = confirmDropAction(trimmed);
+    if (action == DropAction::Cancel) {
+        return;
+    }
+    tryHandleRemoteUrl(url, action);
+}
+
+void MainWindow::onPasteImport() {
+    if (m_isLoading) {
+        return;
+    }
+
+    const QMimeData* mimeData = QApplication::clipboard()->mimeData();
+    if (!mimeData) {
+        return;
+    }
+
+    if (!tryImportClipboard(mimeData, DropAction::Cancel)) {
+        QMessageBox::information(
+            this,
+            tr("Clipboard Not Supported"),
+            tr("Clipboard data must be an image, file, or supported URL."));
+        return;
+    }
+
+    DropAction action = confirmDropAction(tr("clipboard"));
+    if (action == DropAction::Cancel) {
+        return;
+    }
+
+    tryImportClipboard(mimeData, action);
+}
+
+QString MainWindow::createManagedImportFile(const QString& suggestedName, const QByteArray& data, QString& error) {
+    auto tempDir = std::make_unique<QTemporaryDir>();
+    if (!tempDir->isValid()) {
+        error = tr("Unable to create a temporary directory for imported data.");
+        return QString();
+    }
+
+    QString fileName = sanitizedImportName(suggestedName);
+    if (fileName.isEmpty()) {
+        fileName = "imported-data";
+    }
+    const QString filePath = QDir(tempDir->path()).filePath(fileName);
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        error = tr("Unable to write imported data to a temporary file.");
+        return QString();
+    }
+    if (file.write(data) != data.size()) {
+        error = tr("Failed to write all imported data to a temporary file.");
+        return QString();
+    }
+    file.close();
+
+    m_importTempDirs.push_back(std::move(tempDir));
+    return filePath;
+}
+
+QString MainWindow::createManagedImportImageFile(const QImage& image, QString& error) {
+    if (image.isNull()) {
+        error = tr("Clipboard image data is empty.");
+        return QString();
+    }
+
+    QByteArray pngData;
+    QBuffer buffer(&pngData);
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) {
+        error = tr("Unable to encode clipboard image data as PNG.");
+        return QString();
+    }
+
+    return createManagedImportFile("clipboard-image.png", pngData, error);
+}
+
+void MainWindow::finishImportedPath(const QString& path, DropAction action) {
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!isSupportedDropPath(path)) {
+        QMessageBox::warning(
+            this,
+            tr("Unsupported Import"),
+            tr("The imported data is not a supported image, project, or archive."));
+        return;
+    }
+    tryHandleDroppedPath(path, action);
+}
+
+bool MainWindow::tryImportClipboard(const QMimeData* mimeData, DropAction action) {
+    if (!mimeData) {
+        return false;
+    }
+    const bool validateOnly = (action == DropAction::Cancel);
+
+    if (mimeData->hasUrls()) {
+        const QList<QUrl> urls = mimeData->urls();
+        if (urls.size() != 1) {
+            return false;
+        }
+        const QUrl url = urls.first();
+        if (url.isLocalFile()) {
+            return validateOnly ? isSupportedDropPath(url.toLocalFile())
+                                : tryHandleDroppedPath(url.toLocalFile(), action);
+        }
+        return tryHandleRemoteUrl(url, action);
+    }
+
+    if (mimeData->hasImage()) {
+        if (validateOnly) {
+            return true;
+        }
+        QImage image = qvariant_cast<QImage>(mimeData->imageData());
+        if (image.isNull()) {
+            const QPixmap pixmap = qvariant_cast<QPixmap>(mimeData->imageData());
+            image = pixmap.toImage();
+        }
+        QString error;
+        const QString path = createManagedImportImageFile(image, error);
+        if (path.isEmpty()) {
+            QMessageBox::warning(this, tr("Import Failed"), error);
+            return true;
+        }
+        finishImportedPath(path, action);
+        return true;
+    }
+
+    const QStringList zipMimeTypes = {
+        "application/zip",
+        "application/x-zip-compressed"
+    };
+    for (const QString& mimeType : zipMimeTypes) {
+        if (mimeData->hasFormat(mimeType)) {
+            if (validateOnly) {
+                return true;
+            }
+            QString error;
+            const QString path = createManagedImportFile("clipboard.zip", mimeData->data(mimeType), error);
+            if (path.isEmpty()) {
+                QMessageBox::warning(this, tr("Import Failed"), error);
+            } else {
+                finishImportedPath(path, action);
+            }
+            return true;
+        }
+    }
+
+    if (mimeData->hasText()) {
+        const QString text = mimeData->text().trimmed();
+        if (text.isEmpty()) {
+            return false;
+        }
+
+        const QUrl url = QUrl::fromUserInput(text);
+        if (url.isValid() && !url.scheme().isEmpty()) {
+            if (url.isLocalFile()) {
+                return validateOnly ? isSupportedDropPath(url.toLocalFile())
+                                    : tryHandleDroppedPath(url.toLocalFile(), action);
+            }
+            return tryHandleRemoteUrl(url, action);
+        }
+
+        if (QFileInfo::exists(text)) {
+            const QString localPath = QFileInfo(text).absoluteFilePath();
+            return validateOnly ? isSupportedDropPath(localPath)
+                                : tryHandleDroppedPath(localPath, action);
+        }
+    }
+
+    return false;
+}
+
+bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
+    if (!ImportPathSupport::isSupportedRemoteImportUrl(url)) {
+        return false;
+    }
+
+    if (action == DropAction::Cancel) {
+        return true;
+    }
+    if (m_isLoading || m_activeImportReply) {
+        return false;
+    }
+
+    if (!m_importNetworkManager) {
+        m_importNetworkManager = new QNetworkAccessManager(this);
+    }
+
+    m_loadingUiMessage = tr("Downloading from URL...");
+    m_isCanceled = false;
+    setLoading(true);
+
+    QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply* reply = m_importNetworkManager->get(request);
+    m_activeImportReply = reply;
+
+    connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
+        if (total > 0) {
+            m_statusLabel->setText(tr("Downloading... %1%").arg((received * 100) / total));
+        } else {
+            m_statusLabel->setText(tr("Downloading..."));
+        }
+    });
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url, action]() {
+        m_activeImportReply.clear();
+        const QByteArray data = reply->readAll();
+        const QString fileName = suggestedNameFromReply(url, reply);
+        const bool success = (reply->error() == QNetworkReply::NoError);
+        const QString errorText = reply->errorString();
+        const bool canceled = (reply->error() == QNetworkReply::OperationCanceledError) || m_isCanceled;
+        reply->deleteLater();
+
+        setLoading(false);
+
+        if (!success) {
+            if (!canceled) {
+                QMessageBox::warning(this, tr("Download Failed"), errorText);
+            }
+            return;
+        }
+
+        QString error;
+        const QString path = createManagedImportFile(fileName, data, error);
+        if (path.isEmpty()) {
+            QMessageBox::warning(this, tr("Import Failed"), error);
+            return;
+        }
+
+        finishImportedPath(path, action);
+    });
+
+    return true;
 }
 
 void MainWindow::onSaveClicked() {
@@ -410,30 +757,28 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     if (action == DropAction::Cancel) {
         return;
     }
-
-    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
-    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
-        return;
-    }
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
     if (m_canvas) m_canvas->setZoomManual(false);
     if (m_previewView) m_previewView->setZoomManual(false);
 
-    QFileInfo info(path);
-    const QString ext = info.suffix().toLower();
+    const QString lowerPath = path.toLower();
     
     // Delegate to specific loaders based on extension
-    if (ext == "zip") {
+    if (lowerPath.endsWith(".zip")) {
         loadImagesFromZip(path, action);
         return;
     }
     
-    if (ext == "tar" || ext == "gz" || ext == "bz2" || ext == "xz") {
+    if (lowerPath.endsWith(".tar") || lowerPath.endsWith(".tar.gz") ||
+        lowerPath.endsWith(".tar.bz2") || lowerPath.endsWith(".tar.xz")) {
         loadTarFile(path, action);
         return;
     }
     
-    if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || ext == "gif" || ext == "webp" || ext == "tga" || ext == "dds") {
+    if (lowerPath.endsWith(".png") || lowerPath.endsWith(".jpg") ||
+        lowerPath.endsWith(".jpeg") || lowerPath.endsWith(".bmp") ||
+        lowerPath.endsWith(".gif") || lowerPath.endsWith(".webp") ||
+        lowerPath.endsWith(".tga") || lowerPath.endsWith(".dds")) {
         loadImageWithFrameDetection(path, action);
         return;
     }
@@ -570,11 +915,6 @@ void MainWindow::onProjectLoadFinished() {
 
 bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     if (action == DropAction::Cancel) {
-        return false;
-    }
-
-    // Only ask for confirmation if action is not explicitly Replace (user didn't choose from drop dialog)
-    if (action != DropAction::Replace && !confirmLayoutReplacement()) {
         return false;
     }
     if (!m_cliReady || m_isLoading) {

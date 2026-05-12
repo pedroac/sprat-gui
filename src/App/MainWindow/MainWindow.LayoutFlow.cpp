@@ -346,7 +346,7 @@ void MainWindow::setLoading(bool loading) {
         }
     } else {
         if (m_welcomeLabel) {
-            m_welcomeLabel->setText(tr("Drag and drop a folder, image file, or archive (zip/tar)"));
+            m_welcomeLabel->setText(tr("Drag and drop a folder, image file, archive (zip/tar), or URL"));
         }
         if (!m_cliInstallInProgress && m_cliInstallOverlay) {
             if (m_cliInstallProgress) {
