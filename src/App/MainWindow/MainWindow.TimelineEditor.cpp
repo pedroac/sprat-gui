@@ -72,7 +72,7 @@ void MainWindow::onTimelineNameChanged() {
     }
     const QString renamed = m_timelineNameEdit->text();
     m_session->timelines[m_session->selectedTimelineIndex].name = renamed;
-    m_timelineList->item(m_session->selectedTimelineIndex)->setText(renamed);
+    refreshTimelineList();
 }
 
 void MainWindow::onTimelineFpsChanged(int fps) {
@@ -83,5 +83,6 @@ void MainWindow::onTimelineFpsChanged(int fps) {
     if (m_animPlaying) {
         m_animTimer->setInterval(1000 / fps);
     }
+    refreshTimelineList();
     refreshAnimationTest();
 }

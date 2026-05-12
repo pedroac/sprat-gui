@@ -4,6 +4,7 @@
 #include "ResolutionUtils.h"
 #include "AnimationCanvas.h"
 #include "CliToolsConfig.h"
+#include <QDockWidget>
 
 #include <QAction>
 #include <QApplication>
@@ -39,6 +40,24 @@ void MainWindow::setupUi() {
     setWindowTitle(tr("Sprat GUI %1").arg(SPRAT_GUI_VERSION));
     setupToolbar();
 
+    // Add a 10px gap between the menu bar and the dock widgets
+    QToolBar* topSpacer = new QToolBar(this);
+    topSpacer->setObjectName("topSpacer");
+    topSpacer->setFixedHeight(10);
+    topSpacer->setMovable(false);
+    topSpacer->setFloatable(false);
+    topSpacer->setAllowedAreas(Qt::TopToolBarArea);
+    topSpacer->setStyleSheet("background: transparent; border: none;");
+    addToolBar(Qt::TopToolBarArea, topSpacer);
+
+    // Prepare fonts for dock titles
+    QFont boldFont = this->font();
+    boldFont.setBold(true);
+    QFont normalFont = this->font();
+
+    // Set dock options
+    setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AllowNestedDocks);
+
     // Central Widget is a Stack
     m_mainStack = new QStackedWidget(this);
     setCentralWidget(m_mainStack);
@@ -51,24 +70,22 @@ void MainWindow::setupUi() {
     welcomeLayout->addWidget(m_welcomeLabel);
     m_mainStack->addWidget(m_welcomePage);
 
-    // Page 2: Editor
-    m_editorPage = new QWidget(this);
-    QHBoxLayout* editorLayout = new QHBoxLayout(m_editorPage);
-    editorLayout->setContentsMargins(10, 10, 10, 10);
+    // --- Create Docks ---
+    const int groupMargin = 4;
+    const int groupTopPadding = 12;
+    const int groupBottomMargin = 0;
 
-    QSplitter* mainSplitter = new QSplitter(Qt::Horizontal, m_editorPage);
-    editorLayout->addWidget(mainSplitter);
-
-    // --- Left Panel ---
-    m_leftSplitter = new QSplitter(Qt::Vertical, mainSplitter);
-
-    // 1. Layout Canvas Frame
-    QGroupBox* canvasGroup = new QGroupBox(tr("Layout Canvas"), m_leftSplitter);
-    QVBoxLayout* canvasLayout = new QVBoxLayout(canvasGroup);
-    canvasLayout->setContentsMargins(10, 10, 10, 10);
+    // 1. Layout Canvas Dock
+    m_canvasDock = new QDockWidget(tr("Layout Canvas"), this);
+    m_canvasDock->setObjectName("canvasDock");
+    m_canvasDock->setFont(boldFont);
+    QWidget* canvasContent = new QWidget(m_canvasDock);
+    canvasContent->setStyleSheet("font-weight: normal;");
+    QVBoxLayout* canvasLayout = new QVBoxLayout(canvasContent);
+    canvasLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
     // Controls
-    QWidget* canvasControlsWidget = new QWidget(canvasGroup);
+    QWidget* canvasControlsWidget = new QWidget(canvasContent);
     canvasControlsWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     QHBoxLayout* canvasControls = new QHBoxLayout(canvasControlsWidget);
     canvasControls->setContentsMargins(0, 0, 0, 0);
@@ -179,12 +196,17 @@ void MainWindow::setupUi() {
     connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onRemoveFramesRequested);
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
 
-    m_leftSplitter->addWidget(canvasGroup);
+    m_canvasDock->setWidget(canvasContent);
+    addDockWidget(Qt::LeftDockWidgetArea, m_canvasDock);
 
-    // 2. Timelines Frame
-    QGroupBox* timelineGroup = new QGroupBox(tr("Animation Timelines"), m_leftSplitter);
-    QVBoxLayout* timelineLayout = new QVBoxLayout(timelineGroup);
-    timelineLayout->setContentsMargins(10, 10, 10, 10);
+    // 2. Timelines Dock
+    m_timelineDock = new QDockWidget(tr("Animation Timelines"), this);
+    m_timelineDock->setObjectName("timelineDock");
+    m_timelineDock->setFont(boldFont);
+    QWidget* timelineContent = new QWidget(m_timelineDock);
+    timelineContent->setStyleSheet("font-weight: normal;");
+    QVBoxLayout* timelineLayout = new QVBoxLayout(timelineContent);
+    timelineLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
     QHBoxLayout* timelineAddLayout = new QHBoxLayout();
     timelineAddLayout->addWidget(new QLabel(tr("Name:")));
@@ -198,17 +220,25 @@ void MainWindow::setupUi() {
     timelineLayout->addLayout(timelineAddLayout);
 
     m_timelineList = new QListWidget(this);
-    m_timelineList->setFixedHeight(100);
+    m_timelineList->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    m_timelineList->setIconSize(QSize(32, 32));
     connect(m_timelineList, &QListWidget::itemSelectionChanged, this, &MainWindow::onTimelineSelectionChanged);
-    timelineLayout->addWidget(m_timelineList);
+    timelineLayout->addWidget(m_timelineList, 1); // Give it a stretch factor
     m_timelineList->setVisible(false);
 
+    // Add a gap between the list and the editor
+    timelineLayout->addSpacing(8);
+
     m_timelineEditorContainer = new QWidget(this);
-    m_timelineEditorContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    m_timelineEditorContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     QVBoxLayout* editorContainerLayout = new QVBoxLayout(m_timelineEditorContainer);
     editorContainerLayout->setContentsMargins(0, 0, 0, 0);
-    timelineLayout->addWidget(m_timelineEditorContainer, 1);
+    timelineLayout->addWidget(m_timelineEditorContainer, 0); // No stretch for the editor area
     m_timelineEditorContainer->setVisible(false);
+
+    m_selectedTimelineGroup = new QGroupBox(tr("Selected Timeline"), m_timelineEditorContainer);
+    QVBoxLayout* groupLayout = new QVBoxLayout(m_selectedTimelineGroup);
+    editorContainerLayout->addWidget(m_selectedTimelineGroup);
 
     QHBoxLayout* timelineNameLayout = new QHBoxLayout();
     timelineNameLayout->addWidget(new QLabel(tr("Name:")));
@@ -228,37 +258,42 @@ void MainWindow::setupUi() {
     QPushButton* removeTimelineBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove"), this);
     connect(removeTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineRemoveClicked);
     timelineNameLayout->addWidget(removeTimelineBtn);
-    editorContainerLayout->addLayout(timelineNameLayout);
+    groupLayout->addLayout(timelineNameLayout);
 
-    m_timelineDropArea = new QGroupBox(this);
+    m_timelineDropArea = new QWidget(this); // No longer a group box, replaced by Selected Timeline group
     QVBoxLayout* dropAreaLayout = new QVBoxLayout(m_timelineDropArea);
+    dropAreaLayout->setContentsMargins(0, 4, 0, 0);
     m_timelineDragHintLabel = new QLabel(tr("Drag frames from layout canvas here"), m_timelineDropArea);
     dropAreaLayout->addWidget(m_timelineDragHintLabel);
     m_timelineFramesList = new TimelineListWidget(m_timelineDropArea);
     m_timelineFramesList->setViewMode(QListWidget::IconMode);
     m_timelineFramesList->setFlow(QListWidget::LeftToRight);
-    m_timelineFramesList->setWrapping(true);
+    m_timelineFramesList->setWrapping(false);
+    m_timelineFramesList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_timelineFramesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_timelineFramesList->setResizeMode(QListWidget::Adjust);
-    m_timelineFramesList->setIconSize(QSize(64, 64));
+    m_timelineFramesList->setIconSize(QSize(48, 48));
+    m_timelineFramesList->setFixedHeight(80); // Reduced height for the tape
     connect(m_timelineFramesList, &TimelineListWidget::frameDropped, this, &MainWindow::onFrameDropped);
     connect(m_timelineFramesList, &TimelineListWidget::frameMoved, this, &MainWindow::onFrameMoved);
     connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested, this, &MainWindow::onFrameRemoveRequested);
     connect(m_timelineFramesList, &TimelineListWidget::duplicateFrameRequested, this, &MainWindow::onFrameDuplicateRequested);
     connect(m_timelineFramesList, &QListWidget::itemSelectionChanged, this, &MainWindow::onTimelineFrameSelectionChanged);
     dropAreaLayout->addWidget(m_timelineFramesList);
-    editorContainerLayout->addWidget(m_timelineDropArea);
+    groupLayout->addWidget(m_timelineDropArea);
     timelineLayout->addStretch(0);
 
-    m_leftSplitter->addWidget(timelineGroup);
+    m_timelineDock->setWidget(timelineContent);
+    addDockWidget(Qt::LeftDockWidgetArea, m_timelineDock);
 
-    mainSplitter->addWidget(m_leftSplitter);
-
-    // --- Right Panel ---
-    m_rightSplitter = new QSplitter(Qt::Vertical, mainSplitter);
-
-    // 3. Selected Frame Editor
-    QGroupBox* editorGroup = new QGroupBox(tr("Selected Frame Editor"), m_rightSplitter);
-    QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorGroup);
+    // 3. Selected Frame Editor Dock
+    m_editorDock = new QDockWidget(tr("Selected Frame Editor"), this);
+    m_editorDock->setObjectName("editorDock");
+    m_editorDock->setFont(boldFont);
+    QWidget* editorContent = new QWidget(m_editorDock);
+    editorContent->setStyleSheet("font-weight: normal;");
+    QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorContent);
+    editorLayoutBox->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
     QHBoxLayout* nameRow = new QHBoxLayout();
     nameRow->addWidget(new QLabel(tr("Name:")));
@@ -326,12 +361,17 @@ void MainWindow::setupUi() {
     connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onPreviewZoomChanged);
     editorLayoutBox->addWidget(m_previewView);
 
-    m_rightSplitter->addWidget(editorGroup);
+    m_editorDock->setWidget(editorContent);
+    addDockWidget(Qt::RightDockWidgetArea, m_editorDock);
 
-    // 4. Animation Test
-    QGroupBox* animGroup = new QGroupBox(tr("Animation Test"), m_rightSplitter);
-    QVBoxLayout* animLayout = new QVBoxLayout(animGroup);
-    animLayout->setContentsMargins(10, 10, 10, 10);
+    // 4. Animation Test Dock
+    m_animDock = new QDockWidget(tr("Animation Test"), this);
+    m_animDock->setObjectName("animDock");
+    m_animDock->setFont(boldFont);
+    QWidget* animContent = new QWidget(m_animDock);
+    animContent->setStyleSheet("font-weight: normal;");
+    QVBoxLayout* animLayout = new QVBoxLayout(animContent);
+    animLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
     QHBoxLayout* animControls = new QHBoxLayout();
     m_animPrevBtn = new QPushButton(tr("◀◀"));
@@ -377,41 +417,38 @@ void MainWindow::setupUi() {
     });
     animLayout->addWidget(m_animCanvas);
 
-    m_rightSplitter->addWidget(animGroup);
+    m_animDock->setWidget(animContent);
+    addDockWidget(Qt::RightDockWidgetArea, m_animDock);
 
-    mainSplitter->addWidget(m_rightSplitter);
-    mainSplitter->setStretchFactor(0, 3);
-    mainSplitter->setStretchFactor(1, 1);
+    // Initial arrangement: 
+    // Top row: Canvas | Editor
+    // Bottom row: Timelines | Anim Test
+    
+    // First, clear any default placement and set them explicitly
+    addDockWidget(Qt::TopDockWidgetArea, m_canvasDock);
+    addDockWidget(Qt::TopDockWidgetArea, m_editorDock);
+    addDockWidget(Qt::BottomDockWidgetArea, m_timelineDock);
+    addDockWidget(Qt::BottomDockWidgetArea, m_animDock);
 
-    // Sync splitters
-    m_leftSplitter->setStretchFactor(0, 1);
-    m_leftSplitter->setStretchFactor(1, 0);
-    m_rightSplitter->setStretchFactor(0, 1);
-    m_rightSplitter->setStretchFactor(1, 0);
+    splitDockWidget(m_canvasDock, m_editorDock, Qt::Horizontal);
+    splitDockWidget(m_timelineDock, m_animDock, Qt::Horizontal);
+    
+    // Ensure the top row is taller than the bottom row
+    resizeDocks({m_canvasDock, m_editorDock}, {600, 600}, Qt::Vertical);
+    resizeDocks({m_timelineDock, m_animDock}, {260, 260}, Qt::Vertical);
 
-    QList<int> initialSizes;
-    initialSizes << 560 << 300;
-    m_leftSplitter->setSizes(initialSizes);
-    m_rightSplitter->setSizes(initialSizes);
+    // Add view menu
+    m_viewMenu = menuBar()->addMenu(tr("&View"));
+    m_viewMenu->addAction(m_canvasDock->toggleViewAction());
+    m_viewMenu->addAction(m_timelineDock->toggleViewAction());
+    m_viewMenu->addAction(m_editorDock->toggleViewAction());
+    m_viewMenu->addAction(m_animDock->toggleViewAction());
 
-    connect(m_leftSplitter, &QSplitter::splitterMoved, this, [this](int, int) {
-        if (m_syncingSplitters) {
-            return;
-        }
-        m_syncingSplitters = true;
-        m_rightSplitter->setSizes(m_leftSplitter->sizes());
-        m_syncingSplitters = false;
-    });
-    connect(m_rightSplitter, &QSplitter::splitterMoved, this, [this](int, int) {
-        if (m_syncingSplitters) {
-            return;
-        }
-        m_syncingSplitters = true;
-        m_leftSplitter->setSizes(m_rightSplitter->sizes());
-        m_syncingSplitters = false;
-    });
-
-    m_mainStack->addWidget(m_editorPage);
+    // Initially hide docks for welcome page
+    m_canvasDock->hide();
+    m_timelineDock->hide();
+    m_editorDock->hide();
+    m_animDock->hide();
 
     setupStatusBarUi();
 
@@ -420,6 +457,7 @@ void MainWindow::setupUi() {
 
     setupZoomShortcuts();
 }
+
 
 void MainWindow::setupToolbar() {
     QMenuBar* mainMenuBar = menuBar();
@@ -453,6 +491,11 @@ void MainWindow::setupToolbar() {
     fileMenu->addSeparator();
     m_recentProjectsMenu = fileMenu->addMenu(tr("Recent"));
 
+    fileMenu->addSeparator();
+    QAction* quitAction = fileMenu->addAction(tr("Quit"));
+    quitAction->setShortcut(QKeySequence::Quit);
+    connect(quitAction, &QAction::triggered, this, &MainWindow::close);
+
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
     QAction* stylesAction = settingsMenu->addAction(tr("Styles..."));
     stylesAction->setToolTip(tr("Open style settings"));
@@ -469,11 +512,6 @@ void MainWindow::setupToolbar() {
     QAction* manageProfilesAction = settingsMenu->addAction(tr("Manage Profiles..."));
     manageProfilesAction->setToolTip(tr("Create and edit layout profiles"));
     connect(manageProfilesAction, &QAction::triggered, this, &MainWindow::onManageProfiles);
-
-    settingsMenu->addSeparator();
-    QAction* installCliAction = settingsMenu->addAction(tr("Install CLI Tools..."));
-    installCliAction->setToolTip(tr("Download and install the sprat CLI tools"));
-    connect(installCliAction, &QAction::triggered, this, [this]() { installCliTools(); });
 }
 
 void MainWindow::setupStatusBarUi() {
@@ -572,13 +610,16 @@ void MainWindow::setupKeyboardShortcuts() {
 
 void MainWindow::updateUiState() {
     const bool enabled = m_cliReady && !m_isLoading;
+    const bool hasModels = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
+    
     MainWindowUiState::apply(
         m_cliReady,
         m_isLoading,
-        m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty(),
+        hasModels,
         m_loadAction,
         m_profileCombo,
         m_saveAction);
+
     if (m_manageProfilesBtn) {
         m_manageProfilesBtn->setEnabled(enabled);
     }
@@ -588,11 +629,30 @@ void MainWindow::updateUiState() {
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(enabled);
     }
+
+    // Toggle editor page and docks
+    if (hasModels) {
+        m_mainStack->hide();
+        if (m_canvasDock && m_canvasDock->isHidden()) m_canvasDock->show();
+        if (m_timelineDock && m_timelineDock->isHidden()) m_timelineDock->show();
+        if (m_editorDock && m_editorDock->isHidden()) m_editorDock->show();
+        if (m_animDock && m_animDock->isHidden()) m_animDock->show();
+    } else {
+        m_mainStack->setCurrentIndex(0); // Welcome page
+        m_mainStack->show();
+        if (m_canvasDock) m_canvasDock->hide();
+        if (m_timelineDock) m_timelineDock->hide();
+        if (m_editorDock) m_editorDock->hide();
+        if (m_animDock) m_animDock->hide();
+    }
 }
 
 void MainWindow::updateMainContentView() {
-    bool hasLayout = m_canvas && m_canvas->scene() && !m_canvas->scene()->items().isEmpty();
-    m_mainStack->setCurrentWidget(hasLayout ? m_editorPage : m_welcomePage);
+    const bool hasLayout = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
+    m_mainStack->setVisible(!hasLayout);
+    if (!hasLayout) {
+        m_mainStack->setCurrentIndex(0);
+    }
 }
 
 void MainWindow::updateRecentProjectsMenu() {

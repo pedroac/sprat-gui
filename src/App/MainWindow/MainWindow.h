@@ -41,7 +41,6 @@ class QGroupBox;
 class QGraphicsView;
 class QScrollArea;
 class QPushButton;
-class QSplitter;
 class QDragEnterEvent;
 class QDropEvent;
 class QWheelEvent;
@@ -987,11 +986,13 @@ private:
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
     QLabel* m_welcomeLabel;
-    QWidget* m_editorPage;
     QLabel* m_folderLabel;
-    QSplitter* m_leftSplitter;
-    QSplitter* m_rightSplitter;
-    bool m_syncingSplitters = false;
+
+    QDockWidget* m_canvasDock = nullptr;
+    QDockWidget* m_timelineDock = nullptr;
+    QDockWidget* m_editorDock = nullptr;
+    QDockWidget* m_animDock = nullptr;
+    QMenu* m_viewMenu = nullptr;
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas = nullptr;
@@ -1008,10 +1009,12 @@ private:
     QLineEdit* m_timelineNameEdit;
     QListWidget* m_timelineList;
     QWidget* m_timelineEditorContainer;
-    QGroupBox* m_timelineDropArea;
+    QGroupBox* m_selectedTimelineGroup;
+    QWidget* m_timelineDropArea;
     QLabel* m_timelineDragHintLabel;
     TimelineListWidget* m_timelineFramesList;
     QHash<QString, QIcon> m_timelineFrameIconCache;
+    QHash<QString, QIcon> m_timelineListIconCache;
 
     // Selected Frame Editor Area
     QLineEdit* m_spriteNameEdit;

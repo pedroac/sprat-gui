@@ -153,11 +153,8 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     uiOpts["layout_zoom"] = input.layoutZoom;
     uiOpts["preview_zoom"] = input.previewZoom;
     uiOpts["animation_zoom"] = input.animationZoom;
-    if (!input.leftSplitterSizes.isEmpty()) {
-        uiOpts["left_splitter_sizes"] = toJsonArray(input.leftSplitterSizes);
-    }
-    if (!input.rightSplitterSizes.isEmpty()) {
-        uiOpts["right_splitter_sizes"] = toJsonArray(input.rightSplitterSizes);
+    if (!input.dockState.isEmpty()) {
+        uiOpts["dock_state"] = QString::fromLatin1(input.dockState.toBase64());
     }
     root["ui_options"] = uiOpts;
 
@@ -296,8 +293,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.layoutZoom = uiOpts["layout_zoom"].toDouble(1.0);
     out.previewZoom = uiOpts["preview_zoom"].toDouble(1.0);
     out.animationZoom = uiOpts["animation_zoom"].toDouble(1.0);
-    out.leftSplitterSizes = fromJsonArray(uiOpts["left_splitter_sizes"]);
-    out.rightSplitterSizes = fromJsonArray(uiOpts["right_splitter_sizes"]);
+    out.dockState = QByteArray::fromBase64(uiOpts["dock_state"].toString().toLatin1());
 
     QJsonObject settings = root["settings"].toObject();
     {

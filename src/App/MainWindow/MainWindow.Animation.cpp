@@ -31,11 +31,34 @@ int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selecte
 }
 
 void MainWindow::refreshTimelineList() {
+    int currentRow = m_timelineList->currentRow();
+    m_timelineList->blockSignals(true);
     m_timelineList->clear();
     for (const auto& timeline : m_session->timelines) {
-        m_timelineList->addItem(
-            QStringLiteral("%1 (%2)").arg(timeline.name).arg(timeline.frames.size()));
+        QIcon icon;
+        if (!timeline.frames.isEmpty()) {
+            int middleIndex = timeline.frames.size() / 2;
+            QString middlePath = timeline.frames[middleIndex];
+            icon = m_timelineListIconCache.value(middlePath);
+            if (icon.isNull()) {
+                icon = QIcon(middlePath);
+                m_timelineListIconCache.insert(middlePath, icon);
+            }
+        }
+        
+        QListWidgetItem* item = new QListWidgetItem(
+            icon,
+            QStringLiteral("%1 | %2 frames | %3 fps")
+                .arg(timeline.name)
+                .arg(timeline.frames.size())
+                .arg(timeline.fps)
+        );
+        m_timelineList->addItem(item);
     }
+    if (currentRow >= 0 && currentRow < m_timelineList->count()) {
+        m_timelineList->setCurrentRow(currentRow);
+    }
+    m_timelineList->blockSignals(false);
     m_timelineList->setVisible(!m_session->timelines.isEmpty());
 }
 
@@ -71,6 +94,7 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
     }
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
     refreshTimelineFrames();
+    refreshTimelineList();
     fitAnimationToViewport();
     refreshAnimationTest();
 }
@@ -80,6 +104,7 @@ void MainWindow::onFrameMoved(int from, int to) {
         return;
     }
     refreshTimelineFrames();
+    refreshTimelineList();
     refreshAnimationTest();
 }
 
@@ -88,6 +113,7 @@ void MainWindow::onFrameDuplicateRequested(int index) {
         return;
     }
     refreshTimelineFrames();
+    refreshTimelineList();
     refreshAnimationTest();
 }
 
@@ -105,6 +131,7 @@ void MainWindow::onFrameRemoveRequested() {
 
     AnimationTimelineOps::removeFrames(m_session->timelines, m_session->selectedTimelineIndex, rows);
     refreshTimelineFrames();
+    refreshTimelineList();
     refreshAnimationTest();
 }
 

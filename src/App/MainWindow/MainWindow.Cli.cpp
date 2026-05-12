@@ -466,7 +466,7 @@ void MainWindow::setupCliInstallOverlay() {
         return;
     }
     m_cliInstallOverlay = new QWidget(this);
-    m_cliInstallOverlay->setStyleSheet("background: rgba(40, 40, 40, 200); border-radius: 8px;");
+    m_cliInstallOverlay->setStyleSheet("background: rgba(40, 40, 40, 200); border-radius: 8px; color: white;");
     m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     QVBoxLayout* layout = new QVBoxLayout(m_cliInstallOverlay);
     layout->setAlignment(Qt::AlignCenter);
@@ -481,6 +481,8 @@ void MainWindow::setupCliInstallOverlay() {
     m_cliInstallProgress->setRange(0, 0);
     m_cliInstallProgress->setFixedWidth(200);
     m_cliInstallProgress->setMaximumHeight(6);
+    m_cliInstallProgress->setStyleSheet("color: white;");
+    m_cliInstallProgress->hide();
     layout->addWidget(m_cliInstallProgress);
 
     m_cliInstallLog = new QPlainTextEdit(m_cliInstallOverlay);
@@ -488,6 +490,7 @@ void MainWindow::setupCliInstallOverlay() {
     m_cliInstallLog->document()->setMaximumBlockCount(100);
     m_cliInstallLog->setFixedSize(340, 100);
     m_cliInstallLog->setStyleSheet("background: rgba(0, 0, 0, 90); color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 60); font-size: 10px;");
+    m_cliInstallLog->hide();
     layout->addWidget(m_cliInstallLog);
 
     m_cancelLoadingButton = new QPushButton(tr("Cancel"), m_cliInstallOverlay);
@@ -538,6 +541,7 @@ void MainWindow::showCliInstallOverlay() {
     if (m_cliInstallLog) {
         m_cliInstallLog->clear();
         m_cliInstallLog->appendPlainText(tr("Starting CLI install..."));
+        m_cliInstallLog->show();
     }
     updateCliOverlayGeometry();
     m_cliInstallOverlay->show();

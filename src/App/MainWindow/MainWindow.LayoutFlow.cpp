@@ -12,7 +12,9 @@
 #include <QMap>
 #include <QMessageBox>
 #include <QProcess>
+#include <QPushButton>
 #include <QProgressBar>
+#include <QPlainTextEdit>
 #include <QStackedWidget>
 #include <QStandardItem>
 #include <QStandardItemModel>
@@ -326,6 +328,9 @@ void MainWindow::setLoading(bool loading) {
         if (m_cliInstallProgress) {
             m_cliInstallProgress->hide();
         }
+        if (m_cliInstallLog) {
+            m_cliInstallLog->hide();
+        }
         if (m_cancelLoadingButton) {
             m_cancelLoadingButton->setVisible(!m_cliInstallInProgress);
         }
@@ -349,9 +354,6 @@ void MainWindow::setLoading(bool loading) {
             m_welcomeLabel->setText(tr("Drag and drop a folder, image file, archive (zip/tar), or URL"));
         }
         if (!m_cliInstallInProgress && m_cliInstallOverlay) {
-            if (m_cliInstallProgress) {
-                m_cliInstallProgress->show();
-            }
             m_cliInstallOverlay->hide();
             m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
             m_loadingOverlayVisible = false;

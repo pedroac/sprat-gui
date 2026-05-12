@@ -61,7 +61,7 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   - `spratpack`
   - `spratconvert` (optional for format transforms)
   - libsquish (bundled in sprat-cli for DXT texture compression)
-  *(If the app detects them missing it can run the bundled installer and drop binaries into `~/.local/bin`.)*
+  *(If the app detects them missing it will offer to download and build them for you.)*
   - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratframes`, `spratlayout`, `spratpack`, and `spratconvert` from it, or let you point Settings directly at those binaries.
 - Optional export tools:
   - ImageMagick (`magick` or `convert`) for GIF
@@ -140,7 +140,7 @@ Run:
 ## Quick start
 
 1. Launch the app.
-2. Open **Settings** and verify CLI tool paths (or use install action); optionally enable **Deduplicate identical sprites**.
+2. Verify CLI tool paths in **Settings → CLI Tools** (the app prompts to install them if missing); optionally enable **Deduplicate identical sprites** in **Settings → Spritesheet**.
 3. Click **Load Images Folder** and select your frames directory.
 4. Adjust layout options (profile/padding/trim) and use **Manage Profiles** to configure per-profile output processing (GPU compression, artifact reduction).
 5. Select sprites to edit pivots/markers.
@@ -150,11 +150,14 @@ Run:
 
 ## UI workflow
 
-- **CLI Tools / Settings**
-  - On first launch the toolbar shows “CLI missing”; click Settings to point to `spratframes`, `spratlayout`, `spratpack`, and optionally `spratconvert`, or use the “Install CLI Tools” button to download/build into `~/.local/bin`.
-  - **Visual Customization**: Configure workspace and sprite frame background colors, toggle the transparency checkerboard, and set the color and style (Solid, Dash, etc.) of sprite borders.
-  - **Synchronization**: Choose between **None**, **Manual** (sync on demand), or **Watch** (live file system monitoring) to keep your project in sync with the source images folder.
+- **CLI tools configuration / missing detection**
+  - On first launch, if the required Sprat binaries are missing, the app displays a "CLI missing" status and prompts you to either point to existing binaries or download/install them automatically into `~/.local/bin`.
+  - You can manually configure binary paths anytime in **Settings → CLI Tools**.
   - ![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
+
+- **Visual customization & Synchronization**
+  - **Styles**: Configure workspace and sprite frame background colors, toggle the transparency checkerboard, and set the color and style (Solid, Dash, etc.) of sprite borders in **Settings → Styles**.
+  - **Synchronization**: Choose between **None**, **Manual** (sync on demand), or **Watch** (live file system monitoring) in **Settings → Spritesheet** to keep your project in sync with the source images folder.
 
 - **Profile management with output processing**
   - Use **Manage Profiles** to create and configure layout profiles.
@@ -202,8 +205,10 @@ Run:
   - ![Apply pivot to selected](README_assets/apply_pivot_to_selected.png)
 
 - **Animation authoring**
-  - Timelines panel lets you add simple names, remove, rename, and select timelines.
-  - Drag frames from the layout into the timeline list; reorder via drop or context actions; duplicate/remove frames with toolbar buttons.
+  - Timelines panel lists all animations with detailed info: `<name> | <frames count> frames | <fps> fps`.
+  - List items display an icon preview using the middle frame of the sequence.
+  - The **Selected Timeline** group provides controls to rename, adjust FPS, and manage the frame sequence ("tape").
+  - Drag frames from the layout into the timeline; reorder via drag-and-drop or context actions; duplicate/remove frames with toolbar buttons.
   - Animation test area exposes play/pause/step controls plus timeline FPS and zoom controls.
   - The animation test area auto-sizes to the widest/tallest frame in the current timeline, keeps frames fully visible, and uses scrollbars when content exceeds the viewport.
   - Animation test preview supports wheel scrolling, `Ctrl+Wheel` zoom, and panning (`Middle Mouse Drag` or `Space + Left Drag`).
@@ -306,7 +311,7 @@ Generation behavior:
 ## Troubleshooting
 
 - **”CLI missing” at startup**
-  Open Settings and set absolute paths for Sprat binaries (`spratframes`, `spratlayout`, `spratpack`, optional `spratconvert`), or install them from the app.
+  The app will prompt you to install them automatically. Alternatively, open **Settings → CLI Tools** and set absolute paths for your own Sprat binaries.
 
 - **Cannot save/load `.zip` project**
   Ensure `zip`/`unzip` are installed and available in `PATH`.

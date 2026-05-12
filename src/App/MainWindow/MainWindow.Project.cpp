@@ -12,6 +12,7 @@
 #include "ProjectPayloadCodec.h"
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
+#include <QDockWidget>
 #include "ResolutionUtils.h"
 #include "FolderSyncService.h"
 #include "ImportPathSupport.h"
@@ -722,14 +723,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.layoutZoom = m_layoutZoomSpin->value() / 100.0;
     input.previewZoom = m_previewZoomSpin->value() / 100.0;
     input.animationZoom = m_animZoomSpin->value() / 100.0;
-    if (m_leftSplitter) {
-        const QList<int> splitterSizes = m_leftSplitter->sizes();
-        input.leftSplitterSizes = QVector<int>(splitterSizes.begin(), splitterSizes.end());
-    }
-    if (m_rightSplitter) {
-        const QList<int> splitterSizes = m_rightSplitter->sizes();
-        input.rightSplitterSizes = QVector<int>(splitterSizes.begin(), splitterSizes.end());
-    }
+    input.dockState = saveState();
     input.appSettings = m_settings;
     input.cliPaths = m_cliPaths;
     input.saveConfig = config;
@@ -1198,11 +1192,8 @@ void MainWindow::applyProjectPayload() {
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(true);
     }
-    if (m_leftSplitter && !applied.leftSplitterSizes.isEmpty()) {
-        m_leftSplitter->setSizes(QList<int>(applied.leftSplitterSizes.begin(), applied.leftSplitterSizes.end()));
-    }
-    if (m_rightSplitter && !applied.rightSplitterSizes.isEmpty()) {
-        m_rightSplitter->setSizes(QList<int>(applied.rightSplitterSizes.begin(), applied.rightSplitterSizes.end()));
+    if (!applied.dockState.isEmpty()) {
+        restoreState(applied.dockState);
     }
 
     m_settings = applied.appSettings;

@@ -27,8 +27,7 @@ struct ProjectPayloadBuildInput {
     double layoutZoom = 1.0;
     double previewZoom = 1.0;
     double animationZoom = 1.0;
-    QVector<int> leftSplitterSizes;
-    QVector<int> rightSplitterSizes;
+    QByteArray dockState;
     AppSettings appSettings;
     CliPaths cliPaths;
     SaveConfig saveConfig;
@@ -49,8 +48,7 @@ struct ProjectPayloadApplyResult {
     double layoutZoom = 1.0;
     double previewZoom = 1.0;
     double animationZoom = 1.0;
-    QVector<int> leftSplitterSizes;
-    QVector<int> rightSplitterSizes;
+    QByteArray dockState;
     AppSettings appSettings;
     CliPaths cliPaths;
     SaveConfig saveConfig;

@@ -141,16 +141,9 @@ void SettingsDialog::setupUi() {
     baseDirLayout->addWidget(m_cliBaseDirEdit);
     baseDirLayout->addWidget(m_cliBaseDirBtn);
     cliForm->addRow(tr("Base Directory:"), baseDirLayout);
-
-    m_installCliBtn = new QPushButton(tr("Install CLI Tools"), this);
-    m_installCliBtn->setIcon(QIcon::fromTheme("document-save"));
-    connect(m_installCliBtn, &QPushButton::clicked, this, &SettingsDialog::installCliToolsRequested);
-    cliForm->addRow("", m_installCliBtn);
     
     contentLayout->addWidget(m_cliGroup);
     m_cliGroup->setVisible(m_initialSection == Section::CliTools);
-
-    updateCliUi();
 #endif
 
     contentLayout->addStretch(1);
@@ -200,20 +193,6 @@ void SettingsDialog::pickCliBaseDir() {
     if (!dir.isEmpty()) {
         m_cliPaths.baseDir = dir;
         m_cliBaseDirEdit->setText(dir);
-        updateCliUi();
-    }
-}
-
-void SettingsDialog::updateCliUi() {
-    // Check if tools are present (either in baseDir or PATH)
-    bool allFound = !m_cliPaths.layoutBinary.isEmpty() && 
-                    !m_cliPaths.packBinary.isEmpty() && 
-                    !m_cliPaths.framesBinary.isEmpty();
-    
-    if (allFound) {
-        m_installCliBtn->setText(tr("Update CLI Tools"));
-    } else {
-        m_installCliBtn->setText(tr("Install CLI Tools"));
     }
 }
 

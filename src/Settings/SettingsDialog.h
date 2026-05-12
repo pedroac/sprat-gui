@@ -38,7 +38,6 @@ private:
     void focusSection(Section section);
     QPushButton* createColorButton(const QColor& color);
     void updateColorButton(QPushButton* btn, const QColor& color);
-    void updateCliUi();
 
     AppSettings m_settings;
     CliPaths m_cliPaths;
@@ -59,7 +58,6 @@ private:
 
     QLineEdit* m_cliBaseDirEdit;
     QPushButton* m_cliBaseDirBtn;
-    QPushButton* m_installCliBtn;
 
     // Sync controls
     QComboBox* m_syncModeCombo;
