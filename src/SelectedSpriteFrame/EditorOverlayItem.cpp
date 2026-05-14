@@ -1,5 +1,6 @@
 #include "EditorOverlayItem.h"
 #include <QPainter>
+#include <QFontMetrics>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSceneHoverEvent>
 #include <QCursor>
@@ -13,6 +14,16 @@
 namespace {
 QString trOverlay(const char* text) {
     return QCoreApplication::translate("EditorOverlayItem", text);
+}
+
+inline double distSq(const QPointF& a, const QPointF& b) {
+    double dx = a.x() - b.x();
+    double dy = a.y() - b.y();
+    return dx * dx + dy * dy;
+}
+
+inline double dist(const QPointF& a, const QPointF& b) {
+    return std::sqrt(distSq(a, b));
 }
 }
 
@@ -118,19 +129,25 @@ void EditorOverlayItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*
 }
 
 void EditorOverlayItem::drawPivot(QPainter* painter, int x, int y) {
+    static const QPen kPivotOutlinePen = []() {
+        QPen p(Qt::black, 5);
+        p.setCosmetic(true);
+        return p;
+    }();
+    static const QPen kPivotPen = []() {
+        QPen p(QColor(255, 215, 0), 2);
+        p.setCosmetic(true);
+        return p;
+    }();
+
     double scale = getScale();
     double len = 10 * scale;
 
-    QPen outlinePen(Qt::black, 5);
-    outlinePen.setCosmetic(true);
-    painter->setPen(outlinePen);
+    painter->setPen(kPivotOutlinePen);
     painter->drawLine(QPointF(x - len, y), QPointF(x + len, y));
     painter->drawLine(QPointF(x, y - len), QPointF(x, y + len));
 
-    QPen pen(QColor(255, 215, 0), 2); // Gold
-    pen.setCosmetic(true);
-    painter->setPen(pen);
-
+    painter->setPen(kPivotPen);
     painter->drawLine(QPointF(x - len, y), QPointF(x + len, y));
     painter->drawLine(QPointF(x, y - len), QPointF(x, y + len));
 }
@@ -158,10 +175,10 @@ double EditorOverlayItem::distancePointToSegment(const QPointF& p, const QPointF
     QPointF ab = b - a;
     QPointF ap = p - a;
     double ab_len2 = ab.x() * ab.x() + ab.y() * ab.y();
-    if (ab_len2 <= 0.00001) return QLineF(p, a).length();
+    if (ab_len2 <= 0.00001) return dist(p, a);
     double t = qMax(0.0, qMin(1.0, (ap.x() * ab.x() + ap.y() * ab.y()) / ab_len2));
     QPointF closest = a + ab * t;
-    return QLineF(p, closest).length();
+    return dist(p, closest);
 }
 
 int EditorOverlayItem::getPolygonHitEdge(const NamedPoint* p, const QPointF& pos) const {
@@ -177,52 +194,70 @@ int EditorOverlayItem::getPolygonHitEdge(const NamedPoint* p, const QPointF& pos
 }
 
 void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
+    static const QPen kSelectedPen = []() {
+        QPen p(Qt::green, 2);
+        p.setCosmetic(true);
+        return p;
+    }();
+    static const QPen kUnselectedPen = []() {
+        QPen p(Qt::cyan, 2);
+        p.setCosmetic(true);
+        return p;
+    }();
+    static const QColor kSelectedFill(0, 128, 0, 60);   // green alpha 60
+    static const QColor kUnselectedFill(0, 255, 255, 30); // cyan alpha 30
+    static const QColor kVertexHighlight(255, 50, 50);
+    static const QColor kChipBg(0, 0, 0, 160);
+    static const QFont kLabelFont = []() {
+        QFont f;
+        f.setPixelSize(11);
+        return f;
+    }();
+    static const QFontMetrics kLabelFm(kLabelFont);
+
     if (m_sprites.isEmpty()) return;
     double scale = getScale();
+
+    QPainterPath markerPath; // reused across iterations
 
     for (const auto& sprite : m_sprites) {
         for (int i = 0; i < sprite->points.size(); ++i) {
             const auto& p = sprite->points[i];
             bool selected = (p.name == m_selectedMarkerName);
             if (selected != drawSelected) continue;
-            
-            QColor color = selected ? Qt::green : Qt::cyan;
-            QPainterPath path;
+
+            markerPath.clear();
 
             if (p.kind == MarkerKind::Point) {
                 double len = 6 * scale;
-                path.moveTo(p.x - len, p.y - len); path.lineTo(p.x + len, p.y + len);
-                path.moveTo(p.x + len, p.y - len); path.lineTo(p.x - len, p.y + len);
+                markerPath.moveTo(p.x - len, p.y - len); markerPath.lineTo(p.x + len, p.y + len);
+                markerPath.moveTo(p.x + len, p.y - len); markerPath.lineTo(p.x - len, p.y + len);
             } else if (p.kind == MarkerKind::Circle) {
-                path.addEllipse(QPointF(p.x, p.y), p.radius, p.radius);
+                markerPath.addEllipse(QPointF(p.x, p.y), p.radius, p.radius);
             } else if (p.kind == MarkerKind::Rectangle) {
-                path.addRect(p.x, p.y, p.w, p.h);
+                markerPath.addRect(p.x, p.y, p.w, p.h);
             } else if (p.kind == MarkerKind::Polygon) {
                 if (p.polygonPoints.size() > 1) {
                     QPolygonF poly;
                     for(const auto& pt : p.polygonPoints) poly << pt;
-                    path.addPolygon(poly);
-                    path.closeSubpath();
+                    markerPath.addPolygon(poly);
+                    markerPath.closeSubpath();
                 }
             }
 
-            QPen colorPen(color, 2);
-            colorPen.setCosmetic(true);
-            painter->setPen(colorPen);
-            
+            painter->setPen(selected ? kSelectedPen : kUnselectedPen);
+
             if (p.kind != MarkerKind::Point) {
-                QColor fillColor = color;
-                fillColor.setAlpha(selected ? 60 : 30);
-                painter->setBrush(fillColor);
+                painter->setBrush(selected ? kSelectedFill : kUnselectedFill);
             } else {
                 painter->setBrush(Qt::NoBrush);
             }
-            painter->drawPath(path);
+            painter->drawPath(markerPath);
 
             if (selected) {
                 painter->setPen(Qt::NoPen);
                 painter->setBrush(Qt::white);
-                
+
                 if (p.kind == MarkerKind::Circle) {
                     painter->drawEllipse(QPointF(p.x + p.radius, p.y), 4 * scale, 4 * scale);
                 } else if (p.kind == MarkerKind::Rectangle) {
@@ -231,7 +266,7 @@ void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
                     for (int j = 0; j < p.polygonPoints.size(); ++j) {
                         const auto& pt = p.polygonPoints[j];
                         if (j == m_selectedVertexIndex) {
-                            painter->setBrush(QColor(255, 50, 50));
+                            painter->setBrush(kVertexHighlight);
                             painter->drawRect(QRectF(pt.x() - 4*scale, pt.y() - 4*scale, 8*scale, 8*scale));
                         } else {
                             painter->setBrush(Qt::white);
@@ -239,34 +274,31 @@ void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
                         }
                     }
                 }
-                
+
                 // Draw Label with dark chip background
-                QFont font = painter->font();
-                font.setPixelSize(11);
-                painter->setFont(font);
-                QFontMetrics fm(font);
-                
+                painter->setFont(kLabelFont);
+
                 int padding = 4;
-                int textWidth = fm.horizontalAdvance(p.name);
-                int textHeight = fm.height();
-                
+                int textWidth = kLabelFm.horizontalAdvance(p.name);
+                int textHeight = kLabelFm.height();
+
                 // Position label relative to marker
                 QPointF textBasePos(p.x + 10*scale, p.y - 10*scale);
-                
+
                 // Correct for scale to keep chip at constant screen size
                 painter->save();
                 painter->translate(textBasePos);
                 painter->scale(scale, scale);
-                
+
                 QRectF chipRect(0, -textHeight, textWidth + padding * 2, textHeight + padding);
-                
+
                 painter->setPen(Qt::NoPen);
-                painter->setBrush(QColor(0, 0, 0, 160));
+                painter->setBrush(kChipBg);
                 painter->drawRoundedRect(chipRect, 4, 4);
-                
+
                 painter->setPen(Qt::white);
                 painter->drawText(chipRect.adjusted(padding, 0, -padding, 0), Qt::AlignLeft | Qt::AlignVCenter, p.name);
-                
+
                 painter->restore();
             }
         }
@@ -278,13 +310,14 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
     QPointF pos = event->pos();
     double scale = getScale();
     double hitThreshold = 10.0 * scale;
+    double hitThresholdSq = hitThreshold * hitThreshold;
 
     if (event->button() == Qt::RightButton) {
         if (!m_selectedMarkerName.isEmpty()) {
             NamedPoint* p = getNamedPoint(m_selectedMarkerName);
             if (p && p->kind == MarkerKind::Polygon) {
                 for (int i = 0; i < p->polygonPoints.size(); ++i) {
-                    if (QLineF(pos, p->polygonPoints[i]).length() < hitThreshold) {
+                    if (distSq(pos, p->polygonPoints[i]) < hitThresholdSq) {
                         m_selectedVertexIndex = i;
                         update();
                         QMenu menu;
@@ -300,7 +333,7 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         }
 
         auto activeSprite = m_sprites.last();
-        if (QLineF(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)).length() < hitThreshold) {
+        if (distSq(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)) < hitThresholdSq) {
             QMenu menu;
             m_suppressNextViewContextMenu = true;
             QAction* left = menu.addAction(trOverlay("Left"));
@@ -336,8 +369,8 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         for (int i = activeSprite->points.size() - 1; i >= 0; --i) {
             const auto& p = activeSprite->points[i];
             bool hit = false;
-            if (p.kind == MarkerKind::Point) hit = QLineF(pos, QPointF(p.x, p.y)).length() < hitThreshold;
-            else if (p.kind == MarkerKind::Circle) hit = QLineF(pos, QPointF(p.x, p.y)).length() < p.radius;
+            if (p.kind == MarkerKind::Point) hit = distSq(pos, QPointF(p.x, p.y)) < hitThresholdSq;
+            else if (p.kind == MarkerKind::Circle) hit = dist(pos, QPointF(p.x, p.y)) < p.radius;
             else if (p.kind == MarkerKind::Rectangle) hit = QRectF(p.x, p.y, p.w, p.h).contains(pos);
             else if (p.kind == MarkerKind::Polygon) {
                 QPolygonF poly; for(const auto& pt : p.polygonPoints) poly << pt;
@@ -380,7 +413,7 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                     return;
                 }
             } else if (p->kind == MarkerKind::Circle) {
-                if (QLineF(pos, QPointF(p->x + p->radius, p->y)).length() < hitThreshold) {
+                if (distSq(pos, QPointF(p->x + p->radius, p->y)) < hitThresholdSq) {
                     m_dragMode = CircleRadius;
                     m_dragTargetName = p->name;
                     m_dragStartPos = pos;
@@ -391,7 +424,7 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                 }
             } else if (p->kind == MarkerKind::Polygon) {
                 for (int i = 0; i < p->polygonPoints.size(); ++i) {
-                    if (QLineF(pos, p->polygonPoints[i]).length() < hitThreshold) {
+                    if (distSq(pos, p->polygonPoints[i]) < hitThresholdSq) {
                         m_dragMode = PolyVertex;
                         m_dragTargetName = p->name;
                         m_dragVertexIndex = i;
@@ -418,8 +451,8 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
             }
 
             bool hit = false;
-            if (p->kind == MarkerKind::Point) hit = QLineF(pos, QPointF(p->x, p->y)).length() < hitThreshold;
-            else if (p->kind == MarkerKind::Circle) hit = QLineF(pos, QPointF(p->x, p->y)).length() < p->radius;
+            if (p->kind == MarkerKind::Point) hit = distSq(pos, QPointF(p->x, p->y)) < hitThresholdSq;
+            else if (p->kind == MarkerKind::Circle) hit = dist(pos, QPointF(p->x, p->y)) < p->radius;
             else if (p->kind == MarkerKind::Rectangle) hit = QRectF(p->x, p->y, p->w, p->h).contains(pos);
             else if (p->kind == MarkerKind::Polygon) {
                 QPolygonF poly; for(const auto& pt : p->polygonPoints) poly << pt;
@@ -443,8 +476,8 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
     for (int i = activeSprite->points.size() - 1; i >= 0; --i) {
         const auto& p = activeSprite->points[i];
         bool hit = false;
-        if (p.kind == MarkerKind::Point) hit = QLineF(pos, QPointF(p.x, p.y)).length() < hitThreshold;
-        else if (p.kind == MarkerKind::Circle) hit = QLineF(pos, QPointF(p.x, p.y)).length() < p.radius;
+        if (p.kind == MarkerKind::Point) hit = distSq(pos, QPointF(p.x, p.y)) < hitThresholdSq;
+        else if (p.kind == MarkerKind::Circle) hit = dist(pos, QPointF(p.x, p.y)) < p.radius;
         else if (p.kind == MarkerKind::Rectangle) hit = QRectF(p.x, p.y, p.w, p.h).contains(pos);
         else if (p.kind == MarkerKind::Polygon) {
             QPolygonF poly; for(const auto& pt : p.polygonPoints) poly << pt;
@@ -487,7 +520,7 @@ void EditorOverlayItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
         if (m_dragMode == Point || m_dragMode == RectMove) {
             p->x = m_dragOriginalPos.x() + qRound(delta.x()); p->y = m_dragOriginalPos.y() + qRound(delta.y());
         } else if (m_dragMode == CircleRadius) {
-            p->radius = qMax(1, qRound(QLineF(QPointF(p->x, p->y), pos).length()));
+            p->radius = qMax(1, qRound(dist(QPointF(p->x, p->y), pos)));
         } else if (m_dragMode == RectResize) {
             QRect r = m_dragOriginalRect;
             switch (m_resizeHandle) {
@@ -554,7 +587,7 @@ void EditorOverlayItem::updateResizeCursor(ResizeHandle h) {
 
 Qt::CursorShape EditorOverlayItem::cursorForPosition(const QPointF& pos) const {
     if (m_sprites.isEmpty()) return Qt::ArrowCursor;
-    double scale = getScale(); double hitThreshold = 10.0 * scale;
+    double scale = getScale(); double hitThreshold = 10.0 * scale; double hitThresholdSq = hitThreshold * hitThreshold;
     auto activeSprite = m_sprites.last();
     if (!m_selectedMarkerName.isEmpty()) {
         NamedPoint* p = const_cast<EditorOverlayItem*>(this)->getNamedPoint(m_selectedMarkerName);
@@ -571,15 +604,15 @@ Qt::CursorShape EditorOverlayItem::cursorForPosition(const QPointF& pos) const {
                     }
                 }
             } else if (p->kind == MarkerKind::Circle) {
-                if (QLineF(pos, QPointF(p->x + p->radius, p->y)).length() < hitThreshold) return Qt::SizeHorCursor;
+                if (distSq(pos, QPointF(p->x + p->radius, p->y)) < hitThresholdSq) return Qt::SizeHorCursor;
             } else if (p->kind == MarkerKind::Polygon) {
-                for (const auto& pt : p->polygonPoints) if (QLineF(pos, pt).length() < hitThreshold) return Qt::SizeAllCursor;
+                for (const auto& pt : p->polygonPoints) if (distSq(pos, pt) < hitThresholdSq) return Qt::SizeAllCursor;
                 if (getPolygonHitEdge(p, pos) != -1) return Qt::CrossCursor;
             }
             
             bool hit = false;
-            if (p->kind == MarkerKind::Point) hit = QLineF(pos, QPointF(p->x, p->y)).length() < hitThreshold;
-            else if (p->kind == MarkerKind::Circle) hit = QLineF(pos, QPointF(p->x, p->y)).length() < p->radius;
+            if (p->kind == MarkerKind::Point) hit = distSq(pos, QPointF(p->x, p->y)) < hitThresholdSq;
+            else if (p->kind == MarkerKind::Circle) hit = dist(pos, QPointF(p->x, p->y)) < p->radius;
             else if (p->kind == MarkerKind::Rectangle) hit = QRectF(p->x, p->y, p->w, p->h).contains(pos);
             else if (p->kind == MarkerKind::Polygon) {
                 QPolygonF poly; for(const auto& pt : p->polygonPoints) poly << pt;
@@ -592,8 +625,8 @@ Qt::CursorShape EditorOverlayItem::cursorForPosition(const QPointF& pos) const {
     for (int i = activeSprite->points.size() - 1; i >= 0; --i) {
         const auto& p = activeSprite->points[i];
         bool hit = false;
-        if (p.kind == MarkerKind::Point) hit = QLineF(pos, QPointF(p.x, p.y)).length() < hitThreshold;
-        else if (p.kind == MarkerKind::Circle) hit = QLineF(pos, QPointF(p.x, p.y)).length() < p.radius;
+        if (p.kind == MarkerKind::Point) hit = distSq(pos, QPointF(p.x, p.y)) < hitThresholdSq;
+        else if (p.kind == MarkerKind::Circle) hit = dist(pos, QPointF(p.x, p.y)) < p.radius;
         else if (p.kind == MarkerKind::Rectangle) hit = QRectF(p.x, p.y, p.w, p.h).contains(pos);
         else if (p.kind == MarkerKind::Polygon) {
             QPolygonF poly; for(const auto& pt : p.polygonPoints) poly << pt;
@@ -602,7 +635,7 @@ Qt::CursorShape EditorOverlayItem::cursorForPosition(const QPointF& pos) const {
         if (hit) return Qt::SizeAllCursor;
     }
 
-    if (QLineF(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)).length() < hitThreshold) return Qt::SizeAllCursor;
+    if (distSq(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)) < hitThresholdSq) return Qt::SizeAllCursor;
 
     return Qt::CrossCursor;
 }
@@ -656,12 +689,12 @@ void EditorOverlayItem::updateLayout() { prepareGeometryChange(); update(); }
 
 bool EditorOverlayItem::hasContextMenuTargetAt(const QPointF& pos) const {
     if (m_sprites.isEmpty()) return false;
-    double scale = getScale(); double hitThreshold = 10.0 * scale; auto activeSprite = m_sprites.last();
-    if (QLineF(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)).length() < hitThreshold) return true;
+    double scale = getScale(); double hitThreshold = 10.0 * scale; double hitThresholdSq = hitThreshold * hitThreshold; auto activeSprite = m_sprites.last();
+    if (distSq(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)) < hitThresholdSq) return true;
     for (const auto& p : activeSprite->points) {
         bool hit = false;
-        if (p.kind == MarkerKind::Point) hit = QLineF(pos, QPointF(p.x, p.y)).length() < hitThreshold;
-        else if (p.kind == MarkerKind::Circle) hit = QLineF(pos, QPointF(p.x, p.y)).length() < p.radius;
+        if (p.kind == MarkerKind::Point) hit = distSq(pos, QPointF(p.x, p.y)) < hitThresholdSq;
+        else if (p.kind == MarkerKind::Circle) hit = dist(pos, QPointF(p.x, p.y)) < p.radius;
         else if (p.kind == MarkerKind::Rectangle) hit = QRectF(p.x, p.y, p.w, p.h).contains(pos);
         else if (p.kind == MarkerKind::Polygon) {
             QPolygonF poly; for(const auto& pt : p.polygonPoints) poly << pt;

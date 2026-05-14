@@ -64,7 +64,13 @@ void MainWindow::refreshTimelineList() {
 
 void MainWindow::refreshTimelineFrames() {
     if (m_timelineFrameIconCache.size() > 4096) {
-        m_timelineFrameIconCache.clear();
+        // Evict roughly half the cache to avoid sudden stutter from full clear
+        auto it = m_timelineFrameIconCache.begin();
+        int toRemove = m_timelineFrameIconCache.size() / 2;
+        while (toRemove > 0 && it != m_timelineFrameIconCache.end()) {
+            it = m_timelineFrameIconCache.erase(it);
+            --toRemove;
+        }
     }
     m_timelineFramesList->setUpdatesEnabled(false);
     m_timelineFramesList->clear();
@@ -270,7 +276,9 @@ void MainWindow::refreshAnimationTest() {
     }
     // Update button icon to reflect current playing state
     if (m_animPlayPauseBtn) {
-        m_animPlayPauseBtn->setIcon(m_animPlaying ? QIcon::fromTheme("media-playback-pause") : QIcon::fromTheme("media-playback-start"));
+        static const QIcon kPlayIcon = QIcon::fromTheme("media-playback-start");
+        static const QIcon kPauseIcon = QIcon::fromTheme("media-playback-pause");
+        m_animPlayPauseBtn->setIcon(m_animPlaying ? kPauseIcon : kPlayIcon);
     }
 
     m_animStatusLabel->setText(statusText);

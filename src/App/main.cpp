@@ -122,6 +122,10 @@ int main(int argc, char *argv[]) {
                 setTimeout(ensureCanvasFocus, 0);
             }
         }, true);
+
+        // Drag event interception for non-file content (Qt WASM crash workaround)
+        // is handled by sprat_install_drop_handlers() in WasmFileDialog.cpp,
+        // which also handles file drops and URL drops.
     );
 #endif
 

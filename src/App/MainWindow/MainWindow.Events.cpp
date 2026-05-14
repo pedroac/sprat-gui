@@ -29,10 +29,6 @@ namespace {
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     if (!event->mimeData()->hasUrls()) {
         return;
     }
@@ -52,10 +48,6 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void MainWindow::dropEvent(QDropEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     const QList<QUrl> urls = event->mimeData()->urls();
     if (urls.count() != 1) {
         return;

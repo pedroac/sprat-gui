@@ -13,6 +13,17 @@ namespace {
 QString trAnimationPreview(const char* text) {
     return QCoreApplication::translate("AnimationPreviewService", text);
 }
+
+QHash<QString, SpritePtr> buildSpriteMap(const QVector<LayoutModel>& layoutModels) {
+    QHash<QString, SpritePtr> map;
+    for (const auto& model : layoutModels) {
+        map.reserve(map.size() + model.sprites.size());
+        for (const auto& sprite : model.sprites) {
+            map.insert(sprite->path, sprite);
+        }
+    }
+    return map;
+}
 }
 
 QPixmap AnimationPreviewService::refresh(
@@ -41,18 +52,13 @@ QPixmap AnimationPreviewService::refresh(
         frameIndex = 0;
     }
 
+    const auto spriteMap = buildSpriteMap(layoutModels);
+
     QString path = frames[frameIndex];
     QString spriteName = QFileInfo(path).baseName();
-    SpritePtr currentSprite = nullptr;
-    for (const auto& model : layoutModels) {
-        for (const auto& s : model.sprites) {
-            if (s->path == path) {
-                spriteName = s->name;
-                currentSprite = s;
-                break;
-            }
-        }
-        if (currentSprite) break;
+    SpritePtr currentSprite = spriteMap.value(path);
+    if (currentSprite) {
+        spriteName = currentSprite->name;
     }
 
     statusText = QString("%1 | frame %2/%3 | %4")
@@ -93,14 +99,10 @@ QPixmap AnimationPreviewService::refresh(
 
         int framePivotX = frameSize.width() / 2;
         int framePivotY = frameSize.height() / 2;
-        for (const auto& model : layoutModels) {
-            for (const auto& sprite : model.sprites) {
-                if (sprite->path == framePath) {
-                    framePivotX = qBound(0, sprite->pivotX, frameSize.width());
-                    framePivotY = qBound(0, sprite->pivotY, frameSize.height());
-                    break;
-                }
-            }
+        auto it = spriteMap.constFind(framePath);
+        if (it != spriteMap.constEnd()) {
+            framePivotX = qBound(0, it.value()->pivotX, frameSize.width());
+            framePivotY = qBound(0, it.value()->pivotY, frameSize.height());
         }
 
         maxLeftExtent = qMax(maxLeftExtent, framePivotX);
@@ -148,6 +150,7 @@ QSize AnimationPreviewService::calculateAnimationSize(
     }
 
     const auto& frames = timelines[selectedTimelineIndex].frames;
+    const auto spriteMap = buildSpriteMap(layoutModels);
     static QHash<QString, QSize> frameSizeCache;
     if (frameSizeCache.size() > 16384) {
         frameSizeCache.clear();
@@ -171,14 +174,10 @@ QSize AnimationPreviewService::calculateAnimationSize(
 
         int framePivotX = frameSize.width() / 2;
         int framePivotY = frameSize.height() / 2;
-        for (const auto& model : layoutModels) {
-            for (const auto& sprite : model.sprites) {
-                if (sprite->path == framePath) {
-                    framePivotX = qBound(0, sprite->pivotX, frameSize.width());
-                    framePivotY = qBound(0, sprite->pivotY, frameSize.height());
-                    break;
-                }
-            }
+        auto it = spriteMap.constFind(framePath);
+        if (it != spriteMap.constEnd()) {
+            framePivotX = qBound(0, it.value()->pivotX, frameSize.width());
+            framePivotY = qBound(0, it.value()->pivotY, frameSize.height());
         }
 
         maxLeftExtent = qMax(maxLeftExtent, framePivotX);

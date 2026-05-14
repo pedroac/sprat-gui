@@ -211,6 +211,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             }
             sprite->points.clear();
             QJsonArray markersArr = state["markers"].toArray();
+            sprite->points.reserve(markersArr.size());
             for (const auto& mVal : markersArr) {
                 QJsonObject mObj = mVal.toObject();
                 NamedPoint p;
@@ -227,6 +228,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 p.h = mObj["h"].toInt(16);
                 if (mObj.contains("polygon_points")) {
                     QJsonArray polyArr = mObj["polygon_points"].toArray();
+                    p.polygonPoints.reserve(polyArr.size());
                     for (const auto& ptVal : polyArr) {
                         QJsonArray ptPair = ptVal.toArray();
                         if (ptPair.size() == 2) {
@@ -235,6 +237,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                     }
                 } else if (mObj.contains("vertices")) {
                     QJsonArray verticesArr = mObj["vertices"].toArray();
+                    p.polygonPoints.reserve(verticesArr.size());
                     for (const auto& vertexVal : verticesArr) {
                         QJsonObject vertex = vertexVal.toObject();
                         if (vertex.contains("x") && vertex.contains("y")) {
@@ -254,6 +257,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.animationPlaying = animInfo["animation_playing"].toBool(false);
     const int legacyAnimationFps = animInfo["animation_fps"].toInt(8);
     QJsonArray timelinesArr = animInfo["timelines"].toArray();
+    out.timelines.reserve(timelinesArr.size());
     for (const auto& tVal : timelinesArr) {
         QJsonObject tObj = tVal.toObject();
         AnimationTimeline t;
@@ -263,6 +267,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             t.fps = 8;
         }
         QJsonArray framesArr = tObj["frames"].toArray();
+        t.frames.reserve(framesArr.size());
         for (const auto& fVal : framesArr) {
             t.frames.append(fVal.toString());
         }
@@ -272,6 +277,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.selectedSpritePath = markersInfo["selected_sprite_path"].toString();
     {
         const QJsonArray selectedSprites = markersInfo["selected_sprite_paths"].toArray();
+        out.selectedSpritePaths.reserve(selectedSprites.size());
         for (const auto& pathVal : selectedSprites) {
             out.selectedSpritePaths.append(pathVal.toString());
         }
@@ -320,6 +326,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.saveConfig.destination = saveOpts["destination"].toString();
     out.saveConfig.transform = saveOpts["transform"].toString();
     QJsonArray profilesArr = saveOpts["profiles"].toArray();
+    out.saveConfig.profiles.reserve(profilesArr.size());
     for (const auto& pVal : profilesArr) {
         out.saveConfig.profiles.append(pVal.toString());
     }

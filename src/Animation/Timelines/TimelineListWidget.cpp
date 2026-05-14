@@ -17,15 +17,9 @@
  * @param parent The parent widget.
  */
 TimelineListWidget::TimelineListWidget(QWidget* parent) : QListWidget(parent) {
-#ifdef Q_OS_WASM
-    setDragEnabled(false);
-    setAcceptDrops(false);
-    setDragDropMode(QAbstractItemView::NoDragDrop);
-#else
     setDragEnabled(true);
     setAcceptDrops(true);
     setDragDropMode(QAbstractItemView::DragDrop);
-#endif
     setDefaultDropAction(Qt::MoveAction);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -38,10 +32,6 @@ TimelineListWidget::TimelineListWidget(QWidget* parent) : QListWidget(parent) {
  * Accepts drags from the layout canvas (application/x-sprat-sprite) or internal reordering.
  */
 void TimelineListWidget::dragEnterEvent(QDragEnterEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     if (event->mimeData()->hasFormat("application/x-sprat-sprite") ||
         event->source() == this) {
         updatePlaceholder(event->position().toPoint());
@@ -55,10 +45,6 @@ void TimelineListWidget::dragEnterEvent(QDragEnterEvent* event) {
  * @brief Handles drag move events to update the placeholder position.
  */
 void TimelineListWidget::dragMoveEvent(QDragMoveEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     if (event->mimeData()->hasFormat("application/x-sprat-sprite") ||
         event->source() == this) {
         updatePlaceholder(event->position().toPoint());
@@ -72,10 +58,6 @@ void TimelineListWidget::dragMoveEvent(QDragMoveEvent* event) {
  * @brief Cleans up the placeholder when a drag leaves the widget.
  */
 void TimelineListWidget::dragLeaveEvent(QDragLeaveEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     clearPlaceholder();
     QListWidget::dragLeaveEvent(event);
 }
@@ -84,10 +66,6 @@ void TimelineListWidget::dragLeaveEvent(QDragLeaveEvent* event) {
  * @brief Handles drop events to insert frames or reorder items.
  */
 void TimelineListWidget::dropEvent(QDropEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     int targetRow = -1;
     if (m_placeholderItem) {
         targetRow = row(m_placeholderItem);

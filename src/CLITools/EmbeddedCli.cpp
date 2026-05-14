@@ -25,12 +25,14 @@ CliResult EmbeddedCli::run(const QString& command, const QStringList& args, cons
 
     // Prepare arguments
     std::vector<std::string> stdArgs;
+    stdArgs.reserve(args.size() + 1);
     stdArgs.push_back(command.toStdString());
     for (const QString& arg : args) {
         stdArgs.push_back(arg.toStdString());
     }
 
     std::vector<char*> argv;
+    argv.reserve(stdArgs.size() + 1);
     for (auto& s : stdArgs) {
         argv.push_back(s.data());
     }

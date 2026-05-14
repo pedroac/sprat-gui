@@ -9,6 +9,8 @@ if(EMSCRIPTEN)
     endmacro()
     macro(__qt_internal_get_emroot_path_suffix_from_emsdk_env)
     endmacro()
+    macro(_qt_internal_should_include_targets)
+    endmacro()
     
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
     # Early find_package to initialize WASM macros
@@ -436,6 +438,11 @@ if(EMSCRIPTEN)
             "-sEXIT_RUNTIME=0"
         )
     endif()
+
+    add_custom_command(TARGET sprat-gui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rename "$<TARGET_FILE_DIR:sprat-gui>/sprat-gui.html" "$<TARGET_FILE_DIR:sprat-gui>/index.html"
+        COMMENT "Renaming sprat-gui.html to index.html"
+    )
 endif()
 
 if(SPRAT_EMBEDDED_CLI)

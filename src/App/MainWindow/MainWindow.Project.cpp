@@ -30,6 +30,8 @@
 #include <QImage>
 #include <QInputDialog>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -475,7 +477,48 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
 
         if (!success) {
             if (!canceled) {
+#ifdef Q_OS_WASM
+                const bool alreadyProxied = url.host() == QStringLiteral("corsproxy.io");
+                QString message = errorText;
+                if (!data.isEmpty()) {
+                    const QJsonDocument doc = QJsonDocument::fromJson(data);
+                    if (doc.isObject()) {
+                        const QString serverError = doc.object().value("error").toString();
+                        if (!serverError.isEmpty()) {
+                            message += QStringLiteral("\n\n") + tr("Server response: %1").arg(serverError);
+                        }
+                    }
+                }
+                message += QStringLiteral("\n\n")
+                    + tr("In the web version, downloads from external servers may be blocked "
+                         "by the browser's cross-origin (CORS) security policy. "
+                         "You can download the file manually and drop it here, or use Load.");
+                auto* msgBox = new QMessageBox(this);
+                msgBox->setAttribute(Qt::WA_DeleteOnClose);
+                msgBox->setWindowTitle(tr("Download Failed"));
+                msgBox->setText(message);
+                msgBox->setIcon(QMessageBox::Warning);
+                QPushButton* retryBtn = nullptr;
+                if (!alreadyProxied) {
+                    retryBtn = msgBox->addButton(tr("Retry via CORS Proxy"), QMessageBox::AcceptRole);
+                    retryBtn->setToolTip(tr("Routes the download through corsproxy.io, a third-party service. "
+                                            "The URL and file contents will be visible to the proxy operator."));
+                }
+                msgBox->addButton(QMessageBox::Ok);
+                connect(msgBox, &QDialog::finished, this, [this, msgBox, retryBtn, url, action]() {
+                    if (retryBtn && msgBox->clickedButton() == retryBtn) {
+                        const QByteArray encoded = "https://corsproxy.io/?url="
+                            + QUrl::toPercentEncoding(url.toString());
+                        const QUrl proxiedUrl = QUrl::fromEncoded(encoded);
+                        QTimer::singleShot(0, this, [this, proxiedUrl, action]() {
+                            tryHandleRemoteUrl(proxiedUrl, action);
+                        });
+                    }
+                });
+                msgBox->open();
+#else
                 QMessageBox::warning(this, tr("Download Failed"), errorText);
+#endif
             }
             return;
         }

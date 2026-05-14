@@ -142,7 +142,11 @@ private:
     QGraphicsRectItem* m_atlasBgItem = nullptr;
     QList<QAbstractGraphicsShapeItem*> m_borderItems;
     QHash<QString, QPixmap> m_sourcePixmaps;
+    QHash<QString, QPixmap> m_transformedPixmapCache;
+    QHash<QString, int> m_pathToIndex;
     QString m_contextMenuTargetPath;
+    QPixmap m_cachedCheckerboard;
+    QColor m_cachedCheckerboardColor;
 
     bool                m_splitMode     = false;
     QGraphicsLineItem*  m_splitLineItem = nullptr;

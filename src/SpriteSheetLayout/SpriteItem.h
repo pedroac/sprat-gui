@@ -79,6 +79,16 @@ public:
      */
     bool isSearchMatch() const { return m_isMatch; }
 
+    /**
+     * @brief Sets the index of this item within the LayoutCanvas item list.
+     */
+    void setIndex(int index) { m_index = index; }
+
+    /**
+     * @brief Gets the index of this item within the LayoutCanvas item list.
+     */
+    int index() const { return m_index; }
+
 protected:
     /**
      * @brief Custom paint implementation for the sprite item.
@@ -99,4 +109,5 @@ private:
     bool m_isPrimary = false;            ///< Whether this item is the primary selection
     bool m_isContextTarget = false;      ///< Whether this item is the context target
     bool m_isMatch = false;              ///< Whether this item matches the current search
+    int m_index = -1;                    ///< Index within the LayoutCanvas item list
 };

@@ -197,19 +197,11 @@ int findRowEdgeIndex(const QVector<SpriteItem*>& items, int currentIndex, bool e
 LayoutCanvas::LayoutCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
-#ifdef Q_OS_WASM
-    setAcceptDrops(false);
-#else
     setAcceptDrops(true);
-#endif
     setZoomRange(0.1, 8.0);
 }
 
 void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     if (event->mimeData()->hasUrls()) {
         const QList<QUrl> urls = event->mimeData()->urls();
         if (urls.count() == 1) {
@@ -232,14 +224,14 @@ void LayoutCanvas::dragEnterEvent(QDragEnterEvent* event) {
             }
         }
     }
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction(); // Accept any URL for WASM
+        return;
+    }
     ZoomableGraphicsView::dragEnterEvent(event);
 }
 
 void LayoutCanvas::dropEvent(QDropEvent* event) {
-#ifdef Q_OS_WASM
-    Q_UNUSED(event);
-    return;
-#endif
     if (event->mimeData()->hasUrls()) {
         const QList<QUrl> urls = event->mimeData()->urls();
         if (urls.count() == 1) {
@@ -253,7 +245,9 @@ void LayoutCanvas::dropEvent(QDropEvent* event) {
             const QString localPath = urls.first().toLocalFile();
 #ifdef Q_OS_WASM
             if (localPath.isEmpty() || !QFileInfo::exists(localPath)) {
-                ZoomableGraphicsView::dropEvent(event);
+                // If it's not a local file, treat it as a URL string
+                emit externalPathDropped(urls.first().toString());
+                event->acceptProposedAction();
                 return;
             }
 #endif
@@ -274,6 +268,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
     m_pendingDeselect = false;
     m_borderItems.clear();
     m_modelOffsets.clear();
+    m_pathToIndex.clear();
 
     if (models.isEmpty()) {
         m_scene->setSceneRect(0, 0, 0, 0);
@@ -291,6 +286,33 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
     QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
     borderPen.setCosmetic(true);
 
+    int totalSprites = 0;
+    for (const auto& model : models) {
+        totalSprites += model.sprites.size();
+    }
+    m_items.reserve(totalSprites);
+    m_borderItems.reserve(totalSprites);
+    m_modelOffsets.reserve(models.size());
+    m_pathToIndex.reserve(totalSprites);
+
+    // Cache checkerboard pixmap once for all models
+    QBrush bgBrush;
+    if (m_settings.showCheckerboard) {
+        if (m_cachedCheckerboardColor != m_settings.spriteFrameColor || m_cachedCheckerboard.isNull()) {
+            m_cachedCheckerboard = createCheckerboardPixmap(m_settings.spriteFrameColor);
+            m_cachedCheckerboardColor = m_settings.spriteFrameColor;
+        }
+        bgBrush = QBrush(m_cachedCheckerboard);
+    } else {
+        bgBrush = QBrush(m_settings.spriteFrameColor);
+    }
+
+    static const QTransform kRotation90 = []() {
+        QTransform t;
+        t.rotate(90);
+        return t;
+    }();
+
     for (int i = 0; i < models.size(); ++i) {
         if (canceled && *canceled) {
             break;
@@ -298,12 +320,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
         const auto& model = models[i];
         m_modelOffsets.append(QPoint(0, currentY));
 
-        QGraphicsRectItem* bg;
-        if (m_settings.showCheckerboard) {
-            bg = m_scene->addRect(0, currentY, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(createCheckerboardPixmap(m_settings.spriteFrameColor)));
-        } else {
-            bg = m_scene->addRect(0, currentY, model.atlasWidth, model.atlasHeight, Qt::NoPen, QBrush(m_settings.spriteFrameColor));
-        }
+        auto* bg = m_scene->addRect(0, currentY, model.atlasWidth, model.atlasHeight, Qt::NoPen, bgBrush);
         bg->setZValue(-100);
 
         for (const auto& sprite : model.sprites) {
@@ -311,44 +328,58 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
                 break;
             }
 
-            QPixmap pixmap = m_sourcePixmaps.value(sprite->path);
-            if (pixmap.isNull()) {
-                // Should already be in cache from setModelsAsync but just in case
-                if (loadPixmapFromFile(sprite->path, pixmap)) {
-                    m_sourcePixmaps.insert(sprite->path, pixmap);
-                }
-            }
-            if (pixmap.isNull()) {
-                continue;
-            }
-
-            if (sprite->trimmed) {
-                 int l = sprite->trimRect.x();
-                 int t = sprite->trimRect.y();
-                 int r = sprite->trimRect.width();
-                 int b = sprite->trimRect.height();
-                 if (pixmap.width() > l + r && pixmap.height() > t + b) {
-                     pixmap = pixmap.copy(l, t, pixmap.width() - l - r, pixmap.height() - t - b);
-                 }
-            }
-
-            if (sprite->rotated) {
-                QTransform trans;
-                trans.rotate(90);
-                pixmap = pixmap.transformed(trans, Qt::SmoothTransformation);
-            }
-
+            // Build a cache key for the transformed pixmap
             const QSize targetSize = sprite->rect.size();
-            if (targetSize.width() > 0 &&
-                targetSize.height() > 0 &&
-                (pixmap.size() != targetSize)) {
-                pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+            const QString cacheKey = QStringLiteral("%1|%2|%3|%4|%5|%6|%7")
+                .arg(sprite->path)
+                .arg(sprite->trimmed ? sprite->trimRect.x() : 0)
+                .arg(sprite->trimmed ? sprite->trimRect.y() : 0)
+                .arg(sprite->trimmed ? sprite->trimRect.width() : 0)
+                .arg(sprite->trimmed ? sprite->trimRect.height() : 0)
+                .arg(sprite->rotated ? 1 : 0)
+                .arg(QStringLiteral("%1x%2").arg(targetSize.width()).arg(targetSize.height()));
+
+            QPixmap pixmap = m_transformedPixmapCache.value(cacheKey);
+            if (pixmap.isNull()) {
+                pixmap = m_sourcePixmaps.value(sprite->path);
+                if (pixmap.isNull()) {
+                    if (loadPixmapFromFile(sprite->path, pixmap)) {
+                        m_sourcePixmaps.insert(sprite->path, pixmap);
+                    }
+                }
+                if (pixmap.isNull()) {
+                    continue;
+                }
+
+                if (sprite->trimmed) {
+                     int l = sprite->trimRect.x();
+                     int t = sprite->trimRect.y();
+                     int r = sprite->trimRect.width();
+                     int b = sprite->trimRect.height();
+                     if (pixmap.width() > l + r && pixmap.height() > t + b) {
+                         pixmap = pixmap.copy(l, t, pixmap.width() - l - r, pixmap.height() - t - b);
+                     }
+                }
+
+                if (sprite->rotated) {
+                    pixmap = pixmap.transformed(kRotation90, Qt::SmoothTransformation);
+                }
+
+                if (targetSize.width() > 0 &&
+                    targetSize.height() > 0 &&
+                    (pixmap.size() != targetSize)) {
+                    pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+                }
+
+                m_transformedPixmapCache.insert(cacheKey, pixmap);
             }
 
             auto* item = new SpriteItem(sprite);
             item->setPixmap(pixmap);
             item->setPos(sprite->rect.x(), currentY + sprite->rect.y());
+            item->setIndex(m_items.size());
             m_scene->addItem(item);
+            m_pathToIndex.insert(sprite->path, m_items.size());
             m_items.append(item);
 
             QPainterPath path;
@@ -482,23 +513,24 @@ void LayoutCanvas::clearCanvas() {
 
     m_scene->clear();
     m_items.clear();
+    m_pathToIndex.clear();
     m_splitItemIndex = -1;
 }
 
 void LayoutCanvas::selectSpriteByPath(const QString& path) {
-    for (auto* item : m_items) {
-        if (item->getData()->path == path) {
-            for (auto* si : m_items) {
-                if (!si->isSearchMatch()) {
-                    si->setSelectedState(false);
-                }
-            }
-            item->setSelectedState(true);
-            m_lastSelectedIndex = m_items.indexOf(item);
-            finalizeSearchSelection();
-            return;
+    auto it = m_pathToIndex.constFind(path);
+    if (it == m_pathToIndex.constEnd()) {
+        return;
+    }
+    const int targetIndex = it.value();
+    for (auto* si : m_items) {
+        if (!si->isSearchMatch()) {
+            si->setSelectedState(false);
         }
     }
+    m_items[targetIndex]->setSelectedState(true);
+    m_lastSelectedIndex = targetIndex;
+    finalizeSearchSelection();
 }
 
 void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString& primaryPath) {
@@ -524,12 +556,26 @@ void LayoutCanvas::selectSpritesByPaths(const QStringList& paths, const QString&
 }
 
 void LayoutCanvas::setSettings(const AppSettings& settings) {
+    const AppSettings oldSettings = m_settings;
     m_settings = settings;
     setBackgroundBrush(settings.workspaceColor);
-    
-    // Refresh the models to redraw everything with new settings (backgrounds, borders)
-    if (!m_models.isEmpty()) {
+
+    if (m_models.isEmpty()) {
+        return;
+    }
+
+    const bool bgChanged = oldSettings.spriteFrameColor != settings.spriteFrameColor
+                        || oldSettings.showCheckerboard != settings.showCheckerboard;
+    if (bgChanged) {
+        // Background color or checkerboard toggle changed — full rebuild needed
+        // since background rects are not tracked individually.
         setModels(m_models);
+        return;
+    }
+
+    // Border-only changes can be applied in-place
+    if (oldSettings.borderColor != settings.borderColor || oldSettings.borderStyle != settings.borderStyle) {
+        updateBorderHighlights();
     }
 }
 
@@ -579,7 +625,7 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
     }
 
     if (spriteItem) {
-        int clickedIndex = m_items.indexOf(spriteItem);
+        int clickedIndex = spriteItem->index();
 
         if ((event->modifiers() & Qt::ShiftModifier) && m_lastSelectedIndex != -1) {
             if (!(event->modifiers() & Qt::ControlModifier)) {
@@ -690,6 +736,7 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
             QPixmap dragPixmap;
 
             QList<SpriteItem*> selectedItems;
+            selectedItems.reserve(m_items.size());
             for (auto* item : m_items) {
                 if (item->isSelectedState()) {
                     selectedItems.append(item);
@@ -727,12 +774,9 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                 p.drawRect(0, 0, 63, 63);
                 p.drawText(dragPixmap.rect(), Qt::AlignCenter, QString::number(paths.size()));
             } else if (paths.size() == 1) {
-                QString path = paths.first();
-                for (auto* item : m_items) {
-                    if (item->getData()->path == path) {
-                        dragPixmap = item->pixmap().scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-                        break;
-                    }
+                auto it = m_pathToIndex.constFind(paths.first());
+                if (it != m_pathToIndex.constEnd()) {
+                    dragPixmap = m_items[it.value()]->pixmap().scaled(64, 64, Qt::KeepAspectRatio, Qt::FastTransformation);
                 }
             }
 
@@ -777,7 +821,7 @@ void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
                 }
             }
             spriteItem->setSelectedState(true);
-            m_lastSelectedIndex = m_items.indexOf(spriteItem);
+            m_lastSelectedIndex = spriteItem->index();
             finalizeSearchSelection();
         }
         m_pendingDeselect = false;
@@ -935,17 +979,20 @@ void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
         return;
     }
 
+    static const QFont kSearchFont("Monospace", 12, QFont::Bold);
+    static const QFontMetrics kSearchFm(kSearchFont);
+    static const QColor kSearchBg(0, 0, 0, 180);
+    static const QPen kClosePen(Qt::white, 2);
+
     painter->save();
     painter->setWorldMatrixEnabled(false);
 
     const int padding = 10;
     const int margin = 20;
     const QString text = tr("Search: ") + m_searchQuery;
-    const QFont font("Monospace", 12, QFont::Bold);
-    painter->setFont(font);
-    const QFontMetrics fm(font);
-    const int textWidth = fm.horizontalAdvance(text);
-    const int textHeight = fm.height();
+    painter->setFont(kSearchFont);
+    const int textWidth = kSearchFm.horizontalAdvance(text);
+    const int textHeight = kSearchFm.height();
 
     const int closeSize = 16;
     const int boxWidth = textWidth + (padding * 5) + closeSize + 20;
@@ -953,7 +1000,7 @@ void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     const QRect boxRect(viewport()->width() - boxWidth - margin, margin, boxWidth, boxHeight);
 
     painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(0, 0, 0, 180));
+    painter->setBrush(kSearchBg);
     painter->drawRoundedRect(boxRect, 5, 5);
 
     painter->setPen(Qt::white);
@@ -961,7 +1008,7 @@ void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, text);
 
     m_searchCloseRect = QRect(boxRect.right() - padding - closeSize, boxRect.center().y() - closeSize / 2, closeSize, closeSize);
-    painter->setPen(QPen(Qt::white, 2));
+    painter->setPen(kClosePen);
     painter->drawLine(m_searchCloseRect.topLeft(), m_searchCloseRect.bottomRight());
     painter->drawLine(m_searchCloseRect.topRight(), m_searchCloseRect.bottomLeft());
 
@@ -1073,15 +1120,22 @@ void LayoutCanvas::onRemoveSmallTriggered() {
 void LayoutCanvas::removeFramesSmallerThan(int minW, int minH) {
     QStringList removedPaths;
 
-    for (int i = m_items.size() - 1; i >= 0; --i) {
+    int writeIdx = 0;
+    for (int i = 0; i < m_items.size(); ++i) {
         auto* item = m_items[i];
         const auto& sprite = item->getData();
         if (sprite->rect.width() < minW || sprite->rect.height() < minH) {
             removedPaths.append(sprite->path);
+            m_pathToIndex.remove(sprite->path);
             delete item;
-            m_items.removeAt(i);
+        } else {
+            item->setIndex(writeIdx);
+            m_pathToIndex[sprite->path] = writeIdx;
+            m_items[writeIdx] = item;
+            ++writeIdx;
         }
     }
+    m_items.resize(writeIdx);
 
     if (!removedPaths.isEmpty()) {
         m_baseSelectionPaths.clear();
@@ -1133,6 +1187,7 @@ void LayoutCanvas::finalizeSearchSelection() {
 
 void LayoutCanvas::emitSelectionChanged() {
     QList<SpritePtr> selection;
+    selection.reserve(m_items.size());
     SpritePtr primary;
     for (int i = 0; i < m_items.size(); ++i) {
         bool isPrimary = (i == m_lastSelectedIndex && m_items[i]->isSelectedState());

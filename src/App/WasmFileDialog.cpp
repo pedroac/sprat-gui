@@ -492,15 +492,16 @@ EM_JS(void, sprat_install_drop_handlers, (), {
         }
     }
 
-    // Use event handler properties (higher priority than addEventListener)
-    // to block drag events from reaching Qt
-    document.ondragenter = function (e) {
+    // Use capture-phase listeners so these fire before Qt's canvas bubble handlers
+    document.addEventListener('dragenter', function (e) {
         try {
             if (!e || !e.dataTransfer) return false;
-            // Always prevent default to block Qt from processing
             e.preventDefault();
             e.stopPropagation();
-            if (!hasFiles(e.dataTransfer)) return false;
+            var isFile = hasFiles(e.dataTransfer);
+            var isUrl = !isFile && e.dataTransfer.types &&
+                        Array.from(e.dataTransfer.types).indexOf('text/uri-list') >= 0;
+            if (!isFile && !isUrl) return false;
             try {
                 Module.spratDropDragDepth++;
                 showOverlay();
@@ -513,29 +514,29 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             console.warn('[sprat] dragenter error:', ex);
             return false;
         }
-    };
+    }, true);
 
-    document.ondragover = function (e) {
+    document.addEventListener('dragover', function (e) {
         try {
             if (!e || !e.dataTransfer) return false;
-            // Always prevent default to block Qt from processing
             e.preventDefault();
             e.stopPropagation();
-            if (!hasFiles(e.dataTransfer)) return false;
             return false;
         } catch (ex) {
             console.warn('[sprat] dragover error:', ex);
             return false;
         }
-    };
+    }, true);
 
-    document.ondragleave = function (e) {
+    document.addEventListener('dragleave', function (e) {
         try {
             if (!e || !e.dataTransfer) return false;
-            // Always prevent default to block Qt from processing
             e.preventDefault();
             e.stopPropagation();
-            if (!hasFiles(e.dataTransfer)) return false;
+            var isFile = hasFiles(e.dataTransfer);
+            var isUrl = !isFile && e.dataTransfer.types &&
+                        Array.from(e.dataTransfer.types).indexOf('text/uri-list') >= 0;
+            if (!isFile && !isUrl) return false;
             try {
                 Module.spratDropDragDepth = Math.max(0, Module.spratDropDragDepth - 1);
                 if (Module.spratDropDragDepth === 0) {
@@ -549,18 +550,45 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             console.warn('[sprat] dragleave error:', ex);
             return false;
         }
-    };
+    }, true);
 
-    document.ondrop = function (e) {
+    document.addEventListener('drop', function (e) {
         try {
             if (!e || !e.dataTransfer) {
                 return false;
             }
-            // Always prevent default to block Qt from processing
             e.preventDefault();
             e.stopPropagation();
             var hasFilesResult = hasFiles(e.dataTransfer);
             if (!hasFilesResult) {
+                try {
+                    var uriList = e.dataTransfer.getData('text/uri-list');
+                    var rawText = e.dataTransfer.getData('text/plain');
+                    var candidate = (uriList || rawText || '').trim().split('\n')[0].trim();
+                    if (candidate && (candidate.indexOf('http://') === 0 || candidate.indexOf('https://') === 0)) {
+                        console.log('[sprat] URL drop:', candidate);
+                        Module.spratDropDragDepth = 0;
+                        hideOverlay();
+                        showUploadOverlay('Loading URL...', 0);
+                        var droppedUrl = candidate;
+                        setTimeout(function() {
+                            var waitIdle = function(cb) {
+                                var asyncify = (typeof Asyncify !== 'undefined' ? Asyncify : (Module ? Module['Asyncify'] : null));
+                                if (!asyncify || !asyncify.currData) { cb(); return; }
+                                var state = asyncify.state;
+                                var normal = asyncify.State ? asyncify.State.Normal : 0;
+                                if (state !== undefined && state === normal) { cb(); return; }
+                                setTimeout(function() { waitIdle(cb); }, 100);
+                            };
+                            waitIdle(function() {
+                                Module.ccall('sprat_on_file_picked', null, ['string', 'number'], [droppedUrl, 0]);
+                                hideUploadOverlay();
+                            });
+                        }, 0);
+                    }
+                } catch (urlEx) {
+                    console.warn('[sprat] URL drop detection error:', urlEx);
+                }
                 return false;
             }
         } catch (ex) {
@@ -682,7 +710,7 @@ EM_JS(void, sprat_install_drop_handlers, (), {
             Module.spratDropInProgress = false;
         }
         return false;
-    };
+    }, true);
 
     if (!Module.spratResizeGuardInstalled) {
         Module.spratResizeGuardInstalled = true;

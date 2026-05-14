@@ -5,7 +5,7 @@ The WASM build provides a fully functional web demo of Sprat GUI that requires *
 ## Location
 
 Built WASM files are in `build_wasm/`:
-- `sprat-gui.html` - Main entry point
+- `index.html` - Main entry point
 - `sprat-gui.js` - JavaScript loader
 - `sprat-gui.wasm` - WebAssembly binary (~30MB)
 - `sprat-gui.data` - Assets
@@ -17,7 +17,7 @@ cd build_wasm
 python3 -m http.server 8000
 ```
 
-Then open: **http://localhost:8000/sprat-gui.html**
+Then open: **http://localhost:8000/index.html**
 
 ## ✅ Fully Functional
 
@@ -30,6 +30,7 @@ The app works seamlessly in the browser, including window resizing. Asyncify's s
 # Create deployment directory
 mkdir sprat-gui-web
 cd sprat-gui-web
+cp ../build_wasm/index.html .
 cp ../build_wasm/sprat-gui.* .
 ```
 
@@ -60,7 +61,7 @@ cp ../build_wasm/sprat-gui.* .
 ### Step 3: Upload Files
 1. Scroll to "Uploads" section
 2. Click "Upload files" or drag & drop
-3. Select all 4 files: `sprat-gui.html`, `sprat-gui.js`, `sprat-gui.wasm`, `sprat-gui.data`
+3. Select all 4 files: `index.html`, `sprat-gui.js`, `sprat-gui.wasm`, `sprat-gui.data`
 4. Wait for upload to complete
 
 ### Step 4: Configure HTML Settings
@@ -96,7 +97,7 @@ Update these in your itch.io project description:
 
 ## File Sizes
 
-- `sprat-gui.html` - 3 KB
+- `index.html` - 3 KB
 - `sprat-gui.js` - 360 KB
 - `sprat-gui.wasm` - 30 MB
 - `sprat-gui.data` - 6.6 KB

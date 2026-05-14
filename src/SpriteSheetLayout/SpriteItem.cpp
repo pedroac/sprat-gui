@@ -40,6 +40,25 @@ void SpriteItem::setSearchMatch(bool match) {
 }
 
 void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) {
+    // Pre-allocated drawing resources
+    static const QColor kChipBgColor(0, 0, 0, 160);
+    static const QColor kContextTargetColor(255, 215, 0, 64);
+    static const QColor kPrimaryColor(10, 125, 255, 64);
+    static const QColor kSecondaryColor(44, 201, 97);
+    static const QColor kSecondaryFillColor(44, 201, 97, 56);
+    static const QPen kSecondaryPen = []() {
+        QPen p(kSecondaryColor, 2);
+        p.setCosmetic(true);
+        return p;
+    }();
+    static const QFont kChipFont = []() {
+        QFont f;
+        f.setPixelSize(11);
+        f.setBold(false);
+        return f;
+    }();
+    static const QFontMetrics kChipFm(kChipFont);
+
     QGraphicsPixmapItem::paint(painter, option, widget);
 
     // Draw Name Chip
@@ -49,58 +68,50 @@ void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
 
     if (screenWidth >= 40) {
         painter->save();
-        
+
         // Draw at constant screen size
         double scale = 1.0 / lod;
         QPointF centerBottom(rect.center().x(), rect.bottom());
         painter->translate(centerBottom);
         painter->scale(scale, scale);
-        
-        QFont font = painter->font();
-        font.setPixelSize(11);
-        font.setBold(false);
-        painter->setFont(font);
-        QFontMetrics fm(font);
-        
+
+        painter->setFont(kChipFont);
+
         int padding = 4;
         int maxWidth = static_cast<int>(screenWidth) - (padding * 2);
-        
+
         if (maxWidth > 20) {
-            QString elidedText = fm.elidedText(m_data->name, Qt::ElideRight, maxWidth);
-            int textWidth = fm.horizontalAdvance(elidedText);
-            int textHeight = fm.height();
-            
+            QString elidedText = kChipFm.elidedText(m_data->name, Qt::ElideRight, maxWidth);
+            int textWidth = kChipFm.horizontalAdvance(elidedText);
+            int textHeight = kChipFm.height();
+
             // Chip rectangle (centered horizontally, just above bottom)
             QRectF chipRect(-textWidth / 2.0 - padding, -textHeight - padding - 2, textWidth + padding * 2, textHeight + padding);
-            
+
             painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(0, 0, 0, 160));
+            painter->setBrush(kChipBgColor);
             painter->drawRoundedRect(chipRect, 4, 4);
-            
+
             painter->setPen(Qt::white);
             painter->drawText(chipRect, Qt::AlignCenter, elidedText);
         }
-        
+
         painter->restore();
     }
 
     if (m_isContextTarget) {
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(255, 215, 0, 64));
+        painter->setBrush(kContextTargetColor);
         painter->drawRect(boundingRect());
     }
 
     if (m_isPrimary) {
-        // Primary selection (blue)
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(10, 125, 255, 64));
+        painter->setBrush(kPrimaryColor);
         painter->drawRect(boundingRect());
     } else if (m_isSelected || m_isMatch) {
-        // Secondary selection or search match (green)
-        QPen pen(QColor(44, 201, 97), 2);
-        pen.setCosmetic(true);
-        painter->setPen(pen);
-        painter->setBrush(QColor(44, 201, 97, 56));
+        painter->setPen(kSecondaryPen);
+        painter->setBrush(kSecondaryFillColor);
         painter->drawRect(boundingRect());
     }
 }

@@ -120,8 +120,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 #ifdef Q_OS_WASM
     s_wasmInstance = this;
     setAcceptDrops(false);
-    // Block all drag events to prevent Qt WASM segfaults
-    QTimer::singleShot(0, []() { wasmBlockAllDrags(); });
+    // Install JS drop handlers: intercept file drops, write to MEMFS, then call sprat_on_file_picked
+    QTimer::singleShot(0, []() { wasmInstallDropHandlers(); });
     // Fix Qt 6.10 WASM keyboard focus issue (DEL, shortcuts, etc.)
     QTimer::singleShot(100, []() { wasmSetupKeyboardFocus(); });
 #else
@@ -198,6 +198,11 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
         }
         loadFolder(path);
     } else {
+        const QUrl url(path);
+        if (url.isValid() && !url.scheme().isEmpty() && !url.isLocalFile()) {
+            tryHandleRemoteUrl(url, DropAction::Replace);
+            return;
+        }
         if (!isSupportedDropPath(path)) {
             QMessageBox::information(this, tr("Unsupported File"),
                                      tr("This file type is not supported."));
