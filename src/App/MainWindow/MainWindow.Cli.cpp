@@ -202,96 +202,27 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         return;
     }
 
-    if (m_folderDiscoveryWatcher.isRunning()) {
-        return;
-    }
-
     m_loadingUiMessage = tr("Scanning folder...");
     setLoading(true);
 
-    auto discoveryTask = [path, action]() {
-        QElapsedTimer timer;
-        timer.start();
-        qInfo() << "[WASM] loadFolder scan start path=" << path;
-        FolderDiscoveryResult result;
-        result.root = path;
-        result.action = action;
-        result.directories = ImageDiscoveryService::imageDirectoriesOneLevel(path);
-        qInfo() << "[WASM] loadFolder scan done path=" << path
-                << "dirs=" << result.directories.size()
-                << "ms=" << timer.elapsed();
-        return result;
-    };
+    const QString folderPath = QDir(path).absolutePath();
+    const QStringList absolutePaths = ImageDiscoveryService::collectImagesRecursive({folderPath});
+    qInfo() << "[loadFolder] path=" << folderPath
+            << "images=" << absolutePaths.size();
 
-#ifdef Q_OS_WASM
-    // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
-    processFolderDiscoveryResult(discoveryTask());
-#else
-    m_folderDiscoveryWatcher.setFuture(QtConcurrent::run(discoveryTask));
-#endif
-}
-
-void MainWindow::onFolderDiscoveryFinished() {
-    processFolderDiscoveryResult(m_folderDiscoveryWatcher.result());
-}
-
-void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& result) {
-    const QString path = result.root;
-    const DropAction action = result.action;
-    const QStringList directories = result.directories;
-
-    QString targetPath = path;
-    if (directories.isEmpty()) {
+    if (absolutePaths.isEmpty()) {
         setLoading(false);
         QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
         return;
     }
 
-    if (directories.size() > 1) {
-        // We still have to show a dialog, which is blocking, but at least the scan happened async.
-        // For a better UX, we could have a custom non-blocking dialog, but this is a good first step.
-        QDir base(path);
-        QStringList labels;
-        labels.reserve(directories.size());
-        for (const QString& dirPath : directories) {
-            labels.append(base.relativeFilePath(dirPath));
-        }
-
-        bool ok = false;
-        const QString chosen = QInputDialog::getItem(
-            this,
-            tr("Select frame folder"),
-            tr("Folders with images:"),
-            labels,
-            0,
-            false,
-            &ok);
-        
-        if (!ok) {
-            m_statusLabel->setText(tr("Load canceled"));
-            setLoading(false);
-            return;
-        }
-
-        const int index = labels.indexOf(chosen);
-        if (index >= 0 && index < directories.size()) {
-            targetPath = directories[index];
-        }
-    } else {
-        targetPath = directories.first();
+    // Clean up any previous frame list
+    if (!m_session->frameListPath.isEmpty()) {
+        QFile::remove(m_session->frameListPath);
+        m_session->frameListPath.clear();
     }
-    
-    m_loadingUiMessage = tr("Loading images...");
-    setLoading(true);
 
-    QElapsedTimer loadTimer;
-    loadTimer.start();
-    const QStringList absolutePaths = ImageDiscoveryService::imagesInDirectory(targetPath);
-    qInfo() << "[WASM] loadFolder imagesInDirectory done"
-            << "count=" << absolutePaths.size()
-            << "ms=" << loadTimer.elapsed();
     if (action == DropAction::Merge) {
-        // Ask if files with same names should be replaced
         QMessageBox msg(this);
         msg.setWindowTitle(tr("Merge with duplicates"));
         msg.setText(tr("When merging, what should happen to files with the same name?"));
@@ -319,52 +250,28 @@ void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& resul
         refreshAnimationTest();
         m_projectFilePath.clear();
         m_sourceFolderIsTemp = false;
-        m_session->currentFolder = targetPath;
-        m_folderLabel->setText(tr("Folder: ") + QDir(targetPath).absolutePath());
-        m_session->layoutSourcePath = QDir(targetPath).absolutePath();
-        m_session->layoutSourceIsList = false;
+        m_session->currentFolder = folderPath;
+        m_folderLabel->setText(tr("Folder: ") + folderPath);
         m_session->cachedLayoutOutput.clear();
         m_session->cachedLayoutScale = 1.0;
         m_session->activeFramePaths = absolutePaths;
-        // Copy sprites to source folder on Replace
-        copyActiveFramesToSourceFolder();
         m_shouldClearSpritesFolder = false;
     }
-    
-    if (!m_session->frameListPath.isEmpty()) {
-        QFile::remove(m_session->frameListPath);
-        m_session->frameListPath.clear();
-    }
-    
-    const int imageCount = absolutePaths.size();
-    QProgressDialog progress(tr("Loading image frames..."), tr("Cancel"), 0, imageCount, this);
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(1000);
-    progress.setAutoClose(true);
-    progress.setAutoReset(true);
 
-    qInfo() << "[WASM] loadFolder loading frames start"
-            << "count=" << imageCount;
-    for (int i = 0; i < absolutePaths.size(); ++i) {
-        const QString absolutePath = absolutePaths[i];
-        progress.setValue(i);
-        progress.setLabelText(QString("%1: %2\n%3").arg(tr("Loading"), QFileInfo(absolutePath).fileName(), absolutePath));
-        m_statusLabel->setText(tr("Loading frame: ") + absolutePath);
-#ifndef Q_OS_WASM
-        QApplication::processEvents();
-#endif
-        if (progress.wasCanceled()) {
-            m_statusLabel->setText(tr("Frame loading canceled"));
-            setLoading(false);
-            return;
-        }
-    }
-    progress.setValue(imageCount);
-    qInfo() << "[WASM] loadFolder loading frames done"
-            << "ms=" << loadTimer.elapsed();
-    m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(QDir(targetPath).absolutePath()));
+    // Build a frame list so spratlayout sees all images (including subdirectories)
+    ensureFrameListInput();
 
+    m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(folderPath));
     onRunLayout();
+}
+
+void MainWindow::onFolderDiscoveryFinished() {
+    // Kept for signal compatibility; no longer used.
+}
+
+void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& result) {
+    Q_UNUSED(result);
+    // Kept for compatibility; folder loading is now handled directly in loadFolder().
 }
 
 bool MainWindow::confirmLayoutReplacement() {

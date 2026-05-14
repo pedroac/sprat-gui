@@ -34,6 +34,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QFileInfo>
+#include <QFontDatabase>
+#include <QPlainTextEdit>
 
 void MainWindow::setupUi() {
     resize(1400, 860);
@@ -420,19 +422,31 @@ void MainWindow::setupUi() {
     m_animDock->setWidget(animContent);
     addDockWidget(Qt::RightDockWidgetArea, m_animDock);
 
-    // Initial arrangement: 
+    // CLI Log dock
+    m_cliLogDock = new QDockWidget(tr("CLI Log"), this);
+    m_cliLogDock->setObjectName("cliLogDock");
+    m_cliLog = new QPlainTextEdit(this);
+    m_cliLog->setReadOnly(true);
+    m_cliLog->setMaximumBlockCount(5000);
+    m_cliLog->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_cliLogDock->setWidget(m_cliLog);
+
+    // Initial arrangement:
     // Top row: Canvas | Editor
     // Bottom row: Timelines | Anim Test
-    
+
     // First, clear any default placement and set them explicitly
     addDockWidget(Qt::TopDockWidgetArea, m_canvasDock);
     addDockWidget(Qt::TopDockWidgetArea, m_editorDock);
     addDockWidget(Qt::BottomDockWidgetArea, m_timelineDock);
     addDockWidget(Qt::BottomDockWidgetArea, m_animDock);
+    addDockWidget(Qt::BottomDockWidgetArea, m_cliLogDock);
 
     splitDockWidget(m_canvasDock, m_editorDock, Qt::Horizontal);
     splitDockWidget(m_timelineDock, m_animDock, Qt::Horizontal);
-    
+    tabifyDockWidget(m_timelineDock, m_cliLogDock);
+    m_timelineDock->raise(); // ensure timeline tab is active by default
+
     // Ensure the top row is taller than the bottom row
     resizeDocks({m_canvasDock, m_editorDock}, {600, 600}, Qt::Vertical);
     resizeDocks({m_timelineDock, m_animDock}, {260, 260}, Qt::Vertical);
@@ -443,12 +457,14 @@ void MainWindow::setupUi() {
     m_viewMenu->addAction(m_timelineDock->toggleViewAction());
     m_viewMenu->addAction(m_editorDock->toggleViewAction());
     m_viewMenu->addAction(m_animDock->toggleViewAction());
+    m_viewMenu->addAction(m_cliLogDock->toggleViewAction());
 
     // Initially hide docks for welcome page
     m_canvasDock->hide();
     m_timelineDock->hide();
     m_editorDock->hide();
     m_animDock->hide();
+    m_cliLogDock->hide();
 
     setupStatusBarUi();
 

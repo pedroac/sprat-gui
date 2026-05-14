@@ -43,6 +43,7 @@ signals:
     void started();
     void finished(const LayoutResult& result);
     void errorOccurred(const QString& description);
+    void logMessage(const QString& text);
 
 private:
 #ifndef SPRAT_EMBEDDED_CLI

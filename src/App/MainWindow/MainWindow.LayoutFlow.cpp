@@ -20,6 +20,7 @@
 #include <QStandardItemModel>
 #include <QElapsedTimer>
 #include <QDebug>
+#include <QFile>
 
 namespace {
 int legacyDefaultPivotX(const SpritePtr& sprite) {
@@ -39,6 +40,9 @@ void MainWindow::onRunLayout() {
         && !m_session->activeFramePaths.isEmpty()
         && !activeFramesAreInSourceFolder()) {
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        if (m_session->layoutSourceIsList) {
+            ensureFrameListInput();
+        }
     }
 
     if (m_session->layoutSourcePath.isEmpty()) {
@@ -84,6 +88,9 @@ void MainWindow::onRunLayout() {
     setLoading(true);
     m_layoutFailureDialogShown = false;
     
+    qInfo() << "[Layout] Dispatching run, sourcePath=" << config.sourcePath
+            << "exists=" << QFile::exists(config.sourcePath)
+            << "isList=" << m_session->layoutSourceIsList;
     m_layoutRunner->run(config);
 }
 

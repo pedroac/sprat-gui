@@ -449,6 +449,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
         m_session->activeFramePaths.append(finalPath);
         // Copy the image to source folder so it persists after temp dir cleanup
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
         onRunLayout();
         return;
@@ -590,6 +591,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         m_session->activeFramePaths.append(framePaths);
         // Copy extracted frames to source folder so they persist after temp dir cleanup
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
     } else {
         // On Replace, delete all files from sprites folder

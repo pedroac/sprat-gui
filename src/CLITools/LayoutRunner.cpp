@@ -6,6 +6,8 @@
 #include <QElapsedTimer>
 #include <QThreadPool>
 #include <QtConcurrent>
+#include <QTime>
+#include <QFile>
 
 #ifdef SPRAT_EMBEDDED_CLI
 #include "EmbeddedCli.h"
@@ -61,10 +63,13 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 
     auto task = [this, config, args]() {
         QMutexLocker locker(m_mutex);
-        
+
         m_stdoutBuffer.clear();
         m_stderrBuffer.clear();
-        
+
+        QElapsedTimer runTimer;
+        runTimer.start();
+
 #ifdef SPRAT_EMBEDDED_CLI
         Q_UNUSED(config.layoutBinary);
         QElapsedTimer timer;
@@ -135,6 +140,40 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
             result.success = true;
         }
 #endif
+
+        // Emit CLI log
+        {
+            QString binary = config.layoutBinary.isEmpty() ? QStringLiteral("spratlayout") : QFileInfo(config.layoutBinary).fileName();
+            qint64 ms = runTimer.elapsed();
+            QString logEntry = QStringLiteral("[%1] %2 %3\n[%1] Exit: %4 (%5 ms)")
+                .arg(QTime::currentTime().toString("HH:mm:ss"), binary, args.join(' '),
+                     QString::number(result.exitCode), QString::number(ms));
+            if (!result.error.isEmpty()) {
+                logEntry += QStringLiteral("\n  stderr: %1").arg(result.error);
+            }
+            // When input is a list file, log whether it exists and its contents
+            if (!args.isEmpty()) {
+                QFileInfo inputInfo(args.first());
+                if (inputInfo.isFile()) {
+                    logEntry += QStringLiteral("\n  input file: %1 (exists=%2, size=%3)")
+                        .arg(args.first(),
+                             QFile::exists(args.first()) ? "yes" : "no",
+                             QString::number(inputInfo.size()));
+                    QFile f(args.first());
+                    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                        QString contents = QString::fromUtf8(f.readAll()).trimmed();
+                        if (contents.size() > 2000) contents = contents.left(2000) + QStringLiteral("...(truncated)");
+                        logEntry += QStringLiteral("\n  input contents:\n%1").arg(contents);
+                    }
+                } else {
+                    logEntry += QStringLiteral("\n  input: %1 (isDir=%2, exists=%3)")
+                        .arg(args.first(),
+                             inputInfo.isDir() ? "yes" : "no",
+                             inputInfo.exists() ? "yes" : "no");
+                }
+            }
+            emit logMessage(logEntry);
+        }
 
 #ifdef Q_OS_WASM
         QMetaObject::invokeMethod(this, [this, result]() {

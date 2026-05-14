@@ -981,6 +981,8 @@ public:
      */
     bool runTool(const QString& tool, const QStringList& args, const QByteArray* input = nullptr, QByteArray* output = nullptr, QByteArray* error = nullptr);
 
+    void appendCliLog(const QString& text);
+
 private:
     // === UI Components ===
     QStackedWidget* m_mainStack;
@@ -992,6 +994,8 @@ private:
     QDockWidget* m_timelineDock = nullptr;
     QDockWidget* m_editorDock = nullptr;
     QDockWidget* m_animDock = nullptr;
+    QDockWidget* m_cliLogDock = nullptr;
+    QPlainTextEdit* m_cliLog = nullptr;
     QMenu* m_viewMenu = nullptr;
 
     // Layout Canvas Area

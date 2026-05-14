@@ -56,6 +56,8 @@
 #include <QShortcut>
 #include <QToolButton>
 #include <QMenu>
+#include <QPlainTextEdit>
+#include <QTime>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -132,6 +134,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_layoutRunner->setMutex(&m_toolMutex);
     connect(m_layoutRunner, &LayoutRunner::finished, this, &MainWindow::onLayoutFinished);
     connect(m_layoutRunner, &LayoutRunner::errorOccurred, this, &MainWindow::onLayoutError);
+    connect(m_layoutRunner, &LayoutRunner::logMessage, this, &MainWindow::appendCliLog);
 
     m_folderWatcher = new SourceFolderWatcher(this);
     connect(m_folderWatcher, &SourceFolderWatcher::filesAdded,
@@ -314,6 +317,7 @@ bool MainWindow::ensureFrameListInput() {
     const QString newFrameListPath = QDir::temp().filePath(fileName);
     QFile file(newFrameListPath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qWarning() << "[FrameList] Failed to create:" << newFrameListPath;
         return false;
     }
     QTextStream out(&file);
@@ -322,6 +326,9 @@ bool MainWindow::ensureFrameListInput() {
     }
     out.flush();
     file.close();
+    qInfo() << "[FrameList] Created:" << newFrameListPath
+            << "exists=" << QFile::exists(newFrameListPath)
+            << "frames=" << m_session->activeFramePaths.size();
 
     const QString oldFrameListPath = m_session->frameListPath;
     m_session->frameListPath = newFrameListPath;
@@ -331,6 +338,7 @@ bool MainWindow::ensureFrameListInput() {
         m_session->currentFolder = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
     }
     if (!oldFrameListPath.isEmpty() && oldFrameListPath != m_session->frameListPath) {
+        qInfo() << "[FrameList] Deleting old:" << oldFrameListPath;
         QFile::remove(oldFrameListPath);
     }
     updateManualFrameLabel();
@@ -790,6 +798,12 @@ void MainWindow::applySettings() {
     updateOpenSourceFolderAction();
 }
 
+void MainWindow::appendCliLog(const QString& text) {
+    if (m_cliLog) {
+        m_cliLog->appendPlainText(text);
+    }
+}
+
 bool MainWindow::runTool(const QString& tool, const QStringList& args, const QByteArray* input, QByteArray* output, QByteArray* error) {
 #ifdef Q_OS_WASM
     if (jsIsAsyncBusy()) {
@@ -798,15 +812,21 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
     }
 #endif
     QMutexLocker locker(&m_toolMutex);
+    QElapsedTimer timer;
+    timer.start();
+
+    QString toolName = QFileInfo(tool).fileName();
 #ifdef SPRAT_EMBEDDED_CLI
     // Convert tool path to command name
     QString command = QFileInfo(tool).baseName();
     CliResult result = EmbeddedCli::run(command, args, input ? *input : QByteArray());
-    
+
     if (output) *output = result.stdOut;
     if (error) *error = result.stdErr;
-    
-    return result.exitCode == 0;
+
+    int exitCode = result.exitCode;
+    QString stderrStr = QString::fromUtf8(result.stdErr).trimmed();
+    bool ok = exitCode == 0;
 #else
     QProcess process;
     process.setProcessChannelMode(QProcess::SeparateChannels);
@@ -816,12 +836,31 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
         process.closeWriteChannel();
     }
     if (!process.waitForFinished(-1)) {
+        qint64 ms = timer.elapsed();
+        QString logEntry = QStringLiteral("[%1] %2 %3\n[%1] Failed to finish (%4 ms)")
+            .arg(QTime::currentTime().toString("HH:mm:ss"), toolName, args.join(' '), QString::number(ms));
+        QMetaObject::invokeMethod(this, [this, logEntry]() { appendCliLog(logEntry); }, Qt::QueuedConnection);
         return false;
     }
-    if (output) *output = process.readAllStandardOutput();
-    if (error) *error = process.readAllStandardError();
-    return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    QByteArray stdoutData = process.readAllStandardOutput();
+    QByteArray stderrData = process.readAllStandardError();
+    if (output) *output = stdoutData;
+    if (error) *error = stderrData;
+    int exitCode = process.exitCode();
+    QString stderrStr = QString::fromUtf8(stderrData).trimmed();
+    bool ok = process.exitStatus() == QProcess::NormalExit && exitCode == 0;
 #endif
+
+    qint64 ms = timer.elapsed();
+    QString logEntry = QStringLiteral("[%1] %2 %3\n[%1] Exit: %4 (%5 ms)")
+        .arg(QTime::currentTime().toString("HH:mm:ss"), toolName, args.join(' '),
+             QString::number(exitCode), QString::number(ms));
+    if (!stderrStr.isEmpty()) {
+        logEntry += QStringLiteral("\n  stderr: %1").arg(stderrStr);
+    }
+    QMetaObject::invokeMethod(this, [this, logEntry]() { appendCliLog(logEntry); }, Qt::QueuedConnection);
+
+    return ok;
 }
 
 // ===== Source Folder Sync Slots =====
@@ -1256,7 +1295,6 @@ void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
     }
 
     m_session->activeFramePaths = newPaths;
-    ensureFrameListInput(); // writes frame list .txt, sets layoutSourcePath & layoutSourceIsList
 }
 
 void MainWindow::clearSourceFolderImages(const QString& excludePath) {
