@@ -59,6 +59,10 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QTime>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QTextEdit>
+#include <QPushButton>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -1421,4 +1425,182 @@ void MainWindow::onRedo() {
     if (!m_undoStack) return;
     m_undoStack->redo();
     syncPivotSpinsFromSprite();
+}
+
+void MainWindow::onQuickStart() {
+    QString content = tr(
+        "<h2>Quick Start Guide</h2>"
+
+        "<h3>Main Workflow</h3>"
+        "<ol>"
+        "<li><b>Load sprites</b> &mdash; Drag and drop a folder of images onto the window, "
+        "or use <i>File &rarr; Load Images Folder</i>. You can also drop a single sprite sheet image "
+        "and the app will auto-detect individual frames inside it.</li>"
+        "<li><b>Choose a layout profile</b> &mdash; Pick a profile from the dropdown above the atlas "
+        "(e.g. <i>fast</i>, <i>balanced</i>). Profiles control atlas size limits, padding, "
+        "trim, rotation, and other packing options. You can create custom profiles in "
+        "<i>Settings &rarr; Manage Profiles</i>.</li>"
+        "<li><b>Wait for the atlas to build</b> &mdash; The layout rebuilds automatically "
+        "after you stop making changes. If you remove or add sprites the canvas updates immediately "
+        "and a full repack runs in the background.</li>"
+        "<li><b>Edit sprites</b> &mdash; Click a sprite in the atlas to select it. "
+        "The right-hand panel shows a zoomed preview where you can drag the pivot point, "
+        "add markers (points, circles, rectangles, polygons), and rename the sprite.</li>"
+        "<li><b>Create animations</b> &mdash; Open the Timelines panel, add a timeline, "
+        "then drag sprites from the atlas into it. Adjust the frame order by dragging, "
+        "set the FPS, and preview the result in the Animation panel.</li>"
+        "<li><b>Save</b> &mdash; <i>File &rarr; Save</i> (Ctrl+S) exports the atlas image, "
+        "a metadata file with sprite positions, and the full project state. "
+        "You can save to a folder or a ZIP archive.</li>"
+        "</ol>"
+
+        "<h3>Loading Sprites</h3>"
+        "<p>There are several ways to get images into the project:</p>"
+        "<ul>"
+        "<li><b>Folder</b> &mdash; A folder of individual sprite images (PNG, JPG, BMP, GIF, WebP, TGA, DDS).</li>"
+        "<li><b>Single image</b> &mdash; Drop a sprite sheet and the Frame Detection dialog will "
+        "help you slice it into individual frames.</li>"
+        "<li><b>Archive</b> &mdash; ZIP or TAR files are extracted automatically.</li>"
+        "<li><b>URL</b> &mdash; <i>File &rarr; Load URL</i> downloads an image, archive, or project from the web.</li>"
+        "<li><b>Clipboard</b> &mdash; Ctrl+V imports an image from the clipboard.</li>"
+        "<li><b>Project file</b> &mdash; Reopen a previously saved <tt>.json</tt> project with all metadata intact.</li>"
+        "</ul>"
+        "<p>When a project already has sprites loaded, you will be asked whether to <b>Replace</b> "
+        "or <b>Merge</b> the new content.</p>"
+
+        "<h3>Sprites Folder &amp; Sync</h3>"
+        "<p>Each project can have a <b>sprites folder</b> on disk. "
+        "Use <i>File &rarr; Open Sprites Folder</i> to reveal it in your file manager. "
+        "In <i>Settings &rarr; Spritesheet</i> you can enable folder synchronization:</p>"
+        "<ul>"
+        "<li><b>Manual</b> &mdash; Press <i>Sync Now</i> to pick up new, modified, or deleted files.</li>"
+        "<li><b>Watch</b> &mdash; The app monitors the folder in real time and updates the layout automatically.</li>"
+        "</ul>"
+        "<p>This lets you edit sprites in an external image editor and see changes reflected instantly.</p>"
+
+        "<h3>Sprite Navigator</h3>"
+        "<p>Switch from <i>Layout</i> to <i>Navigator</i> view above the atlas to see a "
+        "tree of all sprites organised by folder. From the Navigator you can:</p>"
+        "<ul>"
+        "<li>Check sprites and use the right-click menu to delete, group, or ungroup them.</li>"
+        "<li>Create a timeline from a group of sprites in one click.</li>"
+        "<li>Auto-create timelines from every sub-folder at once.</li>"
+        "<li>Add new frames to any folder directly.</li>"
+        "</ul>"
+
+        "<h3>Animation Preview</h3>"
+        "<p>The Animation panel plays back the currently selected timeline. "
+        "Use the play/pause button or scrub frames with the arrow buttons. "
+        "Right-click the preview to export the animation as GIF, MP4, WebM, or other formats "
+        "(requires FFmpeg or ImageMagick).</p>"
+
+        "<h3>Key Features</h3>"
+        "<ul>"
+        "<li><b>Layout profiles</b> &mdash; Multiple packing configurations (atlas size, padding, "
+        "extrude, trim transparency, rotation, multipack).</li>"
+        "<li><b>Frame detection</b> &mdash; Automatically slice a sprite sheet into individual frames.</li>"
+        "<li><b>Split mode</b> &mdash; Alt+Click on a sprite to split it in two.</li>"
+        "<li><b>Pivot &amp; markers</b> &mdash; Set pivot points and attach named markers "
+        "(points, circles, rectangles, polygons) to each sprite.</li>"
+        "<li><b>Timelines</b> &mdash; Build animation sequences by ordering frames, "
+        "then preview and export them.</li>"
+        "<li><b>Folder sync</b> &mdash; Keep the project in sync with a folder on disk "
+        "(manual or live watch).</li>"
+        "<li><b>Deduplication</b> &mdash; Detect exact or perceptually identical frames "
+        "and merge them to save atlas space.</li>"
+        "<li><b>Resolution scaling</b> &mdash; Set source and target resolutions for automatic rescaling.</li>"
+        "<li><b>Multipack</b> &mdash; Automatically split into multiple atlases when sprites "
+        "exceed the maximum dimensions.</li>"
+        "</ul>"
+
+        "<p>See <i>Help &rarr; Hotkeys</i> for all keyboard shortcuts.</p>"
+    );
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Quick Start"));
+    dlg.setMinimumWidth(560);
+    dlg.setMinimumHeight(520);
+
+    QVBoxLayout* layout = new QVBoxLayout(&dlg);
+    QTextEdit* text = new QTextEdit(&dlg);
+    text->setHtml(content);
+    text->setReadOnly(true);
+    layout->addWidget(text);
+
+    QPushButton* okBtn = new QPushButton(tr("OK"), &dlg);
+    layout->addWidget(okBtn);
+    connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    dlg.exec();
+}
+
+void MainWindow::onShowHotkeys() {
+    QString content = tr(
+        "<h2>Keyboard Shortcuts</h2>"
+
+        "<h3>General</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Save Project</td><td><b>Ctrl+S</b></td></tr>"
+        "<tr><td>Undo Pivot Change</td><td><b>Ctrl+Z</b></td></tr>"
+        "<tr><td>Redo Pivot Change</td><td><b>Ctrl+Y</b></td></tr>"
+        "<tr><td>Paste / Import from Clipboard</td><td><b>Ctrl+V</b></td></tr>"
+        "<tr><td>Quit</td><td><b>Ctrl+Q</b></td></tr>"
+        "</table>"
+
+        "<h3>Canvas Views (Layout, Preview, Animation)</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Zoom In</td><td><b>Ctrl++</b> or <b>Ctrl+Scroll Up</b></td></tr>"
+        "<tr><td>Zoom Out</td><td><b>Ctrl+-</b> or <b>Ctrl+Scroll Down</b></td></tr>"
+        "<tr><td>100% Zoom</td><td><b>Ctrl+1</b></td></tr>"
+        "<tr><td>Fit to Window</td><td><b>Ctrl+0</b></td></tr>"
+        "<tr><td>Pan View</td><td><b>Space+Drag</b> or <b>Middle Mouse Drag</b></td></tr>"
+        "</table>"
+
+        "<h3>Layout Canvas</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Navigate Sprites</td><td><b>Arrow Keys</b></td></tr>"
+        "<tr><td>First / Last Sprite in Row</td><td><b>Home</b> / <b>End</b></td></tr>"
+        "<tr><td>Extend Selection</td><td><b>Shift+Arrow Keys</b></td></tr>"
+        "<tr><td>Select All Sprites</td><td><b>Ctrl+A</b></td></tr>"
+        "<tr><td>Delete Selected Sprites</td><td><b>Delete</b></td></tr>"
+        "<tr><td>Search by Name</td><td>Start typing (printable characters)</td></tr>"
+        "<tr><td>Clear Search</td><td><b>Escape</b></td></tr>"
+        "<tr><td>Quick Split</td><td><b>Alt+Click</b> on a sprite</td></tr>"
+        "</table>"
+
+        "<h3>Timeline</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Navigate Frames</td><td><b>Arrow Keys</b></td></tr>"
+        "<tr><td>Extend Frame Selection</td><td><b>Shift+Arrow Keys</b></td></tr>"
+        "<tr><td>Select All Frames</td><td><b>Ctrl+A</b></td></tr>"
+        "<tr><td>Delete Selected Frames</td><td><b>Delete</b></td></tr>"
+        "</table>"
+
+        "<h3>Sprite Preview</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Delete Selected Marker / Vertex</td><td><b>Delete</b></td></tr>"
+        "</table>"
+    );
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Keyboard Hotkeys"));
+    dlg.setMinimumWidth(550);
+    dlg.setMinimumHeight(450);
+
+    QVBoxLayout* layout = new QVBoxLayout(&dlg);
+    QTextEdit* text = new QTextEdit(&dlg);
+    text->setHtml(content);
+    text->setReadOnly(true);
+    layout->addWidget(text);
+
+    QPushButton* okBtn = new QPushButton(tr("OK"), &dlg);
+    layout->addWidget(okBtn);
+    connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    dlg.exec();
 }

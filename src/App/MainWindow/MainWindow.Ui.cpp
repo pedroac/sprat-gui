@@ -560,6 +560,16 @@ void MainWindow::setupUi() {
     m_viewMenu->addSeparator();
     m_viewMenu->addAction(m_debugDock->toggleViewAction());
 
+    // Help menu (added last so it sits on the right)
+    QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
+    QAction* quickStartAction = helpMenu->addAction(tr("Quick Start..."));
+    quickStartAction->setToolTip(tr("Learn the basic workflow"));
+    connect(quickStartAction, &QAction::triggered, this, &MainWindow::onQuickStart);
+
+    QAction* hotkeysAction = helpMenu->addAction(tr("Hotkeys..."));
+    hotkeysAction->setToolTip(tr("View keyboard shortcuts"));
+    connect(hotkeysAction, &QAction::triggered, this, &MainWindow::onShowHotkeys);
+
     // Initially hide docks for welcome page
     m_atlasDock->hide();
     m_animationDock->hide();

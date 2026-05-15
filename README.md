@@ -148,6 +148,8 @@ Run:
 7. Test animation in the Animation panel.
 8. Save project (`.json` or `.zip`) or export animation; output format (PNG vs. DDS) depends on active profile compression settings.
 
+For a guided introduction, open **Help → Quick Start** inside the app. For a full list of keyboard shortcuts, open **Help → Hotkeys**.
+
 ## UI workflow
 
 - **CLI tools configuration / missing detection**
@@ -166,6 +168,24 @@ Run:
     - **Dilate (Artifact Reduction)**: Apply pixel dilation passes (0–16) to bleed opaque pixels into transparent neighbors, reducing dark halos around trimmed sprites.
   - These settings are profile-specific; different targets can use different compression formats.
   - **Global Deduplicate**: Enable deduplication in Settings using **Exact** (byte-for-byte identical) or **Perceptual** (visually similar) modes to create aliases for duplicate sprites during layout generation.
+
+- **Sprite Navigator**
+  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organised by folder.
+  - Check sprites individually or by folder; right-click for context actions:
+    - Delete selected sprites.
+    - Add frames to a folder.
+    - Add checked sprites to the current timeline.
+    - Create a new timeline from selected sprites.
+    - Auto-create timelines from every sub-folder at once.
+    - Group or ungroup sprites (moves files into subfolders).
+  - When you switch back to Layout view, the atlas rebuilds if any changes were made while the Navigator was open.
+
+- **Automatic layout rebuild**
+  - The atlas rebuilds automatically 2 seconds after you stop making changes (adding, removing, or modifying sprites, changing the active profile or source resolution).
+  - Deleting sprites removes them from the canvas immediately for instant visual feedback; the full repack runs in the background.
+  - If 20 or more changes accumulate quickly, a full rebuild starts right away with a loading overlay.
+  - While you are interacting with the layout (clicking, selecting, scrolling), the rebuild timer is deferred until you stop.
+  - If a rebuild is already running when new changes arrive, it is cancelled safely and restarted after the 2-second pause.
 
 - **Loading frame folders**
   - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.
@@ -225,8 +245,9 @@ Run:
 
 ### **General Application**
 - `Ctrl + S`: Save project.
-- `Ctrl + Z`: Undo.
-- `Ctrl + Y` (or `Ctrl + Shift + Z`): Redo.
+- `Ctrl + Z`: Undo pivot/marker change.
+- `Ctrl + Y`: Redo pivot/marker change.
+- `Ctrl + V`: Paste / import image from clipboard.
 - `Ctrl + +` / `Ctrl + =`: Zoom In.
 - `Ctrl + -`: Zoom Out.
 - `Ctrl + 1`: Reset zoom to 100%.
@@ -366,8 +387,8 @@ These limitations may be resolved in future Qt versions. Consider upgrading to Q
 - **Forks / alternative frontends**  
   Forks are encouraged (for example, a GTK+ frontend variant) as long as they clearly document compatibility and maintenance scope.
 
-- **AI-assisted work**  
-  Development on this project has been assisted with Codex and Gemini; all changes are reviewed and manually adjusted since AI output is not perfect.
+- **AI-assisted work**
+  Development on this project has been assisted with Codex, Gemini, and Claude Code; all changes are reviewed and manually adjusted since AI output is not perfect.
 
 ## Attribution
 

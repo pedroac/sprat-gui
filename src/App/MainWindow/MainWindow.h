@@ -946,6 +946,16 @@ public:
     void applySettings();
 
     /**
+     * @brief Shows Quick Start guide dialog.
+     */
+    void onQuickStart();
+
+    /**
+     * @brief Shows keyboard hotkeys reference dialog.
+     */
+    void onShowHotkeys();
+
+    /**
      * @brief Loads an image file and performs frame detection.
      * 
      * @param imagePath Path to the image file
