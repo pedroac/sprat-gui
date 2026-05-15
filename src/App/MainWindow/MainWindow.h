@@ -990,11 +990,9 @@ private:
     QLabel* m_welcomeLabel;
     QLabel* m_folderLabel;
 
-    QDockWidget* m_canvasDock = nullptr;
-    QDockWidget* m_timelineDock = nullptr;
-    QDockWidget* m_editorDock = nullptr;
-    QDockWidget* m_animDock = nullptr;
-    QDockWidget* m_cliLogDock = nullptr;
+    QDockWidget* m_atlasDock = nullptr;
+    QDockWidget* m_animationDock = nullptr;
+    QDockWidget* m_debugDock = nullptr;
     QPlainTextEdit* m_cliLog = nullptr;
     QMenu* m_viewMenu = nullptr;
 

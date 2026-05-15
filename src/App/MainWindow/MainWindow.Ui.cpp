@@ -77,11 +77,8 @@ void MainWindow::setupUi() {
     const int groupTopPadding = 12;
     const int groupBottomMargin = 0;
 
-    // 1. Layout Canvas Dock
-    m_canvasDock = new QDockWidget(tr("Layout Canvas"), this);
-    m_canvasDock->setObjectName("canvasDock");
-    m_canvasDock->setFont(boldFont);
-    QWidget* canvasContent = new QWidget(m_canvasDock);
+    // 1. Layout Canvas panel
+    QWidget* canvasContent = new QWidget(this);
     canvasContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* canvasLayout = new QVBoxLayout(canvasContent);
     canvasLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
@@ -198,14 +195,8 @@ void MainWindow::setupUi() {
     connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onRemoveFramesRequested);
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
 
-    m_canvasDock->setWidget(canvasContent);
-    addDockWidget(Qt::LeftDockWidgetArea, m_canvasDock);
-
-    // 2. Timelines Dock
-    m_timelineDock = new QDockWidget(tr("Animation Timelines"), this);
-    m_timelineDock->setObjectName("timelineDock");
-    m_timelineDock->setFont(boldFont);
-    QWidget* timelineContent = new QWidget(m_timelineDock);
+    // 2. Animation Timelines panel
+    QWidget* timelineContent = new QWidget(this);
     timelineContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* timelineLayout = new QVBoxLayout(timelineContent);
     timelineLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
@@ -285,14 +276,8 @@ void MainWindow::setupUi() {
     groupLayout->addWidget(m_timelineDropArea);
     timelineLayout->addStretch(0);
 
-    m_timelineDock->setWidget(timelineContent);
-    addDockWidget(Qt::LeftDockWidgetArea, m_timelineDock);
-
-    // 3. Selected Frame Editor Dock
-    m_editorDock = new QDockWidget(tr("Selected Frame Editor"), this);
-    m_editorDock->setObjectName("editorDock");
-    m_editorDock->setFont(boldFont);
-    QWidget* editorContent = new QWidget(m_editorDock);
+    // 3. Selected Frame Editor panel
+    QWidget* editorContent = new QWidget(this);
     editorContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorContent);
     editorLayoutBox->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
@@ -363,14 +348,8 @@ void MainWindow::setupUi() {
     connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onPreviewZoomChanged);
     editorLayoutBox->addWidget(m_previewView);
 
-    m_editorDock->setWidget(editorContent);
-    addDockWidget(Qt::RightDockWidgetArea, m_editorDock);
-
-    // 4. Animation Test Dock
-    m_animDock = new QDockWidget(tr("Animation Test"), this);
-    m_animDock->setObjectName("animDock");
-    m_animDock->setFont(boldFont);
-    QWidget* animContent = new QWidget(m_animDock);
+    // 4. Animation Test panel
+    QWidget* animContent = new QWidget(this);
     animContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* animLayout = new QVBoxLayout(animContent);
     animLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
@@ -419,52 +398,73 @@ void MainWindow::setupUi() {
     });
     animLayout->addWidget(m_animCanvas);
 
-    m_animDock->setWidget(animContent);
-    addDockWidget(Qt::RightDockWidgetArea, m_animDock);
-
-    // CLI Log dock
-    m_cliLogDock = new QDockWidget(tr("CLI Log"), this);
-    m_cliLogDock->setObjectName("cliLogDock");
+    // 5. CLI Log panel
+    QWidget* cliLogContent = new QWidget(this);
+    cliLogContent->setStyleSheet("font-weight: normal;");
+    QVBoxLayout* cliLogLayout = new QVBoxLayout(cliLogContent);
+    cliLogLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
     m_cliLog = new QPlainTextEdit(this);
     m_cliLog->setReadOnly(true);
     m_cliLog->setMaximumBlockCount(5000);
     m_cliLog->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    m_cliLogDock->setWidget(m_cliLog);
+    cliLogLayout->addWidget(m_cliLog);
+    QHBoxLayout* cliLogBtnLayout = new QHBoxLayout();
+    cliLogBtnLayout->setContentsMargins(4, 2, 4, 4);
+    cliLogBtnLayout->addStretch();
+    QPushButton* clearLogBtn = new QPushButton(QIcon::fromTheme("edit-clear"), tr("Clear"), cliLogContent);
+    clearLogBtn->setToolTip(tr("Clear log output"));
+    connect(clearLogBtn, &QPushButton::clicked, m_cliLog, &QPlainTextEdit::clear);
+    cliLogBtnLayout->addWidget(clearLogBtn);
+    cliLogLayout->addLayout(cliLogBtnLayout);
+    // --- Assemble group docks ---
+    // Each group is a single QDockWidget with a QSplitter holding its panels.
+    // Groups occupy separate rows so they never share a dock row.
 
-    // Initial arrangement:
-    // Top row: Canvas | Editor
-    // Bottom row: Timelines | Anim Test
+    // Atlas group: Canvas | Editor
+    m_atlasDock = new QDockWidget(tr("Atlas"), this);
+    m_atlasDock->setObjectName("atlasDock");
+    m_atlasDock->setFont(boldFont);
+    auto *atlasSplitter = new QSplitter(Qt::Horizontal, m_atlasDock);
+    atlasSplitter->addWidget(canvasContent);
+    atlasSplitter->addWidget(editorContent);
+    m_atlasDock->setWidget(atlasSplitter);
 
-    // First, clear any default placement and set them explicitly
-    addDockWidget(Qt::TopDockWidgetArea, m_canvasDock);
-    addDockWidget(Qt::TopDockWidgetArea, m_editorDock);
-    addDockWidget(Qt::BottomDockWidgetArea, m_timelineDock);
-    addDockWidget(Qt::BottomDockWidgetArea, m_animDock);
-    addDockWidget(Qt::BottomDockWidgetArea, m_cliLogDock);
+    // Animation group: Timelines | Anim Test
+    m_animationDock = new QDockWidget(tr("Animation"), this);
+    m_animationDock->setObjectName("animationDock");
+    m_animationDock->setFont(boldFont);
+    auto *animSplitter = new QSplitter(Qt::Horizontal, m_animationDock);
+    animSplitter->addWidget(timelineContent);
+    animSplitter->addWidget(animContent);
+    m_animationDock->setWidget(animSplitter);
 
-    splitDockWidget(m_canvasDock, m_editorDock, Qt::Horizontal);
-    splitDockWidget(m_timelineDock, m_animDock, Qt::Horizontal);
-    tabifyDockWidget(m_timelineDock, m_cliLogDock);
-    m_timelineDock->raise(); // ensure timeline tab is active by default
+    // Debug group: CLI Log
+    m_debugDock = new QDockWidget(tr("Debug"), this);
+    m_debugDock->setObjectName("debugDock");
+    m_debugDock->setFont(boldFont);
+    m_debugDock->setWidget(cliLogContent);
 
-    // Ensure the top row is taller than the bottom row
-    resizeDocks({m_canvasDock, m_editorDock}, {600, 600}, Qt::Vertical);
-    resizeDocks({m_timelineDock, m_animDock}, {260, 260}, Qt::Vertical);
+    // Layout: three rows
+    addDockWidget(Qt::TopDockWidgetArea, m_atlasDock);
+    addDockWidget(Qt::BottomDockWidgetArea, m_animationDock);
+    addDockWidget(Qt::BottomDockWidgetArea, m_debugDock);
+    splitDockWidget(m_animationDock, m_debugDock, Qt::Vertical);
 
-    // Add view menu
+    // Atlas row taller than Animation row
+    resizeDocks({m_atlasDock}, {600}, Qt::Vertical);
+    resizeDocks({m_animationDock}, {260}, Qt::Vertical);
+
+    // View menu — one entry per group
     m_viewMenu = menuBar()->addMenu(tr("&View"));
-    m_viewMenu->addAction(m_canvasDock->toggleViewAction());
-    m_viewMenu->addAction(m_timelineDock->toggleViewAction());
-    m_viewMenu->addAction(m_editorDock->toggleViewAction());
-    m_viewMenu->addAction(m_animDock->toggleViewAction());
-    m_viewMenu->addAction(m_cliLogDock->toggleViewAction());
+    m_viewMenu->addAction(m_atlasDock->toggleViewAction());
+    m_viewMenu->addAction(m_animationDock->toggleViewAction());
+    m_viewMenu->addSeparator();
+    m_viewMenu->addAction(m_debugDock->toggleViewAction());
 
     // Initially hide docks for welcome page
-    m_canvasDock->hide();
-    m_timelineDock->hide();
-    m_editorDock->hide();
-    m_animDock->hide();
-    m_cliLogDock->hide();
+    m_atlasDock->hide();
+    m_animationDock->hide();
+    m_debugDock->hide();
 
     setupStatusBarUi();
 
@@ -646,20 +646,17 @@ void MainWindow::updateUiState() {
         m_sourceResolutionCombo->setEnabled(enabled);
     }
 
-    // Toggle editor page and docks
+    // Toggle editor page and docks (only Atlas + Animation auto-show; Debug stays hidden)
     if (hasModels) {
         m_mainStack->hide();
-        if (m_canvasDock && m_canvasDock->isHidden()) m_canvasDock->show();
-        if (m_timelineDock && m_timelineDock->isHidden()) m_timelineDock->show();
-        if (m_editorDock && m_editorDock->isHidden()) m_editorDock->show();
-        if (m_animDock && m_animDock->isHidden()) m_animDock->show();
+        if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
+        if (m_animationDock && m_animationDock->isHidden()) m_animationDock->show();
     } else {
         m_mainStack->setCurrentIndex(0); // Welcome page
         m_mainStack->show();
-        if (m_canvasDock) m_canvasDock->hide();
-        if (m_timelineDock) m_timelineDock->hide();
-        if (m_editorDock) m_editorDock->hide();
-        if (m_animDock) m_animDock->hide();
+        if (m_atlasDock) m_atlasDock->hide();
+        if (m_animationDock) m_animationDock->hide();
+        if (m_debugDock) m_debugDock->hide();
     }
 }
 
