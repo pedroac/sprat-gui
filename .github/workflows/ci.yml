@@ -78,6 +78,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Install Python test dependencies
+        run: pip install Pillow
+
       - name: Test (Unix)
         if: runner.os != 'Windows'
         run: |
