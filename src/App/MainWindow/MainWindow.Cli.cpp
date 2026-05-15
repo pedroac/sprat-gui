@@ -234,12 +234,11 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         m_session->activeFramePaths.append(absolutePaths);
         m_shouldClearSpritesFolder = false;
     } else {
-        // On Replace, delete all files from sprites folder
+        // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
             QDir dir(m_session->sourceFolder);
-            for (const QString& file : dir.entryList(QDir::Files)) {
-                dir.remove(file);
-            }
+            dir.removeRecursively();
+            QDir().mkpath(m_session->sourceFolder);
         }
 
         m_session->sourceFolder.clear();
@@ -262,7 +261,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     ensureFrameListInput();
 
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(folderPath));
-    onRunLayout();
+    scheduleLayoutRebuild();
 }
 
 void MainWindow::onFolderDiscoveryFinished() {

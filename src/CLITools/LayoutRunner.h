@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QMutex>
 #include <QElapsedTimer>
+#include <atomic>
 #include "SpratProfilesConfig.h"
 
 struct LayoutRunConfig {
@@ -25,6 +26,7 @@ struct LayoutResult {
     QString output;
     QString error;
     bool wasRetryingTrim;
+    bool wasKilledIntentionally = false;
 };
 
 class LayoutRunner : public QObject {
@@ -48,6 +50,7 @@ signals:
 private:
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
+    std::atomic<bool> m_stopRequested{false};
 #endif
     QMutex* m_mutex = nullptr;
     LayoutRunConfig m_currentConfig;

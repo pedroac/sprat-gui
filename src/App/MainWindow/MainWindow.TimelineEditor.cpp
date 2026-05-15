@@ -29,6 +29,9 @@ void MainWindow::onTimelineRemoveClicked() {
     const int newIndex = qMin(m_session->selectedTimelineIndex, m_session->timelines.size() - 1);
     if (newIndex >= 0) {
         m_timelineList->setCurrentRow(newIndex);
+    } else {
+        // No timelines left, hide the timeline editor
+        onTimelineSelectionChanged();
     }
 }
 

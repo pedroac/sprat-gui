@@ -23,6 +23,7 @@
 #include "FrameDetectionDialog.h"
 #include "AnimatedImageImport.h"
 #include "ArchiveExtractor.h"
+#include "ImageDiscoveryService.h"
 #include "SpriteNameUtils.h"
 
 void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
@@ -60,7 +61,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         }
 
         if (processExtractedFrames(tempPath, imagePath, action)) {
-            onRunLayout();
+            scheduleLayoutRebuild();
         }
         return;
     }
@@ -190,7 +191,7 @@ void MainWindow::onFrameExtractionFinished() {
 void MainWindow::processFrameExtractionResult(const FrameExtractionResult& result) {
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.sourcePath, result.action, result.backgroundColor)) {
-            onRunLayout();
+            scheduleLayoutRebuild();
         }
     } else {
         m_statusLabel->setText(tr("Error running spratunpack"));
@@ -269,7 +270,7 @@ void MainWindow::processTarExtractionResult(const TarExtractionResult& result) {
     }
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.tarPath, result.action)) {
-            onRunLayout();
+            scheduleLayoutRebuild();
         }
     } else {
         m_statusLabel->setText(tr("Error extracting tar file"));
@@ -452,16 +453,15 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
-        onRunLayout();
+        scheduleLayoutRebuild();
         return;
     }
 
-    // On Replace, delete all files from sprites folder
+    // On Replace, delete all contents from sprites folder (including subdirectories)
     if (!m_session->sourceFolder.isEmpty()) {
         QDir dir(m_session->sourceFolder);
-        for (const QString& file : dir.entryList(QDir::Files)) {
-            dir.remove(file);
-        }
+        dir.removeRecursively();
+        QDir().mkpath(m_session->sourceFolder);
     }
 
     m_session->sourceFolder.clear();
@@ -539,10 +539,10 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
 }
 
 bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& sourcePath, DropAction action, const QColor& backgroundColor) {
-    QDir extractDir(tempPath);
-    QStringList imageFiles = extractDir.entryList(QStringList() << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif" << "*.webp" << "*.tga" << "*.dds", QDir::Files);
-    
-    if (imageFiles.isEmpty()) {
+    // Collect images recursively to preserve subfolder structure from archives
+    QStringList framePaths = ImageDiscoveryService::collectImagesRecursive({tempPath});
+
+    if (framePaths.isEmpty()) {
         m_statusLabel->setText(tr("No image files found after extraction"));
         setLoading(false);
         return false;
@@ -552,7 +552,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     if (backgroundColor.isValid()) {
         m_loadingUiMessage = tr("Applying transparency...");
         setLoading(true);
-        for (int i = 0; i < imageFiles.size(); ++i) {
+        for (int i = 0; i < framePaths.size(); ++i) {
             if (m_isCanceled) {
                 setLoading(false);
                 return false;
@@ -560,25 +560,13 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
 #ifndef Q_OS_WASM
             QCoreApplication::processEvents();
 #endif
-            
-            QString filePath = extractDir.absoluteFilePath(imageFiles[i]);
-            QImage img(filePath);
+
+            QImage img(framePaths[i]);
             if (!img.isNull()) {
                 applyTransparencyToImage(img, backgroundColor);
-                img.save(filePath);
+                img.save(framePaths[i]);
             }
         }
-    }
-
-    // Sort frames naturally (e.g. 1, 2, 10 instead of 1, 10, 2)
-    QCollator collator;
-    collator.setNumericMode(true);
-    std::sort(imageFiles.begin(), imageFiles.end(), collator);
-    
-    QStringList framePaths;
-    framePaths.reserve(imageFiles.size());
-    for (const QString& fileName : imageFiles) {
-        framePaths.append(extractDir.absoluteFilePath(fileName));
     }
     
     if (action == DropAction::Merge) {
@@ -597,12 +585,11 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
     } else {
-        // On Replace, delete all files from sprites folder
+        // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
             QDir dir(m_session->sourceFolder);
-            for (const QString& file : dir.entryList(QDir::Files)) {
-                dir.remove(file);
-            }
+            dir.removeRecursively();
+            QDir().mkpath(m_session->sourceFolder);
         }
 
         m_session->sourceFolder.clear();
@@ -623,7 +610,9 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;
         m_session->layoutSourceIsList = false;
-        m_session->currentFolder = QFileInfo(sourcePath).absoluteDir().absolutePath();
+        // Set currentFolder to extraction root so copyActiveFramesToSourceFolder
+        // preserves the subfolder hierarchy from the archive
+        m_session->currentFolder = tempPath;
         // Copy sprites to source folder on Replace
         copyActiveFramesToSourceFolder();
         m_shouldClearSpritesFolder = false;

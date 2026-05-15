@@ -1144,6 +1144,31 @@ void LayoutCanvas::removeFramesSmallerThan(int minW, int minH) {
     }
 }
 
+void LayoutCanvas::removeSprites(const QStringList& paths) {
+    if (paths.isEmpty()) return;
+    const QSet<QString> pathSet(paths.begin(), paths.end());
+    int writeIdx = 0;
+    for (int i = 0; i < m_items.size(); ++i) {
+        auto* item = m_items[i];
+        auto* border = (i < m_borderItems.size()) ? m_borderItems[i] : nullptr;
+        if (pathSet.contains(item->getData()->path)) {
+            m_pathToIndex.remove(item->getData()->path);
+            delete item;
+            delete border;
+        } else {
+            item->setIndex(writeIdx);
+            m_pathToIndex[item->getData()->path] = writeIdx;
+            m_items[writeIdx] = item;
+            if (border) m_borderItems[writeIdx] = border;
+            ++writeIdx;
+        }
+    }
+    m_items.resize(writeIdx);
+    m_borderItems.resize(writeIdx);
+    m_baseSelectionPaths.clear();
+    viewport()->update();
+}
+
 void LayoutCanvas::updateSearch() {
     const bool hasQuery = !m_searchQuery.isEmpty();
     bool selectionChangedOccurred = false;

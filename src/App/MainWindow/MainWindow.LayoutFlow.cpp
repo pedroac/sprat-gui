@@ -33,7 +33,7 @@ int legacyDefaultPivotY(const SpritePtr& sprite) {
 }
 }
 
-void MainWindow::onRunLayout() {
+void MainWindow::onRunLayout(bool quiet) {
     // If sync is active, ensure active frames have been copied to the sprites folder.
     if (m_settings.syncMode != SyncMode::None
         && m_session
@@ -54,7 +54,9 @@ void MainWindow::onRunLayout() {
         return;
     }
     if (m_layoutRunner && m_layoutRunner->isRunning()) {
-        m_layoutRunner->stop();
+        m_layoutRunPending = true;
+        m_layoutRunPendingQuiet = quiet;
+        return;
     }
 
     const QString requestedProfile = m_profileCombo->currentText().trimmed();
@@ -64,11 +66,11 @@ void MainWindow::onRunLayout() {
     LayoutRunConfig config;
     config.sourcePath = m_session->layoutSourcePath;
     config.layoutBinary = m_spratLayoutBin;
-    
+
     if (hasSelectedProfile) {
         config.profile = selectedProfile;
     }
-    
+
     config.scale = 1.0;
 
     int sourceResolutionWidth = 0;
@@ -83,12 +85,17 @@ void MainWindow::onRunLayout() {
 
     m_session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile = requestedProfile;
-    m_loadingUiMessage = tr("Building layout...");
-    m_statusLabel->setText(tr("Running spratlayout..."));
     m_isCanceled = false;
-    setLoading(true);
+    if (!quiet) {
+        m_loadingUiMessage = tr("Building layout...");
+        setLoading(true);
+    } else {
+        if (m_statusProgressBar) m_statusProgressBar->setVisible(true);
+        setCursor(Qt::WaitCursor);
+    }
+    m_statusLabel->setText(tr("Rebuilding layout..."));
     m_layoutFailureDialogShown = false;
-    
+
     qInfo() << "[Layout] Dispatching run, sourcePath=" << config.sourcePath
             << "exists=" << QFile::exists(config.sourcePath)
             << "isList=" << m_session->layoutSourceIsList;
@@ -97,6 +104,19 @@ void MainWindow::onRunLayout() {
 
 void MainWindow::onLayoutFinished(const LayoutResult& result) {
     if (!result.success) {
+        if (result.wasKilledIntentionally) {
+            setLoading(false);
+            if (m_statusProgressBar) m_statusProgressBar->setVisible(false);
+            setCursor(Qt::ArrowCursor);
+            if (m_layoutRunPending) {
+                const bool q = m_layoutRunPendingQuiet;
+                m_layoutRunPending = false;
+                m_layoutRunPendingQuiet = false;
+                onRunLayout(q);
+            }
+            return;
+        }
+
         setLoading(false);
 
         const QString combined = (result.error + "\n" + result.output).toLower();
@@ -136,8 +156,10 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         
         m_retryWithoutTrimOnFailure = false;
         if (m_layoutRunPending) {
+            const bool q = m_layoutRunPendingQuiet;
             m_layoutRunPending = false;
-            onRunLayout();
+            m_layoutRunPendingQuiet = false;
+            onRunLayout(q);
         }
         return;
     }
@@ -148,7 +170,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     const QString layoutText = result.output;
     QElapsedTimer parseTimer;
     parseTimer.start();
-    QVector<LayoutModel> newModels = LayoutParser::parse(layoutText, layoutParserFolder());
+    QVector<LayoutModel> newModels = LayoutParser::parse(layoutText, layoutParserFolder(),
+                                                         m_session->currentFolder);
     qInfo() << "[WASM] LayoutParser::parse done"
             << "models=" << newModels.size()
             << "ms=" << parseTimer.elapsed();
@@ -244,12 +267,15 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         // copied to the sprites folder
         m_session->clearTempDirs();
 
+        m_pendingChangeCount = 0;
         setLoading(false);
         qInfo() << "[WASM] setModelsAsync finished";
 
         if (m_layoutRunPending) {
+            const bool q = m_layoutRunPendingQuiet;
             m_layoutRunPending = false;
-            onRunLayout();
+            m_layoutRunPendingQuiet = false;
+            onRunLayout(q);
         }
     });
 }
@@ -268,8 +294,10 @@ void MainWindow::onLayoutError(const QString& details) {
     }
     
     if (m_layoutRunPending) {
+        const bool q = m_layoutRunPendingQuiet;
         m_layoutRunPending = false;
-        onRunLayout();
+        m_layoutRunPendingQuiet = false;
+        onRunLayout(q);
     }
 }
 
@@ -399,7 +427,46 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 
 void MainWindow::onProfileChanged() {
     const QString requestedProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
-    onRunLayout();
+    scheduleLayoutRebuild();
+}
+
+void MainWindow::scheduleLayoutRebuild() {
+    ++m_pendingChangeCount;
+    refreshSpriteTree();
+
+    // Cancel any in-progress rebuild safely (background thread sees atomic flag and kills process)
+    const bool wasRunning = m_layoutRunner && m_layoutRunner->isRunning();
+    if (wasRunning) {
+        m_layoutRunner->stop();
+        m_layoutRunPending = false;    // discard — timer will schedule a fresh run
+        m_layoutRunPendingQuiet = false;
+    }
+
+    const bool bufferFull = (m_pendingChangeCount >= kLayoutBufferFullThreshold);
+
+    if (bufferFull) {
+        m_pendingChangeCount = 0;
+        if (m_layoutDebounceTimer) m_layoutDebounceTimer->stop();
+        // Immediate rebuild with loading overlay
+        onRunLayout(false);
+    } else {
+        if (!m_layoutDebounceTimer) {
+            m_layoutDebounceTimer = new QTimer(this);
+            m_layoutDebounceTimer->setSingleShot(true);
+            connect(m_layoutDebounceTimer, &QTimer::timeout, this, [this]() {
+                if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 1) {
+                    // Navigator is active — defer until the user switches to Layout
+                    m_layoutDirty = true;
+                } else {
+                    m_layoutDirty = false;
+                    onRunLayout(true);   // quiet rebuild from timer
+                }
+            });
+        }
+        m_layoutDebounceTimer->start(2000);
+        if (m_statusLabel)
+            m_statusLabel->setText(tr("Layout pending rebuild..."));
+    }
 }
 
 void MainWindow::onLayoutZoomChanged(double value) {

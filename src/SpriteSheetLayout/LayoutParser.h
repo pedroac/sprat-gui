@@ -6,5 +6,6 @@
 
 class LayoutParser {
 public:
-    static QVector<LayoutModel> parse(const QString& output, const QString& folderPath);
+    static QVector<LayoutModel> parse(const QString& output, const QString& folderPath,
+                                      const QString& sourceFolder = QString());
 };

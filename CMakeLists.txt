@@ -229,6 +229,9 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.Marker.cpp
     src/App/MainWindow/MainWindow.TimelineEditor.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
+    src/App/MainWindow/MainWindow.Navigator.cpp
+    src/App/MainWindow/NavigatorTreeWidget.h
+    src/App/MainWindow/NavigatorTreeWidget.cpp
     src/App/MainWindow/MainWindow.h
     src/App/WasmFileDialog.cpp
     src/App/WasmFileDialog.h

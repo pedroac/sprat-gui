@@ -18,6 +18,7 @@
 #include "ImportPathSupport.h"
 
 #include <QComboBox>
+#include <QDirIterator>
 #include <QBuffer>
 #include <QClipboard>
 #include <QDialogButtonBox>
@@ -211,7 +212,7 @@ void MainWindow::loadAutosavedProject() {
         }
         m_folderLabel->setText(tr("Folder: ") + folder);
     }
-    onRunLayout();
+    scheduleLayoutRebuild();
 }
 
 void MainWindow::onLoadProject() {
@@ -883,7 +884,7 @@ void MainWindow::onProjectLoadFinished() {
         setLoading(false);
         if (!framePaths.isEmpty()) {
             m_session->activeFramePaths.append(framePaths);
-            onRunLayout();
+            scheduleLayoutRebuild();
         }
         return;
     }
@@ -944,7 +945,7 @@ void MainWindow::onProjectLoadFinished() {
             }
             m_folderLabel->setText(tr("Folder: ") + folder);
         }
-        onRunLayout();
+        scheduleLayoutRebuild();
     } else {
         setLoading(false);
     }
@@ -1119,6 +1120,12 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     m_loadingUiMessage = tr("Loading images...");
     setLoading(true);
     
+    // Determine the common root of extracted images for subfolder preservation.
+    // Use the first selected folder if single, or tempPath for multiple.
+    const QString extractionRoot = (selectedFolders.size() == 1)
+        ? selectedFolders.first()
+        : tempPath;
+
     if (action == DropAction::Merge) {
         // Ask if files with same names should be replaced
         QMessageBox msg(this);
@@ -1130,15 +1137,16 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
 
         m_session->activeFramePaths.append(absolutePaths);
+        // Set currentFolder so copyActiveFramesToSourceFolder preserves subfolder hierarchy
+        m_session->currentFolder = extractionRoot;
         // Copy extracted images to source folder so they persist after temp dir cleanup
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
     } else {
-        // On Replace, delete all files from sprites folder
+        // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
             QDir dir(m_session->sourceFolder);
-            for (const QString& file : dir.entryList(QDir::Files)) {
-                dir.remove(file);
-            }
+            dir.removeRecursively();
+            QDir().mkpath(m_session->sourceFolder);
         }
 
         m_projectFilePath.clear();
@@ -1161,6 +1169,8 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         onSpriteSelected(SpritePtr());
         refreshTimelineList();
         refreshAnimationTest();
+        // Set currentFolder so copyActiveFramesToSourceFolder preserves subfolder hierarchy
+        m_session->currentFolder = extractionRoot;
         // Copy extracted images to source folder on Replace
         copyActiveFramesToSourceFolder();
     }
@@ -1172,7 +1182,7 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     }
     updateManualFrameLabel();
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
-    onRunLayout();
+    scheduleLayoutRebuild();
 }
 
 void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
@@ -1187,12 +1197,16 @@ void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
     if (m_sourceFolderIsTemp && !m_session->sourceFolder.isEmpty()) {
         QDir newDir;
         if (newDir.mkpath(newSpritesPath)) {
-            const QStringList files = QDir(m_session->sourceFolder)
-                .entryList(QDir::Files | QDir::NoDotAndDotDot);
-            for (const QString& file : files) {
-                const QString src = QDir(m_session->sourceFolder).filePath(file);
-                const QString dst = QDir(newSpritesPath).filePath(file);
-                QFile::rename(src, dst);
+            // Move all files and subdirectories preserving structure
+            QDirIterator it(m_session->sourceFolder, QDir::Files,
+                            QDirIterator::Subdirectories);
+            QDir srcRoot(m_session->sourceFolder);
+            while (it.hasNext()) {
+                it.next();
+                const QString relPath = srcRoot.relativeFilePath(it.filePath());
+                const QString dst = QDir(newSpritesPath).filePath(relPath);
+                QDir().mkpath(QFileInfo(dst).absolutePath());
+                QFile::rename(it.filePath(), dst);
             }
         }
     }

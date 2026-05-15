@@ -299,7 +299,7 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
  * @brief Parses the output from spratlayout into a LayoutModel.
  */
 LayoutModel MainWindow::parseLayoutOutput(const QString& output, const QString& folderPath) {
-    QVector<LayoutModel> models = LayoutParser::parse(output, folderPath);
+    QVector<LayoutModel> models = LayoutParser::parse(output, folderPath, m_session->currentFolder);
     return models.isEmpty() ? LayoutModel() : models.first();
 }
 
@@ -336,7 +336,21 @@ bool MainWindow::ensureFrameListInput() {
     m_session->layoutSourcePath = m_session->frameListPath;
     m_session->layoutSourceIsList = true;
     if (!m_session->activeFramePaths.isEmpty()) {
-        m_session->currentFolder = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
+        // Find the common parent directory of all frames
+        QString commonFolder = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
+        for (int i = 1; i < m_session->activeFramePaths.size(); ++i) {
+            const QString path = m_session->activeFramePaths.at(i);
+            const QString dir = QFileInfo(path).absoluteDir().absolutePath();
+            // Find common ancestor between commonFolder and dir
+            while (!commonFolder.isEmpty()
+                   && dir != commonFolder
+                   && !dir.startsWith(commonFolder + "/")) {
+                const QString parent = QFileInfo(commonFolder).absoluteDir().absolutePath();
+                if (parent == commonFolder) break; // reached filesystem root
+                commonFolder = parent;
+            }
+        }
+        m_session->currentFolder = commonFolder;
     }
     if (!oldFrameListPath.isEmpty() && oldFrameListPath != m_session->frameListPath) {
         qInfo() << "[FrameList] Deleting old:" << oldFrameListPath;
@@ -364,6 +378,45 @@ void MainWindow::updateManualFrameLabel() {
     } else {
         m_folderLabel->setText(QString(tr("Frames: %1 (manual selection)")).arg(m_session->activeFramePaths.size()));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: Check if a timeline name already exists
+// ---------------------------------------------------------------------------
+bool MainWindow::hasDuplicateTimelineName(const QString& timelineName) const {
+    if (!m_session) return false;
+    for (const auto& timeline : m_session->timelines) {
+        if (timeline.name == timelineName) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: Get a unique timeline name with optional path prefix
+// ---------------------------------------------------------------------------
+QString MainWindow::getUniqueTimelineName(const QString& baseName, const QString& folderPath) {
+    QString fullName = baseName;
+    if (!folderPath.isEmpty()) {
+        fullName = folderPath + "/" + baseName;
+    }
+
+    // If no collision, return as-is
+    if (!hasDuplicateTimelineName(fullName)) {
+        return fullName;
+    }
+
+    // If collision exists, try appending numbers
+    for (int i = 1; i <= 1000; ++i) {
+        QString candidateName = fullName + "_" + QString::number(i);
+        if (!hasDuplicateTimelineName(candidateName)) {
+            return candidateName;
+        }
+    }
+
+    // Fallback (shouldn't happen)
+    return fullName + "_unique";
 }
 
 QVector<SpratProfile> MainWindow::configuredProfiles() {
@@ -470,7 +523,7 @@ void MainWindow::onAddFramesRequested() {
         QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
-    onRunLayout();
+    scheduleLayoutRebuild();
 }
 
 void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
@@ -625,8 +678,21 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         QFile(path).remove();
     }
 
+    // Immediately remove deleted sprites from canvas (leaves a gap until rebuild)
+    if (m_canvas) {
+        m_canvas->removeSprites(targets);
+    }
+    // Keep session layout models in sync so the next rebuild sees the correct sprite list
+    const QSet<QString> targetSet(targets.begin(), targets.end());
+    for (auto& model : m_session->layoutModels) {
+        model.sprites.erase(
+            std::remove_if(model.sprites.begin(), model.sprites.end(),
+                [&targetSet](const SpritePtr& s) { return targetSet.contains(s->path); }),
+            model.sprites.end());
+    }
+
     m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-    onRunLayout();
+    scheduleLayoutRebuild();
 }
 
 void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos) {
@@ -713,7 +779,7 @@ void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orient
     }
 
     ensureFrameListInput();
-    onRunLayout();
+    scheduleLayoutRebuild();
     m_statusLabel->setText(tr("Sprite split into %1 and %2").arg(
         QFileInfo(pathA).fileName(), QFileInfo(pathB).fileName()));
 }
@@ -752,7 +818,7 @@ void MainWindow::onManageProfiles() {
     const QString previousProfile = m_profileCombo ? m_profileCombo->currentText() : QString();
     applyConfiguredProfiles(profiles, previousProfile);
     if (!m_session->layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentText().trimmed().isEmpty()) {
-        onRunLayout();
+        scheduleLayoutRebuild();
     }
 }
 
@@ -792,7 +858,7 @@ void MainWindow::applySettings() {
         && m_session
         && !m_session->layoutModels.isEmpty()
         && m_canvas) {
-        onRunLayout();
+        scheduleLayoutRebuild();
     }
     m_appliedSyncMode = m_settings.syncMode;
 
@@ -906,7 +972,7 @@ void MainWindow::onFolderWatcherFilesModified(const QStringList& paths) {
     }
 
     qInfo() << "[Watch] Processing modifications...";
-    onRunLayout();
+    scheduleLayoutRebuild();
 }
 
 void MainWindow::onSyncNowRequested() {
@@ -951,7 +1017,7 @@ void MainWindow::performFolderSync() {
 
     // Merge changes into layout
     if (!FolderSyncService::mergeSyncResults(
-            m_session->layoutModels.first(), syncResult)) {
+            m_session->layoutModels.first(), syncResult, m_session->sourceFolder)) {
         QMessageBox::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
         return;
     }
@@ -973,7 +1039,7 @@ void MainWindow::performFolderSync() {
             } else {
                 m_statusLabel->setText(tr("Re-generating layout..."));
             }
-            onRunLayout();
+            scheduleLayoutRebuild();
         } else if (!syncResult.deletedImagePaths.isEmpty()) {
             // All frames were deleted
             m_statusLabel->setText(tr("All sprites removed."));
@@ -1038,36 +1104,41 @@ void MainWindow::performManualSync() {
     QStringList folderImages = FolderSyncService::getImageFilesInFolder(m_session->sourceFolder);
     qInfo() << "[Sync]   Found" << folderImages.size() << "images in folder";
 
+    // Build a set of existing sprite paths for fast lookup
+    QSet<QString> existingPaths;
+    for (const auto& sprite : layout.sprites) {
+        if (sprite) existingPaths.insert(sprite->path);
+    }
+
     for (const QString& imagePath : folderImages) {
-        QFileInfo imageInfo(imagePath);
-        const QString baseName = imageInfo.baseName();
-        qInfo() << "[Sync]   Image:" << baseName;
+        qInfo() << "[Sync]   Image:" << imagePath;
 
-        // Check if image is already in layout
-        bool found = false;
-        for (const auto& sprite : layout.sprites) {
-            if (sprite && QFileInfo(sprite->path).baseName() == baseName) {
-                found = true;
-                qInfo() << "[Sync]     Found in layout";
-                break;
-            }
+        // Check if image is already in layout by absolute path
+        if (existingPaths.contains(imagePath)) {
+            qInfo() << "[Sync]     Found in layout";
+            continue;
         }
 
-        // If not found, add new sprite
-        if (!found) {
-            qInfo() << "[Sync]     Adding to layout";
-            auto newSprite = std::make_shared<Sprite>();
-            newSprite->path = imagePath;
-            newSprite->name = baseName;
-            newSprite->rect = QRect(0, 0, 0, 0);
-            newSprite->trimmed = false;
-            newSprite->rotated = false;
-            newSprite->pivotX = 0;
-            newSprite->pivotY = 0;
+        // Not found, add new sprite with name derived from relative path
+        qInfo() << "[Sync]     Adding to layout";
+        auto newSprite = std::make_shared<Sprite>();
+        newSprite->path = imagePath;
 
-            layout.sprites.append(newSprite);
-            addedCount++;
-        }
+        // Derive name from relative path within source folder
+        QString rel = QDir(m_session->sourceFolder).relativeFilePath(imagePath);
+        QFileInfo relInfo(rel);
+        newSprite->name = (relInfo.path() == ".")
+            ? relInfo.baseName()
+            : relInfo.path() + "/" + relInfo.baseName();
+
+        newSprite->rect = QRect(0, 0, 0, 0);
+        newSprite->trimmed = false;
+        newSprite->rotated = false;
+        newSprite->pivotX = 0;
+        newSprite->pivotY = 0;
+
+        layout.sprites.append(newSprite);
+        addedCount++;
     }
 
     qInfo() << "[Sync] Step 3: Updating layout data...";
@@ -1091,7 +1162,7 @@ void MainWindow::performManualSync() {
     if (!m_session->activeFramePaths.isEmpty()) {
         qInfo() << "[Sync]   Running layout...";
         m_statusLabel->setText(tr("Regenerating layout..."));
-        onRunLayout();
+        scheduleLayoutRebuild();
     } else {
         qWarning() << "[Sync]   No sprites left!";
         m_statusLabel->setText(tr("No sprites to display."));
@@ -1231,9 +1302,11 @@ bool MainWindow::activeFramesAreInSourceFolder() const {
     if (m_session->sourceFolder.isEmpty() || m_session->activeFramePaths.isEmpty()) {
         return false;
     }
-    const QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+    QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+    if (!canonicalFolder.endsWith('/')) canonicalFolder += '/';
     for (const QString& path : m_session->activeFramePaths) {
-        if (QFileInfo(path).absolutePath() != canonicalFolder) {
+        const QString absPath = QFileInfo(path).absoluteFilePath();
+        if (!absPath.startsWith(canonicalFolder)) {
             return false;
         }
     }
@@ -1245,21 +1318,37 @@ void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
         return;
     }
     QDir().mkpath(m_session->sourceFolder);
-    const QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+    QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+    if (!canonicalFolder.endsWith('/')) canonicalFolder += '/';
+
+    // Determine the common root of active frames for relative path computation
+    const QString originalRoot = m_session->currentFolder;
 
     QStringList newPaths;
     newPaths.reserve(m_session->activeFramePaths.size());
 
     for (const QString& path : m_session->activeFramePaths) {
         const QFileInfo srcInfo(path);
+        const QString absPath = srcInfo.absoluteFilePath();
 
-        // Already in source folder — keep as-is.
-        if (srcInfo.absolutePath() == canonicalFolder) {
+        // Already in source folder (including subfolders) — keep as-is.
+        if (absPath.startsWith(canonicalFolder)) {
             newPaths.append(path);
             continue;
         }
 
-        QString dst = QDir(m_session->sourceFolder).filePath(srcInfo.fileName());
+        // Compute relative path from original root to preserve subfolder structure
+        QString relPath;
+        if (!originalRoot.isEmpty() && absPath.startsWith(originalRoot)) {
+            relPath = QDir(originalRoot).relativeFilePath(absPath);
+        } else {
+            relPath = srcInfo.fileName();
+        }
+
+        QString dst = QDir(m_session->sourceFolder).filePath(relPath);
+
+        // Create intermediate subdirectories
+        QDir().mkpath(QFileInfo(dst).absolutePath());
 
         // Handle existing files
         if (QFileInfo::exists(dst)) {
@@ -1268,11 +1357,12 @@ void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
                 QFile::remove(dst);
             } else {
                 // Resolve name conflicts: try baseName_1, baseName_2, ..., baseName_99.
-                const QString baseName = srcInfo.completeBaseName();
-                const QString suffix   = srcInfo.suffix();
+                const QString baseName = QFileInfo(dst).completeBaseName();
+                const QString suffix   = QFileInfo(dst).suffix();
+                const QString dstDir   = QFileInfo(dst).absolutePath();
                 bool resolved = false;
                 for (int i = 1; i <= 99; ++i) {
-                    const QString candidate = QDir(m_session->sourceFolder).filePath(
+                    const QString candidate = QDir(dstDir).filePath(
                         QString("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
                     if (!QFileInfo::exists(candidate)) {
                         dst = candidate;
@@ -1282,7 +1372,7 @@ void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
                 }
                 if (!resolved) {
                     qWarning() << "copyActiveFramesToSourceFolder: conflict unresolvable for"
-                               << srcInfo.fileName() << "- skipping";
+                               << relPath << "- skipping";
                     newPaths.append(path);
                     continue;
                 }
@@ -1308,13 +1398,10 @@ void MainWindow::clearSourceFolderImages(const QString& excludePath) {
         QDir(excludePath).absolutePath() == canonicalSource) {
         return; // Don't erase the folder we're about to load from
     }
-    static const QStringList imageExts = {
-        "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif", "*.webp", "*.tga", "*.dds"
-    };
+    // Remove all contents (including subdirectories) and recreate the empty folder
     QDir dir(canonicalSource);
-    for (const QString& fileName : dir.entryList(imageExts, QDir::Files)) {
-        dir.remove(fileName);
-    }
+    dir.removeRecursively();
+    QDir().mkpath(canonicalSource);
 }
 
 void MainWindow::showSyncNotification(const QString& message) {

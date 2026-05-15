@@ -38,6 +38,7 @@
 #include <QPlainTextEdit>
 #include <QTreeWidget>
 #include <QActionGroup>
+#include "NavigatorTreeWidget.h"
 
 void MainWindow::setupUi() {
     resize(1400, 860);
@@ -157,11 +158,11 @@ void MainWindow::setupUi() {
     if (!m_sourceResolutionDebounceTimer) {
         m_sourceResolutionDebounceTimer = new QTimer(this);
         m_sourceResolutionDebounceTimer->setSingleShot(true);
-        connect(m_sourceResolutionDebounceTimer, &QTimer::timeout, this, [this]() { onRunLayout(); });
+        connect(m_sourceResolutionDebounceTimer, &QTimer::timeout, this, [this]() { scheduleLayoutRebuild(); });
     }
     auto scheduleSourceResolutionLayoutRun = [this](int) {
         if (!m_sourceResolutionDebounceTimer) {
-            onRunLayout();
+            scheduleLayoutRebuild();
             return;
         }
         m_sourceResolutionDebounceTimer->start(350);
@@ -196,6 +197,7 @@ void MainWindow::setupUi() {
     connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onAddFramesRequested);
     connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onRemoveFramesRequested);
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
+    m_canvas->viewport()->installEventFilter(this);
 
     // Navigator panel (tree view of sprites)
     QWidget* navigatorContent = new QWidget(this);
@@ -203,11 +205,14 @@ void MainWindow::setupUi() {
     QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
     navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
-    m_spriteTree = new QTreeWidget(navigatorContent);
+    m_spriteTree = new NavigatorTreeWidget(navigatorContent);
     m_spriteTree->setHeaderLabel(tr("Sprites"));
     m_spriteTree->setIconSize(QSize(20, 20));
     m_spriteTree->setSortingEnabled(true);
     m_spriteTree->sortByColumn(0, Qt::AscendingOrder);
+    m_spriteTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_spriteTree, &QWidget::customContextMenuRequested,
+            this, &MainWindow::onSpriteTreeContextMenu);
     navigatorLayout->addWidget(m_spriteTree);
 
     // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
@@ -535,6 +540,11 @@ void MainWindow::setupUi() {
     connect(m_showLayoutAction, &QAction::triggered, this, [this]() {
         m_atlasViewStack->setCurrentIndex(0);
         if (m_atlasDock->isHidden()) m_atlasDock->show();
+        if (m_layoutDirty) {
+            m_layoutDirty = false;
+            if (m_layoutDebounceTimer) m_layoutDebounceTimer->stop();
+            onRunLayout();
+        }
     });
 
     m_showNavigatorAction = atlasSubMenu->addAction(tr("Navigation"));
@@ -803,20 +813,26 @@ void MainWindow::refreshSpriteTree() {
         return;
     }
 
-    // Strip trailing digits to find a group prefix.
-    // e.g. "jump_kick1" → "jump_kick", "idle" → "idle"
+    // Strip trailing digits to find a group prefix for animation sequences.
+    // e.g. "walk1" → "walk", "idle" → "idle"
+    // Returns empty string if no trailing digits found.
     auto groupPrefix = [](const QString& name) -> QString {
         int end = name.size();
         while (end > 0 && name[end - 1].isDigit()) --end;
-        if (end == 0 || end == name.size()) return name;
+        if (end == 0 || end == name.size()) return QString(); // No trailing digits
         return name.left(end);
+    };
+
+    // Check if a filename ends with a digit
+    auto endsWithDigit = [](const QString& name) -> bool {
+        return !name.isEmpty() && name.back().isDigit();
     };
 
     const QIcon folderIcon = QIcon::fromTheme("folder");
 
-    auto makeLeaf = [&](QTreeWidgetItem* parent, const SpritePtr& sprite) {
+    auto makeLeaf = [&](QTreeWidgetItem* parent, const SpritePtr& sprite, const QString& leafName) {
         auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
-        leaf->setText(0, sprite->name);
+        leaf->setText(0, leafName);
         leaf->setFlags(leaf->flags() | Qt::ItemIsUserCheckable);
         leaf->setCheckState(0, Qt::Unchecked);
         leaf->setData(0, Qt::UserRole, QVariant::fromValue(sprite));
@@ -834,6 +850,27 @@ void MainWindow::refreshSpriteTree() {
         return node;
     };
 
+    // Find or create folder nodes along a path like "player/sub"
+    auto findOrCreateFolderPath = [&](QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
+        QTreeWidgetItem* current = root;
+        for (const QString& part : parts) {
+            QTreeWidgetItem* found = nullptr;
+            int childCount = current ? current->childCount() : m_spriteTree->topLevelItemCount();
+            for (int i = 0; i < childCount; ++i) {
+                QTreeWidgetItem* child = current ? current->child(i) : m_spriteTree->topLevelItem(i);
+                if (child->text(0) == part && !child->data(0, Qt::UserRole).isValid()) {
+                    found = child;
+                    break;
+                }
+            }
+            if (!found) {
+                found = makeGroupNode(current, part);
+            }
+            current = found;
+        }
+        return current;
+    };
+
     for (int mi = 0; mi < m_session->layoutModels.size(); ++mi) {
         const auto& model = m_session->layoutModels[mi];
 
@@ -843,21 +880,75 @@ void MainWindow::refreshSpriteTree() {
             atlasRoot = makeGroupNode(nullptr, tr("Atlas %1").arg(mi + 1));
         }
 
-        // Group sprites by name prefix
-        QMap<QString, QVector<SpritePtr>> groups;
-        for (const auto& sprite : model.sprites)
-            groups[groupPrefix(sprite->name)].append(sprite);
+        // Group sprites by their folder path (everything before the last `/` segment)
+        // and then within each folder, sub-group by digit-prefix for animation sequences.
+        QMap<QString, QVector<SpritePtr>> folderGroups;
+        for (const auto& sprite : model.sprites) {
+            int lastSlash = sprite->name.lastIndexOf('/');
+            QString folder = (lastSlash >= 0) ? sprite->name.left(lastSlash) : QString();
+            folderGroups[folder].append(sprite);
+        }
 
-        for (auto it = groups.constBegin(); it != groups.constEnd(); ++it) {
-            const QString& prefix = it.key();
-            const QVector<SpritePtr>& members = it.value();
+        for (auto it = folderGroups.constBegin(); it != folderGroups.constEnd(); ++it) {
+            const QString& folderPath = it.key();
+            const QVector<SpritePtr>& sprites = it.value();
 
-            if (members.size() == 1) {
-                makeLeaf(atlasRoot, members.first());
-            } else {
-                auto* groupNode = makeGroupNode(atlasRoot, prefix);
-                for (const auto& sprite : members)
-                    makeLeaf(groupNode, sprite);
+            // Create folder hierarchy nodes
+            QTreeWidgetItem* folderNode = atlasRoot;
+            if (!folderPath.isEmpty()) {
+                folderNode = findOrCreateFolderPath(atlasRoot, folderPath.split('/'));
+            }
+
+            // Within this folder, apply digit-prefix subgrouping only for numbered files.
+            // Store leaf name alongside sprite to avoid recomputing lastIndexOf later.
+            using SpriteLeaf = QPair<SpritePtr, QString>; // (sprite, leafName)
+            QMap<QString, QVector<SpriteLeaf>> animGroups;
+            for (const auto& sprite : sprites) {
+                const int lastSlash = sprite->name.lastIndexOf('/');
+                const QString leafName = (lastSlash >= 0) ? sprite->name.mid(lastSlash + 1) : sprite->name;
+                if (endsWithDigit(leafName)) {
+                    const QString prefix = groupPrefix(leafName);
+                    animGroups[prefix.isEmpty() ? leafName : prefix].append({sprite, leafName});
+                } else {
+                    animGroups[leafName].append({sprite, leafName});
+                }
+            }
+
+            // Single pass: determine which groups qualify as animation group nodes
+            // (multiple members, all leaf names end with digits, prefix came from digit-stripping).
+            // Also count how many such groups exist to decide whether to skip the single-sequence node.
+            struct GroupInfo { bool isAnimGroup = false; };
+            QMap<QString, GroupInfo> groupInfo;
+            int groupNodeCount = 0;
+            for (auto git = animGroups.constBegin(); git != animGroups.constEnd(); ++git) {
+                const QVector<SpriteLeaf>& members = git.value();
+                if (members.size() <= 1) continue;
+                bool allEndWithDigits = true;
+                for (const auto& [sprite, leafName] : members) {
+                    if (!endsWithDigit(leafName)) { allEndWithDigits = false; break; }
+                }
+                if (allEndWithDigits && !groupPrefix(members.first().second).isEmpty()) {
+                    groupInfo[git.key()].isAnimGroup = true;
+                    ++groupNodeCount;
+                }
+            }
+
+            const bool skipGroupNodeForSingleSequence = (groupNodeCount == 1);
+
+            for (auto git = animGroups.constBegin(); git != animGroups.constEnd(); ++git) {
+                const QString& prefix = git.key();
+                const QVector<SpriteLeaf>& members = git.value();
+
+                if (members.size() == 1) {
+                    makeLeaf(folderNode, members.first().first, members.first().second);
+                } else if (groupInfo[prefix].isAnimGroup && !skipGroupNodeForSingleSequence) {
+                    auto* groupNode = makeGroupNode(folderNode, prefix);
+                    for (const auto& [sprite, leafName] : members)
+                        makeLeaf(groupNode, sprite, leafName);
+                } else {
+                    for (const auto& [sprite, leafName] : members)
+                        makeLeaf(folderNode, sprite, leafName);
+                }
             }
         }
     }

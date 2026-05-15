@@ -7,7 +7,8 @@
 #include <QRegularExpression>
 #include <QHash>
 
-QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& folderPath) {
+QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& folderPath,
+                                          const QString& sourceFolder) {
     QVector<LayoutModel> models;
     double commonScale = 1.0;
     QDir dir(folderPath);
@@ -49,7 +50,16 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             capturedPath.replace("\\\"", "\"");
             capturedPath.replace("\\\\", "\\");
             s->path = dir.absoluteFilePath(capturedPath);
-            s->name = QFileInfo(s->path).baseName();
+            // Derive name from relative path within sourceFolder when available
+            if (!sourceFolder.isEmpty() && s->path.startsWith(sourceFolder)) {
+                QString rel = QDir(sourceFolder).relativeFilePath(s->path);
+                QFileInfo relInfo(rel);
+                s->name = (relInfo.path() == ".")
+                    ? relInfo.baseName()
+                    : relInfo.path() + "/" + relInfo.baseName();
+            } else {
+                s->name = QFileInfo(s->path).baseName();
+            }
             s->rect = QRect(match.captured(2).toInt(), match.captured(3).toInt(), match.captured(4).toInt(), match.captured(5).toInt());
             if (!match.captured(6).isEmpty()) {
                 s->trimmed = true;

@@ -69,6 +69,14 @@ public:
      */
     void removeFramesSmallerThan(int minW, int minH);
 
+    /**
+     * @brief Removes sprites by file path from the canvas without emitting removeFramesRequested.
+     *
+     * Provides immediate visual feedback when sprites are deleted — leaves a gap
+     * in the layout until the next full rebuild.
+     */
+    void removeSprites(const QStringList& paths);
+
 signals:
     /**
      * @brief Emitted when the sprite selection changes.

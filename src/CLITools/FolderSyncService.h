@@ -51,7 +51,8 @@ public:
      */
     static bool mergeSyncResults(
         LayoutModel& layout,
-        const SyncResult& changes);
+        const SyncResult& changes,
+        const QString& sourceFolder = QString());
 
     /**
      * Get displayable name for a sync result count.
@@ -65,6 +66,18 @@ public:
      * @return Sorted list of absolute paths to image files
      */
     static QStringList getImageFilesInFolder(const QString& folderPath);
+
+    /**
+     * Organize new image files by naming pattern.
+     *
+     * Analyzes file names and creates subfolders when files have mixed patterns.
+     * For example, if files include both "walk1.png" and "run1.png", creates
+     * "walk" and "run" subfolders and moves files accordingly.
+     *
+     * @param newImagePaths List of new image file paths to organize
+     * @return List of paths after organization (may differ from input if files were moved)
+     */
+    static QStringList organizeNewImagesByPattern(const QStringList& newImagePaths);
 
 private:
 

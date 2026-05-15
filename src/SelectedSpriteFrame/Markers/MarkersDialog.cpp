@@ -65,6 +65,7 @@ void MarkersDialog::setupUi() {
     addLayout->addWidget(m_addNameEdit);
     
     QPushButton* addBtn = new QPushButton(QIcon::fromTheme("list-add"), tr("Add"));
+    addBtn->setAutoDefault(false);
     connect(addBtn, &QPushButton::clicked, this, &MarkersDialog::onAddClicked);
     connect(m_addNameEdit, &QLineEdit::returnPressed, this, &MarkersDialog::onAddClicked);
     addLayout->addWidget(addBtn);
@@ -76,6 +77,7 @@ void MarkersDialog::setupUi() {
     mainLayout->addWidget(m_listWidget);
 
     QPushButton* removeBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove Selected"));
+    removeBtn->setAutoDefault(false);
     connect(removeBtn, &QPushButton::clicked, this, &MarkersDialog::onRemoveClicked);
     mainLayout->addWidget(removeBtn);
 
@@ -185,7 +187,13 @@ void MarkersDialog::onAddClicked() {
         name = QString("point%1").arg(m_sprite->points.size() + 1);
     }
     name = normalizeMarkerName(name);
-    
+
+    // Check if reserved name
+    if (name.toLower() == "pivot") {
+        QMessageBox::warning(this, tr("Error"), tr("'pivot' is a reserved name and cannot be used for markers."));
+        return;
+    }
+
     // Check duplicate
     for (const auto& p : m_sprite->points) {
         if (p.name == name) {
@@ -292,7 +300,29 @@ void MarkersDialog::onFieldChanged() {
     }
 
     auto& p = m_sprite->points[row];
-    p.name = normalizeMarkerName(m_nameEdit->text());
+    QString newName = normalizeMarkerName(m_nameEdit->text());
+
+    // Check if reserved name
+    if (newName.toLower() == "pivot") {
+        QMessageBox::warning(this, tr("Error"), tr("'pivot' is a reserved name and cannot be used for markers."));
+        m_updating = true;
+        m_nameEdit->setText(p.name);
+        m_updating = false;
+        return;
+    }
+
+    // Check for duplicates (but allow same name for the current marker)
+    for (int i = 0; i < m_sprite->points.size(); ++i) {
+        if (i != row && m_sprite->points[i].name == newName) {
+            QMessageBox::warning(this, tr("Error"), tr("Marker name already exists."));
+            m_updating = true;
+            m_nameEdit->setText(p.name);
+            m_updating = false;
+            return;
+        }
+    }
+
+    p.name = newName;
     if (m_nameEdit->text() != p.name) {
         m_updating = true;
         m_nameEdit->setText(p.name);

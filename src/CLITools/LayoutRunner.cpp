@@ -35,10 +35,7 @@ void LayoutRunner::stop() {
 #ifdef SPRAT_EMBEDDED_CLI
     EmbeddedCli::requestStop();
 #else
-    if (m_process->state() != QProcess::NotRunning) {
-        m_process->kill();
-        m_process->waitForFinished(1000);
-    }
+    m_stopRequested = true;
 #endif
 }
 
@@ -66,6 +63,10 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 
         m_stdoutBuffer.clear();
         m_stderrBuffer.clear();
+
+#ifndef SPRAT_EMBEDDED_CLI
+        m_stopRequested = false;
+#endif
 
         QElapsedTimer runTimer;
         runTimer.start();
@@ -105,6 +106,18 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         const int timeoutMs = 300000; // 5 minutes for layout
 
         while (m_process->state() == QProcess::Running || m_process->bytesAvailable() > 0) {
+            if (m_stopRequested.load()) {
+                m_process->kill();
+                m_process->waitForFinished(500);
+                LayoutResult killed;
+                killed.success = false;
+                killed.exitCode = -1;
+                killed.wasRetryingTrim = config.retryWithoutTrim;
+                killed.wasKilledIntentionally = true;
+                emit finished(killed);
+                return;
+            }
+
             if (timer.elapsed() > timeoutMs) {
                 m_process->kill();
                 m_process->waitForFinished(1000);
@@ -114,7 +127,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
             m_process->waitForReadyRead(50);
             m_stdoutBuffer.append(m_process->readAllStandardOutput());
             m_stderrBuffer.append(m_process->readAllStandardError());
-            
+
             if (m_process->state() == QProcess::NotRunning && m_process->bytesAvailable() == 0) break;
         }
 

@@ -1,6 +1,7 @@
 #include "FolderSyncService.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QDebug>
 #include <algorithm>
@@ -51,7 +52,8 @@ FolderSyncService::SyncResult FolderSyncService::detectChanges(
 
 bool FolderSyncService::mergeSyncResults(
     LayoutModel& layout,
-    const SyncResult& changes) {
+    const SyncResult& changes,
+    const QString& sourceFolder) {
 
     if (changes.error.isEmpty() == false) {
         qWarning() << "FolderSyncService: Cannot merge with error:" << changes.error;
@@ -68,14 +70,25 @@ bool FolderSyncService::mergeSyncResults(
         }
     }
 
+    // Organize new images by pattern before adding to layout
+    const QStringList organizedPaths = organizeNewImagesByPattern(changes.newImagePaths);
+
     // Add new sprites to layout
-    for (const QString& imagePath : changes.newImagePaths) {
+    for (const QString& imagePath : organizedPaths) {
         auto newSprite = std::make_shared<Sprite>();
         newSprite->path = imagePath;
 
-        // Extract filename for display name
-        QFileInfo fileInfo(imagePath);
-        newSprite->name = fileInfo.baseName();
+        // Derive name from relative path within sourceFolder when available
+        if (!sourceFolder.isEmpty()) {
+            QString rel = QDir(sourceFolder).relativeFilePath(imagePath);
+            QFileInfo relInfo(rel);
+            newSprite->name = (relInfo.path() == ".")
+                ? relInfo.baseName()
+                : relInfo.path() + "/" + relInfo.baseName();
+        } else {
+            QFileInfo fileInfo(imagePath);
+            newSprite->name = fileInfo.baseName();
+        }
 
         // Initialize with default values
         newSprite->rect = QRect(0, 0, 0, 0);  // Will be set by layout generation
@@ -114,17 +127,15 @@ QString FolderSyncService::describeSyncResult(const SyncResult& result) {
 QStringList FolderSyncService::getImageFilesInFolder(const QString& folderPath) {
     QStringList result;
 
-    QDir dir(folderPath);
     QStringList nameFilters;
     nameFilters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif" << "*.webp"
                 << "*.PNG" << "*.JPG" << "*.JPEG" << "*.BMP" << "*.GIF" << "*.WEBP";
 
-    dir.setNameFilters(nameFilters);
-    dir.setFilter(QDir::Files | QDir::Readable);
-
-    const QFileInfoList fileList = dir.entryInfoList();
-    for (const QFileInfo& fileInfo : fileList) {
-        result.append(fileInfo.absoluteFilePath());
+    QDirIterator it(folderPath, nameFilters, QDir::Files | QDir::Readable,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        result.append(it.fileInfo().absoluteFilePath());
     }
 
     result.sort();
@@ -150,4 +161,107 @@ bool FolderSyncService::isImageFile(const QString& filePath) {
 
     QString ext = QFileInfo(filePath).suffix().toLower();
     return extensions.contains("." + ext);
+}
+
+QStringList FolderSyncService::organizeNewImagesByPattern(const QStringList& newImagePaths) {
+    if (newImagePaths.isEmpty())
+        return newImagePaths;
+
+    // Group files by their name pattern (prefix before trailing digits)
+    QMap<QString, QStringList> patterns; // prefix -> list of file paths
+    QStringList noPattern; // files without trailing digits
+
+    for (const QString& path : newImagePaths) {
+        QFileInfo fi(path);
+        QString baseName = fi.baseName();
+
+        // Extract prefix by removing trailing digits
+        int end = baseName.size();
+        while (end > 0 && baseName[end - 1].isDigit()) {
+            --end;
+        }
+
+        if (end > 0 && end < baseName.size()) {
+            // Has trailing digits
+            QString prefix = baseName.left(end);
+            patterns[prefix].append(path);
+        } else {
+            // No trailing digits
+            noPattern.append(path);
+        }
+    }
+
+    // Check if we need to organize
+    // We organize only if:
+    // 1. There are multiple different patterns with numbered files, OR
+    // 2. There are mixed numbered and non-numbered files
+    int patternsWithMultiple = 0;
+    for (auto it = patterns.constBegin(); it != patterns.constEnd(); ++it) {
+        if (it.value().size() > 1) {
+            ++patternsWithMultiple;
+        }
+    }
+
+    // If all files follow the same pattern (or no pattern), don't organize
+    if (patternsWithMultiple <= 1 && noPattern.isEmpty()) {
+        return newImagePaths;
+    }
+
+    // Organize files into subfolders by pattern
+    QStringList result;
+
+    // Handle non-patterned files
+    for (const QString& path : noPattern) {
+        result.append(path); // Keep them at current location
+    }
+
+    // Handle patterned files - move to subfolders
+    for (auto it = patterns.constBegin(); it != patterns.constEnd(); ++it) {
+        const QString& prefix = it.key();
+        const QStringList& paths = it.value();
+
+        // Only organize if there are multiple files with this pattern
+        if (paths.size() <= 1) {
+            result.append(paths);
+            continue;
+        }
+
+        QFileInfo firstFile(paths.first());
+        QString parentDir = firstFile.absolutePath();
+
+        // Create target subfolder name
+        QString targetFolder = parentDir + '/' + prefix;
+        QDir targetDir(targetFolder);
+
+        // Handle existing folder collision
+        int counter = 2;
+        while (targetDir.exists()) {
+            targetFolder = parentDir + '/' + prefix + '_' + QString::number(counter);
+            targetDir.setPath(targetFolder);
+            ++counter;
+        }
+
+        // Create the subfolder
+        if (!QDir().mkpath(targetFolder)) {
+            qWarning() << "FolderSyncService: Failed to create folder" << targetFolder;
+            result.append(paths);
+            continue;
+        }
+
+        // Move files to subfolder
+        for (const QString& oldPath : paths) {
+            QFileInfo fi(oldPath);
+            QString newPath = targetFolder + '/' + fi.fileName();
+
+            if (QFile::rename(oldPath, newPath)) {
+                qInfo() << "FolderSyncService: Moved" << oldPath << "to" << newPath;
+                result.append(newPath);
+            } else {
+                qWarning() << "FolderSyncService: Failed to move" << oldPath << "to" << newPath;
+                result.append(oldPath);
+            }
+        }
+    }
+
+    return result;
 }

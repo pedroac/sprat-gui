@@ -78,6 +78,15 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             return handleAnimPreviewContextMenu(static_cast<QContextMenuEvent*>(event));
         }
     }
+    if (m_canvas && watched == m_canvas->viewport()
+            && m_layoutDebounceTimer && m_layoutDebounceTimer->isActive()) {
+        const auto type = event->type();
+        if (type == QEvent::MouseButtonPress ||
+            type == QEvent::MouseButtonRelease ||
+            type == QEvent::Wheel) {
+            m_layoutDebounceTimer->start(m_layoutDebounceTimer->interval());
+        }
+    }
     return QMainWindow::eventFilter(watched, event);
 }
 

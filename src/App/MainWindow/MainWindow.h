@@ -37,6 +37,7 @@ class QLabel;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
+class NavigatorTreeWidget;
 class QListWidget;
 class QLineEdit;
 class QActionGroup;
@@ -148,8 +149,10 @@ private slots:
 
     /**
      * @brief Handles running the layout generation process.
+     *
+     * @param quiet If true, shows only the progress bar instead of the full loading overlay.
      */
-    void onRunLayout();
+    void onRunLayout(bool quiet = false);
 
     /**
      * @brief Handles when layout process finishes execution.
@@ -424,6 +427,7 @@ private slots:
     void onCliInstallLog(const QString& message);
 
     // === Source Folder Sync ===
+    void onSpriteTreeContextMenu(const QPoint& pos);
     void onFolderWatcherFilesAdded(const QStringList& paths);
     void onFolderWatcherFilesRemoved(const QStringList& paths);
     void onFolderWatcherFilesModified(const QStringList& paths);
@@ -469,6 +473,15 @@ protected:
 
 private:
     // === Helper Methods ===
+    /**
+     * @brief Schedules a debounced layout rebuild (1000 ms).
+     *
+     * Call this instead of onRunLayout() for user-triggered changes.
+     * If the Navigator view is active, sets m_layoutDirty and defers
+     * the rebuild until the user switches back to Layout view.
+     */
+    void scheduleLayoutRebuild();
+
     /**
      * @brief Gets the layout parser folder path.
      */
@@ -844,6 +857,25 @@ private:
     void refreshHandleCombo();
     void refreshSpriteTree();
 
+    // Navigator context menu helpers
+    QStringList collectCheckedSpritePaths() const;
+    QStringList collectDescendantSpritePaths(QTreeWidgetItem* item) const;
+    QString folderPathForTreeItem(QTreeWidgetItem* item) const;
+    void onNavigatorDeleteFrames(const QStringList& paths);
+    void onNavigatorAddFrames(const QString& subfolder);
+    void onNavigatorAddToTimeline(const QStringList& paths);
+    void onNavigatorCreateTimeline(const QStringList& paths, QTreeWidgetItem* contextItem = nullptr);
+    void onNavigatorCreateGroup(const QStringList& paths, const QString& parentFolder);
+    void onNavigatorDeleteGroup(QTreeWidgetItem* groupItem);
+    void onNavigatorUngroup(QTreeWidgetItem* groupItem);
+    void onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup);
+
+    // Helper: Check for duplicate timeline names
+    bool hasDuplicateTimelineName(const QString& timelineName) const;
+
+    // Helper: Get unique timeline name (with path)
+    QString getUniqueTimelineName(const QString& baseName, const QString& folderPath = QString());
+
     /**
      * @brief Applies project payload to the UI.
      */
@@ -1002,7 +1034,7 @@ private:
 
     // Atlas view stack (Layout / Navigator)
     QStackedWidget* m_atlasViewStack      = nullptr;
-    QTreeWidget*    m_spriteTree          = nullptr;
+    NavigatorTreeWidget* m_spriteTree      = nullptr;
     QAction*        m_showLayoutAction    = nullptr;
     QAction*        m_showNavigatorAction = nullptr;
 
@@ -1167,6 +1199,11 @@ private:
     QMutex m_toolMutex;
     QString m_runningLayoutProfile;
     bool m_layoutRunPending = false;
+    bool m_layoutRunPendingQuiet = false;  // quiet flag for deferred pending run
+    bool m_layoutDirty = false;            // rebuild needed but Navigator view is active
+    int m_pendingChangeCount = 0;
+    static constexpr int kLayoutBufferFullThreshold = 20;
+    QTimer* m_layoutDebounceTimer = nullptr;
     bool m_layoutFailureDialogShown = false;
     bool m_retryWithoutTrimOnFailure = false;
     QTimer* m_autosaveTimer = nullptr;
