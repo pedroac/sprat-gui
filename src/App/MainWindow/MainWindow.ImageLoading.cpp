@@ -23,6 +23,7 @@
 #include "FrameDetectionDialog.h"
 #include "AnimatedImageImport.h"
 #include "ArchiveExtractor.h"
+#include "SpriteNameUtils.h"
 
 void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
     if (action == DropAction::Cancel) {
@@ -510,6 +511,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
 
     // Apply the model to the canvas
     m_session->layoutModels = { singleImageModel };
+    ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
     if (m_canvas) {
         m_loadingUiMessage = tr("Loading image...");
         setLoading(true);
@@ -521,9 +523,10 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
             m_canvas->setZoomManual(false);
             QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
             
-            m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));    
+            m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));
             // Update UI state
             populateActiveFrameListFromModel();
+            refreshSpriteTree();
             updateMainContentView();
             updateUiState();
             

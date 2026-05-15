@@ -35,8 +35,11 @@ class QDoubleSpinBox;
 class QCheckBox;
 class QLabel;
 class QStackedWidget;
+class QTreeWidget;
+class QTreeWidgetItem;
 class QListWidget;
 class QLineEdit;
+class QActionGroup;
 class QGroupBox;
 class QGraphicsView;
 class QScrollArea;
@@ -839,6 +842,7 @@ private:
      * @brief Refreshes handle combo box.
      */
     void refreshHandleCombo();
+    void refreshSpriteTree();
 
     /**
      * @brief Applies project payload to the UI.
@@ -995,6 +999,12 @@ private:
     QDockWidget* m_debugDock = nullptr;
     QPlainTextEdit* m_cliLog = nullptr;
     QMenu* m_viewMenu = nullptr;
+
+    // Atlas view stack (Layout / Navigator)
+    QStackedWidget* m_atlasViewStack      = nullptr;
+    QTreeWidget*    m_spriteTree          = nullptr;
+    QAction*        m_showLayoutAction    = nullptr;
+    QAction*        m_showNavigatorAction = nullptr;
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas = nullptr;

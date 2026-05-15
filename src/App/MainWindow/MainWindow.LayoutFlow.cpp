@@ -4,6 +4,7 @@
 #include "LayoutRunner.h"
 #include "LayoutParser.h"
 #include "ResolutionUtils.h"
+#include "SpriteNameUtils.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -185,6 +186,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         }
     }
 
+    ensureUniqueSpriteNames(newModels, m_session->sourceFolder);
+
     QStringList selectedPaths;
     for (const auto& s : m_session->selectedSprites) {
         selectedPaths << s->path;
@@ -230,6 +233,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         }
 
         m_session->lastSuccessfulProfile = m_profileCombo->currentText();
+
+        refreshSpriteTree();
 
         updateMainContentView();
         updateUiState();

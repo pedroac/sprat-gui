@@ -6,6 +6,7 @@
 #include <QPoint>
 #include <memory>
 #include <QColor>
+#include <QMetaType>
 
 /**
  * @enum MarkerKind
@@ -493,3 +494,5 @@ struct CliPaths {
      */
     QString unpackBinary;
 };
+
+Q_DECLARE_METATYPE(SpritePtr)

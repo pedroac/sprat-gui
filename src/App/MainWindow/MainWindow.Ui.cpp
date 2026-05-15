@@ -36,6 +36,8 @@
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QPlainTextEdit>
+#include <QTreeWidget>
+#include <QActionGroup>
 
 void MainWindow::setupUi() {
     resize(1400, 860);
@@ -194,6 +196,70 @@ void MainWindow::setupUi() {
     connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onAddFramesRequested);
     connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onRemoveFramesRequested);
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
+
+    // Navigator panel (tree view of sprites)
+    QWidget* navigatorContent = new QWidget(this);
+    navigatorContent->setStyleSheet("font-weight: normal;");
+    QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
+    navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+
+    m_spriteTree = new QTreeWidget(navigatorContent);
+    m_spriteTree->setHeaderLabel(tr("Sprites"));
+    m_spriteTree->setIconSize(QSize(20, 20));
+    m_spriteTree->setSortingEnabled(true);
+    m_spriteTree->sortByColumn(0, Qt::AscendingOrder);
+    navigatorLayout->addWidget(m_spriteTree);
+
+    // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
+    connect(m_spriteTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int /*column*/) {
+        m_spriteTree->blockSignals(true);
+
+        // If a group node was checked/unchecked, propagate to all descendants
+        if (item->childCount() > 0 && item->checkState(0) != Qt::PartiallyChecked) {
+            std::function<void(QTreeWidgetItem*, Qt::CheckState)> setDescendants;
+            setDescendants = [&](QTreeWidgetItem* node, Qt::CheckState state) {
+                for (int i = 0; i < node->childCount(); ++i) {
+                    node->child(i)->setCheckState(0, state);
+                    setDescendants(node->child(i), state);
+                }
+            };
+            setDescendants(item, item->checkState(0));
+        }
+
+        // Walk up and update all ancestor group states
+        for (QTreeWidgetItem* p = item->parent(); p; p = p->parent()) {
+            int checked = 0, total = 0;
+            for (int i = 0; i < p->childCount(); ++i) {
+                auto s = p->child(i)->checkState(0);
+                ++total;
+                if (s == Qt::Checked) ++checked;
+                else if (s == Qt::PartiallyChecked) { checked = -1; break; }
+            }
+            if (checked == -1 || (checked > 0 && checked < total))
+                p->setCheckState(0, Qt::PartiallyChecked);
+            else if (checked == total)
+                p->setCheckState(0, Qt::Checked);
+            else
+                p->setCheckState(0, Qt::Unchecked);
+        }
+
+        m_spriteTree->blockSignals(false);
+    });
+
+    // Selecting (highlighting) a sprite row makes it the active/editable sprite
+    connect(m_spriteTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* current, QTreeWidgetItem* /*previous*/) {
+        if (!current) return;
+        QVariant v = current->data(0, Qt::UserRole);
+        if (!v.isValid()) return;
+        auto sprite = v.value<SpritePtr>();
+        if (sprite) onSpriteSelected(sprite);
+    });
+
+    // Atlas view stack: page 0 = Layout, page 1 = Navigator
+    m_atlasViewStack = new QStackedWidget(this);
+    m_atlasViewStack->addWidget(canvasContent);
+    m_atlasViewStack->addWidget(navigatorContent);
+    m_atlasViewStack->setCurrentIndex(0);
 
     // 2. Animation Timelines panel
     QWidget* timelineContent = new QWidget(this);
@@ -425,7 +491,7 @@ void MainWindow::setupUi() {
     m_atlasDock->setObjectName("atlasDock");
     m_atlasDock->setFont(boldFont);
     auto *atlasSplitter = new QSplitter(Qt::Horizontal, m_atlasDock);
-    atlasSplitter->addWidget(canvasContent);
+    atlasSplitter->addWidget(m_atlasViewStack);
     atlasSplitter->addWidget(editorContent);
     m_atlasDock->setWidget(atlasSplitter);
 
@@ -454,9 +520,32 @@ void MainWindow::setupUi() {
     resizeDocks({m_atlasDock}, {600}, Qt::Vertical);
     resizeDocks({m_animationDock}, {260}, Qt::Vertical);
 
-    // View menu — one entry per group
+    // View menu
     m_viewMenu = menuBar()->addMenu(tr("&View"));
-    m_viewMenu->addAction(m_atlasDock->toggleViewAction());
+
+    // Atlas submenu with Layout / Navigation toggle
+    QMenu* atlasSubMenu = m_viewMenu->addMenu(tr("Atlas"));
+    auto* atlasViewGroup = new QActionGroup(this);
+    atlasViewGroup->setExclusive(true);
+
+    m_showLayoutAction = atlasSubMenu->addAction(tr("Layout"));
+    m_showLayoutAction->setCheckable(true);
+    m_showLayoutAction->setChecked(true);
+    atlasViewGroup->addAction(m_showLayoutAction);
+    connect(m_showLayoutAction, &QAction::triggered, this, [this]() {
+        m_atlasViewStack->setCurrentIndex(0);
+        if (m_atlasDock->isHidden()) m_atlasDock->show();
+    });
+
+    m_showNavigatorAction = atlasSubMenu->addAction(tr("Navigation"));
+    m_showNavigatorAction->setCheckable(true);
+    atlasViewGroup->addAction(m_showNavigatorAction);
+    connect(m_showNavigatorAction, &QAction::triggered, this, [this]() {
+        m_atlasViewStack->setCurrentIndex(1);
+        if (m_atlasDock->isHidden()) m_atlasDock->show();
+        refreshSpriteTree();
+    });
+
     m_viewMenu->addAction(m_animationDock->toggleViewAction());
     m_viewMenu->addSeparator();
     m_viewMenu->addAction(m_debugDock->toggleViewAction());
@@ -702,4 +791,79 @@ void MainWindow::syncPivotSpinsFromSprite() {
     m_pivotYSpin->blockSignals(false);
     if (m_previewView && m_previewView->overlay())
         m_previewView->overlay()->updateLayout();
+}
+
+void MainWindow::refreshSpriteTree() {
+    if (!m_spriteTree) return;
+    m_spriteTree->blockSignals(true);
+    m_spriteTree->clear();
+
+    if (!m_session || m_session->layoutModels.isEmpty()) {
+        m_spriteTree->blockSignals(false);
+        return;
+    }
+
+    // Strip trailing digits to find a group prefix.
+    // e.g. "jump_kick1" → "jump_kick", "idle" → "idle"
+    auto groupPrefix = [](const QString& name) -> QString {
+        int end = name.size();
+        while (end > 0 && name[end - 1].isDigit()) --end;
+        if (end == 0 || end == name.size()) return name;
+        return name.left(end);
+    };
+
+    const QIcon folderIcon = QIcon::fromTheme("folder");
+
+    auto makeLeaf = [&](QTreeWidgetItem* parent, const SpritePtr& sprite) {
+        auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
+        leaf->setText(0, sprite->name);
+        leaf->setFlags(leaf->flags() | Qt::ItemIsUserCheckable);
+        leaf->setCheckState(0, Qt::Unchecked);
+        leaf->setData(0, Qt::UserRole, QVariant::fromValue(sprite));
+        QPixmap pix(sprite->path);
+        if (!pix.isNull())
+            leaf->setIcon(0, QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    };
+
+    auto makeGroupNode = [&](QTreeWidgetItem* parent, const QString& text) {
+        auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
+        node->setText(0, text);
+        node->setIcon(0, folderIcon);
+        node->setFlags(node->flags() | Qt::ItemIsUserCheckable);
+        node->setCheckState(0, Qt::Unchecked);
+        return node;
+    };
+
+    for (int mi = 0; mi < m_session->layoutModels.size(); ++mi) {
+        const auto& model = m_session->layoutModels[mi];
+
+        // Atlas root node (only when multiple atlases)
+        QTreeWidgetItem* atlasRoot = nullptr;
+        if (m_session->layoutModels.size() > 1) {
+            atlasRoot = makeGroupNode(nullptr, tr("Atlas %1").arg(mi + 1));
+        }
+
+        // Group sprites by name prefix
+        QMap<QString, QVector<SpritePtr>> groups;
+        for (const auto& sprite : model.sprites)
+            groups[groupPrefix(sprite->name)].append(sprite);
+
+        for (auto it = groups.constBegin(); it != groups.constEnd(); ++it) {
+            const QString& prefix = it.key();
+            const QVector<SpritePtr>& members = it.value();
+
+            if (members.size() == 1) {
+                makeLeaf(atlasRoot, members.first());
+            } else {
+                auto* groupNode = makeGroupNode(atlasRoot, prefix);
+                for (const auto& sprite : members)
+                    makeLeaf(groupNode, sprite);
+            }
+        }
+    }
+
+    m_spriteTree->expandAll();
+    m_spriteTree->sortItems(0, Qt::AscendingOrder);
+
+    m_spriteTree->blockSignals(false);
 }

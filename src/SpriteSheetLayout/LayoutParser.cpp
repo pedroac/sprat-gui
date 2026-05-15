@@ -1,4 +1,5 @@
 #include "LayoutParser.h"
+#include "SpriteNameUtils.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -93,5 +94,6 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             model.sprites.append(s);
         }
     }
+    ensureUniqueSpriteNames(models, folderPath);
     return models;
 }

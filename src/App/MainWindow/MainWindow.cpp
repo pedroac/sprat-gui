@@ -22,6 +22,7 @@
 #include "ProfilesDialog.h"
 #include "SpratProfilesConfig.h"
 #include "FolderSyncService.h"
+#include "SpriteNameUtils.h"
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
 #endif
@@ -954,6 +955,7 @@ void MainWindow::performFolderSync() {
         QMessageBox::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
         return;
     }
+    ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
 
     // Update activeFramePaths to match the modified layout
     populateActiveFrameListFromModel();
@@ -1070,6 +1072,7 @@ void MainWindow::performManualSync() {
 
     qInfo() << "[Sync] Step 3: Updating layout data...";
     qInfo() << "[Sync]   Removed:" << removedCount << "Added:" << addedCount;
+    ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
 
     // Step 3: Update activeFramePaths and frame list
     populateActiveFrameListFromModel();
@@ -1140,6 +1143,7 @@ void MainWindow::onWatchModePeriodicCheck() {
         qInfo() << "[Watch] Periodic check detected removed sprites, updating UI";
         m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this]() {
             if (!m_isCanceled) {
+                refreshSpriteTree();
                 updateUiState();
             }
         });
