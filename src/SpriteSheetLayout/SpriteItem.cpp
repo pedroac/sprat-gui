@@ -61,42 +61,44 @@ void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
 
     QGraphicsPixmapItem::paint(painter, option, widget);
 
-    // Draw Name Chip
-    qreal lod = QStyleOptionGraphicsItem::levelOfDetailFromTransform(painter->transform());
-    QRectF rect = boundingRect();
-    double screenWidth = rect.width() * lod;
+    // Draw Name Chip (hidden during animations to avoid label rotation visual artifacts)
+    if (!m_labelHidden) {
+        qreal lod = QStyleOptionGraphicsItem::levelOfDetailFromTransform(painter->transform());
+        QRectF rect = boundingRect();
+        double screenWidth = rect.width() * lod;
 
-    if (screenWidth >= 40) {
-        painter->save();
+        if (screenWidth >= 40) {
+            painter->save();
 
-        // Draw at constant screen size
-        double scale = 1.0 / lod;
-        QPointF centerBottom(rect.center().x(), rect.bottom());
-        painter->translate(centerBottom);
-        painter->scale(scale, scale);
+            // Draw at constant screen size
+            double scale = 1.0 / lod;
+            QPointF centerBottom(rect.center().x(), rect.bottom());
+            painter->translate(centerBottom);
+            painter->scale(scale, scale);
 
-        painter->setFont(kChipFont);
+            painter->setFont(kChipFont);
 
-        int padding = 4;
-        int maxWidth = static_cast<int>(screenWidth) - (padding * 2);
+            int padding = 4;
+            int maxWidth = static_cast<int>(screenWidth) - (padding * 2);
 
-        if (maxWidth > 20) {
-            QString elidedText = kChipFm.elidedText(m_data->name, Qt::ElideRight, maxWidth);
-            int textWidth = kChipFm.horizontalAdvance(elidedText);
-            int textHeight = kChipFm.height();
+            if (maxWidth > 20) {
+                QString elidedText = kChipFm.elidedText(m_data->name, Qt::ElideRight, maxWidth);
+                int textWidth = kChipFm.horizontalAdvance(elidedText);
+                int textHeight = kChipFm.height();
 
-            // Chip rectangle (centered horizontally, just above bottom)
-            QRectF chipRect(-textWidth / 2.0 - padding, -textHeight - padding - 2, textWidth + padding * 2, textHeight + padding);
+                // Chip rectangle (centered horizontally, just above bottom)
+                QRectF chipRect(-textWidth / 2.0 - padding, -textHeight - padding - 2, textWidth + padding * 2, textHeight + padding);
 
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(kChipBgColor);
-            painter->drawRoundedRect(chipRect, 4, 4);
+                painter->setPen(Qt::NoPen);
+                painter->setBrush(kChipBgColor);
+                painter->drawRoundedRect(chipRect, 4, 4);
 
-            painter->setPen(Qt::white);
-            painter->drawText(chipRect, Qt::AlignCenter, elidedText);
+                painter->setPen(Qt::white);
+                painter->drawText(chipRect, Qt::AlignCenter, elidedText);
+            }
+
+            painter->restore();
         }
-
-        painter->restore();
     }
 
     if (m_isContextTarget) {

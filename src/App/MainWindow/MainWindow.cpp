@@ -610,9 +610,9 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         }
     }
 
-    // Deselect sprite if it's being removed
+    // Deselect sprite if it's being removed, and clear the editor immediately.
     if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path)) {
-        m_session->selectedSprite.reset();
+        onSpriteSelected(nullptr);
     }
     m_session->selectedSprites.erase(
         std::remove_if(m_session->selectedSprites.begin(), m_session->selectedSprites.end(),
@@ -730,6 +730,9 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         QFile(path).remove();
     }
 
+    // Capture sprite positions BEFORE removing them for smooth animation
+    captureOldSpritePositions();
+
     // Immediately remove deleted sprites from canvas (leaves a gap until rebuild)
     if (m_canvas) {
         m_canvas->removeSprites(targets);
@@ -744,8 +747,8 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     }
 
     m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-    // Canvas action - rebuild immediately with loading UI
-    scheduleLayoutRebuild(true);
+    // Canvas action - rebuild immediately with loading UI (skip second capture since we already captured)
+    scheduleLayoutRebuild(true, true);
 }
 
 void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
@@ -780,9 +783,9 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         }
     }
 
-    // Deselect sprite if it's being removed
+    // Deselect sprite if it's being removed, and clear the editor immediately.
     if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path)) {
-        m_session->selectedSprite.reset();
+        onSpriteSelected(nullptr);
     }
     m_session->selectedSprites.erase(
         std::remove_if(m_session->selectedSprites.begin(), m_session->selectedSprites.end(),
@@ -900,6 +903,9 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         QFile(path).remove();
     }
 
+    // Capture sprite positions BEFORE removing them for smooth animation
+    captureOldSpritePositions();
+
     // Immediately remove deleted sprites from canvas (leaves a gap until rebuild)
     if (m_canvas) {
         m_canvas->removeSprites(targets);
@@ -914,8 +920,8 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     }
 
     m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-    // Navigator/deferred action - use lazy loading (debounce)
-    scheduleLayoutRebuild();
+    // Navigator/deferred action - use lazy loading (debounce) (skip second capture since we already captured)
+    scheduleLayoutRebuild(false, true);
 }
 
 void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos) {
@@ -1799,6 +1805,13 @@ void MainWindow::onShowHotkeys() {
         "<tr><td>Quit</td><td><b>Ctrl+Q</b></td></tr>"
         "</table>"
 
+        "<h3>Atlas View</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Switch to Layout</td><td><b>Alt+L</b></td></tr>"
+        "<tr><td>Switch to Navigation</td><td><b>Alt+N</b></td></tr>"
+        "</table>"
+
         "<h3>Canvas Views (Layout, Preview, Animation)</h3>"
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
@@ -1820,6 +1833,12 @@ void MainWindow::onShowHotkeys() {
         "<tr><td>Search by Name</td><td>Start typing (printable characters)</td></tr>"
         "<tr><td>Clear Search</td><td><b>Escape</b></td></tr>"
         "<tr><td>Quick Split</td><td><b>Alt+Click</b> on a sprite</td></tr>"
+        "</table>"
+
+        "<h3>Navigation View</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Delete Selected Sprites</td><td><b>Delete</b></td></tr>"
         "</table>"
 
         "<h3>Timeline</h3>"

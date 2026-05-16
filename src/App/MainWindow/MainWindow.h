@@ -13,6 +13,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPointer>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -309,6 +310,11 @@ private slots:
     void resumeLayoutRebuild();
 
     /**
+     * @brief Captures current sprite positions before layout rebuild.
+     */
+    void captureOldSpritePositions();
+
+    /**
      * @brief Handles request to manage profiles.
      */
     void onManageProfiles();
@@ -503,8 +509,20 @@ private:
      * Call this instead of onRunLayout() for user-triggered changes.
      * If the Navigator view is active, sets m_layoutDirty and defers
      * the rebuild until the user switches back to Layout view.
+     *
+     * @param immediate If true, rebuild immediately without debounce
+     * @param skipCapture If true, skip capturing sprite positions (already captured elsewhere)
      */
-    void scheduleLayoutRebuild(bool immediate = false);
+    void scheduleLayoutRebuild(bool immediate = false, bool skipCapture = false);
+
+    /**
+     * @brief Animates sprites from captured old positions to the given new positions,
+     * then invokes onFinished. If no animation is needed, onFinished is called immediately.
+     */
+    void animateSpritesToNewPositions(const QMap<QString, QPointF>& newPositions,
+                                      const QVector<QRectF>& newAtlasRects,
+                                      const QVector<LayoutModel>& newModels,
+                                      std::function<void()> onFinished);
 
     /**
      * @brief Gets the layout parser folder path.
@@ -1242,6 +1260,10 @@ private:
     QMutex m_toolMutex;
     QString m_runningLayoutProfile;
     QWidget* m_canvasOverlay = nullptr;  // Semi-transparent overlay for canvas during loading
+    QMap<QString, QPointF> m_oldSpritePositions;   // Sprite scene pos before layout rebuild
+    QMap<QString, QRect>   m_oldSpritePackedRects; // sprite->rect (packed size) before rebuild
+    QMap<QString, bool>    m_oldSpriteRotated;     // sprite->rotated flag before rebuild
+    bool m_enableSpriteAnimation = true;
     bool m_layoutRunPending = false;
     bool m_layoutRunPendingQuiet = false;  // quiet flag for deferred pending run
     bool m_layoutDirty = false;            // rebuild needed but Navigator view is active

@@ -170,8 +170,8 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
   - **Global Deduplicate**: Enable deduplication in Settings using **Exact** (byte-for-byte identical) or **Perceptual** (visually similar) modes to create aliases for duplicate sprites during layout generation.
 
 - **Sprite Navigator**
-  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organised by folder.
-  - Check sprites individually or by folder; right-click for context actions:
+  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organised by folder. Use `Alt+L` / `Alt+N` to switch quickly via keyboard.
+  - Check sprites individually or by folder; right-click for context actions or press `Delete` to remove selected sprites:
     - Delete selected sprites.
     - Add frames to a folder.
     - Add checked sprites to the current timeline.
@@ -252,6 +252,13 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
 - `Ctrl + -`: Zoom Out.
 - `Ctrl + 1`: Reset zoom to 100%.
 - `Ctrl + 0`: Fit to screen.
+
+### **Atlas View**
+- `Alt+L`: Switch to **Layout** view.
+- `Alt+N`: Switch to **Navigation** view.
+
+### **Navigation View (Sprite Navigator)**
+- `Delete`: Remove selected sprites from the layout.
 
 ### **Navigation & Selection (Canvases / Lists)**
 - `Space (Hold) + Mouse Drag`: Pan (move) the view.

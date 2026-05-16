@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <QDrag>
+#include <QKeyEvent>
 #include <QMimeData>
 #include <QPainter>
 #include <QPixmap>
@@ -63,4 +64,31 @@ void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
     drag->setMimeData(mimeData);
     drag->setPixmap(pixmap);
     drag->exec(Qt::CopyAction);
+}
+
+void NavigatorTreeWidget::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Delete) {
+        QStringList paths;
+        std::function<void(QTreeWidgetItem*)> collectPaths = [&](QTreeWidgetItem* item) {
+            QVariant v = item->data(0, Qt::UserRole);
+            if (v.isValid()) {
+                auto sprite = v.value<SpritePtr>();
+                if (sprite && !sprite->path.isEmpty())
+                    paths.append(sprite->path);
+            } else if (item->childCount() > 0) {
+                for (int i = 0; i < item->childCount(); ++i)
+                    collectPaths(item->child(i));
+            }
+        };
+        for (QTreeWidgetItem* item : selectedItems())
+            collectPaths(item);
+
+        if (!paths.isEmpty()) {
+            emit deleteRequested(paths);
+            event->accept();
+            return;
+        }
+    }
+    QTreeWidget::keyPressEvent(event);
 }

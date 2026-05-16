@@ -3,8 +3,10 @@
 #include "models.h"
 #include "SpriteItem.h"
 #include <atomic>
+#include <optional>
 
 class QFocusEvent;
+class QGraphicsRectItem;
 
 /**
  * @class LayoutCanvas
@@ -76,6 +78,71 @@ public:
      * in the layout until the next full rebuild.
      */
     void removeSprites(const QStringList& paths);
+
+    /**
+     * @brief Returns the current scene position of a sprite item.
+     *
+     * Returns the item's actual rendered position (including any per-model Y offset).
+     * Returns a null optional if the sprite is not found.
+     */
+    std::optional<QPointF> spriteItemScenePos(const QString& spritePath) const;
+
+    /**
+     * @brief Sets a sprite item's scene position directly (no offset applied).
+     * Also moves the corresponding border outline by the same delta.
+     */
+    void setSpriteItemScenePos(const QString& spritePath, const QPointF& pos);
+
+    /**
+     * @brief Sets the scene rotation angle of a sprite item (in degrees, CW positive).
+     * Call setSpriteItemTransformOrigin first to set the pivot point.
+     */
+    void setSpriteItemRotation(const QString& spritePath, qreal angle);
+
+    /**
+     * @brief Sets the transform origin point of a sprite item (in item coordinates).
+     * Must be called before setSpriteItemRotation for correct pivot behaviour.
+     */
+    void setSpriteItemTransformOrigin(const QString& spritePath, const QPointF& origin);
+
+    /**
+     * @brief Sets the label visibility of a sprite item.
+     * Used to hide labels during animations to avoid visual artifacts.
+     */
+    void setSpriteItemLabelHidden(const QString& spritePath, bool hidden);
+
+    /**
+     * @brief Locks the scene rect to its current bounding rect, preventing auto-resize.
+     * Call before animating items to old positions so the canvas doesn't jump in size.
+     */
+    void freezeSceneRect();
+
+    /**
+     * @brief Releases the locked scene rect, restoring normal auto-resize behaviour.
+     */
+    void thawSceneRect();
+
+    /**
+     * @brief Computes scene positions for all sprites in the given models,
+     * using the same layout formula as setModels (without modifying the scene).
+     */
+    static QMap<QString, QPointF> computeItemScenePositions(const QVector<LayoutModel>& models);
+
+    /**
+     * @brief Computes the atlas background rects for the given models,
+     * using the same layout formula as setModels (without modifying the scene).
+     */
+    static QVector<QRectF> computeAtlasRects(const QVector<LayoutModel>& models);
+
+    /**
+     * @brief Returns the current bounding rects of the atlas background items.
+     */
+    QVector<QRectF> currentAtlasRects() const;
+
+    /**
+     * @brief Sets the atlas background rect at the given index (for animation).
+     */
+    void setAtlasRect(int index, const QRectF& rect);
 
 signals:
     /**
@@ -161,6 +228,7 @@ private:
     AppSettings m_settings;
     QGraphicsRectItem* m_atlasBgItem = nullptr;
     QList<QAbstractGraphicsShapeItem*> m_borderItems;
+    QVector<QGraphicsRectItem*> m_atlasBackgroundItems;
     QHash<QString, QPixmap> m_sourcePixmaps;
     QHash<QString, QPixmap> m_transformedPixmapCache;
     QHash<QString, int> m_pathToIndex;

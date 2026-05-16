@@ -24,6 +24,8 @@
 #include <QDebug>
 #include <QFile>
 #include <QDockWidget>
+#include <QVariantAnimation>
+#include <QEasingCurve>
 
 namespace {
 int legacyDefaultPivotX(const SpritePtr& sprite) {
@@ -208,65 +210,68 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     }
     const QString primaryPath = m_session->selectedSprite ? m_session->selectedSprite->path : QString();
 
-    m_session->layoutModels = newModels;
+    auto newScenePositions = LayoutCanvas::computeItemScenePositions(newModels);
+    auto newAtlasRects     = LayoutCanvas::computeAtlasRects(newModels);
 
-    qInfo() << "[WASM] setModelsAsync start"
-            << "models=" << m_session->layoutModels.size();
-    m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this, selectedPaths, primaryPath]() {
-        if (m_isCanceled) {
-            m_statusLabel->setText(tr("Loading images canceled"));
-            return;
-        }
+    // Capture the post-load work as a reusable lambda (called after setModelsAsync).
+    auto doSetModels = [this, newModels, selectedPaths, primaryPath]() {
+        m_session->layoutModels = newModels;
+        qInfo() << "[WASM] setModelsAsync start"
+                << "models=" << m_session->layoutModels.size();
+        m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled,
+            [this, selectedPaths, primaryPath]() {
+                if (m_isCanceled) {
+                    m_statusLabel->setText(tr("Loading images canceled"));
+                    return;
+                }
 
-        // Only reset viewport when profile changes, not when sprites are added/removed/modified
-        const QString currentProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
-        const bool profileChanged = m_session->lastSuccessfulProfile != currentProfile;
+                const QString currentProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
+                const bool profileChanged = m_session->lastSuccessfulProfile != currentProfile;
 
-        if (profileChanged) {
-            m_canvas->setZoomManual(false);
-            QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
-        }
+                if (profileChanged) {
+                    m_canvas->setZoomManual(false);
+                    QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+                }
 
-        m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
-            .arg(m_session->activeFramePaths.size())
-            .arg(m_session->layoutModels.size()));
+                m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
+                    .arg(m_session->activeFramePaths.size())
+                    .arg(m_session->layoutModels.size()));
 
-        // Hide loading dialog now that layout and sprites are loaded
-        setLoading(false);
+                setLoading(false);
 
-        populateActiveFrameListFromModel();
-        if (m_session->layoutSourceIsList) {
-            updateManualFrameLabel();
-        }
+                populateActiveFrameListFromModel();
+                if (m_session->layoutSourceIsList) {
+                    updateManualFrameLabel();
+                }
 
-        if (!m_session->pendingProjectPayload.isEmpty()) {
-            applyProjectPayload();
-        } else if (!selectedPaths.isEmpty()) {
-            m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
-        }
+                if (!m_session->pendingProjectPayload.isEmpty()) {
+                    applyProjectPayload();
+                } else if (!selectedPaths.isEmpty()) {
+                    m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
+                }
 
-        m_session->lastSuccessfulProfile = m_profileCombo->currentText();
+                m_session->lastSuccessfulProfile = m_profileCombo->currentText();
 
-        refreshSpriteTree();
+                refreshSpriteTree();
 
-        updateMainContentView();
-        updateUiState();
+                updateMainContentView();
+                updateUiState();
 
-        // Clear temporary folders used for ZIP extraction - they're no longer needed
-        // since images have been loaded into the layout and (if sync is active)
-        // copied to the sprites folder
-        m_session->clearTempDirs();
+                m_session->clearTempDirs();
 
-        m_pendingChangeCount = 0;
-        qInfo() << "[WASM] setModelsAsync finished";
+                m_pendingChangeCount = 0;
+                qInfo() << "[WASM] setModelsAsync finished";
 
-        if (m_layoutRunPending) {
-            const bool q = m_layoutRunPendingQuiet;
-            m_layoutRunPending = false;
-            m_layoutRunPendingQuiet = false;
-            onRunLayout(q);
-        }
-    });
+                if (m_layoutRunPending) {
+                    const bool q = m_layoutRunPendingQuiet;
+                    m_layoutRunPending = false;
+                    m_layoutRunPendingQuiet = false;
+                    onRunLayout(q);
+                }
+            });
+    };
+
+    animateSpritesToNewPositions(newScenePositions, newAtlasRects, newModels, doSetModels);
 }
 
 void MainWindow::onLayoutError(const QString& details) {
@@ -446,6 +451,196 @@ void MainWindow::onProfileChanged() {
     scheduleLayoutRebuild(true);
 }
 
+void MainWindow::captureOldSpritePositions() {
+    m_oldSpritePositions.clear();
+    m_oldSpritePackedRects.clear();
+    m_oldSpriteRotated.clear();
+    if (!m_canvas) return;
+
+    for (const auto& model : m_session->layoutModels) {
+        for (const auto& sprite : model.sprites) {
+            if (!sprite) continue;
+            auto pos = m_canvas->spriteItemScenePos(sprite->path);
+            if (pos.has_value()) {
+                m_oldSpritePositions[sprite->path]   = pos.value();
+                m_oldSpritePackedRects[sprite->path] = sprite->rect;
+                m_oldSpriteRotated[sprite->path]     = sprite->rotated;
+            }
+        }
+    }
+}
+
+void MainWindow::animateSpritesToNewPositions(
+    const QMap<QString, QPointF>& newPositions,
+    const QVector<QRectF>& newAtlasRects,
+    const QVector<LayoutModel>& newModels,
+    std::function<void()> onFinished)
+{
+    if (!m_enableSpriteAnimation || m_oldSpritePositions.isEmpty() || !m_canvas) {
+        m_oldSpritePositions.clear();
+        m_oldSpritePackedRects.clear();
+        m_oldSpriteRotated.clear();
+        onFinished();
+        return;
+    }
+
+    // Build a path → new sprite lookup for rotation/size info.
+    QMap<QString, SpritePtr> newSpriteLookup;
+    for (const auto& model : newModels)
+        for (const auto& sprite : model.sprites)
+            if (sprite) newSpriteLookup[sprite->path] = sprite;
+
+    // Build sprite moves.
+    // For sprites that change rotation state, setPos must be adjusted so the
+    // visual top-left (not the item origin) ends up exactly at the new atlas
+    // position after the rotation transform is applied.
+    //
+    // With transform origin at the item centre (iw/2, ih/2) and rotation angle R:
+    //   visual_top_left = setPos + ((iw−ih)/2, (ih−iw)/2)   [for CW  90°]
+    //                   = setPos + ((iw−ih)/2, (ih−iw)/2)   [for CCW 90°, same formula]
+    // Setting visual_top_left = rawNewPos gives:
+    //   adjustedPos = rawNewPos + ((ih−iw)/2, (iw−ih)/2)
+    struct Move {
+        QString path;
+        QPointF oldPos;
+        QPointF newPos;       // adjusted setPos target (accounts for rotation pivot)
+        qreal   endAngle;     // 0 = translate only; ±90 = rotation change
+        QPointF transformOrigin; // item-space pivot (used only when endAngle != 0)
+    };
+    QVector<Move> moves;
+
+    for (auto it = newPositions.begin(); it != newPositions.end(); ++it) {
+        const QString& path = it.key();
+        if (!m_oldSpritePositions.contains(path)) continue;
+
+        const QPointF oldPos    = m_oldSpritePositions[path];
+        const QPointF rawNewPos = it.value();
+        const bool    oldRotated = m_oldSpriteRotated.value(path, false);
+        const QRect   oldRect    = m_oldSpritePackedRects.value(path);
+        const int     iw = oldRect.width();   // item width  on screen (packed dims)
+        const int     ih = oldRect.height();  // item height on screen (packed dims)
+
+        const SpritePtr newSprite = newSpriteLookup.value(path);
+        const bool newRotated = newSprite ? newSprite->rotated : oldRotated;
+
+        qreal   endAngle = 0.0;
+        QPointF adjustedNewPos = rawNewPos;
+        QPointF origin;
+
+        if (oldRotated != newRotated && iw > 0 && ih > 0) {
+            // Rotation changes: animate the scene rotation and adjust setPos.
+            endAngle = oldRotated ? -90.0 : 90.0;
+            origin   = QPointF(iw / 2.0, ih / 2.0);
+            adjustedNewPos = rawNewPos + QPointF((ih - iw) / 2.0, (iw - ih) / 2.0);
+        }
+
+        const QPointF delta = adjustedNewPos - oldPos;
+        if (qAbs(delta.x()) < 0.5 && qAbs(delta.y()) < 0.5 && qAbs(endAngle) < 0.01)
+            continue;
+
+        moves.append({path, oldPos, adjustedNewPos, endAngle, origin});
+    }
+
+    m_oldSpritePositions.clear();
+    m_oldSpritePackedRects.clear();
+    m_oldSpriteRotated.clear();
+
+    // Build atlas background rect moves.
+    struct AtlasMove { int index; QRectF oldRect; QRectF newRect; };
+    QVector<AtlasMove> atlasMoves;
+    const QVector<QRectF> oldAtlasRects = m_canvas->currentAtlasRects();
+    const int atlasCount = qMin(oldAtlasRects.size(), newAtlasRects.size());
+    for (int i = 0; i < atlasCount; ++i) {
+        const QRectF& o = oldAtlasRects[i];
+        const QRectF& n = newAtlasRects[i];
+        if (qAbs(o.x()-n.x())>0.5 || qAbs(o.y()-n.y())>0.5 ||
+            qAbs(o.width()-n.width())>0.5 || qAbs(o.height()-n.height())>0.5)
+            atlasMoves.append({i, o, n});
+    }
+
+    // Compute old and new scene rects so the view's scrollable area and alignment
+    // transition smoothly rather than jumping when setModels fires.
+    // New scene rect mirrors setModels: width = max atlas width, height = bottom of last atlas.
+    const QRectF oldSceneRect = m_canvas->scene()->sceneRect();
+    QRectF newSceneRect = oldSceneRect;
+    if (!newAtlasRects.isEmpty()) {
+        qreal maxW = 0;
+        for (const auto& r : newAtlasRects)
+            maxW = qMax(maxW, r.width());
+        const QRectF& last = newAtlasRects.last();
+        newSceneRect = QRectF(0, 0, maxW, last.y() + last.height());
+    }
+    const bool sceneRectChanges =
+        qAbs(oldSceneRect.width()  - newSceneRect.width())  > 0.5 ||
+        qAbs(oldSceneRect.height() - newSceneRect.height()) > 0.5;
+
+    if (moves.isEmpty() && atlasMoves.isEmpty() && !sceneRectChanges) {
+        onFinished();
+        return;
+    }
+
+    // Set transform origin points once, before the animation starts.
+    for (const auto& move : moves)
+        if (qAbs(move.endAngle) > 0.01)
+            m_canvas->setSpriteItemTransformOrigin(move.path, move.transformOrigin);
+
+    // Hide labels during animation to avoid visual artifacts (especially during rotation)
+    for (const auto& move : moves)
+        m_canvas->setSpriteItemLabelHidden(move.path, true);
+
+    // Single QVariantAnimation drives everything in lockstep:
+    //   • sprite items + their border outlines (via setSpriteItemScenePos)
+    //   • sprite scene rotation (via setSpriteItemRotation)
+    //   • atlas background rects (via setAtlasRect)
+    //   • scene rect (controls view alignment / scrollbar range)
+    auto* anim = new QVariantAnimation(this);
+    anim->setDuration(180);
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    anim->setEasingCurve(QEasingCurve::InOutQuad);
+
+    connect(anim, &QVariantAnimation::valueChanged, this,
+            [this, moves, atlasMoves, oldSceneRect, newSceneRect](const QVariant& v) {
+        const double t = v.toDouble();
+        for (const auto& move : moves) {
+            m_canvas->setSpriteItemScenePos(move.path,
+                move.oldPos + t * (move.newPos - move.oldPos));
+            if (qAbs(move.endAngle) > 0.01)
+                m_canvas->setSpriteItemRotation(move.path, t * move.endAngle);
+        }
+        for (const auto& am : atlasMoves)
+            m_canvas->setAtlasRect(am.index, QRectF(
+                am.oldRect.x()      + t * (am.newRect.x()      - am.oldRect.x()),
+                am.oldRect.y()      + t * (am.newRect.y()      - am.oldRect.y()),
+                am.oldRect.width()  + t * (am.newRect.width()  - am.oldRect.width()),
+                am.oldRect.height() + t * (am.newRect.height() - am.oldRect.height())));
+        m_canvas->scene()->setSceneRect(QRectF(
+            0, 0,
+            oldSceneRect.width()  + t * (newSceneRect.width()  - oldSceneRect.width()),
+            oldSceneRect.height() + t * (newSceneRect.height() - oldSceneRect.height())));
+        m_canvas->viewport()->update();
+    });
+
+    connect(anim, &QVariantAnimation::finished, this,
+            [this, moves, atlasMoves, newSceneRect, onFinished]() {
+        for (const auto& move : moves) {
+            m_canvas->setSpriteItemScenePos(move.path, move.newPos);
+            if (qAbs(move.endAngle) > 0.01)
+                m_canvas->setSpriteItemRotation(move.path, move.endAngle);
+            // Show labels again after animation completes
+            m_canvas->setSpriteItemLabelHidden(move.path, false);
+        }
+        for (const auto& am : atlasMoves)
+            m_canvas->setAtlasRect(am.index, am.newRect);
+        m_canvas->scene()->setSceneRect(newSceneRect);
+        m_canvas->viewport()->update();
+        onFinished();
+    });
+
+    connect(anim, &QVariantAnimation::finished, anim, &QObject::deleteLater);
+    anim->start();
+}
+
 void MainWindow::pauseLayoutRebuild() {
     if (m_layoutDebounceTimer && m_layoutDebounceTimer->isActive()) {
         m_layoutDebounceTimer->stop();
@@ -461,7 +656,13 @@ void MainWindow::resumeLayoutRebuild() {
     m_layoutRebuildPaused = false;
 }
 
-void MainWindow::scheduleLayoutRebuild(bool immediate) {
+void MainWindow::scheduleLayoutRebuild(bool immediate, bool skipCapture) {
+    // Capture current sprite positions before layout rebuild for animation
+    // (skip if already captured, e.g., during sprite removal)
+    if (!skipCapture) {
+        captureOldSpritePositions();
+    }
+
     ++m_pendingChangeCount;
     refreshSpriteTree();
 

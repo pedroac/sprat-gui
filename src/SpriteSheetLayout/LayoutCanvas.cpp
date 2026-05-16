@@ -293,6 +293,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
     m_items.reserve(totalSprites);
     m_borderItems.reserve(totalSprites);
     m_modelOffsets.reserve(models.size());
+    m_atlasBackgroundItems.reserve(models.size());
     m_pathToIndex.reserve(totalSprites);
 
     // Cache checkerboard pixmap once for all models
@@ -322,6 +323,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
 
         auto* bg = m_scene->addRect(0, currentY, model.atlasWidth, model.atlasHeight, Qt::NoPen, bgBrush);
         bg->setZValue(-100);
+        m_atlasBackgroundItems.append(bg);
 
         for (const auto& sprite : model.sprites) {
             if (canceled && *canceled) {
@@ -525,6 +527,8 @@ void LayoutCanvas::clearCanvas() {
         m_splitLineItem = nullptr;
     }
 
+    m_borderItems.clear();
+    m_atlasBackgroundItems.clear();
     m_scene->clear();
     m_items.clear();
     m_pathToIndex.clear();
@@ -1178,6 +1182,98 @@ void LayoutCanvas::removeSprites(const QStringList& paths) {
     m_borderItems.resize(writeIdx);
     m_baseSelectionPaths.clear();
     viewport()->update();
+}
+
+std::optional<QPointF> LayoutCanvas::spriteItemScenePos(const QString& spritePath) const {
+    auto it = m_pathToIndex.find(spritePath);
+    if (it == m_pathToIndex.end()) return std::nullopt;
+    int index = it.value();
+    if (index < 0 || index >= m_items.size()) return std::nullopt;
+    return m_items[index]->pos();
+}
+
+void LayoutCanvas::setSpriteItemScenePos(const QString& spritePath, const QPointF& pos) {
+    auto it = m_pathToIndex.find(spritePath);
+    if (it == m_pathToIndex.end()) return;
+    int index = it.value();
+    if (index < 0 || index >= m_items.size()) return;
+    const QPointF delta = pos - m_items[index]->pos();
+    m_items[index]->setPos(pos);
+    // Move the border outline by the same delta (it uses absolute path coordinates).
+    if (index < m_borderItems.size() && m_borderItems[index])
+        m_borderItems[index]->setPos(m_borderItems[index]->pos() + delta);
+}
+
+QMap<QString, QPointF> LayoutCanvas::computeItemScenePositions(const QVector<LayoutModel>& models) {
+    QMap<QString, QPointF> positions;
+    int currentY = 0;
+    constexpr int margin = 100;
+    for (const auto& model : models) {
+        for (const auto& sprite : model.sprites) {
+            if (sprite) {
+                positions[sprite->path] = QPointF(sprite->rect.x(), currentY + sprite->rect.y());
+            }
+        }
+        currentY += model.atlasHeight + margin;
+    }
+    return positions;
+}
+
+void LayoutCanvas::setSpriteItemRotation(const QString& spritePath, qreal angle) {
+    auto it = m_pathToIndex.find(spritePath);
+    if (it == m_pathToIndex.end()) return;
+    int index = it.value();
+    if (index < 0 || index >= m_items.size()) return;
+    m_items[index]->setRotation(angle);
+}
+
+void LayoutCanvas::setSpriteItemTransformOrigin(const QString& spritePath, const QPointF& origin) {
+    auto it = m_pathToIndex.find(spritePath);
+    if (it == m_pathToIndex.end()) return;
+    int index = it.value();
+    if (index < 0 || index >= m_items.size()) return;
+    m_items[index]->setTransformOriginPoint(origin);
+}
+
+void LayoutCanvas::setSpriteItemLabelHidden(const QString& spritePath, bool hidden) {
+    auto it = m_pathToIndex.find(spritePath);
+    if (it == m_pathToIndex.end()) return;
+    int index = it.value();
+    if (index < 0 || index >= m_items.size()) return;
+    m_items[index]->setLabelHidden(hidden);
+}
+
+QVector<QRectF> LayoutCanvas::computeAtlasRects(const QVector<LayoutModel>& models) {
+    QVector<QRectF> rects;
+    int currentY = 0;
+    constexpr int margin = 100;
+    for (const auto& model : models) {
+        rects.append(QRectF(0, currentY, model.atlasWidth, model.atlasHeight));
+        currentY += model.atlasHeight + margin;
+    }
+    return rects;
+}
+
+QVector<QRectF> LayoutCanvas::currentAtlasRects() const {
+    QVector<QRectF> rects;
+    rects.reserve(m_atlasBackgroundItems.size());
+    for (auto* item : m_atlasBackgroundItems)
+        rects.append(item ? item->rect() : QRectF());
+    return rects;
+}
+
+void LayoutCanvas::setAtlasRect(int index, const QRectF& rect) {
+    if (index < 0 || index >= m_atlasBackgroundItems.size()) return;
+    if (m_atlasBackgroundItems[index])
+        m_atlasBackgroundItems[index]->setRect(rect);
+}
+
+void LayoutCanvas::freezeSceneRect() {
+    m_scene->setSceneRect(m_scene->itemsBoundingRect());
+}
+
+void LayoutCanvas::thawSceneRect() {
+    m_scene->setSceneRect(QRectF());
 }
 
 void LayoutCanvas::updateSearch() {

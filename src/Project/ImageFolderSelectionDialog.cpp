@@ -10,6 +10,7 @@
 #include <QHash>
 #include <QInputDialog>
 #include <QLabel>
+#include <QPushButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -110,6 +111,8 @@ bool ImageFolderSelectionDialog::pickMultipleFoldersWithImages(QWidget* parent, 
     layout->addWidget(tree, 1);
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QPushButton* okButton = buttons->button(QDialogButtonBox::Ok);
+    okButton->setEnabled(false);
     layout->addWidget(buttons);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -203,6 +206,18 @@ bool ImageFolderSelectionDialog::pickMultipleFoldersWithImages(QWidget* parent, 
             }
             parentItem = parentItem->parent();
         }
+        // Enable OK only when at least one folder is checked
+        std::function<bool(QTreeWidgetItem*)> anyChecked = [&](QTreeWidgetItem* item) -> bool {
+            if (item->checkState(0) == Qt::Checked)
+                return true;
+            for (int i = 0; i < item->childCount(); ++i) {
+                if (anyChecked(item->child(i)))
+                    return true;
+            }
+            return false;
+        };
+        okButton->setEnabled(anyChecked(rootItem));
+
         updatingChecks = false;
     });
 

@@ -1055,6 +1055,8 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         tree->setSelectionMode(QAbstractItemView::NoSelection);
         layout->addWidget(tree, 1);
         QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        QPushButton* okButton = buttons->button(QDialogButtonBox::Ok);
+        okButton->setEnabled(false);
         layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -1080,6 +1082,17 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
             }
         }
         tree->expandAll();
+
+        connect(tree, &QTreeWidget::itemChanged, tree, [&]() {
+            bool anyChecked = false;
+            for (auto it = items.cbegin(); it != items.cend(); ++it) {
+                if (it.value()->checkState(0) == Qt::Checked) {
+                    anyChecked = true;
+                    break;
+                }
+            }
+            okButton->setEnabled(anyChecked);
+        });
 
         if (dialog.exec() == QDialog::Accepted) {
             for (auto it = items.begin(); it != items.end(); ++it) {

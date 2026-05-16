@@ -221,6 +221,8 @@ void MainWindow::setupUi() {
     m_spriteTree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_spriteTree, &QWidget::customContextMenuRequested,
             this, &MainWindow::onSpriteTreeContextMenu);
+    connect(m_spriteTree, &NavigatorTreeWidget::deleteRequested,
+            this, &MainWindow::onNavigatorDeleteFrames);
     navigatorLayout->addWidget(m_spriteTree);
 
     // Connect filter box to search functionality
@@ -545,6 +547,7 @@ void MainWindow::setupUi() {
     atlasViewGroup->setExclusive(true);
 
     m_showLayoutAction = atlasSubMenu->addAction(tr("Layout"));
+    m_showLayoutAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_L));
     m_showLayoutAction->setCheckable(true);
     m_showLayoutAction->setChecked(true);
     atlasViewGroup->addAction(m_showLayoutAction);
@@ -559,6 +562,7 @@ void MainWindow::setupUi() {
     });
 
     m_showNavigatorAction = atlasSubMenu->addAction(tr("Navigation"));
+    m_showNavigatorAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_N));
     m_showNavigatorAction->setCheckable(true);
     atlasViewGroup->addAction(m_showNavigatorAction);
     connect(m_showNavigatorAction, &QAction::triggered, this, [this]() {
