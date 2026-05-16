@@ -191,7 +191,13 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 #ifdef Q_OS_WASM
         QMetaObject::invokeMethod(this, [this, result]() {
             emit finished(result);
-        }, Qt::QueuedConnection);
+        }, Qt::AutoConnection);
+        // Qt::AutoConnection: task() runs on the main thread (same as this), so Qt
+        // resolves AutoConnection as DirectConnection and emits finished() immediately.
+        // Qt::QueuedConnection would post a QMetaCallEvent that the WASM backend
+        // won't process (no requestAnimationFrame requested) until the next user
+        // input event, causing onLayoutFinished() — and the "Loading images..."
+        // overlay removal — to stall until cursor movement.
 #else
         emit finished(result);
 #endif

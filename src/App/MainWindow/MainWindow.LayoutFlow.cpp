@@ -430,7 +430,7 @@ void MainWindow::onProfileChanged() {
     scheduleLayoutRebuild();
 }
 
-void MainWindow::scheduleLayoutRebuild() {
+void MainWindow::scheduleLayoutRebuild(bool immediate) {
     ++m_pendingChangeCount;
     refreshSpriteTree();
 
@@ -450,22 +450,43 @@ void MainWindow::scheduleLayoutRebuild() {
         // Immediate rebuild with loading overlay
         onRunLayout(false);
     } else {
-        if (!m_layoutDebounceTimer) {
-            m_layoutDebounceTimer = new QTimer(this);
-            m_layoutDebounceTimer->setSingleShot(true);
-            connect(m_layoutDebounceTimer, &QTimer::timeout, this, [this]() {
-                if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 1) {
-                    // Navigator is active — defer until the user switches to Layout
-                    m_layoutDirty = true;
-                } else {
-                    m_layoutDirty = false;
-                    onRunLayout(true);   // quiet rebuild from timer
-                }
-            });
-        }
-        m_layoutDebounceTimer->start(2000);
+#ifdef Q_OS_WASM
+        // In WASM the layout runner is synchronous and fast (no subprocess).
+        // QTimer callbacks rely on Qt's RAF-driven event loop, which stops advancing
+        // once pending paint events are exhausted — so a 2-second debounce timer
+        // simply never fires without user input (e.g. mouse movement).
+        // Run the layout immediately instead of deferring.
+        if (m_layoutDebounceTimer) m_layoutDebounceTimer->stop();
+        m_layoutDirty = false;
         if (m_statusLabel)
             m_statusLabel->setText(tr("Layout pending rebuild..."));
+        onRunLayout(true);
+#else
+        if (immediate) {
+            if (m_layoutDebounceTimer) m_layoutDebounceTimer->stop();
+            m_layoutDirty = false;
+            if (m_statusLabel)
+                m_statusLabel->setText(tr("Layout pending rebuild..."));
+            onRunLayout(true);
+        } else {
+            if (!m_layoutDebounceTimer) {
+                m_layoutDebounceTimer = new QTimer(this);
+                m_layoutDebounceTimer->setSingleShot(true);
+                connect(m_layoutDebounceTimer, &QTimer::timeout, this, [this]() {
+                    if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 1) {
+                        // Navigator is active — defer until the user switches to Layout
+                        m_layoutDirty = true;
+                    } else {
+                        m_layoutDirty = false;
+                        onRunLayout(true);   // quiet rebuild from timer
+                    }
+                });
+            }
+            m_layoutDebounceTimer->start(2000);
+            if (m_statusLabel)
+                m_statusLabel->setText(tr("Layout pending rebuild..."));
+        }
+#endif
     }
 }
 

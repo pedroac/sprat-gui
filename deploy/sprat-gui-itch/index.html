@@ -18,7 +18,11 @@ SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
     <style>
       /* Make the html body cover the entire (visual) viewport with no scroll bars. */
       html, body { padding: 0; margin: 0; overflow: hidden; height: 100% }
-      #screen { width: 100%; height: 100%; }
+      #screen {
+        width: 100%;
+        height: 100%;
+        scroll-margin-top: 100vh;
+      }
     </style>
   </head>
   <body onload="init()">
@@ -33,6 +37,57 @@ SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
     <div id="screen"></div>
 
     <script type="text/javascript">
+        // itch.io embed scroll-prevention
+        // -----------------------------------------------------------------------
+        // Problem 1 – scroll-to-top on outside click:
+        //   Qt WASM calls canvas.focus() whenever it receives a blur event, trying
+        //   to keep keyboard input. A cross-iframe focus() call tells the browser
+        //   to scroll the *parent* page to bring the iframe into view.
+        //   preventScroll:true only suppresses scrolling within this iframe's own
+        //   document; it does not stop the parent page from scrolling.
+        //   Fix: track whether this iframe has user focus. While it does not,
+        //   suppress all focus() calls so the parent page is never asked to scroll.
+        //
+        // Problem 2 – parent page scrolls on wheel:
+        //   Wheel events inside the iframe bubble to the parent, scrolling the
+        //   itch.io page instead of (or in addition to) the Qt canvas.
+        //   Fix: consume every wheel event at the window level.
+        // -----------------------------------------------------------------------
+        (function () {
+            // Suppress focus() calls until the user explicitly clicks inside the
+            // iframe. Starting true prevents Qt's canvas.focus() during startup
+            // from scrolling the parent page before the user has interacted.
+            let suppressFocus = true;
+
+            const _origFocus = HTMLElement.prototype.focus;
+            HTMLElement.prototype.focus = function (options) {
+                if (suppressFocus) return;
+                // preventScroll:true suppresses any intra-iframe scrolling too.
+                _origFocus.call(this, Object.assign({}, options, { preventScroll: true }));
+            };
+
+            // Iframe lost focus → user clicked somewhere outside.
+            window.addEventListener('blur', function () {
+                suppressFocus = true;
+            });
+
+            // The ONLY way to re-enable focus is an explicit pointerdown inside
+            // the iframe. We intentionally do NOT listen for window 'focus' here:
+            // that event fires during page load (when the iframe becomes active)
+            // which would reset suppressFocus to false before Qt's startup
+            // canvas.focus() runs and cause the parent page to scroll.
+            // capture:true ensures our handler fires before Qt's pointerdown handler.
+            window.addEventListener('pointerdown', function () {
+                suppressFocus = false;
+            }, { capture: true });
+
+            // Consume wheel events so they never reach the parent page scroll.
+            // passive:false is required to be allowed to call preventDefault().
+            window.addEventListener('wheel', function (e) {
+                e.preventDefault();
+            }, { passive: false });
+        })();
+
         async function init()
         {
             const spinner = document.querySelector('#qtspinner');

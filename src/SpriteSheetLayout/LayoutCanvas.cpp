@@ -461,7 +461,16 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
             setModels(models, canceled);
             if (onFinished) onFinished();
             qInfo() << "[WASM] setModelsAsync UI apply done";
-        }, Qt::QueuedConnection);
+        }, Qt::AutoConnection);
+        // Qt::AutoConnection: in WASM task() runs on the main thread (same as this),
+        // so Qt resolves AutoConnection as DirectConnection — the callback runs
+        // immediately here rather than being queued. This matters because a queued
+        // QMetaCallEvent alone does not cause Qt's WASM backend to request a new
+        // requestAnimationFrame, so the event loop would stall until the next user
+        // input (e.g. mouse movement). Running the callback directly means hide()
+        // is called inside task(), which posts a paint event that *does* trigger a
+        // RAF request, keeping the loop alive. On Desktop the task runs in a thread
+        // pool thread (different thread), so AutoConnection queues as before.
     };
 
 #ifdef Q_OS_WASM

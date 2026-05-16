@@ -191,7 +191,7 @@ EM_JS(void, sprat_setup_keyboard_focus, (), {
             }
             const button = shadowContainer.shadowRoot.querySelector('.hidden-visually-read-by-screen-reader');
             if (button) {
-                button.focus();
+                button.focus({ preventScroll: true });
                 console.log('[sprat] Keyboard focus restored');
                 return true;
             }

@@ -212,7 +212,7 @@ void MainWindow::loadAutosavedProject() {
         }
         m_folderLabel->setText(tr("Folder: ") + folder);
     }
-    scheduleLayoutRebuild();
+    scheduleLayoutRebuild(true);
 }
 
 void MainWindow::onLoadProject() {
@@ -884,7 +884,7 @@ void MainWindow::onProjectLoadFinished() {
         setLoading(false);
         if (!framePaths.isEmpty()) {
             m_session->activeFramePaths.append(framePaths);
-            scheduleLayoutRebuild();
+            scheduleLayoutRebuild(true);
         }
         return;
     }
@@ -945,7 +945,7 @@ void MainWindow::onProjectLoadFinished() {
             }
             m_folderLabel->setText(tr("Folder: ") + folder);
         }
-        scheduleLayoutRebuild();
+        scheduleLayoutRebuild(true);
     } else {
         setLoading(false);
     }
@@ -1182,7 +1182,7 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     }
     updateManualFrameLabel();
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
-    scheduleLayoutRebuild();
+    scheduleLayoutRebuild(true);
 }
 
 void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {

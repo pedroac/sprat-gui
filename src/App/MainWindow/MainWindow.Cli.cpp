@@ -261,7 +261,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     ensureFrameListInput();
 
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(folderPath));
-    scheduleLayoutRebuild();
+    scheduleLayoutRebuild(true);
 }
 
 void MainWindow::onFolderDiscoveryFinished() {

@@ -61,7 +61,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         }
 
         if (processExtractedFrames(tempPath, imagePath, action)) {
-            scheduleLayoutRebuild();
+            scheduleLayoutRebuild(true);
         }
         return;
     }
@@ -191,7 +191,7 @@ void MainWindow::onFrameExtractionFinished() {
 void MainWindow::processFrameExtractionResult(const FrameExtractionResult& result) {
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.sourcePath, result.action, result.backgroundColor)) {
-            scheduleLayoutRebuild();
+            scheduleLayoutRebuild(true);
         }
     } else {
         m_statusLabel->setText(tr("Error running spratunpack"));
@@ -270,7 +270,7 @@ void MainWindow::processTarExtractionResult(const TarExtractionResult& result) {
     }
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.tarPath, result.action)) {
-            scheduleLayoutRebuild();
+            scheduleLayoutRebuild(true);
         }
     } else {
         m_statusLabel->setText(tr("Error extracting tar file"));
@@ -453,7 +453,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
-        scheduleLayoutRebuild();
+        scheduleLayoutRebuild(true);
         return;
     }
 

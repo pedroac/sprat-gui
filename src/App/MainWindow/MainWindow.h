@@ -480,7 +480,7 @@ private:
      * If the Navigator view is active, sets m_layoutDirty and defers
      * the rebuild until the user switches back to Layout view.
      */
-    void scheduleLayoutRebuild();
+    void scheduleLayoutRebuild(bool immediate = false);
 
     /**
      * @brief Gets the layout parser folder path.
