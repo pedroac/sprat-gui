@@ -23,6 +23,7 @@
 #include "SpratProfilesConfig.h"
 #include "FolderSyncService.h"
 #include "SpriteNameUtils.h"
+#include "AppConstants.h"
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
 #endif
@@ -106,7 +107,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Initialize undo stack and connect pivot drag signal
     m_undoStack = new QUndoStack(this);
-    m_undoStack->setUndoLimit(50);
+    m_undoStack->setUndoLimit(AppConstants::kUndoStackLimit);
     if (m_previewView && m_previewView->overlay()) {
         connect(m_previewView->overlay(), &EditorOverlayItem::pivotDragFinished,
                 this, [this](int oldX, int oldY, int newX, int newY) {
@@ -161,14 +162,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
     connect(m_cliToolInstaller, &CliToolInstaller::downloadProgress, this, &MainWindow::onDownloadProgress);
     connect(m_cliToolInstaller, &CliToolInstaller::installLog, this, &MainWindow::onCliInstallLog);
-    QTimer::singleShot(1000, this, &MainWindow::checkCliTools);
+    QTimer::singleShot(AppConstants::kCliStartupDelayMs, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
     
     // Autosave setup
     m_autosaveTimer = new QTimer(this);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
-    m_autosaveTimer->start(300000); // Autosave every 5 minutes
+    m_autosaveTimer->start(AppConstants::kAutosaveIntervalMs);
 
     connect(&m_folderDiscoveryWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFolderDiscoveryFinished);
     connect(&m_projectLoadWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectLoadFinished);
@@ -283,7 +284,7 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     if (!m_resizeDebounceTimer) {
         m_resizeDebounceTimer = new QTimer(this);
         m_resizeDebounceTimer->setSingleShot(true);
-        m_resizeDebounceTimer->setInterval(200);
+        m_resizeDebounceTimer->setInterval(AppConstants::kResizeDebounceMs);
         connect(m_resizeDebounceTimer, &QTimer::timeout, this, [this]() {
 #ifdef Q_OS_WASM
             if (jsIsAsyncBusy() || jsHaveJspi()) { // On JSPI, we must be extra careful, though jsIsAsyncBusy should handle it
@@ -295,6 +296,10 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
             QMainWindow::resizeEvent(&dummyEvent);
             updateCliOverlayGeometry();
             handleAnimPreviewResize();
+            // Update canvas overlay if visible
+            if (m_canvasOverlay && m_canvasOverlay->isVisible() && m_canvas) {
+                m_canvasOverlay->resize(m_canvas->size());
+            }
         });
     }
     m_resizeDebounceTimer->start();
@@ -489,6 +494,48 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
     }
 }
 
+void MainWindow::onCanvasAddFramesRequested() {
+    QString startDir = m_session->currentFolder;
+    if (startDir.isEmpty() && !m_session->activeFramePaths.isEmpty()) {
+        startDir = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
+    }
+    QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+    QStringList files = QFileDialog::getOpenFileNames(this, tr("Add Frames"), startDir, filter);
+    if (files.isEmpty()) {
+        return;
+    }
+
+    QSet<QString> existing(m_session->activeFramePaths.begin(), m_session->activeFramePaths.end());
+    QStringList added;
+    for (const QString& file : files) {
+        QFileInfo info(file);
+        if (!info.exists() || info.isDir()) {
+            continue;
+        }
+        QString absPath = info.absoluteFilePath();
+        if (existing.contains(absPath)) {
+            continue;
+        }
+        existing.insert(absPath);
+        added.append(absPath);
+    }
+    if (added.isEmpty()) {
+        QMessageBox::information(this, tr("Add Frames"), tr("All selected frames are already loaded."));
+        return;
+    }
+
+    const QStringList previousFramePaths = m_session->activeFramePaths;
+    m_session->activeFramePaths.append(added);
+    m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
+    if (!ensureFrameListInput()) {
+        m_session->activeFramePaths = previousFramePaths;
+        QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
+        return;
+    }
+    // Canvas action - rebuild immediately with loading UI
+    scheduleLayoutRebuild(true);
+}
+
 void MainWindow::onAddFramesRequested() {
     QString startDir = m_session->currentFolder;
     if (startDir.isEmpty() && !m_session->activeFramePaths.isEmpty()) {
@@ -527,7 +574,178 @@ void MainWindow::onAddFramesRequested() {
         QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
+    // Navigator/deferred action - use lazy loading (debounce)
     scheduleLayoutRebuild();
+}
+
+void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
+    if (paths.isEmpty()) {
+        return;
+    }
+    QStringList targets;
+    for (const QString& path : paths) {
+        if (m_session->activeFramePaths.contains(path)) {
+            targets.append(path);
+        }
+    }
+    if (targets.isEmpty()) {
+        return;
+    }
+
+    QSet<QString> timelineNames;
+    for (const auto& timeline : m_session->timelines) {
+        for (const QString& frame : timeline.frames) {
+            if (targets.contains(frame)) {
+                timelineNames.insert(timeline.name);
+                break;
+            }
+        }
+    }
+
+    if (!timelineNames.isEmpty()) {
+        QString warning = QString(tr("The selected frame(s) are referenced by the following timelines:\n%1\nRemoving them will drop those entries from the timelines. Continue?"))
+                          .arg(QStringList(timelineNames.values()).join(", "));
+        if (QMessageBox::warning(this, tr("Remove Frames"), warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    // Deselect sprite if it's being removed
+    if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path)) {
+        m_session->selectedSprite.reset();
+    }
+    m_session->selectedSprites.erase(
+        std::remove_if(m_session->selectedSprites.begin(), m_session->selectedSprites.end(),
+            [&targets](const SpritePtr& sprite) { return sprite && targets.contains(sprite->path); }),
+        m_session->selectedSprites.end()
+    );
+
+    QStringList remainingFramePaths = m_session->activeFramePaths;
+    for (const QString& path : targets) {
+        remainingFramePaths.removeAll(path);
+    }
+
+    if (remainingFramePaths.isEmpty()) {
+        bool timelineChanged = false;
+        for (auto& timeline : m_session->timelines) {
+            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+                if (targets.contains(timeline.frames[i])) {
+                    timeline.frames.removeAt(i);
+                    timelineChanged = true;
+                }
+            }
+        }
+        if (timelineChanged) {
+            refreshTimelineFrames();
+            refreshAnimationTest();
+        }
+
+        // Remove animations that became empty because their sprites were removed from layout
+        for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
+            if (m_session->timelines[i].frames.isEmpty()) {
+                m_session->timelines.removeAt(i);
+                if (m_session->selectedTimelineIndex > i) {
+                    --m_session->selectedTimelineIndex;
+                } else if (m_session->selectedTimelineIndex == i) {
+                    m_session->selectedTimelineIndex = -1;
+                }
+                timelineChanged = true;
+            }
+        }
+        if (timelineChanged) {
+            refreshTimelineList();
+            refreshTimelineFrames();
+            refreshAnimationTest();
+        }
+
+        m_session->activeFramePaths.clear();
+        m_session->layoutSourcePath.clear();
+        m_session->layoutSourceIsList = false;
+        if (!m_session->frameListPath.isEmpty()) {
+            QFile::remove(m_session->frameListPath);
+            m_session->frameListPath.clear();
+        }
+        m_session->layoutModels.clear();
+        if (m_canvas) {
+            m_canvas->clearCanvas();
+        }
+        m_session->selectedSprites.clear();
+        m_session->selectedSprite.reset();
+
+        // Delete the image files for removed sprites
+        for (const QString& path : targets) {
+            QFile(path).remove();
+        }
+        m_statusLabel->setText(tr("No frames loaded"));
+        m_folderLabel->setText(tr("Folder: none"));
+        m_session->cachedLayoutOutput.clear();
+        m_session->cachedLayoutScale = 1.0;
+        updateMainContentView();
+        updateUiState();
+        return;
+    }
+
+    const QStringList previousFramePaths = m_session->activeFramePaths;
+    m_session->activeFramePaths = remainingFramePaths;
+    if (!ensureFrameListInput()) {
+        m_session->activeFramePaths = previousFramePaths;
+        QMessageBox::warning(this, tr("Remove Frames"), tr("Could not refresh the frame list after removal."));
+        return;
+    }
+
+    bool timelineChanged = false;
+    for (auto& timeline : m_session->timelines) {
+        for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+            if (targets.contains(timeline.frames[i])) {
+                timeline.frames.removeAt(i);
+                timelineChanged = true;
+            }
+        }
+    }
+    if (timelineChanged) {
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    }
+
+    // Remove animations that became empty because their sprites were removed from layout
+    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
+        if (m_session->timelines[i].frames.isEmpty()) {
+            m_session->timelines.removeAt(i);
+            if (m_session->selectedTimelineIndex > i) {
+                --m_session->selectedTimelineIndex;
+            } else if (m_session->selectedTimelineIndex == i) {
+                m_session->selectedTimelineIndex = -1;
+            }
+            timelineChanged = true;
+        }
+    }
+    if (timelineChanged) {
+        refreshTimelineList();
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    }
+
+    // Delete the image files for removed sprites
+    for (const QString& path : targets) {
+        QFile(path).remove();
+    }
+
+    // Immediately remove deleted sprites from canvas (leaves a gap until rebuild)
+    if (m_canvas) {
+        m_canvas->removeSprites(targets);
+    }
+    // Keep session layout models in sync so the next rebuild sees the correct sprite list
+    const QSet<QString> targetSet(targets.begin(), targets.end());
+    for (auto& model : m_session->layoutModels) {
+        model.sprites.erase(
+            std::remove_if(model.sprites.begin(), model.sprites.end(),
+                [&targetSet](const SpritePtr& s) { return targetSet.contains(s->path); }),
+            model.sprites.end());
+    }
+
+    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
+    // Canvas action - rebuild immediately with loading UI
+    scheduleLayoutRebuild(true);
 }
 
 void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
@@ -696,6 +914,7 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
     }
 
     m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
+    // Navigator/deferred action - use lazy loading (debounce)
     scheduleLayoutRebuild();
 }
 
@@ -783,7 +1002,8 @@ void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orient
     }
 
     ensureFrameListInput();
-    scheduleLayoutRebuild();
+    // Explicit user action - rebuild immediately
+    scheduleLayoutRebuild(true);
     m_statusLabel->setText(tr("Sprite split into %1 and %2").arg(
         QFileInfo(pathA).fileName(), QFileInfo(pathB).fileName()));
 }
@@ -822,7 +1042,8 @@ void MainWindow::onManageProfiles() {
     const QString previousProfile = m_profileCombo ? m_profileCombo->currentText() : QString();
     applyConfiguredProfiles(profiles, previousProfile);
     if (!m_session->layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentText().trimmed().isEmpty()) {
-        scheduleLayoutRebuild();
+        // Profiles dialog closed - rebuild immediately with new settings
+        scheduleLayoutRebuild(true);
     }
 }
 
@@ -851,7 +1072,7 @@ void MainWindow::applySettings() {
                         this, &MainWindow::onWatchModePeriodicCheck);
             }
             // Check every 2 seconds for deleted files
-            m_watchModePeriodicCheckTimer->start(2000);
+            m_watchModePeriodicCheckTimer->start(AppConstants::kWatchModeCheckMs);
         }
     }
 
@@ -862,7 +1083,8 @@ void MainWindow::applySettings() {
         && m_session
         && !m_session->layoutModels.isEmpty()
         && m_canvas) {
-        scheduleLayoutRebuild();
+        // Sync mode enabled - rebuild immediately
+        scheduleLayoutRebuild(true);
     }
     m_appliedSyncMode = m_settings.syncMode;
 
@@ -976,7 +1198,8 @@ void MainWindow::onFolderWatcherFilesModified(const QStringList& paths) {
     }
 
     qInfo() << "[Watch] Processing modifications...";
-    scheduleLayoutRebuild();
+    // Watch mode detected file changes - rebuild immediately
+    scheduleLayoutRebuild(true);
 }
 
 void MainWindow::onSyncNowRequested() {
@@ -1038,15 +1261,41 @@ void MainWindow::performFolderSync() {
     // Re-run layout to position new sprites or remove deleted ones
     if (!syncResult.newImagePaths.isEmpty() || !syncResult.deletedImagePaths.isEmpty()) {
         if (!m_session->activeFramePaths.isEmpty()) {
-            if (!syncResult.newImagePaths.isEmpty()) {
-                m_statusLabel->setText(tr("Re-generating layout with new sprites..."));
-            } else {
-                m_statusLabel->setText(tr("Re-generating layout..."));
+            // IMPORTANT: Refresh GUI immediately to show deleted sprites removed
+            // This prevents stale UI while layout rebuilds in background
+            refreshSpriteTree();
+            if (m_canvas) {
+                m_canvas->update();
             }
-            scheduleLayoutRebuild();
+
+            // Show feedback about what happened
+            if (!syncResult.newImagePaths.isEmpty() && !syncResult.deletedImagePaths.isEmpty()) {
+                m_statusLabel->setText(tr("Sprites synced: %1 added, %2 removed. Rebuilding layout...")
+                    .arg(syncResult.newImagePaths.size()).arg(syncResult.deletedImagePaths.size()));
+            } else if (!syncResult.newImagePaths.isEmpty()) {
+                m_statusLabel->setText(tr("Sprites synced: %1 added. Rebuilding layout...")
+                    .arg(syncResult.newImagePaths.size()));
+            } else {
+                m_statusLabel->setText(tr("Sprites synced: %1 removed. Rebuilding layout...")
+                    .arg(syncResult.deletedImagePaths.size()));
+            }
+
+            // Build layout in background (debounced to avoid blocking UI)
+            scheduleLayoutRebuild(false);
+
+            // Clear the status message after 4 seconds to show it completed
+            QTimer::singleShot(4000, this, [this]() {
+                if (m_statusLabel) {
+                    m_statusLabel->clear();
+                }
+            });
         } else if (!syncResult.deletedImagePaths.isEmpty()) {
             // All frames were deleted
             m_statusLabel->setText(tr("All sprites removed."));
+            refreshSpriteTree();
+            if (m_canvas) {
+                m_canvas->update();
+            }
         }
     }
 }
@@ -1166,7 +1415,8 @@ void MainWindow::performManualSync() {
     if (!m_session->activeFramePaths.isEmpty()) {
         qInfo() << "[Sync]   Running layout...";
         m_statusLabel->setText(tr("Regenerating layout..."));
-        scheduleLayoutRebuild();
+        // Folder sync completed - rebuild immediately
+        scheduleLayoutRebuild(true);
     } else {
         qWarning() << "[Sync]   No sprites left!";
         m_statusLabel->setText(tr("No sprites to display."));
@@ -1527,6 +1777,7 @@ void MainWindow::onQuickStart() {
     text->setReadOnly(true);
     layout->addWidget(text);
 
+
     QPushButton* okBtn = new QPushButton(tr("OK"), &dlg);
     layout->addWidget(okBtn);
     connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
@@ -1584,6 +1835,12 @@ void MainWindow::onShowHotkeys() {
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
         "<tr><td>Delete Selected Marker / Vertex</td><td><b>Delete</b></td></tr>"
+        "</table>"
+
+        "<h3>Animation Playback</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Play / Pause Animation</td><td><b>Space</b></td></tr>"
         "</table>"
     );
 

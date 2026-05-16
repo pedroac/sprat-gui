@@ -5,6 +5,7 @@
 #include "LayoutParser.h"
 #include "ResolutionUtils.h"
 #include "SpriteNameUtils.h"
+#include "AppConstants.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -22,6 +23,7 @@
 #include <QElapsedTimer>
 #include <QDebug>
 #include <QFile>
+#include <QDockWidget>
 
 namespace {
 int legacyDefaultPivotX(const SpritePtr& sprite) {
@@ -86,13 +88,7 @@ void MainWindow::onRunLayout(bool quiet) {
     m_session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile = requestedProfile;
     m_isCanceled = false;
-    if (!quiet) {
-        m_loadingUiMessage = tr("Building layout...");
-        setLoading(true);
-    } else {
-        if (m_statusProgressBar) m_statusProgressBar->setVisible(true);
-        setCursor(Qt::WaitCursor);
-    }
+    // Layout rebuilds silently in the background - no loading dialog or cursor
     m_statusLabel->setText(tr("Rebuilding layout..."));
     m_layoutFailureDialogShown = false;
 
@@ -105,9 +101,6 @@ void MainWindow::onRunLayout(bool quiet) {
 void MainWindow::onLayoutFinished(const LayoutResult& result) {
     if (!result.success) {
         if (result.wasKilledIntentionally) {
-            setLoading(false);
-            if (m_statusProgressBar) m_statusProgressBar->setVisible(false);
-            setCursor(Qt::ArrowCursor);
             if (m_layoutRunPending) {
                 const bool q = m_layoutRunPendingQuiet;
                 m_layoutRunPending = false;
@@ -116,8 +109,6 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
             }
             return;
         }
-
-        setLoading(false);
 
         const QString combined = (result.error + "\n" + result.output).toLower();
 
@@ -219,14 +210,10 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
     m_session->layoutModels = newModels;
 
-    m_loadingUiMessage = tr("Loading images...");
-    setLoading(true);
-
     qInfo() << "[WASM] setModelsAsync start"
             << "models=" << m_session->layoutModels.size();
     m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this, selectedPaths, primaryPath]() {
         if (m_isCanceled) {
-            setLoading(false);
             m_statusLabel->setText(tr("Loading images canceled"));
             return;
         }
@@ -243,6 +230,9 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         m_statusLabel->setText(QString(tr("Loaded %1 sprites in %2 atlas(es)"))
             .arg(m_session->activeFramePaths.size())
             .arg(m_session->layoutModels.size()));
+
+        // Hide loading dialog now that layout and sprites are loaded
+        setLoading(false);
 
         populateActiveFrameListFromModel();
         if (m_session->layoutSourceIsList) {
@@ -268,7 +258,6 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         m_session->clearTempDirs();
 
         m_pendingChangeCount = 0;
-        setLoading(false);
         qInfo() << "[WASM] setModelsAsync finished";
 
         if (m_layoutRunPending) {
@@ -281,7 +270,6 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 }
 
 void MainWindow::onLayoutError(const QString& details) {
-    setLoading(false);
     m_runningLayoutProfile.clear();
     m_retryWithoutTrimOnFailure = false;
     
@@ -389,6 +377,22 @@ void MainWindow::setLoading(bool loading) {
         if (!m_cliInstallInProgress) {
             showLoadingOverlayNow();
         }
+        // Disable dockers and canvas while loading - prevent interaction with stale data
+        if (m_canvas) {
+            m_canvas->setEnabled(false);
+            // Create semi-transparent overlay if not already created
+            if (!m_canvasOverlay) {
+                m_canvasOverlay = new QWidget(m_canvas);
+                m_canvasOverlay->setStyleSheet("background-color: rgba(128, 128, 128, 160);");
+            }
+            // Show overlay and resize to match canvas
+            m_canvasOverlay->resize(m_canvas->size());
+            m_canvasOverlay->raise();
+            m_canvasOverlay->show();
+        }
+        if (m_atlasDock) m_atlasDock->setEnabled(false);
+        if (m_animationDock) m_animationDock->setEnabled(false);
+        if (m_debugDock) m_debugDock->setEnabled(false);
     } else {
         if (m_welcomeLabel) {
             m_welcomeLabel->setText(tr("Drag and drop a folder, image file, archive (zip/tar), or URL"));
@@ -398,6 +402,17 @@ void MainWindow::setLoading(bool loading) {
             m_cliInstallOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
             m_loadingOverlayVisible = false;
         }
+        // Re-enable dockers and canvas when loading finishes
+        if (m_canvas) {
+            m_canvas->setEnabled(true);
+            // Hide overlay to restore normal canvas appearance
+            if (m_canvasOverlay) {
+                m_canvasOverlay->hide();
+            }
+        }
+        if (m_atlasDock) m_atlasDock->setEnabled(true);
+        if (m_animationDock) m_animationDock->setEnabled(true);
+        if (m_debugDock) m_debugDock->setEnabled(true);
         m_loadingUiMessage = tr("Loading...");
     }
     if (m_statusProgressBar) {
@@ -427,7 +442,23 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 
 void MainWindow::onProfileChanged() {
     const QString requestedProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
-    scheduleLayoutRebuild();
+    // Profile changes should rebuild layout immediately - user expects visual feedback
+    scheduleLayoutRebuild(true);
+}
+
+void MainWindow::pauseLayoutRebuild() {
+    if (m_layoutDebounceTimer && m_layoutDebounceTimer->isActive()) {
+        m_layoutDebounceTimer->stop();
+        m_layoutRebuildPaused = true;
+    }
+}
+
+void MainWindow::resumeLayoutRebuild() {
+    if (m_layoutRebuildPaused && m_layoutDirty && !m_layoutRunner) {
+        // Restart the debounce timer to rebuild after user stops hovering
+        scheduleLayoutRebuild();
+    }
+    m_layoutRebuildPaused = false;
 }
 
 void MainWindow::scheduleLayoutRebuild(bool immediate) {
@@ -442,13 +473,13 @@ void MainWindow::scheduleLayoutRebuild(bool immediate) {
         m_layoutRunPendingQuiet = false;
     }
 
-    const bool bufferFull = (m_pendingChangeCount >= kLayoutBufferFullThreshold);
+    const bool bufferFull = (m_pendingChangeCount >= AppConstants::kLayoutBufferFullThreshold);
 
     if (bufferFull) {
         m_pendingChangeCount = 0;
         if (m_layoutDebounceTimer) m_layoutDebounceTimer->stop();
-        // Immediate rebuild with loading overlay
-        onRunLayout(false);
+        // Immediate rebuild without loading overlay
+        onRunLayout(true);
     } else {
 #ifdef Q_OS_WASM
         // In WASM the layout runner is synchronous and fast (no subprocess).
@@ -482,7 +513,13 @@ void MainWindow::scheduleLayoutRebuild(bool immediate) {
                     }
                 });
             }
-            m_layoutDebounceTimer->start(2000);
+            // Only start the timer if rebuild is not paused (user hovering over canvas)
+            if (!m_layoutRebuildPaused) {
+                m_layoutDebounceTimer->start(AppConstants::kLayoutDebounceMs);
+            } else {
+                // Mark as dirty so it resumes after user stops hovering
+                m_layoutDirty = true;
+            }
             if (m_statusLabel)
                 m_statusLabel->setText(tr("Layout pending rebuild..."));
         }

@@ -1,4 +1,5 @@
 #include "ZoomableGraphicsView.h"
+#include "AppConstants.h"
 #include <QScrollBar>
 #include <QApplication>
 #include <QTimer>
@@ -172,7 +173,7 @@ void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
     if (!m_resizeTimer) {
         m_resizeTimer = new QTimer(this);
         m_resizeTimer->setSingleShot(true);
-        m_resizeTimer->setInterval(200); // Debounce interval
+        m_resizeTimer->setInterval(AppConstants::kResizeDebounceMs);
         connect(m_resizeTimer, &QTimer::timeout, this, [this]() {
 #ifdef Q_OS_WASM
             if (jsIsAsyncBusy() || jsHaveJspi()) {

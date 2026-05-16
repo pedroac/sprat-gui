@@ -113,6 +113,16 @@ signals:
      */
     void splitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos);
 
+    /**
+     * @brief Emitted when the user starts interacting with the canvas (mouse enters).
+     */
+    void userInteractionStarted();
+
+    /**
+     * @brief Emitted when the user stops interacting with the canvas (mouse leaves).
+     */
+    void userInteractionEnded();
+
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -124,6 +134,8 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
     void drawForeground(QPainter* painter, const QRectF& rect) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private slots:
     void onRemoveSmallTriggered();

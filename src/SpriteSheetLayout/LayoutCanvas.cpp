@@ -371,6 +371,11 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
                     pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
                 }
 
+                // Prevent unbounded cache growth: drop all entries if we exceed the limit
+                constexpr int kMaxTransformedCache = 500;
+                if (m_transformedPixmapCache.size() >= kMaxTransformedCache) {
+                    m_transformedPixmapCache.clear();
+                }
                 m_transformedPixmapCache.insert(cacheKey, pixmap);
             }
 
@@ -1022,9 +1027,6 @@ void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     painter->drawLine(m_searchCloseRect.topRight(), m_searchCloseRect.bottomLeft());
 
     painter->restore();
-    
-    // Ensure viewport-level update for immediate visual feedback of the search text
-    viewport()->update();
 }
 
 void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
@@ -1184,7 +1186,7 @@ void LayoutCanvas::updateSearch() {
     for (auto* item : m_items) {
         const bool match = hasQuery && item->getData()->name.contains(m_searchQuery, Qt::CaseInsensitive);
         item->setSearchMatch(match);
-        
+
         const bool shouldBeSelected = match || m_baseSelectionPaths.contains(item->getData()->path);
         if (item->isSelectedState() != shouldBeSelected) {
             item->setSelectedState(shouldBeSelected);
@@ -1194,8 +1196,11 @@ void LayoutCanvas::updateSearch() {
     if (selectionChangedOccurred) {
         emitSelectionChanged();
     }
-    viewport()->update();
-    update();
+    // Only update if selection actually changed - prevents continuous repaint loop
+    if (selectionChangedOccurred) {
+        viewport()->update();
+        update();
+    }
 }
 
 void LayoutCanvas::finalizeSearchSelection() {
@@ -1251,4 +1256,14 @@ void LayoutCanvas::updateBorderHighlights() {
     for (auto* border : m_borderItems) {
         border->setPen(borderPen);
     }
+}
+
+void LayoutCanvas::enterEvent(QEnterEvent* event) {
+    ZoomableGraphicsView::enterEvent(event);
+    emit userInteractionStarted();
+}
+
+void LayoutCanvas::leaveEvent(QEvent* event) {
+    ZoomableGraphicsView::leaveEvent(event);
+    emit userInteractionEnded();
 }

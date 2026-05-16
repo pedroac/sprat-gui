@@ -1,0 +1,22 @@
+#!/bin/sh
+# Pre-commit hook for clang-format validation
+# Checks that staged C++ files comply with .clang-format style
+
+set -e
+
+# Get list of staged files
+git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|h|hpp|cxx|hxx)$' | while read file; do
+    # Skip deleted files
+    if [ ! -f "$file" ]; then
+        continue
+    fi
+
+    # Check formatting
+    if ! clang-format --dry-run --Werror "$file" 2>/dev/null; then
+        echo "Error: File '$file' does not comply with project code style."
+        echo "Run: clang-format -i '$file'"
+        exit 1
+    fi
+done
+
+exit 0

@@ -115,12 +115,24 @@ private slots:
     void onLayoutCanvasPathDropped(const QString& path);
 
     /**
-     * @brief Handles request to add frames to the layout.
+     * @brief Handles request to add frames from canvas context menu (immediate rebuild).
+     */
+    void onCanvasAddFramesRequested();
+
+    /**
+     * @brief Handles request to add frames (lazy loading, used by Navigator and other deferred operations).
      */
     void onAddFramesRequested();
 
     /**
-     * @brief Handles request to remove frames from the layout.
+     * @brief Handles request to remove frames from canvas (immediate rebuild).
+     *
+     * @param paths List of paths to remove
+     */
+    void onCanvasRemoveFramesRequested(const QStringList& paths);
+
+    /**
+     * @brief Handles request to remove frames (lazy loading, used by Navigator and other deferred operations).
      *
      * @param paths List of paths to remove
      */
@@ -287,6 +299,16 @@ private slots:
     void onLayoutZoomChanged(double value);
 
     /**
+     * @brief Pauses the layout rebuild timer when user hovers over canvas.
+     */
+    void pauseLayoutRebuild();
+
+    /**
+     * @brief Resumes the layout rebuild timer when user stops hovering over canvas.
+     */
+    void resumeLayoutRebuild();
+
+    /**
      * @brief Handles request to manage profiles.
      */
     void onManageProfiles();
@@ -422,12 +444,14 @@ private slots:
     void onFrameExtractionFinished();
     void onProjectSaveFinished();
     void handleProjectSaveResult(const ProjectSaveResult& result);
+    void onTransparencyProcessingFinished();
 
     // === CLI Installation Logging ===
     void onCliInstallLog(const QString& message);
 
     // === Source Folder Sync ===
     void onSpriteTreeContextMenu(const QPoint& pos);
+    void filterSpriteTree(const QString& text);
     void onFolderWatcherFilesAdded(const QStringList& paths);
     void onFolderWatcherFilesRemoved(const QStringList& paths);
     void onFolderWatcherFilesModified(const QStringList& paths);
@@ -1045,6 +1069,7 @@ private:
     // Atlas view stack (Layout / Navigator)
     QStackedWidget* m_atlasViewStack      = nullptr;
     NavigatorTreeWidget* m_spriteTree      = nullptr;
+    QLineEdit*      m_spriteFilterEdit    = nullptr;
     QAction*        m_showLayoutAction    = nullptr;
     QAction*        m_showNavigatorAction = nullptr;
 
@@ -1135,6 +1160,13 @@ private:
     bool m_mergeReplaceAllDuplicates = true;
     QTimer* m_watchModePeriodicCheckTimer = nullptr;
 
+    // Temporary storage for transparency processing continuation
+    QString m_pendingTransparencyTempPath;
+    QString m_pendingTransparencySourcePath;
+    QStringList m_pendingTransparencyFramePaths;
+    DropAction m_pendingTransparencyAction;
+    QColor m_pendingTransparencyBgColor;
+
     // === Undo/Redo & Recent Projects ===
     QUndoStack* m_undoStack = nullptr;
     QStringList m_recentProjects;
@@ -1202,15 +1234,18 @@ private:
         bool canceled = false;
     };
     QFutureWatcher<ProjectSaveResult> m_projectSaveWatcher;
+    QFutureWatcher<void> m_transparencyWatcher;  // For background transparency processing
     QNetworkAccessManager* m_importNetworkManager = nullptr;
     QPointer<QNetworkReply> m_activeImportReply;
     std::vector<std::unique_ptr<QTemporaryDir>> m_importTempDirs;
 
     QMutex m_toolMutex;
     QString m_runningLayoutProfile;
+    QWidget* m_canvasOverlay = nullptr;  // Semi-transparent overlay for canvas during loading
     bool m_layoutRunPending = false;
     bool m_layoutRunPendingQuiet = false;  // quiet flag for deferred pending run
     bool m_layoutDirty = false;            // rebuild needed but Navigator view is active
+    bool m_layoutRebuildPaused = false;    // rebuild paused because user is hovering over canvas
     int m_pendingChangeCount = 0;
     static constexpr int kLayoutBufferFullThreshold = 20;
     QTimer* m_layoutDebounceTimer = nullptr;
@@ -1220,6 +1255,7 @@ private:
     QTimer* m_resizeDebounceTimer = nullptr;
     QSize m_pendingResizeSize;
     QSize m_pendingResizeOldSize;
+    QSize m_singleImageDimensions;  // Cache to avoid redundant image loads
     bool m_inResize = false;
     bool m_isRestoringProject = false;
 

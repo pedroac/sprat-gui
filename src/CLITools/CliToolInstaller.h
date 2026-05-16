@@ -33,6 +33,7 @@ signals:
     void installLog(const QString& message);
     void cliToolsResolved(bool ready);
     void downloadProgress(qint64 bytesReceived, qint64 bytesTotal);
+    void errorOccurred(const QString& title, const QString& message);
 
 private slots:
 #ifndef SPRAT_EMBEDDED_CLI

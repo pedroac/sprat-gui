@@ -23,6 +23,9 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
     flags |= ARCHIVE_EXTRACT_PERM;
     flags |= ARCHIVE_EXTRACT_ACL;
     flags |= ARCHIVE_EXTRACT_FFLAGS;
+    // Security: prevent directory traversal and symlink attacks
+    flags |= ARCHIVE_EXTRACT_SECURE_NODOTDOT;
+    flags |= ARCHIVE_EXTRACT_SECURE_SYMLINKS;
 
     a = archive_read_new();
     archive_read_support_format_all(a);
@@ -71,7 +74,16 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
         const QString currentFile = QString::fromUtf8(archive_entry_pathname(entry));
 #endif
         const QString fullPath = destination.absoluteFilePath(currentFile);
-        
+
+        // Security: Validate that the extracted path doesn't escape the destination directory
+        const QString canonicalDest = QDir(destination.absolutePath()).canonicalPath();
+        const QString candidatePath = QDir::cleanPath(fullPath);
+        if (!candidatePath.startsWith(canonicalDest + QDir::separator()) && candidatePath != canonicalDest) {
+            // Path traversal attempt detected; skip this entry
+            qWarning() << "Skipping entry with path traversal attempt:" << currentFile;
+            continue;
+        }
+
 #ifdef Q_OS_WIN
         archive_entry_copy_pathname_w(entry, reinterpret_cast<const wchar_t*>(fullPath.utf16()));
 #else
@@ -142,6 +154,7 @@ bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QSt
     }
 
     bool found = false;
+    constexpr la_int64_t kMaxInMemorySize = 256 * 1024 * 1024; // 256 MB
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
 #ifdef Q_OS_WIN
         QString entryPath = QString::fromWCharArray(archive_entry_pathname_w(entry));
@@ -150,12 +163,14 @@ bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QSt
 #endif
         // Normalize paths for comparison (handles subdirectories inside zip)
         if (entryPath == fileName || entryPath.endsWith("/" + fileName)) {
-            found = true;
             la_int64_t size = archive_entry_size(entry);
-            if (size > 0) {
-                data.resize(static_cast<int>(size));
-                archive_read_data(a, data.data(), static_cast<size_t>(size));
+            if (size <= 0 || size > kMaxInMemorySize) {
+                error = QString("Entry size out of bounds (0 or > 256 MB): %1").arg(fileName);
+                break;
             }
+            found = true;
+            data.resize(static_cast<int>(size));
+            archive_read_data(a, data.data(), static_cast<size_t>(size));
             break;
         }
     }

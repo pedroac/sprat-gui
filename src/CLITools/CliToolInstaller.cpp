@@ -9,6 +9,19 @@
 #include <QFileInfo>
 #include <QNetworkReply>
 
+namespace {
+// Escape a string for safe use in shell scripts by wrapping in single quotes
+// and escaping embedded single quotes as '\''
+static QString shellQuote(const QString& s) {
+    if (s.isEmpty()) {
+        return "''";
+    }
+    QString escaped = s;
+    escaped.replace("'", "'\\''");
+    return "'" + escaped + "'";
+}
+}  // namespace
+
 CliToolInstaller::CliToolInstaller(QObject* parent) 
     : QObject(parent), 
 #ifndef SPRAT_EMBEDDED_CLI
@@ -63,7 +76,7 @@ void CliToolInstaller::installCliTools() {
 #endif
 
     if (osSuffix.isEmpty()) {
-        QMessageBox::critical(nullptr, "Unsupported OS", "Automatic installation is not supported on this operating system.");
+        emit errorOccurred("Unsupported OS", "Automatic installation is not supported on this operating system.");
         emit installFinished(-1, QProcess::CrashExit);
         return;
     }
@@ -87,13 +100,15 @@ void CliToolInstaller::installOnLinux() {
     if (!hasCpp) missing << "g++";
 
     if (!missing.isEmpty()) {
-        QMessageBox::critical(nullptr, "Missing Dependencies",
-                              "Cannot install sprat-cli. Missing build tools: " + missing.join(", "));
+        emit errorOccurred("Missing Dependencies",
+                          "Cannot install sprat-cli. Missing build tools: " + missing.join(", "));
         emit installFinished(-1, QProcess::CrashExit);
         return;
     }
 
     emit installLog(QString("Cloning sprat-cli (%1)...").arg(m_cliVersion));
+    // Linux script is safe: only m_cliVersion (compile-time constant) is interpolated,
+    // no runtime user-supplied paths are used.
     QString script = QString(R"SCRIPT(
 set -euo pipefail
 workdir=$(mktemp -d)
@@ -158,7 +173,7 @@ void CliToolInstaller::onDownloadProgress(qint64 bytesReceived, qint64 bytesTota
 
 void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
     if (reply->error() != QNetworkReply::NoError) {
-        QMessageBox::critical(nullptr, "Download Failed", "Could not download sprat-cli: " + reply->errorString());
+        emit errorOccurred("Download Failed", "Could not download sprat-cli: " + reply->errorString());
 #ifndef SPRAT_EMBEDDED_CLI
         emit installFinished(-1, QProcess::CrashExit);
 #else
@@ -170,7 +185,7 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
 
     QTemporaryFile* tempFile = new QTemporaryFile(this);
     if (!tempFile->open()) {
-        QMessageBox::critical(nullptr, "Install Failed", "Could not create a temporary file for downloaded installer.");
+        emit errorOccurred("Install Failed", "Could not create a temporary file for downloaded installer.");
 #ifndef SPRAT_EMBEDDED_CLI
         emit installFinished(-1, QProcess::CrashExit);
 #else
@@ -215,17 +230,18 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
 #elif defined(Q_OS_MACOS)
     emit installLog("Mounting DMG and copying files...");
     // Use hdiutil to mount and cp while preserving structure
+    // Paths are safely quoted using shellQuote() to prevent shell injection
     QString script = QString("set -euo pipefail\n"
-                             "MOUNT_POINT=$(hdiutil mount \"%1\" | grep -o '/Volumes/.*' | head -n 1)\n"
+                             "MOUNT_POINT=$(hdiutil mount %1 | grep -o '/Volumes/.*' | head -n 1)\n"
                              "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
-                             "mkdir -p \"%2/cli\"\n"
-                             "cp -R \"$MOUNT_POINT\"/. \"%2/cli/\" 2>/dev/null || true\n"
+                             "mkdir -p %2/cli\n"
+                             "cp -R \"$MOUNT_POINT\"/. %2/cli/ 2>/dev/null || true\n"
                              "hdiutil unmount \"$MOUNT_POINT\"\n"
                              "echo \"Checking installed CLI tool versions:\"\n"
                              "echo \"Expected version: %3\"\n"
                              "echo \"---\"\n"
                              "for tool in spratlayout spratpack spratconvert spratframes spratunpack; do\n"
-                             "  installed_version=$(\"%2/cli/$tool\" --version 2>&1 | grep -oP 'v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*' | head -1)\n"
+                             "  installed_version=$(%2/cli/$tool --version 2>&1 | grep -oP 'v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*' | head -1)\n"
                              "  echo \"$tool: $installed_version\"\n"
                              "  if [ \"$installed_version\" != \"%3\" ]; then\n"
                              "    echo \"ERROR: Version mismatch for $tool! Expected %3 but got $installed_version\" >&2\n"
@@ -233,7 +249,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "  fi\n"
                              "done\n"
                              "echo \"---\"\n"
-                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(filePath, appDir, expectedVersion);
+                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(shellQuote(filePath), shellQuote(appDir), expectedVersion);
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
 #endif

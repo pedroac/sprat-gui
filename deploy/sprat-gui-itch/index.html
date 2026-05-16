@@ -22,6 +22,9 @@ SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
         width: 100%;
         height: 100%;
         scroll-margin-top: 100vh;
+        /* Prevent scroll chaining to parent page when scrolling inside the app.
+           Works well on Chrome/Chromium. Firefox support is incomplete but improving. */
+        overscroll-behavior: none;
       }
     </style>
   </head>
@@ -81,11 +84,8 @@ SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
                 suppressFocus = false;
             }, { capture: true });
 
-            // Consume wheel events so they never reach the parent page scroll.
-            // passive:false is required to be allowed to call preventDefault().
-            window.addEventListener('wheel', function (e) {
-                e.preventDefault();
-            }, { passive: false });
+            // Wheel scroll blocking is now handled by CSS overscroll-behavior: none
+            // in the #screen element style, which prevents scroll chaining to parent.
         })();
 
         async function init()

@@ -1,4 +1,5 @@
 #include "LayoutRunner.h"
+#include "AppConstants.h"
 #include "ResolutionUtils.h"
 #include <QFileInfo>
 #include <QDir>
@@ -103,7 +104,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 
         QElapsedTimer timer;
         timer.start();
-        const int timeoutMs = 300000; // 5 minutes for layout
+        const int timeoutMs = AppConstants::kLayoutProcessTimeoutMs;
 
         while (m_process->state() == QProcess::Running || m_process->bytesAvailable() > 0) {
             if (m_stopRequested.load()) {

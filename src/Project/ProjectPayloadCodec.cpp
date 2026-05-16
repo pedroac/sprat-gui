@@ -26,7 +26,15 @@ QVector<int> fromJsonArray(const QJsonValue& value) {
     return out;
 }
 
+bool isValidCliPath(const QString& path) {
+    if (path.isEmpty()) {
+        return true; // Empty path is allowed (use default)
+    }
+    QFileInfo fi(path);
+    return fi.isAbsolute() && fi.isExecutable() && !fi.isDir() && !path.contains("..");
 }
+
+}  // namespace
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
@@ -317,9 +325,21 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             out.appSettings.borderColor = QColor(borderColor);
         }
         out.appSettings.borderStyle = static_cast<Qt::PenStyle>(settings["border_style"].toInt(static_cast<int>(out.appSettings.borderStyle)));
-        out.cliPaths.layoutBinary = settings["cli_spratlayout"].toString();
-        out.cliPaths.packBinary = settings["cli_spratpack"].toString();
-        out.cliPaths.convertBinary = settings["cli_spratconvert"].toString();
+        // Validate CLI paths to prevent arbitrary binary execution
+        QString layoutPath = settings["cli_spratlayout"].toString();
+        if (isValidCliPath(layoutPath)) {
+            out.cliPaths.layoutBinary = layoutPath;
+        }
+
+        QString packPath = settings["cli_spratpack"].toString();
+        if (isValidCliPath(packPath)) {
+            out.cliPaths.packBinary = packPath;
+        }
+
+        QString convertPath = settings["cli_spratconvert"].toString();
+        if (isValidCliPath(convertPath)) {
+            out.cliPaths.convertBinary = convertPath;
+        }
     }
 
     QJsonObject saveOpts = root["save_options"].toObject();

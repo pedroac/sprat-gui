@@ -4,6 +4,7 @@
 #include "ResolutionUtils.h"
 #include "AnimationCanvas.h"
 #include "CliToolsConfig.h"
+#include "AppConstants.h"
 #include <QDockWidget>
 
 #include <QAction>
@@ -165,7 +166,7 @@ void MainWindow::setupUi() {
             scheduleLayoutRebuild();
             return;
         }
-        m_sourceResolutionDebounceTimer->start(350);
+        m_sourceResolutionDebounceTimer->start(AppConstants::kSourceResDebounceMs);
     };
     connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, scheduleSourceResolutionLayoutRun);
 
@@ -194,9 +195,11 @@ void MainWindow::setupUi() {
     });
     connect(m_canvas, &LayoutCanvas::requestTimelineGeneration, this, &MainWindow::onGenerateTimelinesFromFrames);
     connect(m_canvas, &LayoutCanvas::externalPathDropped, this, &MainWindow::onLayoutCanvasPathDropped);
-    connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onAddFramesRequested);
-    connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onRemoveFramesRequested);
+    connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onCanvasAddFramesRequested);
+    connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onCanvasRemoveFramesRequested);
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
+    connect(m_canvas, &LayoutCanvas::userInteractionStarted, this, &MainWindow::pauseLayoutRebuild);
+    connect(m_canvas, &LayoutCanvas::userInteractionEnded, this, &MainWindow::resumeLayoutRebuild);
     m_canvas->viewport()->installEventFilter(this);
 
     // Navigator panel (tree view of sprites)
@@ -204,6 +207,11 @@ void MainWindow::setupUi() {
     navigatorContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
     navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+
+    // Sprite filter search box
+    m_spriteFilterEdit = new QLineEdit(navigatorContent);
+    m_spriteFilterEdit->setPlaceholderText(tr("Search sprites..."));
+    navigatorLayout->addWidget(m_spriteFilterEdit);
 
     m_spriteTree = new NavigatorTreeWidget(navigatorContent);
     m_spriteTree->setHeaderLabel(tr("Sprites"));
@@ -214,6 +222,9 @@ void MainWindow::setupUi() {
     connect(m_spriteTree, &QWidget::customContextMenuRequested,
             this, &MainWindow::onSpriteTreeContextMenu);
     navigatorLayout->addWidget(m_spriteTree);
+
+    // Connect filter box to search functionality
+    connect(m_spriteFilterEdit, &QLineEdit::textChanged, this, &MainWindow::filterSpriteTree);
 
     // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
     connect(m_spriteTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int /*column*/) {
@@ -476,7 +487,7 @@ void MainWindow::setupUi() {
     cliLogLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
     m_cliLog = new QPlainTextEdit(this);
     m_cliLog->setReadOnly(true);
-    m_cliLog->setMaximumBlockCount(5000);
+    m_cliLog->setMaximumBlockCount(AppConstants::kCliLogMaxBlocks);
     m_cliLog->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     cliLogLayout->addWidget(m_cliLog);
     QHBoxLayout* cliLogBtnLayout = new QHBoxLayout();
@@ -795,7 +806,7 @@ void MainWindow::updateRecentProjectsMenu() {
 void MainWindow::addToRecentProjects(const QString& path) {
     m_recentProjects.removeAll(path);
     m_recentProjects.prepend(path);
-    while (m_recentProjects.size() > 5)
+    while (m_recentProjects.size() > AppConstants::kRecentProjectsMax)
         m_recentProjects.removeLast();
     CliToolsConfig::saveRecentProjects(m_recentProjects);
     updateRecentProjectsMenu();
@@ -815,6 +826,12 @@ void MainWindow::syncPivotSpinsFromSprite() {
 
 void MainWindow::refreshSpriteTree() {
     if (!m_spriteTree) return;
+    // Clear the filter when refreshing the tree
+    if (m_spriteFilterEdit) {
+        m_spriteFilterEdit->blockSignals(true);
+        m_spriteFilterEdit->clear();
+        m_spriteFilterEdit->blockSignals(false);
+    }
     m_spriteTree->blockSignals(true);
     m_spriteTree->clear();
 

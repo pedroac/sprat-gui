@@ -472,3 +472,39 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
     refreshTimelineFrames();
     refreshAnimationTest();
 }
+
+// ---------------------------------------------------------------------------
+// Navigator Search Filter
+// ---------------------------------------------------------------------------
+void MainWindow::filterSpriteTree(const QString& text) {
+    if (!m_spriteTree) return;
+
+    // Iterate through all items in the tree and apply filter
+    QTreeWidgetItemIterator it(m_spriteTree);
+    QSet<QTreeWidgetItem*> itemsToShow;
+
+    // First pass: find all items matching the search text
+    while (*it) {
+        QTreeWidgetItem* item = *it;
+        bool matches = text.isEmpty() || item->text(0).contains(text, Qt::CaseInsensitive);
+
+        if (matches) {
+            itemsToShow.insert(item);
+            // Mark all ancestors as visible (they should show since a descendant matches)
+            QTreeWidgetItem* parent = item->parent();
+            while (parent) {
+                itemsToShow.insert(parent);
+                parent = parent->parent();
+            }
+        }
+        ++it;
+    }
+
+    // Second pass: apply visibility based on filter results
+    QTreeWidgetItemIterator it2(m_spriteTree);
+    while (*it2) {
+        QTreeWidgetItem* item = *it2;
+        item->setHidden(!itemsToShow.contains(item));
+        ++it2;
+    }
+}

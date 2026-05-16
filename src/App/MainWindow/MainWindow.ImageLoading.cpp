@@ -426,13 +426,15 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
                 fileName = info.baseName() + "_transparent.png";
             }
             QString outputPath = QDir(tempPath).absoluteFilePath(fileName);
-            
+
             QImage img(imagePath);
             if (!img.isNull()) {
                 applyTransparencyToImage(img, backgroundColor);
                 if (img.save(outputPath)) {
                     finalPath = outputPath;
                     m_session->addTempDir(std::move(tempDir));
+                    // Retain image size to avoid redundant reload later
+                    m_singleImageDimensions = img.size();
                 }
             }
         }
@@ -494,12 +496,21 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     sprite->path = copiedPath;
     sprite->name = QFileInfo(imagePath).baseName();
     
-    // Get image dimensions
-    QImage img(finalPath);
-    if (!img.isNull()) {
-        sprite->rect = QRect(0, 0, img.width(), img.height());
-        sprite->pivotX = img.width() / 2;
-        sprite->pivotY = img.height() / 2;
+    // Get image dimensions (use cached size to avoid redundant disk load)
+    QSize imgSize;
+    if (!m_singleImageDimensions.isEmpty()) {
+        imgSize = m_singleImageDimensions;
+    } else {
+        QImage img(finalPath);
+        if (!img.isNull()) {
+            imgSize = img.size();
+        }
+    }
+
+    if (!imgSize.isEmpty()) {
+        sprite->rect = QRect(0, 0, imgSize.width(), imgSize.height());
+        sprite->pivotX = imgSize.width() / 2;
+        sprite->pivotY = imgSize.height() / 2;
     } else {
         // Fallback dimensions if image can't be loaded
         sprite->rect = QRect(0, 0, 100, 100);
@@ -552,21 +563,33 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     if (backgroundColor.isValid()) {
         m_loadingUiMessage = tr("Applying transparency...");
         setLoading(true);
-        for (int i = 0; i < framePaths.size(); ++i) {
-            if (m_isCanceled) {
-                setLoading(false);
-                return false;
-            }
-#ifndef Q_OS_WASM
-            QCoreApplication::processEvents();
-#endif
 
-            QImage img(framePaths[i]);
-            if (!img.isNull()) {
-                applyTransparencyToImage(img, backgroundColor);
-                img.save(framePaths[i]);
+        // Store parameters for continuation after async processing
+        m_pendingTransparencyTempPath = tempPath;
+        m_pendingTransparencySourcePath = sourcePath;
+        m_pendingTransparencyFramePaths = framePaths;
+        m_pendingTransparencyAction = action;
+        m_pendingTransparencyBgColor = backgroundColor;
+
+        // Run transparency processing in background thread
+        auto transparencyTask = [this, framePaths, backgroundColor]() {
+            for (int i = 0; i < framePaths.size(); ++i) {
+                if (m_isCanceled) {
+                    break;
+                }
+                QImage img(framePaths[i]);
+                if (!img.isNull()) {
+                    applyTransparencyToImage(img, backgroundColor);
+                    img.save(framePaths[i]);
+                }
             }
-        }
+        };
+
+        // Execute in thread pool and connect completion
+        m_transparencyWatcher.setFuture(QtConcurrent::run(transparencyTask));
+        connect(&m_transparencyWatcher, &QFutureWatcher<void>::finished,
+                this, &MainWindow::onTransparencyProcessingFinished);
+        return true;  // Processing continues asynchronously
     }
     
     if (action == DropAction::Merge) {
@@ -632,4 +655,85 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     
     m_statusLabel->setText(QString(tr("Loaded %1 frames")).arg(framePaths.size()));
     return true;
+}
+
+void MainWindow::onTransparencyProcessingFinished() {
+    // Transparency processing completed in background thread
+    // Continue with the merge/replace logic
+    setLoading(false);
+
+    if (m_isCanceled) {
+        m_statusLabel->setText(tr("Cancelled"));
+        return;
+    }
+
+    // Use the stored parameters to continue processing
+    const QString& tempPath = m_pendingTransparencyTempPath;
+    const QString& sourcePath = m_pendingTransparencySourcePath;
+    const QStringList& framePaths = m_pendingTransparencyFramePaths;
+    const DropAction& action = m_pendingTransparencyAction;
+
+    if (action == DropAction::Merge) {
+        // Ask if files with same names should be replaced
+        QMessageBox msg(this);
+        msg.setWindowTitle(tr("Merge with duplicates"));
+        msg.setText(tr("When merging, what should happen to files with the same name?"));
+        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
+        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
+        msg.exec();
+        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
+
+        m_session->activeFramePaths.append(framePaths);
+        // Copy extracted frames to source folder so they persist after temp dir cleanup
+        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        ensureFrameListInput();
+        m_shouldClearSpritesFolder = false;
+        scheduleLayoutRebuild(true);
+    } else {
+        // On Replace, delete all contents from sprites folder (including subdirectories)
+        if (!m_session->sourceFolder.isEmpty()) {
+            QDir dir(m_session->sourceFolder);
+            dir.removeRecursively();
+            QDir().mkpath(m_session->sourceFolder);
+        }
+
+        m_session->sourceFolder.clear();
+        m_session->clearSourceFolderTempDir();
+        ensureSourceFolder();
+        m_session->timelines.clear();
+        m_session->selectedTimelineIndex = -1;
+        // Clear selection state when loading new frames to avoid stale pointers
+        m_session->selectedSprite.reset();
+        m_session->selectedSprites.clear();
+        m_session->selectedPointName.clear();
+        // Update UI to clear sprite selection display
+        onSpriteSelected(SpritePtr());
+        refreshTimelineList();
+        refreshAnimationTest();
+        m_projectFilePath.clear();
+        m_sourceFolderIsTemp = false;
+        m_session->activeFramePaths = framePaths;
+        m_session->layoutSourcePath = tempPath;
+        m_session->layoutSourceIsList = false;
+        // Set currentFolder to extraction root so copyActiveFramesToSourceFolder
+        // preserves the subfolder hierarchy from the archive
+        m_session->currentFolder = tempPath;
+        // Copy sprites to source folder on Replace
+        copyActiveFramesToSourceFolder();
+        m_shouldClearSpritesFolder = false;
+    }
+
+    if (!m_session->frameListPath.isEmpty()) {
+        QFile::remove(m_session->frameListPath);
+        m_session->frameListPath.clear();
+    }
+
+    // Ensure we generate a list file so spratlayout respects our sort order
+    if (!ensureFrameListInput()) {
+        m_statusLabel->setText(tr("Error: Could not create frame list for layout"));
+        return;
+    }
+
+    m_statusLabel->setText(QString(tr("Loaded %1 frames")).arg(framePaths.size()));
+    scheduleLayoutRebuild(true);
 }

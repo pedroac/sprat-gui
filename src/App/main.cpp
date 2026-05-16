@@ -5,6 +5,7 @@
 #include <QTranslator>
 #include <QTimer>
 #include <QStyleFactory>
+#include <QPixmapCache>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
 
@@ -36,6 +37,10 @@ int main(int argc, char *argv[]) {
     qputenv("QT_STYLE_OVERRIDE", "Fusion");
 
     QApplication app(argc, argv);
+
+    // Increase pixmap cache to prevent thrashing on sprite-heavy projects
+    // Default is 10 MB; 256 MB is better for projects with 500+ sprites
+    QPixmapCache::setCacheLimit(256 * 1024); // 256 MB in KB
 
 #ifdef __EMSCRIPTEN__
     // Disable Asyncify's overly strict "multiple async operations" checks.

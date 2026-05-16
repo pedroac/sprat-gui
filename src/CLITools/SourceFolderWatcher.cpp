@@ -1,4 +1,5 @@
 #include "SourceFolderWatcher.h"
+#include "AppConstants.h"
 
 #include <QDir>
 #include <QTimer>
@@ -9,7 +10,7 @@ SourceFolderWatcher::SourceFolderWatcher(QObject* parent)
     : QObject(parent),
       m_watcher(nullptr),
       m_debounceTimer(nullptr),
-      m_debounceInterval(500) {
+      m_debounceInterval(AppConstants::kFolderWatchDebounceMs) {
 
     try {
         m_watcher = new QFileSystemWatcher(this);
