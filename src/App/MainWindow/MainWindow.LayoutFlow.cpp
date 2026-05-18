@@ -259,6 +259,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
                 updateMainContentView();
                 updateUiState();
+                updateOpenSourceFolderAction();
+                updateCliDiagnostics();
 
                 m_session->clearTempDirs();
 

@@ -4,6 +4,7 @@
 #include <emscripten.h>
 #include <QMetaObject>
 #include <QTimer>
+#include <QFileInfo>
 #include "MainWindow.h"
 
 namespace {
@@ -745,6 +746,25 @@ EM_JS(void, sprat_install_drop_handlers, (), {
     }
 });
 
+EM_JS(void, sprat_download_file, (const char* path, const char* filename), {
+    var pathStr = UTF8ToString(path);
+    var filenameStr = UTF8ToString(filename);
+    try {
+        var data = FS.readFile(pathStr);
+        var blob = new Blob([data]);
+        var url  = URL.createObjectURL(blob);
+        var a    = document.createElement('a');
+        a.href = url; a.download = filenameStr;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    } catch (e) { console.error('[sprat] download failed for', pathStr, e); }
+});
+
+}
+
+void wasmDownloadFile(const QString& path) {
+    QFileInfo fi(path);
+    sprat_download_file(path.toUtf8().constData(), fi.fileName().toUtf8().constData());
 }
 
 extern "C" {

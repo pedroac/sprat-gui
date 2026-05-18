@@ -20,7 +20,22 @@ fi
 
 BUILD_TYPE="${1:-host}"
 
-if [ "$BUILD_TYPE" == "wasm" ]; then
+if [ "$BUILD_TYPE" == "serve" ]; then
+    echo "Serving build_wasm/ on http://127.0.0.1:8000 (no-cache)..."
+    python3 - <<'EOF'
+import http.server, os
+
+class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
+os.chdir("build_wasm")
+http.server.HTTPServer(("127.0.0.1", 8000), NoCacheHandler).serve_forever()
+EOF
+elif [ "$BUILD_TYPE" == "wasm" ]; then
     echo "Configuring for WASM..."
     # Use the Qt-provided Emscripten toolchain to match the Qt WASM build.
     # This avoids ABI/symbol mismatches with libqwasm.a.

@@ -28,7 +28,7 @@ SpratProfile genericDefaultProfile(const QString& name = QString()) {
     p.allowRotation = false;
     p.scale = 1.0;
     p.multipack = false;
-    p.sort = "name";
+    p.sort = "none";
     p.gpuCompress = "";
     p.dilate = 0;
     return p;
@@ -96,7 +96,7 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
         }
         p.sort = p.sort.trimmed().toLower();
         if (p.sort != "name" && p.sort != "none") {
-            p.sort = "name";
+            p.sort = "none";
         }
         p.gpuCompress = p.gpuCompress.trimmed().toLower();
         if (p.gpuCompress != "" && p.gpuCompress != "dxt1" && p.gpuCompress != "dxt5") {

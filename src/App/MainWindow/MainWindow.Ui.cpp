@@ -670,6 +670,10 @@ void MainWindow::setupToolbar() {
     m_openSourceFolderAction->setEnabled(false);
     connect(m_openSourceFolderAction, &QAction::triggered,
             this, &MainWindow::onOpenSourceFolderClicked);
+#ifdef Q_OS_WASM
+    m_openSourceFolderAction->setText(tr("Browse Sprites Folder..."));
+    m_openSourceFolderAction->setToolTip(tr("Browse and manage files in the virtual sprites folder"));
+#endif
 
     fileMenu->addSeparator();
     m_recentProjectsMenu = fileMenu->addMenu(tr("Recent"));

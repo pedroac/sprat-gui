@@ -26,6 +26,7 @@
 #include "AppConstants.h"
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
+#include "WasmFolderBrowserDialog.h"
 #endif
 #include <algorithm>
 #include <QFileDialog>
@@ -1704,19 +1705,129 @@ void MainWindow::ensureSourceFolder() {
 }
 
 void MainWindow::onOpenSourceFolderClicked() {
+#ifdef Q_OS_WASM
+    const QString folder = m_session ? m_session->currentFolder : QString();
+    if (folder.isEmpty()) return;
+    auto* dlg = new WasmFolderBrowserDialog(folder, this);
+
+    // Accumulate all deletions made during the dialog session; process them
+    // after exec() returns so the layout rebuild runs in the parent event loop,
+    // not inside the modal's nested event loop (avoids a WASM UI freeze).
+    QStringList accumulatedDeleted;
+    connect(dlg, &WasmFolderBrowserDialog::filesDeleted,
+            dlg, [&accumulatedDeleted](const QStringList& paths) {
+        accumulatedDeleted << paths;
+    });
+
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->exec();
+
+    if (!accumulatedDeleted.isEmpty()) {
+        onSpritesDeleted(accumulatedDeleted);
+    }
+#else
     const QString folder = m_session ? m_session->sourceFolder : QString();
     if (folder.isEmpty()) return;
     QDir().mkpath(folder);
     QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+#endif
 }
 
 void MainWindow::updateOpenSourceFolderAction() {
     if (!m_openSourceFolderAction) return;
+#ifdef Q_OS_WASM
+    const bool enabled = m_session && !m_session->activeFramePaths.isEmpty();
+#else
     const bool enabled = m_session
         && m_settings.syncMode != SyncMode::None
         && !m_session->sourceFolder.isEmpty();
+#endif
     m_openSourceFolderAction->setEnabled(enabled);
 }
+
+#ifdef Q_OS_WASM
+void MainWindow::onSpritesDeleted(const QStringList& paths)
+{
+    if (!m_session) return;
+
+    // Filter to paths that are actually loaded
+    QStringList targets;
+    for (const QString& path : paths) {
+        if (m_session->activeFramePaths.contains(path)) {
+            targets.append(path);
+        }
+    }
+    if (targets.isEmpty()) return;
+
+    // Deselect sprite if it is being removed
+    if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path)) {
+        onSpriteSelected(nullptr);
+    }
+    m_session->selectedSprites.erase(
+        std::remove_if(m_session->selectedSprites.begin(), m_session->selectedSprites.end(),
+            [&targets](const SpritePtr& s) { return s && targets.contains(s->path); }),
+        m_session->selectedSprites.end());
+
+    // Remove from activeFramePaths
+    for (const QString& path : targets) {
+        m_session->activeFramePaths.removeAll(path);
+    }
+
+    // Remove from timelines, drop empty timelines
+    const QSet<QString> targetSet(targets.begin(), targets.end());
+    for (auto& timeline : m_session->timelines) {
+        for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+            if (targetSet.contains(timeline.frames[i])) {
+                timeline.frames.removeAt(i);
+            }
+        }
+    }
+    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
+        if (m_session->timelines[i].frames.isEmpty()) {
+            m_session->timelines.removeAt(i);
+            if (m_session->selectedTimelineIndex > i) {
+                --m_session->selectedTimelineIndex;
+            } else if (m_session->selectedTimelineIndex == i) {
+                m_session->selectedTimelineIndex = -1;
+            }
+        }
+    }
+
+    if (m_session->activeFramePaths.isEmpty()) {
+        m_session->layoutSourcePath.clear();
+        m_session->layoutSourceIsList = false;
+        if (!m_session->frameListPath.isEmpty()) {
+            QFile::remove(m_session->frameListPath);
+            m_session->frameListPath.clear();
+        }
+        m_session->currentFolder.clear();
+        m_session->layoutModels.clear();
+        if (m_canvas) m_canvas->clearCanvas();
+        m_session->selectedSprites.clear();
+        m_session->selectedSprite.reset();
+        m_statusLabel->setText(tr("No frames loaded"));
+        m_folderLabel->setText(tr("Folder: none"));
+        m_session->cachedLayoutOutput.clear();
+        m_session->cachedLayoutScale = 1.0;
+        updateMainContentView();
+        updateUiState();
+        updateOpenSourceFolderAction();
+        refreshSpriteTree();
+        refreshTimelineList();
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    } else {
+        ensureFrameListInput();
+        captureOldSpritePositions();
+        if (m_canvas) m_canvas->removeSprites(targets);
+        m_statusLabel->setText(QString(tr("Removed %1 file(s)")).arg(targets.size()));
+        refreshTimelineFrames();
+        refreshTimelineList();
+        refreshAnimationTest();
+        scheduleLayoutRebuild(false, true);
+    }
+}
+#endif
 
 bool MainWindow::activeFramesAreInSourceFolder() const {
     if (m_session->sourceFolder.isEmpty() || m_session->activeFramePaths.isEmpty()) {

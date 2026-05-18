@@ -18,4 +18,7 @@ void wasmBlockAllDrags();
 
 // Called after JS file picker writes files into the virtual FS.
 void wasmHandleFilePicked(const QString& path, int mode);
+
+// Trigger a browser download for a file in the virtual FS.
+void wasmDownloadFile(const QString& path);
 #endif

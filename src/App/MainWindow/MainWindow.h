@@ -73,6 +73,9 @@ class QUrl;
 class FrameDetectionDialog;
 class AnimationCanvas;
 class SourceFolderWatcher;
+#ifdef Q_OS_WASM
+class WasmFolderBrowserDialog;
+#endif
 
 /**
  * @class MainWindow
@@ -475,6 +478,9 @@ private slots:
     void promoteSourceFolderAfterSave(const QString& saveDestination);
     void updateOpenSourceFolderAction();   // enable/disable based on state
     void onWatchModePeriodicCheck();       // periodic file removal detection in Watch mode
+#ifdef Q_OS_WASM
+    void onSpritesDeleted(const QStringList& paths);
+#endif
 
 protected:
     // === Event Handling ===

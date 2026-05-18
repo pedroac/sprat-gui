@@ -236,6 +236,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.h
     src/App/WasmFileDialog.cpp
     src/App/WasmFileDialog.h
+    src/App/WasmFolderBrowserDialog.cpp
+    src/App/WasmFolderBrowserDialog.h
     src/App/MainWindow/FrameDetectionDialog.cpp
     src/App/MainWindow/FrameDetectionDialog.h
     src/App/MainWindow/FrameDetectionCanvas.cpp

@@ -99,6 +99,9 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
 
 #include <QProcess>
 #include <QRegularExpression>
+#ifdef SPRAT_EMBEDDED_CLI
+#include "EmbeddedCli.h"
+#endif
 
 QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
 #ifdef SPRAT_EMBEDDED_CLI
@@ -187,9 +190,10 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
 }
 
 QString CliToolsConfig::queryTransformsDir(const QString& convertBinaryPath) {
-#ifdef Q_OS_WASM
+#ifdef SPRAT_EMBEDDED_CLI
     Q_UNUSED(convertBinaryPath);
-    return {};
+    CliResult result = EmbeddedCli::run("spratconvert", {"--transforms-dir"});
+    return QString::fromLocal8Bit(result.stdOut).trimmed();
 #else
     if (convertBinaryPath.isEmpty()) return {};
     QProcess process;
@@ -200,9 +204,10 @@ QString CliToolsConfig::queryTransformsDir(const QString& convertBinaryPath) {
 }
 
 QString CliToolsConfig::queryDefaultProfilesConfig(const QString& layoutBinaryPath) {
-#ifdef Q_OS_WASM
+#ifdef SPRAT_EMBEDDED_CLI
     Q_UNUSED(layoutBinaryPath);
-    return {};
+    CliResult result = EmbeddedCli::run("spratlayout", {"--default-profiles-config"});
+    return QString::fromLocal8Bit(result.stdOut).trimmed();
 #else
     if (layoutBinaryPath.isEmpty()) return {};
     QProcess process;

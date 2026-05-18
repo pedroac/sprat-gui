@@ -39,7 +39,7 @@ SpratProfile makeDefaultProfile(const QString& name) {
     p.allowRotation = false;
     p.scale = 1.0;
     p.multipack = false;
-    p.sort = "name";
+    p.sort = "none";
     p.gpuCompress = "";
     p.dilate = 0;
     return p;

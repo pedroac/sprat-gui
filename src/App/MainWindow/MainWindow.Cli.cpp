@@ -532,11 +532,23 @@ void MainWindow::updateCliDiagnostics() {
         version.isEmpty() ? tr("ERROR  not found") : version);
 
     // Binaries
+#ifdef SPRAT_EMBEDDED_CLI
+    const QString embeddedTag = ok + QLatin1Char(' ');
+    auto embeddedLine = [&](const QString& label) -> QString {
+        return embeddedTag + (label + QLatin1Char(':')).leftJustified(20) + tr("embedded") + QLatin1Char('\n');
+    };
+    text += embeddedLine(QStringLiteral("spratlayout"));
+    text += embeddedLine(QStringLiteral("spratpack"));
+    text += embeddedLine(QStringLiteral("spratconvert"));
+    text += embeddedLine(QStringLiteral("spratframes"));
+    text += embeddedLine(QStringLiteral("spratunpack"));
+#else
     text += pathLine(QStringLiteral("spratlayout"),   m_cliPaths.layoutBinary);
     text += pathLine(QStringLiteral("spratpack"),     m_cliPaths.packBinary);
     text += pathLine(QStringLiteral("spratconvert"),  m_cliPaths.convertBinary);
     text += pathLine(QStringLiteral("spratframes"),   m_cliPaths.framesBinary);
     text += pathLine(QStringLiteral("spratunpack"),   m_cliPaths.unpackBinary);
+#endif
 
     // Data paths
     text += QLatin1Char('\n');
@@ -545,6 +557,23 @@ void MainWindow::updateCliDiagnostics() {
 
     const QString transformsDir = CliToolsConfig::queryTransformsDir(m_cliPaths.convertBinary);
     text += pathLine(QStringLiteral("Transforms dir"), transformsDir);
+
+    // Session state
+    text += QLatin1Char('\n');
+#ifdef Q_OS_WASM
+    const QString spritesFolder = m_session ? m_session->currentFolder : QString();
+#else
+    const QString spritesFolder = m_session ? m_session->sourceFolder : QString();
+#endif
+    {
+        const bool exists = !spritesFolder.isEmpty() && QDir(spritesFolder).exists();
+        const QString tag = exists ? ok : error;
+        const QString key = QStringLiteral("Sprites folder:").leftJustified(20);
+        const QString value = spritesFolder.isEmpty() ? tr("not loaded")
+                            : exists                  ? spritesFolder
+                                                      : spritesFolder + tr(" (not found)");
+        text += tag + QLatin1Char(' ') + key + value + QLatin1Char('\n');
+    }
 
     m_cliInfoText->setPlainText(text);
 }

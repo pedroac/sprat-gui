@@ -21,7 +21,7 @@ struct SpratProfile {
     bool allowRotation = false;
     double scale = 1.0;
     bool multipack = false;
-    QString sort = "name";
+    QString sort = "none";
     QString gpuCompress = "";  // "" = none, "dxt1", "dxt5"
     int dilate = 0;             // 0 = disabled, N = passes
 };
