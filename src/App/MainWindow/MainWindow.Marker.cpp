@@ -2,6 +2,8 @@
 #include "UndoCommands.h"
 
 #include "MarkersDialog.h"
+#include "AnimationPreviewService.h"
+#include <algorithm>
 
 #include <QComboBox>
 #include <QLabel>
@@ -115,12 +117,27 @@ void MainWindow::onPointsConfigClicked() {
         suggestion.baseSize = 20;
     }
 
+    const QVector<NamedPoint> oldPoints = m_session->selectedSprite->points;
+
     MarkersDialog dlg(m_session->selectedSprite, suggestion, this);
     connect(&dlg, &MarkersDialog::markersChanged, this, [this]() {
         m_previewView->overlay()->updateLayout();
         refreshHandleCombo();
     });
     dlg.exec();
+
+    const QVector<NamedPoint> newPoints = m_session->selectedSprite->points;
+    if (newPoints != oldPoints) {
+        m_undoStack->push(new SetMarkersCommand(
+            m_session->selectedSprite,
+            oldPoints,
+            newPoints,
+            [this]() {
+                m_previewView->overlay()->updateLayout();
+                refreshHandleCombo();
+            }
+        ));
+    }
 }
 
 void MainWindow::onMarkerSelectedFromCanvas(const QString& name) {
@@ -158,6 +175,9 @@ void MainWindow::onApplyPivotToSelectedTimelineFrames() {
         return;
     }
 
+    const int newX = m_session->selectedSprite->pivotX;
+    const int newY = m_session->selectedSprite->pivotY;
+
     QSet<QString> targetPaths;
     for (const auto& sprite : m_session->selectedSprites) {
         if (sprite) {
@@ -165,31 +185,47 @@ void MainWindow::onApplyPivotToSelectedTimelineFrames() {
         }
     }
 
-    int updated = 0;
+    // Collect targets and their old pivots for undo
+    QVector<QPair<SpritePtr, QPair<int,int>>> targets;
     for (const QString& path : targetPaths) {
         SpritePtr target = spriteByPath(m_session->layoutModels, path);
-        if (!target) {
-            continue;
-        }
-        target->pivotX = m_session->selectedSprite->pivotX;
-        target->pivotY = m_session->selectedSprite->pivotY;
-        ++updated;
+        if (!target) continue;
+        targets.append({target, {target->pivotX, target->pivotY}});
     }
 
-    if (updated <= 0) {
+    if (targets.isEmpty()) {
         m_statusLabel->setText(tr("No selected frames matched loaded sprites."));
         return;
     }
 
+    // Apply new pivot
+    for (const auto& pair : targets) {
+        pair.first->pivotX = newX;
+        pair.first->pivotY = newY;
+    }
+    AnimationPreviewService::invalidateBounds();
+
     if (targetPaths.contains(m_session->selectedSprite->path)) {
-        onCanvasPivotChanged(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY);
+        onCanvasPivotChanged(newX, newY);
     }
     m_previewView->overlay()->updateLayout();
     if (m_canvas) {
         m_canvas->update();
     }
     refreshAnimationTest();
-    m_statusLabel->setText(tr("Applied pivot to %1 sprite(s).").arg(updated));
+    m_statusLabel->setText(tr("Applied pivot to %1 sprite(s).").arg(targets.size()));
+
+    m_undoStack->push(new ApplyPivotToFramesCommand(
+        targets,
+        newX,
+        newY,
+        [this]() {
+            AnimationPreviewService::invalidateBounds();
+            m_previewView->overlay()->updateLayout();
+            if (m_canvas) m_canvas->update();
+            refreshAnimationTest();
+        }
+    ));
 }
 
 void MainWindow::onApplyMarkerToSelectedTimelineFrames(const QString& markerName) {
@@ -224,31 +260,49 @@ void MainWindow::onApplyMarkerToSelectedTimelineFrames(const QString& markerName
         }
     }
 
-    int updated = 0;
+    // Collect targets with their old marker state (nullopt if marker didn't exist)
+    QVector<QPair<SpritePtr, std::optional<NamedPoint>>> targets;
     for (const QString& path : targetPaths) {
         SpritePtr target = spriteByPath(m_session->layoutModels, path);
-        if (!target) {
-            continue;
+        if (!target) continue;
+        auto it = std::find_if(target->points.begin(), target->points.end(),
+            [&sourceMarkerName](const NamedPoint& p) { return p.name == sourceMarkerName; });
+        std::optional<NamedPoint> oldMarker;
+        if (it != target->points.end()) {
+            oldMarker = *it;
         }
-        auto targetIt = std::find_if(
-            target->points.begin(),
-            target->points.end(),
-            [&sourceMarkerName](const NamedPoint& point) { return point.name == sourceMarkerName; });
-        if (targetIt == target->points.end()) {
-            target->points.append(sourceMarker);
-        } else {
-            *targetIt = sourceMarker;
-        }
-        ++updated;
+        targets.append({target, oldMarker});
     }
 
-    if (updated <= 0) {
+    if (targets.isEmpty()) {
         m_statusLabel->setText(tr("No selected frames matched loaded sprites."));
         return;
+    }
+
+    // Apply the marker to all targets
+    for (const auto& pair : targets) {
+        SpritePtr target = pair.first;
+        auto it = std::find_if(target->points.begin(), target->points.end(),
+            [&sourceMarkerName](const NamedPoint& p) { return p.name == sourceMarkerName; });
+        if (it == target->points.end()) {
+            target->points.append(sourceMarker);
+        } else {
+            *it = sourceMarker;
+        }
     }
 
     m_previewView->overlay()->updateLayout();
     refreshHandleCombo();
     refreshAnimationTest();
-    m_statusLabel->setText(tr("Applied marker '%1' to %2 sprite(s).").arg(sourceMarkerName).arg(updated));
+    m_statusLabel->setText(tr("Applied marker '%1' to %2 sprite(s).").arg(sourceMarkerName).arg(targets.size()));
+
+    m_undoStack->push(new ApplyMarkerToFramesCommand(
+        targets,
+        sourceMarker,
+        [this]() {
+            m_previewView->overlay()->updateLayout();
+            refreshHandleCombo();
+            refreshAnimationTest();
+        }
+    ));
 }

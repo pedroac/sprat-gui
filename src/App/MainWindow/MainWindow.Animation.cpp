@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "AnimationCanvas.h"
+#include "UndoCommands.h"
 
 #include "AnimationExportService.h"
 #include "AnimationPlaybackService.h"
@@ -98,36 +99,99 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
     if (!AnimationTimelineOps::dropFrame(m_session->timelines, m_session->selectedTimelineIndex, path, index)) {
         return;
     }
+
+    // Compute actual inserted index (dropFrame clamps negative/overflowing indices to end)
+    const auto& frames = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    const int insertedIdx = (index < 0 || index >= (int)frames.size())
+                                ? (int)frames.size() - 1
+                                : index;
+
+    // Refresh UI for the already-applied drop
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
     refreshTimelineFrames();
     refreshTimelineList();
     fitAnimationToViewport();
     refreshAnimationTest();
+
+    m_undoStack->push(new TimelineFrameDropCommand(
+        &m_session->timelines,
+        m_session->selectedTimelineIndex,
+        path,
+        insertedIdx,
+        [this]() {
+            refreshTimelineFrames();
+            refreshTimelineList();
+            refreshAnimationTest();
+        }
+    ));
 }
 
 void MainWindow::onFrameMoved(int from, int to) {
+    if (m_session->selectedTimelineIndex < 0 ||
+        m_session->selectedTimelineIndex >= m_session->timelines.size()) {
+        return;
+    }
+    // Capture frames before the move for undo
+    QStringList savedFramesBefore = m_session->timelines[m_session->selectedTimelineIndex].frames;
+
     if (!AnimationTimelineOps::moveFrame(m_session->timelines, m_session->selectedTimelineIndex, from, to)) {
         return;
     }
     refreshTimelineFrames();
     refreshTimelineList();
     refreshAnimationTest();
+
+    m_undoStack->push(new TimelineFrameMoveCommand(
+        &m_session->timelines,
+        m_session->selectedTimelineIndex,
+        from,
+        to,
+        savedFramesBefore,
+        [this]() {
+            refreshTimelineFrames();
+            refreshTimelineList();
+            refreshAnimationTest();
+        }
+    ));
 }
 
 void MainWindow::onFrameDuplicateRequested(int index) {
+    if (m_session->selectedTimelineIndex < 0 ||
+        m_session->selectedTimelineIndex >= m_session->timelines.size()) {
+        return;
+    }
+    // Capture path for command (needed for subsequent redo after undo)
+    const auto& frames = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    if (index < 0 || index >= frames.size()) return;
+    const QString path = frames[index];
+
     if (!AnimationTimelineOps::duplicateFrame(m_session->timelines, m_session->selectedTimelineIndex, index)) {
         return;
     }
     refreshTimelineFrames();
     refreshTimelineList();
     refreshAnimationTest();
+
+    m_undoStack->push(new TimelineFrameDuplicateCommand(
+        &m_session->timelines,
+        m_session->selectedTimelineIndex,
+        index,
+        path,
+        [this]() {
+            refreshTimelineFrames();
+            refreshTimelineList();
+            refreshAnimationTest();
+        }
+    ));
 }
 
 void MainWindow::onFrameRemoveRequested() {
-    if (m_session->selectedTimelineIndex < 0) {
+    if (m_session->selectedTimelineIndex < 0 ||
+        m_session->selectedTimelineIndex >= m_session->timelines.size()) {
         return;
     }
     QList<QListWidgetItem*> items = m_timelineFramesList->selectedItems();
+    if (items.isEmpty()) return;
 
     QVector<int> rows;
     for (auto* item : items) {
@@ -135,10 +199,34 @@ void MainWindow::onFrameRemoveRequested() {
     }
     std::sort(rows.begin(), rows.end(), std::greater<int>());
 
+    // Capture (index, path) pairs ascending for the undo command
+    const auto& frames = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    QVector<QPair<int,QString>> removed;
+    removed.reserve(rows.size());
+    for (int i = rows.size() - 1; i >= 0; --i) {
+        int row = rows[i];
+        if (row >= 0 && row < frames.size()) {
+            removed.append({row, frames[row]});
+        }
+    }
+
     AnimationTimelineOps::removeFrames(m_session->timelines, m_session->selectedTimelineIndex, rows);
     refreshTimelineFrames();
     refreshTimelineList();
     refreshAnimationTest();
+
+    if (!removed.isEmpty()) {
+        m_undoStack->push(new TimelineFrameRemoveCommand(
+            &m_session->timelines,
+            m_session->selectedTimelineIndex,
+            removed,
+            [this]() {
+                refreshTimelineFrames();
+                refreshTimelineList();
+                refreshAnimationTest();
+            }
+        ));
+    }
 }
 
 void MainWindow::onTimelineFrameSelectionChanged() {
@@ -207,6 +295,7 @@ void MainWindow::onAnimPrevClicked() {
 }
 
 void MainWindow::onAnimPlayPauseClicked() {
+    const bool wasPlaying = m_animPlaying;
     AnimationPlaybackService::togglePlayPause(
         m_session->timelines,
         m_session->selectedTimelineIndex,
@@ -214,6 +303,8 @@ void MainWindow::onAnimPlayPauseClicked() {
         m_animPlaying,
         m_animTimer,
         m_animPlayPauseBtn);
+    if (m_animPlaying && !wasPlaying)
+        m_animElapsed.start();
 }
 
 void MainWindow::onAnimNextClicked() {
@@ -230,7 +321,16 @@ void MainWindow::onAnimNextClicked() {
 }
 
 void MainWindow::onAnimTimerTimeout() {
-    if (!AnimationPlaybackService::tick(m_session->timelines, m_session->selectedTimelineIndex, m_animFrameIndex)) {
+    const int fps = selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex);
+#ifdef Q_OS_WASM
+    // Timer fires on every RAF callback (~16 ms). Skip until a full frame-duration
+    // has elapsed so the animation plays at the correct fps rather than at 60 fps.
+    if (m_animElapsed.elapsed() < static_cast<qint64>(1000.0 / fps))
+        return;
+#endif
+    const qint64 elapsed = m_animElapsed.restart();
+    if (!AnimationPlaybackService::tick(m_session->timelines, m_session->selectedTimelineIndex,
+                                        m_animFrameIndex, elapsed, fps)) {
         return;
     }
     refreshAnimationTest();
@@ -258,6 +358,14 @@ void MainWindow::saveAnimationToFile() {
 }
 
 void MainWindow::refreshAnimationTest() {
+    // Ensure all frames are in QPixmapCache before the first tick.
+    // preloadTimeline() is a no-op when the timeline has not changed.
+    if (m_session->selectedTimelineIndex >= 0
+            && m_session->selectedTimelineIndex < m_session->timelines.size()) {
+        AnimationPreviewService::preloadTimeline(
+            m_session->timelines[m_session->selectedTimelineIndex].frames);
+    }
+
     QString statusText;
     bool hasFrames = false;
     bool playing = m_animPlaying;

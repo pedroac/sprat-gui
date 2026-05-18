@@ -6,6 +6,7 @@
 
 #include "CliToolsConfig.h"
 #include "CliToolsUi.h"
+#include "SpratProfilesConfig.h"
 #include "ImageDiscoveryService.h"
 #include "ImageFolderSelectionDialog.h"
 
@@ -42,7 +43,8 @@ void MainWindow::checkCliTools() {
 
     QStringList missing;
     bool allFound = resolveCliBinaries(missing);
-    
+    updateCliDiagnostics();
+
     if (allFound) {
         QString currentVersion = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
         QString requiredVersion = SPRAT_CLI_VERSION;
@@ -115,6 +117,7 @@ bool MainWindow::resolveCliBinaries(QStringList& missing) {
     m_spratUnpackBin = "/spratunpack";
     return true;
 #else
+    qInfo() << "[resolveCliBinaries] baseDir=" << m_cliPaths.baseDir;
     m_cliPaths.layoutBinary = CliToolsConfig::resolveBinary("spratlayout", m_cliPaths.baseDir);
     if (m_cliPaths.layoutBinary.isEmpty()) {
         missing << "spratlayout";
@@ -206,7 +209,40 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     setLoading(true);
 
     const QString folderPath = QDir(path).absolutePath();
-    const QStringList absolutePaths = ImageDiscoveryService::collectImagesRecursive({folderPath});
+
+#ifdef Q_OS_WASM
+    // WASM is single-threaded; defer via singleShot(0) so the loading overlay
+    // gets a chance to paint before the synchronous directory scan begins.
+    QTimer::singleShot(0, this, [this, folderPath, action]() {
+        processFolderDiscoveryResult({folderPath,
+                                      ImageDiscoveryService::collectImagesRecursive({folderPath}),
+                                      action});
+    });
+#else
+    // Desktop: run the filesystem scan on a worker thread so the UI stays
+    // responsive. Result is delivered back on the main thread via the watcher.
+    if (m_folderDiscoveryWatcher.isRunning()) {
+        m_folderDiscoveryWatcher.cancel();
+    }
+    m_folderDiscoveryWatcher.setFuture(
+        QtConcurrent::run([folderPath, action]() -> FolderDiscoveryResult {
+            return {folderPath,
+                    ImageDiscoveryService::collectImagesRecursive({folderPath}),
+                    action};
+        })
+    );
+#endif
+}
+
+void MainWindow::onFolderDiscoveryFinished() {
+    processFolderDiscoveryResult(m_folderDiscoveryWatcher.result());
+}
+
+void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& result) {
+    const QString&     folderPath    = result.root;
+    const QStringList& absolutePaths = result.imagePaths;
+    const DropAction   action        = result.action;
+
     qInfo() << "[loadFolder] path=" << folderPath
             << "images=" << absolutePaths.size();
 
@@ -255,6 +291,8 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         m_session->cachedLayoutScale = 1.0;
         m_session->activeFramePaths = absolutePaths;
         m_shouldClearSpritesFolder = false;
+        // Clear undo history when loading a new project
+        if (m_undoStack) m_undoStack->clear();
     }
 
     // Build a frame list so spratlayout sees all images (including subdirectories)
@@ -262,15 +300,6 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
 
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(folderPath));
     scheduleLayoutRebuild(true);
-}
-
-void MainWindow::onFolderDiscoveryFinished() {
-    // Kept for signal compatibility; no longer used.
-}
-
-void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& result) {
-    Q_UNUSED(result);
-    // Kept for compatibility; folder loading is now handled directly in loadFolder().
 }
 
 bool MainWindow::confirmLayoutReplacement() {
@@ -477,6 +506,47 @@ void MainWindow::updateCliOverlayGeometry() {
     int y = (rect().height() - height) / 2;
     m_cliInstallOverlay->setGeometry(x, y, width, height);
     m_cliInstallOverlay->raise();
+}
+
+void MainWindow::updateCliDiagnostics() {
+    if (!m_cliInfoText) {
+        return;
+    }
+
+    const QString ok    = QStringLiteral("  OK   ");
+    const QString error = QStringLiteral("  ERROR");
+
+    auto pathLine = [&](const QString& label, const QString& path) -> QString {
+        const bool found = !path.isEmpty();
+        const QString tag   = found ? ok : error;
+        const QString key   = (label + QLatin1Char(':')).leftJustified(20);
+        const QString value = found ? path : tr("not found");
+        return tag + QLatin1Char(' ') + key + value + QLatin1Char('\n');
+    };
+
+    QString text;
+
+    // Version
+    const QString version = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
+    text += QStringLiteral("CLI version:  %1\n\n").arg(
+        version.isEmpty() ? tr("ERROR  not found") : version);
+
+    // Binaries
+    text += pathLine(QStringLiteral("spratlayout"),   m_cliPaths.layoutBinary);
+    text += pathLine(QStringLiteral("spratpack"),     m_cliPaths.packBinary);
+    text += pathLine(QStringLiteral("spratconvert"),  m_cliPaths.convertBinary);
+    text += pathLine(QStringLiteral("spratframes"),   m_cliPaths.framesBinary);
+    text += pathLine(QStringLiteral("spratunpack"),   m_cliPaths.unpackBinary);
+
+    // Data paths
+    text += QLatin1Char('\n');
+    const QString profilesPath = SpratProfilesConfig::findProfilesConfigPath();
+    text += pathLine(QStringLiteral("Profiles config"), profilesPath);
+
+    const QString transformsDir = CliToolsConfig::queryTransformsDir(m_cliPaths.convertBinary);
+    text += pathLine(QStringLiteral("Transforms dir"), transformsDir);
+
+    m_cliInfoText->setPlainText(text);
 }
 
 #ifndef SPRAT_EMBEDDED_CLI

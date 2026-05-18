@@ -30,7 +30,7 @@ private:
     bool hasDuplicateName(const QString& name, int exceptRow = -1) const;
     void saveEditorsToProfile(int row);
     void loadEditorsFromProfile(int row);
-    void refreshMaxCombinationsEnabledState();
+    void refreshThreadsEnabledState();
     QString uniqueProfileName(const QString& base) const;
 
     QListWidget* m_listWidget = nullptr;
@@ -39,8 +39,8 @@ private:
     QDialogButtonBox* m_buttonBox = nullptr;
 
     QLineEdit* m_nameEdit = nullptr;
-    QComboBox* m_modeCombo = nullptr;
-    QComboBox* m_optimizeCombo = nullptr;
+    QLineEdit* m_labelEdit = nullptr;
+    QComboBox* m_presetCombo = nullptr;
     QCheckBox* m_useMaxWidthCheck = nullptr;
     QSpinBox* m_maxWidthSpin = nullptr;
     QCheckBox* m_useMaxHeightCheck = nullptr;
@@ -49,8 +49,6 @@ private:
     QComboBox* m_resolutionReferenceCombo = nullptr;
     QSpinBox* m_paddingSpin = nullptr;
     QSpinBox* m_extrudeSpin = nullptr;
-    QSpinBox* m_maxCombinationsSpin = nullptr;
-    QCheckBox* m_useThreadsCheck = nullptr;
     QSpinBox* m_threadsSpin = nullptr;
     QCheckBox* m_trimTransparentCheck = nullptr;
     QCheckBox* m_allowRotationCheck = nullptr;

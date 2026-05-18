@@ -39,6 +39,7 @@
 #include <QPlainTextEdit>
 #include <QTreeWidget>
 #include <QActionGroup>
+#include <QMessageBox>
 #include "NavigatorTreeWidget.h"
 
 void MainWindow::setupUi() {
@@ -262,6 +263,26 @@ void MainWindow::setupUi() {
         }
 
         m_spriteTree->blockSignals(false);
+
+        // Rebuild selectedSprites from all checked leaf items so that
+        // "Apply to Selected Frames" reflects the navigator checkbox state.
+        if (m_session) {
+            QList<SpritePtr> checked;
+            std::function<void(QTreeWidgetItem*)> collectChecked = [&](QTreeWidgetItem* node) {
+                if (node->childCount() == 0) {
+                    if (node->checkState(0) == Qt::Checked) {
+                        auto sprite = node->data(0, Qt::UserRole).value<SpritePtr>();
+                        if (sprite) checked.append(sprite);
+                    }
+                } else {
+                    for (int i = 0; i < node->childCount(); ++i)
+                        collectChecked(node->child(i));
+                }
+            };
+            for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
+                collectChecked(m_spriteTree->topLevelItem(i));
+            m_session->selectedSprites = checked;
+        }
     });
 
     // Selecting (highlighting) a sprite row makes it the active/editable sprite
@@ -522,11 +543,21 @@ void MainWindow::setupUi() {
     animSplitter->addWidget(animContent);
     m_animationDock->setWidget(animSplitter);
 
-    // Debug group: CLI Log
+    // Debug group: CLI diagnostics + log
     m_debugDock = new QDockWidget(tr("Debug"), this);
     m_debugDock->setObjectName("debugDock");
     m_debugDock->setFont(boldFont);
-    m_debugDock->setWidget(cliLogContent);
+
+    m_cliInfoText = new QPlainTextEdit(this);
+    m_cliInfoText->setReadOnly(true);
+    m_cliInfoText->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_cliInfoText->setStyleSheet("font-weight: normal;");
+    m_cliInfoText->setPlaceholderText(tr("CLI diagnostics not yet available."));
+
+    auto* debugTabs = new QTabWidget(this);
+    debugTabs->addTab(cliLogContent, tr("Log"));
+    debugTabs->addTab(m_cliInfoText, tr("Diagnostics"));
+    m_debugDock->setWidget(debugTabs);
 
     // Layout: three rows
     addDockWidget(Qt::TopDockWidgetArea, m_atlasDock);
@@ -585,6 +616,11 @@ void MainWindow::setupUi() {
     hotkeysAction->setToolTip(tr("View keyboard shortcuts"));
     connect(hotkeysAction, &QAction::triggered, this, &MainWindow::onShowHotkeys);
 
+    helpMenu->addSeparator();
+    QAction* aboutAction = helpMenu->addAction(tr("About..."));
+    aboutAction->setToolTip(tr("About Sprat"));
+    connect(aboutAction, &QAction::triggered, this, &MainWindow::onAboutClicked);
+
     // Initially hide docks for welcome page
     m_atlasDock->hide();
     m_animationDock->hide();
@@ -616,10 +652,17 @@ void MainWindow::setupToolbar() {
     connect(loadUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
 
     fileMenu->addSeparator();
-    m_saveAction = fileMenu->addAction(tr("Save..."));
+    m_saveAction = fileMenu->addAction(tr("Save"));
+    m_saveAction->setShortcut(QKeySequence::Save);      // Ctrl+S
     m_saveAction->setEnabled(false);
-    m_saveAction->setToolTip(tr("Save the current project (Ctrl+S)"));
+    m_saveAction->setToolTip(tr("Save to the last-used destination"));
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveClicked);
+
+    m_saveAsAction = fileMenu->addAction(tr("Save As..."));
+    m_saveAsAction->setShortcut(QKeySequence::SaveAs);  // Ctrl+Shift+S
+    m_saveAsAction->setEnabled(false);
+    m_saveAsAction->setToolTip(tr("Save to a new destination"));
+    connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::onSaveAsClicked);
 
     fileMenu->addSeparator();
     m_openSourceFolderAction = fileMenu->addAction(tr("Open Sprites Folder"));
@@ -635,6 +678,15 @@ void MainWindow::setupToolbar() {
     QAction* quitAction = fileMenu->addAction(tr("Quit"));
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
+
+    QMenu* editMenu = mainMenuBar->addMenu(tr("&Edit"));
+    QAction* undoAction = editMenu->addAction(tr("&Undo"));
+    undoAction->setShortcut(QKeySequence::Undo);
+    connect(undoAction, &QAction::triggered, this, &MainWindow::onUndo);
+
+    QAction* redoAction = editMenu->addAction(tr("&Redo"));
+    redoAction->setShortcut(QKeySequence::Redo);
+    connect(redoAction, &QAction::triggered, this, &MainWindow::onRedo);
 
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
     QAction* stylesAction = settingsMenu->addAction(tr("Styles..."));
@@ -731,17 +783,8 @@ void MainWindow::setupZoomShortcuts() {
 }
 
 void MainWindow::setupKeyboardShortcuts() {
-    // Ctrl+S → Save
-    QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
-    connect(saveShortcut, &QShortcut::activated, this, &MainWindow::onSaveClicked);
-
-    // Ctrl+Z → Undo
-    QShortcut* undoShortcut = new QShortcut(QKeySequence::Undo, this);
-    connect(undoShortcut, &QShortcut::activated, this, &MainWindow::onUndo);
-
-    // Ctrl+Y (or Ctrl+Shift+Z on Mac) → Redo
-    QShortcut* redoShortcut = new QShortcut(QKeySequence::Redo, this);
-    connect(redoShortcut, &QShortcut::activated, this, &MainWindow::onRedo);
+    // Save/undo/redo shortcuts are provided by their QAction bindings.
+    // Duplicating them with QShortcut causes handlers to fire twice.
 
     // Ctrl+V → Import image/file/URL from clipboard
     QShortcut* pasteShortcut = new QShortcut(QKeySequence::Paste, this);
@@ -758,7 +801,8 @@ void MainWindow::updateUiState() {
         hasModels,
         m_loadAction,
         m_profileCombo,
-        m_saveAction);
+        m_saveAction,
+        m_saveAsAction);
 
     if (m_manageProfilesBtn) {
         m_manageProfilesBtn->setEnabled(enabled);
@@ -988,4 +1032,24 @@ void MainWindow::refreshSpriteTree() {
     m_spriteTree->sortItems(0, Qt::AscendingOrder);
 
     m_spriteTree->blockSignals(false);
+}
+
+void MainWindow::onAboutClicked() {
+    QMessageBox::about(this, tr("About Sprat"),
+        "<h3>sprat-gui " SPRAT_GUI_VERSION "</h3>"
+        "<p>A spritesheet packing and animation authoring tool.</p>"
+        "<p>"
+          "<b>Author:</b> Pedro Amaral Couto<br>"
+          "<b>License:</b> MIT<br>"
+          "<b>CLI version:</b> " SPRAT_CLI_VERSION
+        "</p>"
+        "<p><a href=\"https://pedroac.itch.io/sprat\">https://pedroac.itch.io/sprat</a></p>"
+        "<p><b>AI Assistance</b><br>"
+          "Claude (Anthropic), Codex (OpenAI), Gemini (Google)</p>"
+        "<p><b>Libraries &amp; Tools</b><br>"
+          "Qt 6 &mdash; GUI framework<br>"
+          "libarchive &mdash; ZIP/tar archive handling<br>"
+          "zlib &mdash; ZIP compression<br>"
+          "CMake &mdash; build system</p>"
+    );
 }

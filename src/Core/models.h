@@ -175,11 +175,22 @@ struct NamedPoint {
 
     /**
      * @brief Vertices for polygon markers.
-     * 
+     *
      * Only used when kind is MarkerKind::Polygon.
      * Each QPoint represents a vertex relative to the marker's position.
      */
     QVector<QPoint> polygonPoints;
+
+    bool operator==(const NamedPoint& other) const {
+        return name == other.name && x == other.x && y == other.y &&
+               kind == other.kind && radius == other.radius &&
+               w == other.w && h == other.h &&
+               polygonPoints == other.polygonPoints;
+    }
+
+    bool operator!=(const NamedPoint& other) const {
+        return !(*this == other);
+    }
 };
 
 /**

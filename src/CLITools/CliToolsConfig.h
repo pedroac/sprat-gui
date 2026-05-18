@@ -11,6 +11,8 @@ public:
     static void saveAppSettings(const AppSettings& settings, const CliPaths& cliPaths);
     static QString resolveBinary(const QString& name, const QString& baseDir = QString());
     static QString checkBinaryVersion(const QString& binaryPath);
+    static QString queryTransformsDir(const QString& convertBinaryPath);
+    static QString queryDefaultProfilesConfig(const QString& layoutBinaryPath);
     static QString defaultInstallDir();
     static void ensureConfigExists();
     static void saveInstalledCliVersion(const QString& version);

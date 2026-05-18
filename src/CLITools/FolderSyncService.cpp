@@ -1,8 +1,10 @@
 #include "FolderSyncService.h"
+#include "ImageDiscoveryService.h"
 
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QSet>
 #include <QDebug>
 #include <algorithm>
 
@@ -24,21 +26,23 @@ FolderSyncService::SyncResult FolderSyncService::detectChanges(
     }
 
     // Get current image files in folder
-    QStringList folderImages = getImageFilesInFolder(folderPath);
+    const QStringList folderImagesList = getImageFilesInFolder(folderPath);
+    const QSet<QString> folderImagesSet(folderImagesList.cbegin(), folderImagesList.cend());
 
     // Get current sprite paths
-    QStringList currentPaths = getSpritePaths(currentSprites);
+    const QStringList currentPaths = getSpritePaths(currentSprites);
+    const QSet<QString> currentPathsSet(currentPaths.cbegin(), currentPaths.cend());
 
-    // Detect added files (in folder but not in sprites)
-    for (const QString& imagePath : folderImages) {
-        if (!currentPaths.contains(imagePath)) {
+    // Detect added files (in folder but not in sprites) — O(N) with QSet lookup
+    for (const QString& imagePath : folderImagesList) {
+        if (!currentPathsSet.contains(imagePath)) {
             result.newImagePaths.append(imagePath);
         }
     }
 
-    // Detect removed files (in sprites but not in folder)
+    // Detect removed files (in sprites but not in folder) — O(M) with QSet lookup
     for (const QString& spritePath : currentPaths) {
-        if (!folderImages.contains(spritePath)) {
+        if (!folderImagesSet.contains(spritePath)) {
             result.deletedImagePaths.append(spritePath);
         }
     }
@@ -127,15 +131,12 @@ QString FolderSyncService::describeSyncResult(const SyncResult& result) {
 QStringList FolderSyncService::getImageFilesInFolder(const QString& folderPath) {
     QStringList result;
 
-    QStringList nameFilters;
-    nameFilters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif" << "*.webp"
-                << "*.PNG" << "*.JPG" << "*.JPEG" << "*.BMP" << "*.GIF" << "*.WEBP";
-
-    QDirIterator it(folderPath, nameFilters, QDir::Files | QDir::Readable,
-                    QDirIterator::Subdirectories);
+    // Use the shared filter list so formats stay in sync with ImageDiscoveryService
+    // (includes tga/dds; removes the redundant uppercase duplicates).
+    QDirIterator it(folderPath, ImageDiscoveryService::supportedImageFilters(),
+                    QDir::Files | QDir::Readable, QDirIterator::Subdirectories);
     while (it.hasNext()) {
-        it.next();
-        result.append(it.fileInfo().absoluteFilePath());
+        result.append(it.next());
     }
 
     result.sort();

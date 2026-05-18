@@ -344,12 +344,14 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
             QAction* vcenter = menu.addAction(trOverlay("V-Center"));
             menu.addSeparator();
             QAction* applyAction = menu.addAction(trOverlay("Apply to Selected Frames"));
-            
+
             QAction* sel = menu.exec(event->screenPos());
             if (sel) {
                 if (sel == applyAction) {
                     emit applyPivotToSelectedFramesRequested();
                 } else {
+                    const int oldPivotX = activeSprite->pivotX;
+                    const int oldPivotY = activeSprite->pivotY;
                     for (auto& sprite : m_sprites) {
                         if (sel == left) sprite->pivotX = 0;
                         else if (sel == right) sprite->pivotX = m_sceneSize.width();
@@ -360,6 +362,9 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                     }
                     emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY);
                     update();
+                    if (activeSprite->pivotX != oldPivotX || activeSprite->pivotY != oldPivotY)
+                        emit pivotDragFinished(oldPivotX, oldPivotY,
+                                               activeSprite->pivotX, activeSprite->pivotY);
                 }
             }
             event->accept();
@@ -396,6 +401,10 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
     }
 
     if (event->button() != Qt::LeftButton) return;
+
+    // Save marker state before any drag so we can push an undo command on release.
+    if (!m_sprites.isEmpty())
+        m_pointsBeforeDrag = m_sprites.last()->points;
 
     if (!m_selectedMarkerName.isEmpty()) {
         NamedPoint* p = getNamedPoint(m_selectedMarkerName);
@@ -549,17 +558,25 @@ void EditorOverlayItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void EditorOverlayItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
-    bool wasDraggingPivot = m_draggingPivot;
+    const bool wasDraggingPivot = m_draggingPivot;
+    const bool wasDraggingMarker = (m_dragMode != None);
+    QVector<NamedPoint> pointsAfterDrag;
+    if (wasDraggingMarker && !m_sprites.isEmpty())
+        pointsAfterDrag = m_sprites.last()->points;
+
     m_draggingPivot = false;
     m_dragMode = None;
     Q_UNUSED(event);
     unsetCursor();
+
     if (wasDraggingPivot && !m_sprites.isEmpty()) {
         auto s = m_sprites.last();
         if (s->pivotX != m_pivotBeforeDrag.x() || s->pivotY != m_pivotBeforeDrag.y())
             emit pivotDragFinished(m_pivotBeforeDrag.x(), m_pivotBeforeDrag.y(),
                                    s->pivotX, s->pivotY);
     }
+    if (wasDraggingMarker && pointsAfterDrag != m_pointsBeforeDrag)
+        emit markerDragFinished(m_pointsBeforeDrag, pointsAfterDrag);
 }
 
 EditorOverlayItem::ResizeHandle EditorOverlayItem::getResizeHandle(const QPointF& p, const QRectF& r) const {
@@ -655,15 +672,20 @@ void EditorOverlayItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
 }
 
 bool EditorOverlayItem::removeSelectedVertex() {
+    if (m_sprites.isEmpty()) return false;
     NamedPoint* p = getNamedPoint(m_selectedMarkerName);
     if (!p || p->kind != MarkerKind::Polygon || m_selectedVertexIndex < 0 || m_selectedVertexIndex >= p->polygonPoints.size() || p->polygonPoints.size() <= 3) return false;
+    const QVector<NamedPoint> oldPoints = m_sprites.last()->points;
     prepareGeometryChange(); p->polygonPoints.remove(m_selectedVertexIndex);
     m_selectedVertexIndex = qMin(m_selectedVertexIndex, p->polygonPoints.size() - 1);
-    emit markerChanged(); update(); return true;
+    emit markerChanged(); update();
+    emit markerDragFinished(oldPoints, m_sprites.last()->points);
+    return true;
 }
 
 bool EditorOverlayItem::deleteSelectedMarker() {
     if (m_selectedMarkerName.isEmpty() || m_sprites.isEmpty()) return false;
+    const QVector<NamedPoint> oldPoints = m_sprites.last()->points;
     QString target = m_selectedMarkerName;
     bool anyDeleted = false;
     for (auto& sprite : m_sprites) {
@@ -681,6 +703,7 @@ bool EditorOverlayItem::deleteSelectedMarker() {
         emit markerSelected("");
         emit markerChanged();
         update();
+        emit markerDragFinished(oldPoints, m_sprites.last()->points);
     }
     return anyDeleted;
 }

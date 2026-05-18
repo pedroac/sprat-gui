@@ -1,7 +1,9 @@
 #include "SourceFolderWatcher.h"
 #include "AppConstants.h"
+#include "ImageDiscoveryService.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QTimer>
 #include <QFileInfo>
 #include <QDebug>
@@ -51,14 +53,12 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
 
     m_watchedPath = dir.absolutePath();
 
-    // Verify the path still exists and is valid before adding to watcher
     if (!QDir(m_watchedPath).exists()) {
         qWarning() << "SourceFolderWatcher: Folder path is invalid:" << m_watchedPath;
         m_watchedPath.clear();
         return;
     }
 
-    // Ensure watcher is properly initialized
     if (!m_watcher) {
         try {
             m_watcher = new QFileSystemWatcher(this);
@@ -67,7 +67,6 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
                 m_watchedPath.clear();
                 return;
             }
-
             connect(m_watcher, &QFileSystemWatcher::directoryChanged,
                     this, &SourceFolderWatcher::onDirectoryChanged);
             connect(m_watcher, &QFileSystemWatcher::fileChanged,
@@ -80,7 +79,6 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
         }
     }
 
-    // Ensure timer is properly initialized
     if (!m_debounceTimer) {
         try {
             m_debounceTimer = new QTimer(this);
@@ -89,7 +87,6 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
                 m_watchedPath.clear();
                 return;
             }
-
             m_debounceTimer->setSingleShot(true);
             connect(m_debounceTimer, &QTimer::timeout,
                     this, &SourceFolderWatcher::onDebounceTimeout);
@@ -101,17 +98,21 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
         }
     }
 
-    // Add path to watcher with try-catch
+    // Defer the addPath call to avoid synchronous issues during startup.
     try {
-        // Use QTimer to defer the addPath call, avoiding synchronous issues
         QTimer::singleShot(100, this, [this]() {
             if (!m_watchedPath.isEmpty() && m_watcher) {
                 try {
                     m_watcher->addPath(m_watchedPath);
+                    // Also watch all existing subdirectories so changes anywhere
+                    // in the tree are detected.
+                    watchSubdirectories();
+
                     if (m_watcher->directories().contains(m_watchedPath)) {
                         updatePreviousFilesList();
                         emit watchingStarted();
-                        qInfo() << "SourceFolderWatcher: Started watching" << m_watchedPath;
+                        qInfo() << "SourceFolderWatcher: Started watching" << m_watchedPath
+                                << "(" << m_watcher->directories().size() << "dirs)";
                     } else {
                         qWarning() << "SourceFolderWatcher: Failed to add path to watcher:" << m_watchedPath;
                         m_watchedPath.clear();
@@ -134,7 +135,11 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
 void SourceFolderWatcher::stopWatching() {
     if (!m_watchedPath.isEmpty()) {
         if (m_watcher) {
-            m_watcher->removePath(m_watchedPath);
+            // Remove the root and every subdirectory that was added.
+            const QStringList watchedDirs = m_watcher->directories();
+            for (const QString& dir : watchedDirs) {
+                m_watcher->removePath(dir);
+            }
         }
         if (m_debounceTimer) {
             m_debounceTimer->stop();
@@ -154,72 +159,69 @@ void SourceFolderWatcher::setDebounceInterval(int ms) {
     m_debounceInterval = qMax(100, ms);
 }
 
+void SourceFolderWatcher::watchSubdirectories() {
+    if (!m_watcher || m_watchedPath.isEmpty()) return;
+    QDirIterator it(m_watchedPath, QDir::Dirs | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        m_watcher->addPath(it.next());
+    }
+}
+
 void SourceFolderWatcher::onDirectoryChanged(const QString& path) {
-    if (path != m_watchedPath) {
+    // Accept the root directory or any watched subdirectory.
+    if (!path.startsWith(m_watchedPath)) {
         return;
     }
 
-    // Folder changed - detect which files were added/removed/modified
-    QStringList currentFiles = getCurrentFiles();
+    // If a new subdirectory was created, register it with the watcher so future
+    // changes inside it are also detected.
+    watchSubdirectories();
 
-    // Find added files
+    const QSet<QString> currentFiles = getCurrentFiles();
+
+    // O(1) set operations replace the old O(N²) QStringList::contains loops.
     for (const QString& file : currentFiles) {
         if (!m_previousFiles.contains(file)) {
-            if (!m_pendingAdds.contains(file)) {
-                m_pendingAdds.append(file);
-            }
-            // Remove from removals if it was marked for removal
-            m_pendingRemoves.removeAll(file);
+            m_pendingAdds.insert(file);
+            m_pendingRemoves.remove(file);
         }
     }
-
-    // Find removed files
     for (const QString& file : m_previousFiles) {
         if (!currentFiles.contains(file)) {
-            if (!m_pendingRemoves.contains(file)) {
-                m_pendingRemoves.append(file);
-            }
-            // Remove from additions if it was marked for addition
-            m_pendingAdds.removeAll(file);
+            m_pendingRemoves.insert(file);
+            m_pendingAdds.remove(file);
         }
     }
 
     m_previousFiles = currentFiles;
-
-    // Debounce to batch rapid changes
     m_debounceTimer->start(m_debounceInterval);
 }
 
 void SourceFolderWatcher::onFileChanged(const QString& path) {
-    // File was modified
-    if (!m_pendingModifies.contains(path)) {
-        m_pendingModifies.append(path);
-    }
-
-    // Debounce
+    m_pendingModifies.insert(path);
     m_debounceTimer->start(m_debounceInterval);
 }
 
 void SourceFolderWatcher::onDebounceTimeout() {
-    // Emit batched changes
     if (!m_pendingAdds.isEmpty()) {
-        m_pendingAdds.removeDuplicates();
-        qInfo() << "SourceFolderWatcher: Files added" << m_pendingAdds;
-        emit filesAdded(m_pendingAdds);
+        const QStringList adds = m_pendingAdds.values();
+        qInfo() << "SourceFolderWatcher: Files added" << adds;
+        emit filesAdded(adds);
         m_pendingAdds.clear();
     }
 
     if (!m_pendingRemoves.isEmpty()) {
-        m_pendingRemoves.removeDuplicates();
-        qInfo() << "SourceFolderWatcher: Files removed" << m_pendingRemoves;
-        emit filesRemoved(m_pendingRemoves);
+        const QStringList removes = m_pendingRemoves.values();
+        qInfo() << "SourceFolderWatcher: Files removed" << removes;
+        emit filesRemoved(removes);
         m_pendingRemoves.clear();
     }
 
     if (!m_pendingModifies.isEmpty()) {
-        m_pendingModifies.removeDuplicates();
-        qInfo() << "SourceFolderWatcher: Files modified" << m_pendingModifies;
-        emit filesModified(m_pendingModifies);
+        const QStringList modifies = m_pendingModifies.values();
+        qInfo() << "SourceFolderWatcher: Files modified" << modifies;
+        emit filesModified(modifies);
         m_pendingModifies.clear();
     }
 }
@@ -228,23 +230,17 @@ void SourceFolderWatcher::updatePreviousFilesList() {
     m_previousFiles = getCurrentFiles();
 }
 
-QStringList SourceFolderWatcher::getCurrentFiles() const {
-    QStringList files;
-
-    QDir dir(m_watchedPath);
-    // Filter for image files
-    QStringList nameFilters;
-    nameFilters << "*.png" << "*.jpg" << "*.jpeg" << "*.bmp" << "*.gif" << "*.webp"
-                << "*.PNG" << "*.JPG" << "*.JPEG" << "*.BMP" << "*.GIF" << "*.WEBP";
-
-    dir.setNameFilters(nameFilters);
-    dir.setFilter(QDir::Files | QDir::Readable);
-
-    const QFileInfoList fileList = dir.entryInfoList();
-    for (const QFileInfo& fileInfo : fileList) {
-        files.append(fileInfo.absoluteFilePath());
+QSet<QString> SourceFolderWatcher::getCurrentFiles() const {
+    QSet<QString> files;
+    // Use the shared filter list (includes tga/dds, lowercase only matching
+    // ImageDiscoveryService behaviour).  QDirIterator with Subdirectories
+    // scans the full tree so subdirectory changes are reflected correctly.
+    QDirIterator it(m_watchedPath,
+                    ImageDiscoveryService::supportedImageFilters(),
+                    QDir::Files | QDir::Readable,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        files.insert(it.next());
     }
-
-    files.sort();
     return files;
 }

@@ -25,6 +25,7 @@
 #include "ArchiveExtractor.h"
 #include "ImageDiscoveryService.h"
 #include "SpriteNameUtils.h"
+#include "AnimationPreviewService.h"
 
 void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
     if (action == DropAction::Cancel) {
@@ -522,6 +523,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
 
     // Apply the model to the canvas
     m_session->layoutModels = { singleImageModel };
+    AnimationPreviewService::invalidateSpriteMap();
     ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
     if (m_canvas) {
         m_loadingUiMessage = tr("Loading image...");

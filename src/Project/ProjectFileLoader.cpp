@@ -14,7 +14,7 @@ QString trProjectFileLoader(const char* text) {
 bool ProjectFileLoader::load(const QString& path, QJsonObject& root, QString& error) {
     QByteArray jsonData;
     if (path.endsWith(".zip", Qt::CaseInsensitive)) {
-        if (!ArchiveExtractor::readFileFromArchive(path, "project.spart.json", jsonData, error)) {
+        if (!ArchiveExtractor::readFileFromArchive(path, "project.spart.json", jsonData, error, true)) {
             return false;
         }
     } else {

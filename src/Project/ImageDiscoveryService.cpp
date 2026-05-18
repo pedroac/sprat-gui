@@ -20,11 +20,9 @@ const QStringList& ImageDiscoveryService::supportedImageFilters() {
 }
 
 bool ImageDiscoveryService::hasImageFiles(const QString& path) {
-    QDir dir(path);
-    if (!dir.exists()) {
-        return false;
-    }
-    return !dir.entryList(supportedImageFilters(), QDir::Files).isEmpty();
+    // Use QDirIterator so we stop at the first match instead of collecting all files.
+    QDirIterator it(path, supportedImageFilters(), QDir::Files);
+    return it.hasNext();
 }
 
 QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root) {
@@ -50,7 +48,7 @@ QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root)
 
     directories.removeDuplicates();
     std::sort(directories.begin(), directories.end());
-    qInfo() << "[WASM] imageDirectoriesOneLevel root=" << root
+    qInfo() << "[ImageDiscovery] imageDirectoriesOneLevel root=" << root
             << "subdirs=" << subdirs.size()
             << "imageDirs=" << directories.size()
             << "ms=" << timer.elapsed();
@@ -64,10 +62,18 @@ QStringList ImageDiscoveryService::imageDirectoriesRecursive(const QString& root
         return QStringList();
     }
 
+    // Pre-compute trash path fragments to avoid per-iteration string allocation.
+    const QString trashInfix  = QStringLiteral("/.sprat-trash/");
+    const QString trashSuffix = QStringLiteral("/.sprat-trash");
+
     QDirIterator it(base.absolutePath(), supportedImageFilters(), QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         it.next();
-        imageDirs.insert(it.fileInfo().absolutePath());
+        const QString absPath = it.fileInfo().absolutePath();
+        if (absPath.contains(trashInfix) || absPath.endsWith(trashSuffix)) {
+            continue;
+        }
+        imageDirs.insert(absPath);
     }
 
     QStringList result = imageDirs.values();
@@ -90,7 +96,7 @@ QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
         absolutePaths.append(dir.absoluteFilePath(relPath));
     }
     std::sort(absolutePaths.begin(), absolutePaths.end());
-    qInfo() << "[WASM] imagesInDirectory path=" << path
+    qInfo() << "[ImageDiscovery] imagesInDirectory path=" << path
             << "files=" << absolutePaths.size()
             << "ms=" << timer.elapsed();
     return absolutePaths;
@@ -99,10 +105,18 @@ QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
 QStringList ImageDiscoveryService::collectImagesRecursive(const QStringList& roots) {
     QSet<QString> absolutePaths;
 
+    // Pre-compute trash path fragments to avoid per-iteration string allocation.
+    const QString trashInfix  = QStringLiteral("/.sprat-trash/");
+    const QString trashInfixW = QStringLiteral("/.sprat-trash\\");
+
     for (const QString& root : roots) {
         QDirIterator imageIt(root, supportedImageFilters(), QDir::Files, QDirIterator::Subdirectories);
         while (imageIt.hasNext()) {
-            absolutePaths.insert(imageIt.next());
+            const QString path = imageIt.next();
+            if (path.contains(trashInfix) || path.contains(trashInfixW)) {
+                continue;
+            }
+            absolutePaths.insert(path);
         }
     }
 

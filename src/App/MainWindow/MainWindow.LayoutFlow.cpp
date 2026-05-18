@@ -6,6 +6,7 @@
 #include "ResolutionUtils.h"
 #include "SpriteNameUtils.h"
 #include "AppConstants.h"
+#include "AnimationPreviewService.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -63,7 +64,7 @@ void MainWindow::onRunLayout(bool quiet) {
         return;
     }
 
-    const QString requestedProfile = m_profileCombo->currentText().trimmed();
+    const QString requestedProfile = m_profileCombo->currentData().toString();
     SpratProfile selectedProfile;
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
 
@@ -136,6 +137,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         if (details.isEmpty()) details = tr("spratlayout exited with code %1.").arg(result.exitCode);
 
         m_statusLabel->setText(tr("Error running layout"));
+        setLoading(false);
         qCritical() << "spratlayout process failed. Exit code:" << result.exitCode << "Error:" << result.error << "Output:" << result.output;
 
         // Don't show error dialog if it was retrying or if it was explicitly stopped (which often results in non-zero exit code but we don't want a dialog)
@@ -146,7 +148,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                 m_layoutFailureDialogShown = true;
             }
         }
-        
+
         m_retryWithoutTrimOnFailure = false;
         if (m_layoutRunPending) {
             const bool q = m_layoutRunPendingQuiet;
@@ -216,6 +218,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     // Capture the post-load work as a reusable lambda (called after setModelsAsync).
     auto doSetModels = [this, newModels, selectedPaths, primaryPath]() {
         m_session->layoutModels = newModels;
+        AnimationPreviewService::invalidateSpriteMap();
         qInfo() << "[WASM] setModelsAsync start"
                 << "models=" << m_session->layoutModels.size();
         m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled,
@@ -225,7 +228,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                     return;
                 }
 
-                const QString currentProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
+                const QString currentProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
                 const bool profileChanged = m_session->lastSuccessfulProfile != currentProfile;
 
                 if (profileChanged) {
@@ -250,7 +253,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                     m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
                 }
 
-                m_session->lastSuccessfulProfile = m_profileCombo->currentText();
+                m_session->lastSuccessfulProfile = m_profileCombo->currentData().toString();
 
                 refreshSpriteTree();
 
@@ -277,8 +280,9 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 void MainWindow::onLayoutError(const QString& details) {
     m_runningLayoutProfile.clear();
     m_retryWithoutTrimOnFailure = false;
-    
+
     m_statusLabel->setText(tr("Error running layout process"));
+    setLoading(false);
     qCritical() << "spratlayout process error:" << details;
     
     if (!m_layoutFailureDialogShown) {
@@ -295,7 +299,7 @@ void MainWindow::onLayoutError(const QString& details) {
 }
 
 bool MainWindow::isProfileEnabled(const QString& profile) const {
-    const int index = m_profileCombo->findText(profile);
+    const int index = m_profileCombo->findData(profile);
     if (index < 0) {
         return false;
     }
@@ -308,7 +312,7 @@ bool MainWindow::isProfileEnabled(const QString& profile) const {
 }
 
 void MainWindow::handleProfileFailure(const QString& failedProfile) {
-    const int failedIndex = m_profileCombo->findText(failedProfile);
+    const int failedIndex = m_profileCombo->findData(failedProfile);
     if (failedIndex >= 0) {
         if (auto* model = qobject_cast<QStandardItemModel*>(m_profileCombo->model())) {
             if (QStandardItem* item = model->item(failedIndex)) {
@@ -328,7 +332,7 @@ void MainWindow::handleProfileFailure(const QString& failedProfile) {
         fallbackProfile = "fast";
     } else {
         for (int i = 0; i < m_profileCombo->count(); ++i) {
-            QString candidate = m_profileCombo->itemText(i);
+            QString candidate = m_profileCombo->itemData(i).toString();
             if (candidate == failedProfile) {
                 continue;
             }
@@ -343,12 +347,12 @@ void MainWindow::handleProfileFailure(const QString& failedProfile) {
         QMessageBox::warning(this, tr("Profile disabled"), tr("The selected profile failed and was disabled. No fallback profile is available."));
         return;
     }
-    if (m_profileCombo->currentText() == fallbackProfile) {
+    if (m_profileCombo->currentData().toString() == fallbackProfile) {
         onRunLayout();
         return;
     }
 
-    m_profileCombo->setCurrentText(fallbackProfile);
+    m_profileCombo->setCurrentIndex(m_profileCombo->findData(fallbackProfile));
 }
 
 void MainWindow::setLoading(bool loading) {
@@ -446,7 +450,7 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 }
 
 void MainWindow::onProfileChanged() {
-    const QString requestedProfile = m_profileCombo ? m_profileCombo->currentText().trimmed() : QString();
+    const QString requestedProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
     // Profile changes should rebuild layout immediately - user expects visual feedback
     scheduleLayoutRebuild(true);
 }
@@ -482,6 +486,20 @@ void MainWindow::animateSpritesToNewPositions(
         m_oldSpriteRotated.clear();
         onFinished();
         return;
+    }
+
+    // If a previous animation is still running, stop it cleanly before starting a new one.
+    // Without this, two QVariantAnimations would fight over the same sprite positions each tick.
+    if (m_spriteAnimation) {
+        m_spriteAnimation->stop();
+        // Restore labels that were hidden by the old animation.
+        for (const auto& path : m_spriteAnimationPaths)
+            m_canvas->setSpriteItemLabelHidden(path, false);
+        m_spriteAnimationPaths.clear();
+        delete m_spriteAnimation.data(); // QPointer auto-zeroes after delete
+        // Re-capture positions now that the stopped animation is no longer moving sprites,
+        // so the new animation starts from wherever the sprites actually are.
+        captureOldSpritePositions();
     }
 
     // Build a path → new sprite lookup for rotation/size info.
@@ -584,9 +602,13 @@ void MainWindow::animateSpritesToNewPositions(
         if (qAbs(move.endAngle) > 0.01)
             m_canvas->setSpriteItemTransformOrigin(move.path, move.transformOrigin);
 
-    // Hide labels during animation to avoid visual artifacts (especially during rotation)
-    for (const auto& move : moves)
+    // Hide labels during animation to avoid visual artifacts (especially during rotation).
+    // Track the paths so we can restore them if this animation is stopped early.
+    m_spriteAnimationPaths.clear();
+    for (const auto& move : moves) {
         m_canvas->setSpriteItemLabelHidden(move.path, true);
+        m_spriteAnimationPaths.append(move.path);
+    }
 
     // Single QVariantAnimation drives everything in lockstep:
     //   • sprite items + their border outlines (via setSpriteItemScenePos)
@@ -634,11 +656,13 @@ void MainWindow::animateSpritesToNewPositions(
             m_canvas->setAtlasRect(am.index, am.newRect);
         m_canvas->scene()->setSceneRect(newSceneRect);
         m_canvas->viewport()->update();
+        m_spriteAnimationPaths.clear();
         onFinished();
     });
 
     connect(anim, &QVariantAnimation::finished, anim, &QObject::deleteLater);
     anim->start();
+    m_spriteAnimation = anim; // QPointer auto-zeroes when anim is deleted on finish
 }
 
 void MainWindow::pauseLayoutRebuild() {
@@ -762,7 +786,7 @@ void MainWindow::handleDimensionsError(const QString& failedProfile) {
     // Pass 1: prefer multipack=true if failed profile had multipack=false
     if (!failedHasMultipack) {
         for (int i = 0; i < m_profileCombo->count() && fallback.isEmpty(); ++i) {
-            const QString c = m_profileCombo->itemText(i).trimmed();
+            const QString c = m_profileCombo->itemData(i).toString();
             if (c == failedProfile || !isProfileEnabled(c)) continue;
             if (const SpratProfile* d = profileDef(c); d && d->multipack)
                 fallback = c;
@@ -773,7 +797,7 @@ void MainWindow::handleDimensionsError(const QString& failedProfile) {
     if (fallback.isEmpty()) {
         int bestArea = failedArea;
         for (int i = 0; i < m_profileCombo->count(); ++i) {
-            const QString c = m_profileCombo->itemText(i).trimmed();
+            const QString c = m_profileCombo->itemData(i).toString();
             if (c == failedProfile || !isProfileEnabled(c)) continue;
             if (const SpratProfile* d = profileDef(c)) {
                 int area = d->maxWidth * d->maxHeight;
@@ -785,7 +809,7 @@ void MainWindow::handleDimensionsError(const QString& failedProfile) {
     // Pass 3: any other enabled profile
     if (fallback.isEmpty()) {
         for (int i = 0; i < m_profileCombo->count() && fallback.isEmpty(); ++i) {
-            const QString c = m_profileCombo->itemText(i).trimmed();
+            const QString c = m_profileCombo->itemData(i).toString();
             if (c != failedProfile && isProfileEnabled(c)) fallback = c;
         }
     }
@@ -802,8 +826,8 @@ void MainWindow::handleDimensionsError(const QString& failedProfile) {
         tr("Profile '%1' failed (sprite too large), retrying with '%2'...")
             .arg(failedProfile, fallback));
 
-    if (m_profileCombo->currentText().trimmed() == fallback)
+    if (m_profileCombo->currentData().toString() == fallback)
         onRunLayout();
     else
-        m_profileCombo->setCurrentText(fallback);
+        m_profileCombo->setCurrentIndex(m_profileCombo->findData(fallback));
 }

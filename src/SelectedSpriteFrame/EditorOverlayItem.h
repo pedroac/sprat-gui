@@ -57,6 +57,10 @@ signals:
      * @brief Emitted when pivot drag finishes on canvas.
      */
     void pivotDragFinished(int oldX, int oldY, int newX, int newY);
+    /**
+     * @brief Emitted when a marker drag (move/resize/vertex edit/delete) finishes.
+     */
+    void markerDragFinished(QVector<NamedPoint> oldPoints, QVector<NamedPoint> newPoints);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
@@ -73,6 +77,7 @@ private:
 
     bool m_draggingPivot = false;
     QPoint m_pivotBeforeDrag;
+    QVector<NamedPoint> m_pointsBeforeDrag;
     
     // Marker Drag State
     enum DragMode { None, Point, CircleRadius, RectMove, RectResize, PolyVertex, PolyMove };

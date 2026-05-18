@@ -5,6 +5,7 @@
 
 struct ProjectPayloadBuildInput {
     QString currentFolder;
+    QString sourceFolder;   // Source folder for sprite files (used as base for relative paths)
     QStringList activeFramePaths;
     bool layoutSourceIsList = false;
     QVector<AnimationTimeline> timelines;
@@ -31,6 +32,7 @@ struct ProjectPayloadBuildInput {
     AppSettings appSettings;
     CliPaths cliPaths;
     SaveConfig saveConfig;
+    bool portablePaths = false;  // When true, store relative paths for portable saves
 };
 
 struct ProjectPayloadApplyResult {

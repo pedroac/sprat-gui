@@ -2,15 +2,19 @@
 
 #include <QObject>
 #include <QString>
+#include <QSet>
 #include <QStringList>
 #include <QFileSystemWatcher>
 
 /**
  * @class SourceFolderWatcher
- * @brief Monitors a source folder for file system changes.
+ * @brief Monitors a source folder (and its subdirectories) for file system changes.
  *
- * Uses QFileSystemWatcher to detect when files are added, removed, or modified
- * in the source folder. Debounces rapid changes to batch processing.
+ * Uses QFileSystemWatcher to detect when image files are added, removed, or modified
+ * in the source folder tree. Debounces rapid changes to batch processing.
+ *
+ * Internal state uses QSet<QString> for O(1) change detection instead of the
+ * O(N²) QStringList::contains approach.
  */
 class SourceFolderWatcher : public QObject {
     Q_OBJECT
@@ -20,7 +24,7 @@ public:
     ~SourceFolderWatcher() override;
 
     /**
-     * Start watching a folder for changes.
+     * Start watching a folder (and all its subdirectories) for changes.
      * @param folderPath Absolute path to folder to watch
      */
     void watchFolder(const QString& folderPath);
@@ -47,29 +51,10 @@ public:
     void setDebounceInterval(int ms);
 
 signals:
-    /**
-     * Emitted when files are detected as added to the watched folder.
-     */
     void filesAdded(const QStringList& paths);
-
-    /**
-     * Emitted when files are detected as removed from the watched folder.
-     */
     void filesRemoved(const QStringList& paths);
-
-    /**
-     * Emitted when files are detected as modified in the watched folder.
-     */
     void filesModified(const QStringList& paths);
-
-    /**
-     * Emitted when watching has started.
-     */
     void watchingStarted();
-
-    /**
-     * Emitted when watching has stopped.
-     */
     void watchingStopped();
 
 private slots:
@@ -82,11 +67,17 @@ private:
     QString m_watchedPath;
     class QTimer* m_debounceTimer;
     int m_debounceInterval;
-    QStringList m_pendingAdds;
-    QStringList m_pendingRemoves;
-    QStringList m_pendingModifies;
-    QStringList m_previousFiles;
+
+    // QSet gives O(1) contains/insert/remove; replacing QStringList avoids O(N²) in
+    // onDirectoryChanged when many files are present.
+    QSet<QString> m_pendingAdds;
+    QSet<QString> m_pendingRemoves;
+    QSet<QString> m_pendingModifies;
+    QSet<QString> m_previousFiles;
 
     void updatePreviousFilesList();
-    QStringList getCurrentFiles() const;
+    // Returns the set of all image files under m_watchedPath (recursive).
+    QSet<QString> getCurrentFiles() const;
+    // Adds all subdirectories under m_watchedPath to the watcher.
+    void watchSubdirectories();
 };

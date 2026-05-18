@@ -1,4 +1,5 @@
 #include "SaveDialog.h"
+#include "CliToolsConfig.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -11,17 +12,62 @@
 #include <QGroupBox>
 #include <QDialogButtonBox>
 #include <QMessageBox>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QTextStream>
 
 namespace {
-QStringList uniqueProfileNames(const QVector<SpratProfile>& profiles) {
-    QStringList names;
-    for (const SpratProfile& profile : profiles) {
-        const QString trimmedName = profile.name.trimmed();
-        if (!trimmedName.isEmpty() && !names.contains(trimmedName)) {
-            names.append(trimmedName);
-        }
+struct TransformInfo {
+    QString name;
+};
+
+QVector<TransformInfo> loadAvailableTransforms() {
+    const CliPaths cliPaths = CliToolsConfig::loadCliPaths();
+
+    QStringList searchDirs;
+
+    // Ask spratconvert where it keeps its transforms
+    const QString queriedDir = CliToolsConfig::queryTransformsDir(cliPaths.convertBinary);
+    if (!queriedDir.isEmpty()) {
+        searchDirs << queriedDir;
     }
-    return names;
+
+    // Dev/app-bundle fallbacks only
+    const QString appDir = QCoreApplication::applicationDirPath();
+    searchDirs << QDir(appDir).filePath("transforms");
+    searchDirs << QDir(appDir).filePath("bin/transforms");
+    searchDirs << QDir(appDir).filePath("cli/transforms");
+
+    for (const QString& dirPath : searchDirs) {
+        QDir dir(dirPath);
+        if (!dir.exists()) continue;
+        const QStringList files = dir.entryList({"*.transform"}, QDir::Files, QDir::Name);
+        if (files.isEmpty()) continue;
+
+        QVector<TransformInfo> result;
+        for (const QString& fileName : files) {
+            QFile file(dir.filePath(fileName));
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+            TransformInfo info;
+            bool inMeta = false;
+            QTextStream in(&file);
+            while (!in.atEnd()) {
+                const QString line = in.readLine().trimmed();
+                if (line.compare("[meta]", Qt::CaseInsensitive) == 0) { inMeta = true; continue; }
+                if (line.startsWith('[')) { inMeta = false; continue; }
+                if (!inMeta) continue;
+                const int eq = line.indexOf('=');
+                if (eq <= 0) continue;
+                const QString key = line.left(eq).trimmed().toLower();
+                const QString value = line.mid(eq + 1).trimmed();
+                if (key == "name") info.name = value;
+            }
+            if (!info.name.isEmpty()) result.append(info);
+        }
+        if (!result.isEmpty()) return result;
+    }
+    return {};
 }
 }
 
@@ -42,24 +88,33 @@ SaveDialog::SaveDialog(const QString& defaultPath,
     }
 
     if (!lastConfig.transform.isEmpty()) {
-        m_transformCombo->setCurrentText(lastConfig.transform);
+        const int idx = m_transformCombo->findData(lastConfig.transform);
+        if (idx >= 0) m_transformCombo->setCurrentIndex(idx);
     }
 
-    QStringList profileNames = uniqueProfileNames(availableProfiles);
-    if (profileNames.isEmpty()) {
-        const QString fallbackProfile = selectedProfileName.trimmed().isEmpty() ? tr("default") : selectedProfileName.trimmed();
-        profileNames.append(fallbackProfile);
-    }
-    for (const QString& profileName : profileNames) {
-        QCheckBox* checkBox = new QCheckBox(profileName, this);
+    QStringList seenNames;
+    const auto addProfileCheck = [&](const QString& name, const QString& label) {
+        if (name.isEmpty() || seenNames.contains(name)) return;
+        seenNames.append(name);
+        const QString display = label.trimmed().isEmpty() ? name : label.trimmed();
+        QCheckBox* checkBox = new QCheckBox(display, this);
+        checkBox->setProperty("profileName", name);
         if (!lastConfig.profiles.isEmpty()) {
-            checkBox->setChecked(lastConfig.profiles.contains(profileName));
+            checkBox->setChecked(lastConfig.profiles.contains(name));
         } else {
-            checkBox->setChecked(profileName == selectedProfileName);
+            checkBox->setChecked(name == selectedProfileName);
         }
         connect(checkBox, &QCheckBox::toggled, this, [this]() { updateProfileSelectionState(); });
         m_profilesLayout->addWidget(checkBox);
         m_profileChecks.append(checkBox);
+    };
+
+    for (const SpratProfile& profile : availableProfiles) {
+        addProfileCheck(profile.name.trimmed(), profile.label);
+    }
+    if (seenNames.isEmpty()) {
+        const QString fallback = selectedProfileName.trimmed().isEmpty() ? tr("default") : selectedProfileName.trimmed();
+        addProfileCheck(fallback, QString());
     }
 
     if (lastConfig.profiles.isEmpty() && !m_profileChecks.isEmpty() && selectedProfileName.trimmed().isEmpty()) {
@@ -99,8 +154,22 @@ void SaveDialog::setupUi() {
     QGroupBox* optsGroup = new QGroupBox(tr("Options"), this);
     QFormLayout* optsLayout = new QFormLayout(optsGroup);
     m_transformCombo = new QComboBox(this);
-    m_transformCombo->addItems({"none", "json", "csv", "xml", "css"});
-    m_transformCombo->setCurrentText("json");
+    m_transformCombo->addItem(tr("None (no metadata)"), QStringLiteral("none"));
+    const QVector<TransformInfo> transforms = loadAvailableTransforms();
+    if (!transforms.isEmpty()) {
+        for (const TransformInfo& t : transforms) {
+            m_transformCombo->addItem(t.name, t.name);
+        }
+    } else {
+        m_transformCombo->addItem(QStringLiteral("json"), QStringLiteral("json"));
+        m_transformCombo->addItem(QStringLiteral("csv"), QStringLiteral("csv"));
+        m_transformCombo->addItem(QStringLiteral("xml"), QStringLiteral("xml"));
+        m_transformCombo->addItem(QStringLiteral("css"), QStringLiteral("css"));
+    }
+    {
+        const int jsonIdx = m_transformCombo->findData(QStringLiteral("json"));
+        m_transformCombo->setCurrentIndex(jsonIdx >= 0 ? jsonIdx : 0);
+    }
     optsLayout->addRow(tr("Format (transform):"), m_transformCombo);
     mainLayout->addWidget(optsGroup);
     
@@ -157,11 +226,12 @@ void SaveDialog::onBrowseFile() {
 SaveConfig SaveDialog::getConfig() const {
     SaveConfig config;
     config.destination = m_destEdit->text();
-    config.transform = m_transformCombo->currentText();
+    config.transform = m_transformCombo->currentData().toString();
 
     for (QCheckBox* checkBox : m_profileChecks) {
         if (checkBox && checkBox->isChecked()) {
-            config.profiles.append(checkBox->text().trimmed());
+            const QString name = checkBox->property("profileName").toString();
+            if (!name.isEmpty()) config.profiles.append(name);
         }
     }
     return config;

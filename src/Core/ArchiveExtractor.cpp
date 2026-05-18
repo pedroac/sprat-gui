@@ -134,7 +134,7 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
     return r >= ARCHIVE_WARN;
 }
 
-bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QString& fileName, QByteArray& data, QString& error) {
+bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QString& fileName, QByteArray& data, QString& error, bool exactMatch) {
     struct archive* a;
     struct archive_entry* entry;
     int r;
@@ -162,7 +162,10 @@ bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QSt
         QString entryPath = QString::fromUtf8(archive_entry_pathname(entry));
 #endif
         // Normalize paths for comparison (handles subdirectories inside zip)
-        if (entryPath == fileName || entryPath.endsWith("/" + fileName)) {
+        const bool matches = exactMatch
+            ? (entryPath == fileName)
+            : (entryPath == fileName || entryPath.endsWith("/" + fileName));
+        if (matches) {
             la_int64_t size = archive_entry_size(entry);
             if (size <= 0 || size > kMaxInMemorySize) {
                 error = QString("Entry size out of bounds (0 or > 256 MB): %1").arg(fileName);

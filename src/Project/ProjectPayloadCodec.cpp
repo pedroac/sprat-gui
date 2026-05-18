@@ -38,7 +38,7 @@ bool isValidCliPath(const QString& path) {
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
-    root["version"] = 1;
+    root["version"] = input.portablePaths ? 2 : 1;
 
     QJsonObject layoutOpts;
     layoutOpts["profile"] = input.profile;
@@ -50,14 +50,31 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     root["layout_options"] = layoutOpts;
 
     QJsonObject layoutInfo;
-    layoutInfo["folder"] = input.currentFolder;
+    if (input.portablePaths) {
+        layoutInfo["folder"] = QStringLiteral("sprites");
+    } else {
+        layoutInfo["folder"] = input.currentFolder;
+    }
     layoutInfo["scale"] = input.layoutScale;
     layoutInfo["output"] = input.layoutOutput;
     layoutInfo["source_mode"] = input.layoutSourceIsList ? "list" : "folder";
     if (!input.activeFramePaths.isEmpty()) {
         QJsonArray framePaths;
-        for (const QString& path : input.activeFramePaths) {
-            framePaths.append(path);
+        if (input.portablePaths) {
+            // Use sourceFolder as base — matches the save service's sprite copy logic
+            const QString base = input.sourceFolder.isEmpty() ? input.currentFolder : input.sourceFolder;
+            QDir baseDir(base);
+            for (const QString& path : input.activeFramePaths) {
+                QString rel = baseDir.relativeFilePath(path);
+                if (rel.startsWith("..")) {
+                    rel = QFileInfo(path).fileName();
+                }
+                framePaths.append(rel);
+            }
+        } else {
+            for (const QString& path : input.activeFramePaths) {
+                framePaths.append(path);
+            }
         }
         layoutInfo["frame_paths"] = framePaths;
     }

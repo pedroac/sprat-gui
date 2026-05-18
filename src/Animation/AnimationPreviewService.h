@@ -26,4 +26,18 @@ public:
         const QVector<LayoutModel>& layoutModels,
         double zoom,
         int previewPadding);
+
+    // Preload all frames in the given list into QPixmapCache so the first
+    // playthrough has no per-frame disk reads.  Safe to call every tick —
+    // a hash check makes it a no-op when the timeline has not changed.
+    static void preloadTimeline(const QStringList& frames);
+
+    // Invalidate the cached sprite map so the next refresh() rebuilds it
+    // from the current layout models.  Call whenever layoutModels changes.
+    // Also invalidates the bounds cache.
+    static void invalidateSpriteMap();
+
+    // Invalidate the cached canvas bounds so the next refresh() recomputes
+    // them.  Call whenever any sprite pivot changes.
+    static void invalidateBounds();
 };

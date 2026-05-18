@@ -30,7 +30,7 @@ public:
      * @param error Output error message if reading fails.
      * @return bool True if reading was successful.
      */
-    static bool readFileFromArchive(const QString& archivePath, const QString& fileName, QByteArray& data, QString& error);
+    static bool readFileFromArchive(const QString& archivePath, const QString& fileName, QByteArray& data, QString& error, bool exactMatch = false);
 
     /**
      * @brief Creates a ZIP archive from a source directory.

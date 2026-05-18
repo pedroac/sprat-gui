@@ -15,8 +15,9 @@
 #endif
 
 namespace {
-    bool isCompactMode(const QString& mode) {
-        return mode.trimmed().compare("compact", Qt::CaseInsensitive) == 0;
+    bool isCompactPreset(const QString& preset) {
+        const QString p = preset.trimmed().toLower();
+        return p == "quality" || p == "small";
     }
 }
 
@@ -219,11 +220,8 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
     const SpratProfile& p = config.profile;
     
     // Profile specific arguments
-    if (!p.mode.trimmed().isEmpty()) {
-        args << "--mode" << p.mode.trimmed();
-    }
-    if (!p.optimize.trimmed().isEmpty()) {
-        args << "--optimize" << p.optimize.trimmed();
+    if (!p.preset.trimmed().isEmpty()) {
+        args << "--preset" << p.preset.trimmed();
     }
     if (p.maxWidth > 0) {
         args << "--max-width" << QString::number(p.maxWidth);
@@ -231,10 +229,7 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
     if (p.maxHeight > 0) {
         args << "--max-height" << QString::number(p.maxHeight);
     }
-    if (isCompactMode(p.mode) && p.maxCombinations > 0) {
-        args << "--max-combinations" << QString::number(p.maxCombinations);
-    }
-    if (isCompactMode(p.mode) && p.threads > 0) {
+    if (isCompactPreset(p.preset) && p.threads > 0) {
         args << "--threads" << QString::number(p.threads);
     }
 

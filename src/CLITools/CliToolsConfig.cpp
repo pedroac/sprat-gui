@@ -186,6 +186,32 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
     return QString();
 }
 
+QString CliToolsConfig::queryTransformsDir(const QString& convertBinaryPath) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(convertBinaryPath);
+    return {};
+#else
+    if (convertBinaryPath.isEmpty()) return {};
+    QProcess process;
+    process.start(convertBinaryPath, {"--transforms-dir"});
+    if (!process.waitForFinished(2000)) return {};
+    return QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+#endif
+}
+
+QString CliToolsConfig::queryDefaultProfilesConfig(const QString& layoutBinaryPath) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(layoutBinaryPath);
+    return {};
+#else
+    if (layoutBinaryPath.isEmpty()) return {};
+    QProcess process;
+    process.start(layoutBinaryPath, {"--default-profiles-config"});
+    if (!process.waitForFinished(2000)) return {};
+    return QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+#endif
+}
+
 void CliToolsConfig::saveInstalledCliVersion(const QString& version) {
     QString pathToConfig = configPath();
     QDir().mkpath(QFileInfo(pathToConfig).path());

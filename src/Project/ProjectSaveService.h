@@ -14,6 +14,7 @@ public:
         SaveConfig config,
         const QString& layoutInputPath,
         const QStringList& framePaths,
+        const QString& sourceFolder,
         const QVector<SpratProfile>& availableProfiles,
         const QString& selectedProfileName,
         const QString& spratLayoutBin,

@@ -11,16 +11,32 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
                                           const QString& sourceFolder) {
     QVector<LayoutModel> models;
     double commonScale = 1.0;
+    QString rootPath;
     QDir dir(folderPath);
     static QHash<QString, QSize> sourceSizeCache;
     if (sourceSizeCache.size() > 16384) {
         sourceSizeCache.clear();
     }
     QRegularExpression spriteRe(R"raw(sprite\s+"((?:[^"\\]|\\.)*)"\s+(\d+),(\d+)\s+(\d+),(\d+)(?:\s+(\d+),(\d+)\s+(\d+),(\d+))?(?:\s+(rotated))?)raw");
+    QRegularExpression rootRe(R"raw(root\s+"((?:[^"\\]|\\.)*)")raw");
 
     QStringList lines = output.split('\n');
     for (const QString& line : lines) {
         QString trimmed = line.trimmed();
+        if (trimmed.startsWith("root ")) {
+            QRegularExpressionMatch rootMatch = rootRe.match(trimmed);
+            if (rootMatch.hasMatch()) {
+                rootPath = rootMatch.captured(1);
+                rootPath.replace("\\\"", "\"");
+                rootPath.replace("\\\\", "\\");
+                // Resolve relative root path against folderPath
+                if (QDir::isRelativePath(rootPath)) {
+                    rootPath = QDir(folderPath).absoluteFilePath(rootPath);
+                }
+                dir = QDir(rootPath);
+            }
+            continue;
+        }
         if (trimmed.startsWith("atlas ")) {
             LayoutModel model;
             model.scale = commonScale;
@@ -51,12 +67,16 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             capturedPath.replace("\\\\", "\\");
             s->path = dir.absoluteFilePath(capturedPath);
             // Derive name from relative path within sourceFolder when available
-            if (!sourceFolder.isEmpty() && s->path.startsWith(sourceFolder)) {
+            if (!sourceFolder.isEmpty()) {
                 QString rel = QDir(sourceFolder).relativeFilePath(s->path);
                 QFileInfo relInfo(rel);
-                s->name = (relInfo.path() == ".")
-                    ? relInfo.baseName()
-                    : relInfo.path() + "/" + relInfo.baseName();
+                if (!rel.startsWith("..")) {
+                    s->name = (relInfo.path() == ".")
+                        ? relInfo.baseName()
+                        : relInfo.path() + "/" + relInfo.baseName();
+                } else {
+                    s->name = relInfo.baseName();
+                }
             } else {
                 s->name = QFileInfo(s->path).baseName();
             }

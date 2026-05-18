@@ -110,6 +110,7 @@ if(NOT LibArchive_FOUND)
             zlib
             URL https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz
             URL_HASH SHA256=17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         )
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
         set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)

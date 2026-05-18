@@ -11,50 +11,27 @@
 #include <QTextStream>
 
 namespace {
-SpratProfile makeProfile(const QString& name,
-                         const QString& mode,
-                         const QString& optimize,
-                         int maxWidth,
-                         int maxHeight,
-                         int targetResolutionWidth,
-                         int targetResolutionHeight,
-                         bool targetResolutionUseSource,
-                         const QString& resolutionReference,
-                         int padding,
-                         int extrude,
-                         int maxCombinations,
-                         int threads,
-                         bool trimTransparent,
-                         double scale,
-                         bool multipack,
-                         const QString& sort,
-                         const QString& gpuCompress = "",
-                         int dilate = 0) {
+SpratProfile genericDefaultProfile(const QString& name = QString()) {
     SpratProfile p;
     p.name = name;
-    p.mode = mode;
-    p.optimize = optimize;
-    p.maxWidth = maxWidth;
-    p.maxHeight = maxHeight;
-    p.targetResolutionWidth = targetResolutionWidth;
-    p.targetResolutionHeight = targetResolutionHeight;
-    p.targetResolutionUseSource = targetResolutionUseSource;
-    p.resolutionReference = resolutionReference;
-    p.padding = padding;
-    p.extrude = extrude;
-    p.maxCombinations = maxCombinations;
-    p.threads = threads;
-    p.trimTransparent = trimTransparent;
-    p.scale = scale;
-    p.multipack = multipack;
-    p.sort = sort;
-    p.gpuCompress = gpuCompress;
-    p.dilate = dilate;
+    p.preset = "quality";
+    p.maxWidth = -1;
+    p.maxHeight = -1;
+    p.targetResolutionWidth = 1024;
+    p.targetResolutionHeight = 1024;
+    p.targetResolutionUseSource = false;
+    p.resolutionReference = "largest";
+    p.padding = 0;
+    p.extrude = 0;
+    p.threads = 0;
+    p.trimTransparent = true;
+    p.allowRotation = false;
+    p.scale = 1.0;
+    p.multipack = false;
+    p.sort = "name";
+    p.gpuCompress = "";
+    p.dilate = 0;
     return p;
-}
-
-SpratProfile genericDefaultProfile(const QString& name = QString()) {
-    return makeProfile(name, "compact", "gpu", -1, -1, 1024, 1024, false, "largest", 0, 0, 0, 0, true, 1.0, false, "name");
 }
 
 bool toBool(const QString& value, bool fallback) {
@@ -68,21 +45,27 @@ bool toBool(const QString& value, bool fallback) {
     return fallback;
 }
 
+QString migrateModOptimizeToPreset(const QString& mode, const QString& optimize) {
+    const QString m = mode.trimmed().toLower();
+    const QString o = optimize.trimmed().toLower();
+    if (m == "pot") return "pot";
+    if (m == "fast") return "fast";
+    // compact mode
+    if (o == "space") return "small";
+    return "quality"; // compact + gpu (default)
+}
+
 QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
     QVector<SpratProfile> cleaned;
     QStringList seen;
     for (SpratProfile p : profiles) {
         p.name = p.name.trimmed();
-        p.mode = p.mode.trimmed();
-        p.optimize = p.optimize.trimmed();
+        p.preset = p.preset.trimmed().toLower();
         if (p.name.isEmpty() || seen.contains(p.name)) {
             continue;
         }
-        if (p.mode.isEmpty()) {
-            p.mode = "compact";
-        }
-        if (p.optimize.isEmpty()) {
-            p.optimize = "gpu";
+        if (p.preset != "fast" && p.preset != "quality" && p.preset != "small" && p.preset != "pot") {
+            p.preset = "quality";
         }
         if (p.maxWidth <= 0) {
             p.maxWidth = -1;
@@ -105,10 +88,7 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
         if (p.extrude < 0) {
             p.extrude = 0;
         }
-        if (p.maxCombinations < 0) {
-            p.maxCombinations = 0;
-        }
-        if (p.threads < 1) {
+        if (p.threads < 0) {
             p.threads = 0;
         }
         if (p.scale <= 0 || p.scale > 1.0) {
@@ -137,6 +117,29 @@ QString SpratProfilesConfig::configPath() {
     return QDir(configDir).filePath("sprat/spratprofiles.cfg");
 }
 
+QString SpratProfilesConfig::findProfilesConfigPath() {
+    QStringList candidates;
+    candidates << configPath();
+
+    const CliPaths cliPaths = CliToolsConfig::loadCliPaths();
+    const QString defaultConfig = CliToolsConfig::queryDefaultProfilesConfig(cliPaths.layoutBinary);
+    if (!defaultConfig.isEmpty()) {
+        candidates << defaultConfig;
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    candidates << QDir(appDir).filePath("spratprofiles.cfg");
+    candidates << QDir(appDir).filePath("bin/spratprofiles.cfg");
+    candidates << QDir(appDir).filePath("cli/spratprofiles.cfg");
+
+    for (const QString& candidate : candidates) {
+        if (QFile::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
 QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* errorMessage) {
     if (errorMessage) {
         errorMessage->clear();
@@ -144,12 +147,13 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
 
     QStringList candidates;
     candidates << configPath();
-    
-    const QString cliBaseDir = CliToolsConfig::loadCliPaths().baseDir;
-    if (!cliBaseDir.isEmpty()) {
-        candidates << QDir(cliBaseDir).filePath("spratprofiles.cfg");
+
+    const CliPaths cliPaths = CliToolsConfig::loadCliPaths();
+    const QString defaultConfig = CliToolsConfig::queryDefaultProfilesConfig(cliPaths.layoutBinary);
+    if (!defaultConfig.isEmpty()) {
+        candidates << defaultConfig;
     }
-    
+
     const QString appDir = QCoreApplication::applicationDirPath();
     candidates << QDir(appDir).filePath("spratprofiles.cfg");
     candidates << QDir(appDir).filePath("bin/spratprofiles.cfg");
@@ -181,6 +185,10 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
     bool inLegacyProfilesSection = false;
     bool hasConfigContent = false;
 
+    // Temporary storage for legacy mode/optimize migration
+    QString legacyMode;
+    QString legacyOptimize;
+
     QTextStream in(&file);
     const QRegularExpression headerPattern("^\\[profile\\s+(.+)\\]$", QRegularExpression::CaseInsensitiveOption);
     while (!in.atEnd()) {
@@ -199,6 +207,10 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
         const QRegularExpressionMatch headerMatch = headerPattern.match(line);
         if (headerMatch.hasMatch()) {
             if (inProfile) {
+                // Migrate legacy mode/optimize if no preset was set explicitly
+                if (!legacyMode.isEmpty() && current.preset == "quality") {
+                    current.preset = migrateModOptimizeToPreset(legacyMode, legacyOptimize);
+                }
                 profiles.append(current);
             }
             QString profileName = headerMatch.captured(1).trimmed();
@@ -206,6 +218,8 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
                 profileName = profileName.mid(1, profileName.size() - 2);
             }
             current = genericDefaultProfile(profileName);
+            legacyMode.clear();
+            legacyOptimize.clear();
             inProfile = true;
             inLegacyProfilesSection = false;
             continue;
@@ -238,10 +252,14 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             continue;
         }
 
-        if (key == "mode") {
-            current.mode = value;
+        if (key == "label") {
+            current.label = value;
+        } else if (key == "preset") {
+            current.preset = value;
+        } else if (key == "mode") {
+            legacyMode = value;
         } else if (key == "optimize") {
-            current.optimize = value;
+            legacyOptimize = value;
         } else if (key == "max_width") {
             bool ok = false;
             int n = value.toInt(&ok);
@@ -296,11 +314,7 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
         } else if (key == "resolution_reference") {
             current.resolutionReference = value;
         } else if (key == "max_combinations") {
-            bool ok = false;
-            int n = value.toInt(&ok);
-            if (ok) {
-                current.maxCombinations = n;
-            }
+            // Ignored (removed in v0.4.0+), kept for backward compat parsing
         } else if (key == "threads") {
             bool ok = false;
             int n = value.toInt(&ok);
@@ -333,6 +347,9 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
     }
 
     if (inProfile) {
+        if (!legacyMode.isEmpty() && current.preset == "quality") {
+            current.preset = migrateModOptimizeToPreset(legacyMode, legacyOptimize);
+        }
         profiles.append(current);
     }
 
@@ -377,8 +394,10 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
             profileName = "\"" + profileName + "\"";
         }
         out << "[profile " << profileName << "]\n";
-        out << "mode=" << p.mode << "\n";
-        out << "optimize=" << p.optimize << "\n";
+        if (!p.label.trimmed().isEmpty()) {
+            out << "label=" << p.label.trimmed() << "\n";
+        }
+        out << "preset=" << p.preset << "\n";
         if (p.maxWidth > 0) {
             out << "max_width=" << p.maxWidth << "\n";
         }
@@ -393,7 +412,6 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         out << "resolution_reference=" << p.resolutionReference << "\n";
         out << "padding=" << p.padding << "\n";
         out << "extrude=" << p.extrude << "\n";
-        out << "max_combinations=" << p.maxCombinations << "\n";
         if (p.threads > 0) {
             out << "threads=" << p.threads << "\n";
         }

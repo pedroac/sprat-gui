@@ -2,6 +2,7 @@
 #include "NavigatorTreeWidget.h"
 #include "AnimationTimelineOps.h"
 #include "FolderSyncService.h"
+#include "UndoCommands.h"
 
 #include <functional>
 #include <QDir>
@@ -103,31 +104,49 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
 {
     QTreeWidgetItem* clickedItem = m_spriteTree->itemAt(pos);
 
-    // Collect paths from selected items (including descendants of groups)
-    QStringList selectedPaths;
-    std::function<void(QTreeWidgetItem*)> collectPaths = [&](QTreeWidgetItem* item) {
-        QVariant v = item->data(0, Qt::UserRole);
-        if (v.isValid()) {
-            auto sprite = v.value<SpritePtr>();
-            if (sprite && !sprite->path.isEmpty())
-                selectedPaths.append(sprite->path);
-        } else if (item->childCount() > 0) {
-            for (int i = 0; i < item->childCount(); ++i)
-                collectPaths(item->child(i));
-        }
-    };
-
-    const auto selectedItems = m_spriteTree->selectedItems();
-    for (QTreeWidgetItem* item : selectedItems) {
-        collectPaths(item);
+    // Paths for the right-clicked item and all its descendants.
+    QStringList clickedPaths;
+    {
+        std::function<void(QTreeWidgetItem*)> walk = [&](QTreeWidgetItem* item) {
+            QVariant v = item->data(0, Qt::UserRole);
+            if (v.isValid()) {
+                auto sprite = v.value<SpritePtr>();
+                if (sprite && !sprite->path.isEmpty())
+                    clickedPaths.append(sprite->path);
+            } else {
+                for (int i = 0; i < item->childCount(); ++i)
+                    walk(item->child(i));
+            }
+        };
+        if (clickedItem) walk(clickedItem);
     }
 
-    const bool hasSelected = !selectedPaths.isEmpty();
-    const bool clickedIsGroup = clickedItem && clickedItem->childCount() > 0;
-    const bool hasTimeline = m_session->selectedTimelineIndex >= 0
-                             && m_session->selectedTimelineIndex < m_session->timelines.size();
+    // Paths from checkbox-checked leaf sprites (no fallback).
+    QStringList checkedPaths;
+    {
+        std::function<void(QTreeWidgetItem*)> walkChecked = [&](QTreeWidgetItem* item) {
+            if (item->childCount() == 0) {
+                if (item->checkState(0) == Qt::Checked) {
+                    auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
+                    if (sprite && !sprite->path.isEmpty())
+                        checkedPaths.append(sprite->path);
+                }
+            } else {
+                for (int i = 0; i < item->childCount(); ++i)
+                    walkChecked(item->child(i));
+            }
+        };
+        for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
+            walkChecked(m_spriteTree->topLevelItem(i));
+    }
 
-    // Check if clicked item is a group containing other groups
+    const bool clickedIsLeaf  = clickedItem && clickedItem->childCount() == 0
+                                && clickedItem->data(0, Qt::UserRole).isValid();
+    const bool clickedIsGroup = clickedItem && clickedItem->childCount() > 0;
+    const bool hasChecked     = !checkedPaths.isEmpty();
+    const bool hasTimeline    = m_session->selectedTimelineIndex >= 0
+                                && m_session->selectedTimelineIndex < m_session->timelines.size();
+
     bool clickedGroupHasGroups = false;
     if (clickedIsGroup) {
         for (int i = 0; i < clickedItem->childCount(); ++i) {
@@ -138,69 +157,67 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
         }
     }
 
+    const QString subfolder = clickedItem ? folderPathForTreeItem(clickedItem) : QString();
+
     QMenu menu(this);
+    // Helper: insert a separator only when there are preceding items.
+    bool hadItems = false;
+    auto addSep = [&]() { if (hadItems) { menu.addSeparator(); hadItems = false; } };
 
-    // Delete
-    QAction* deleteAction = menu.addAction(tr("Delete"));
-    deleteAction->setEnabled(hasSelected);
+    // ── Section 1: delete ──────────────────────────────────────────────────
+    QAction* deleteFrameAction    = nullptr;
+    QAction* deleteGroupAction    = nullptr;
+    QAction* deleteSelectedAction = nullptr;
 
-    menu.addSeparator();
+    if (clickedIsLeaf)  { deleteFrameAction    = menu.addAction(tr("Delete frame"));    hadItems = true; }
+    if (clickedIsGroup) { deleteGroupAction    = menu.addAction(tr("Delete group"));    hadItems = true; }
+    if (hasChecked)     { deleteSelectedAction = menu.addAction(tr("Delete selected")); hadItems = true; }
 
-    // Add frames
-    QString subfolder;
-    if (clickedItem) {
-        subfolder = folderPathForTreeItem(clickedItem);
-    }
-    QString addLabel = subfolder.isEmpty()
-                       ? tr("Add frames...")
-                       : tr("Add frames into '%1'...").arg(subfolder);
+    // ── Section 2: add frames ──────────────────────────────────────────────
+    addSep();
+    const QString addLabel = clickedIsGroup
+        ? tr("Add frames into '%1'...").arg(clickedItem->text(0))
+        : tr("Add frames...");
     QAction* addFramesAction = menu.addAction(addLabel);
+    hadItems = true;
 
-    menu.addSeparator();
+    // ── Section 3: timelines ───────────────────────────────────────────────
+    QAction* createTimelineFromGroupAction    = nullptr;
+    QAction* autoCreateTimelinesAction        = nullptr;
+    QAction* createTimelineFromSelectedAction = nullptr;
+    QAction* addToTimelineAction              = nullptr;
 
-    // Timeline actions
-    QAction* addToTimelineAction = menu.addAction(tr("Add to current timeline"));
-    addToTimelineAction->setEnabled(hasSelected && hasTimeline);
-
-    QAction* createTimelineAction = menu.addAction(tr("Create timeline"));
-    createTimelineAction->setEnabled(hasSelected);
-
-    QAction* autoCreateTimelinesAction = nullptr;
-    if (clickedGroupHasGroups) {
-        autoCreateTimelinesAction = menu.addAction(tr("Auto-create timelines"));
+    if (clickedIsGroup || hasChecked) {
+        addSep();
+        if (clickedIsGroup)              { createTimelineFromGroupAction    = menu.addAction(tr("Create timeline from group"));          hadItems = true; }
+        if (clickedGroupHasGroups)       { autoCreateTimelinesAction        = menu.addAction(tr("Auto-create timelines"));               hadItems = true; }
+        if (hasChecked)                  { createTimelineFromSelectedAction = menu.addAction(tr("Create timeline from selected frames")); hadItems = true; }
+        if (hasChecked && hasTimeline)   { addToTimelineAction              = menu.addAction(tr("Add selected to current timeline"));    hadItems = true; }
     }
 
-    menu.addSeparator();
+    // ── Section 4: grouping ────────────────────────────────────────────────
+    QAction* groupSelectedAction = nullptr;
+    QAction* ungroupAction       = nullptr;
 
-    // Group actions
-    QAction* createGroupAction = menu.addAction(tr("Create group from selection..."));
-    createGroupAction->setEnabled(hasSelected);
+    if (hasChecked || clickedIsGroup) {
+        addSep();
+        if (hasChecked)     { groupSelectedAction = menu.addAction(tr("Group selected frames...")); hadItems = true; }
+        if (clickedIsGroup) { ungroupAction       = menu.addAction(tr("Ungroup (move up)"));        hadItems = true; }
+    }
 
-    QAction* ungroupAction = menu.addAction(tr("Ungroup (move up)"));
-    ungroupAction->setEnabled(clickedIsGroup);
-
-    // Execute
+    // ── Dispatch ───────────────────────────────────────────────────────────
     QAction* chosen = menu.exec(m_spriteTree->viewport()->mapToGlobal(pos));
     if (!chosen) return;
 
-    if (chosen == deleteAction) {
-        onNavigatorDeleteFrames(selectedPaths);
-    } else if (chosen == addFramesAction) {
-        onNavigatorAddFrames(subfolder);
-    } else if (chosen == addToTimelineAction) {
-        onNavigatorAddToTimeline(selectedPaths);
-    } else if (chosen == createTimelineAction) {
-        onNavigatorCreateTimeline(selectedPaths, clickedItem);
-    } else if (chosen == autoCreateTimelinesAction) {
-        onNavigatorAutoCreateTimelines(clickedItem);
-    } else if (chosen == createGroupAction) {
-        QString parentFolder;
-        if (clickedItem)
-            parentFolder = folderPathForTreeItem(clickedItem);
-        onNavigatorCreateGroup(selectedPaths, parentFolder);
-    } else if (chosen == ungroupAction) {
-        onNavigatorUngroup(clickedItem);
-    }
+    if      (chosen == deleteFrameAction || chosen == deleteGroupAction)  onNavigatorDeleteFrames(clickedPaths);
+    else if (chosen == deleteSelectedAction)                              onNavigatorDeleteFrames(checkedPaths);
+    else if (chosen == addFramesAction)                                   onNavigatorAddFrames(subfolder);
+    else if (chosen == createTimelineFromGroupAction)                     onNavigatorCreateTimeline(clickedPaths, clickedItem);
+    else if (chosen == autoCreateTimelinesAction)                         onNavigatorAutoCreateTimelines(clickedItem);
+    else if (chosen == createTimelineFromSelectedAction)                  onNavigatorCreateTimeline(checkedPaths, nullptr);
+    else if (chosen == addToTimelineAction)                               onNavigatorAddToTimeline(checkedPaths);
+    else if (chosen == groupSelectedAction)                               onNavigatorCreateGroup(checkedPaths, subfolder);
+    else if (chosen == ungroupAction)                                     onNavigatorUngroup(clickedItem);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,15 +293,25 @@ void MainWindow::onNavigatorAddFrames(const QString& subfolder)
 void MainWindow::onNavigatorAddToTimeline(const QStringList& paths)
 {
     if (paths.isEmpty()) return;
-    if (m_session->selectedTimelineIndex < 0
-        || m_session->selectedTimelineIndex >= m_session->timelines.size())
-        return;
+    const int tlIdx = m_session->selectedTimelineIndex;
+    if (tlIdx < 0 || tlIdx >= m_session->timelines.size()) return;
 
+    auto postExecute = [this]() {
+        refreshTimelineFrames();
+        refreshTimelineList();
+        refreshAnimationTest();
+    };
+
+    const bool useMacro = paths.size() > 1;
+    if (useMacro) m_undoStack->beginMacro(tr("Add Frames to Timeline"));
     for (const QString& path : paths) {
-        AnimationTimelineOps::dropFrame(m_session->timelines,
-                                        m_session->selectedTimelineIndex,
-                                        path, -1);
+        const int insertIdx = m_session->timelines[tlIdx].frames.size();
+        AnimationTimelineOps::dropFrame(m_session->timelines, tlIdx, path, -1);
+        m_undoStack->push(new TimelineFrameDropCommand(
+            &m_session->timelines, tlIdx, path, insertIdx, postExecute));
     }
+    if (useMacro) m_undoStack->endMacro();
+
     refreshTimelineFrames();
     refreshTimelineList();
     refreshAnimationTest();
@@ -335,12 +362,27 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     timeline.fps = 8;
     timeline.frames = paths;
     m_session->timelines.append(timeline);
+    m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
 
     refreshTimelineList();
-    m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
     m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
     refreshTimelineFrames();
     refreshAnimationTest();
+
+    m_undoStack->push(new TimelineAddCommand(
+        &m_session->timelines,
+        timeline,
+        &m_session->selectedTimelineIndex,
+        [this]() {
+            refreshTimelineList();
+            if (m_session->selectedTimelineIndex >= 0)
+                m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+            else
+                onTimelineSelectionChanged();
+            refreshTimelineFrames();
+            refreshAnimationTest();
+        }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +409,9 @@ void MainWindow::onNavigatorCreateGroup(const QStringList& paths, const QString&
     targetDir += '/' + groupName;
     QDir().mkpath(targetDir);
 
+    const QStringList savedActivePaths = m_session->activeFramePaths;
+
+    QVector<QPair<QString,QString>> moves;
     for (const QString& oldPath : paths) {
         QFileInfo fi(oldPath);
         QString newPath = targetDir + '/' + fi.fileName();
@@ -374,6 +419,7 @@ void MainWindow::onNavigatorCreateGroup(const QStringList& paths, const QString&
             int idx = m_session->activeFramePaths.indexOf(oldPath);
             if (idx >= 0)
                 m_session->activeFramePaths[idx] = newPath;
+            moves.append({oldPath, newPath});
         }
     }
 
@@ -381,7 +427,19 @@ void MainWindow::onNavigatorCreateGroup(const QStringList& paths, const QString&
         QMessageBox::warning(this, tr("Create Group"), tr("Could not create temporary frame list."));
         return;
     }
+
+    const QStringList newActivePaths = m_session->activeFramePaths;
     scheduleLayoutRebuild();
+
+    m_undoStack->push(new CreateGroupCommand(
+        &m_session->activeFramePaths,
+        moves,
+        targetDir,
+        savedActivePaths,
+        newActivePaths,
+        [this]() { return ensureFrameListInput(); },
+        [this]() { scheduleLayoutRebuild(false); }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +464,11 @@ void MainWindow::onNavigatorUngroup(QTreeWidgetItem* groupItem)
     QStringList paths = collectDescendantSpritePaths(groupItem);
     if (paths.isEmpty()) return;
 
+    const QStringList savedActivePaths = m_session->activeFramePaths;
+
+    QVector<QPair<QString,QString>> moves;
+    QSet<QString> removedDirs;
+
     for (const QString& oldPath : paths) {
         QFileInfo fi(oldPath);
         QDir parentDir = fi.dir();
@@ -416,22 +479,34 @@ void MainWindow::onNavigatorUngroup(QTreeWidgetItem* groupItem)
             int idx = m_session->activeFramePaths.indexOf(oldPath);
             if (idx >= 0)
                 m_session->activeFramePaths[idx] = newPath;
+            moves.append({oldPath, newPath});
         }
+        removedDirs.insert(fi.absolutePath());
     }
 
-    // Try to remove the now-empty subfolder
-    // Gather unique directories from the original paths
-    QSet<QString> dirs;
-    for (const QString& p : paths)
-        dirs.insert(QFileInfo(p).absolutePath());
-    for (const QString& d : dirs)
+    // Try to remove the now-empty subfolders
+    for (const QString& d : removedDirs)
         QDir().rmdir(d);
 
     if (!ensureFrameListInput()) {
         QMessageBox::warning(this, tr("Ungroup"), tr("Could not create temporary frame list."));
         return;
     }
+
+    const QStringList newActivePaths = m_session->activeFramePaths;
     scheduleLayoutRebuild();
+
+    if (!moves.isEmpty()) {
+        m_undoStack->push(new UngroupCommand(
+            &m_session->activeFramePaths,
+            moves,
+            removedDirs,
+            savedActivePaths,
+            newActivePaths,
+            [this]() { return ensureFrameListInput(); },
+            [this]() { scheduleLayoutRebuild(false); }
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -441,36 +516,52 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
 {
     if (!parentGroup) return;
 
-    // Get the folder path for the parent group
-    QString parentFolderPath = folderPathForTreeItem(parentGroup);
+    const QString parentFolderPath = folderPathForTreeItem(parentGroup);
 
-    // Iterate through all child groups and create a timeline from each
-    int created = 0;
+    QVector<AnimationTimeline> added;
     for (int i = 0; i < parentGroup->childCount(); ++i) {
         QTreeWidgetItem* childItem = parentGroup->child(i);
         QStringList paths = collectDescendantSpritePaths(childItem);
-
         if (paths.isEmpty()) continue;
-
-        // Create a unique timeline name with path and collision detection
-        QString childName = childItem->text(0);
-        QString uniqueName = getUniqueTimelineName(childName, parentFolderPath);
-
         AnimationTimeline timeline;
-        timeline.name = uniqueName;
+        timeline.name = getUniqueTimelineName(childItem->text(0), parentFolderPath);
         timeline.fps = 8;
         timeline.frames = paths;
         m_session->timelines.append(timeline);
-        ++created;
+        added.append(timeline);
     }
 
-    if (created == 0) return;
+    if (added.isEmpty()) return;
 
-    refreshTimelineList();
     m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
+    refreshTimelineList();
     m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
     refreshTimelineFrames();
     refreshAnimationTest();
+
+    auto postExecute = [this]() {
+        refreshTimelineList();
+        if (m_session->selectedTimelineIndex >= 0)
+            m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+        else
+            onTimelineSelectionChanged();
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    };
+
+    if (added.size() == 1) {
+        m_undoStack->push(new TimelineAddCommand(
+            &m_session->timelines, added[0],
+            &m_session->selectedTimelineIndex, postExecute));
+    } else {
+        m_undoStack->beginMacro(tr("Auto-create Timelines"));
+        for (const AnimationTimeline& tl : added) {
+            m_undoStack->push(new TimelineAddCommand(
+                &m_session->timelines, tl,
+                &m_session->selectedTimelineIndex, postExecute));
+        }
+        m_undoStack->endMacro();
+    }
 }
 
 // ---------------------------------------------------------------------------

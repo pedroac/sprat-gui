@@ -115,6 +115,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
                                                   oldX, oldY, newX, newY, true));
         });
+        connect(m_previewView->overlay(), &EditorOverlayItem::markerDragFinished,
+                this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
+            if (!m_session->selectedSprite) return;
+            m_undoStack->push(new SetMarkersCommand(
+                m_session->selectedSprite,
+                oldPoints,
+                newPoints,
+                [this]() {
+                    m_previewView->overlay()->updateLayout();
+                    refreshHandleCombo();
+                }
+            ));
+        });
     }
 
     // Load recent projects
@@ -442,7 +455,7 @@ bool MainWindow::selectedProfileDefinition(SpratProfile& out) const {
     if (!m_profileCombo) {
         return false;
     }
-    const QString selectedName = m_profileCombo->currentText().trimmed();
+    const QString selectedName = m_profileCombo->currentData().toString().trimmed();
     if (selectedName.isEmpty()) {
         return false;
     }
@@ -461,35 +474,43 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
         return;
     }
 
-    QStringList effectiveProfiles;
+    QStringList effectiveNames;
     for (const SpratProfile& profile : profiles) {
         const QString trimmed = profile.name.trimmed();
-        if (trimmed.isEmpty() || effectiveProfiles.contains(trimmed)) {
+        if (trimmed.isEmpty() || effectiveNames.contains(trimmed)) {
             continue;
         }
-        effectiveProfiles.append(trimmed);
+        effectiveNames.append(trimmed);
     }
-    const QString previousSelected = m_profileCombo->currentText().trimmed();
+    const QString previousSelected = m_profileCombo->currentData().toString().trimmed();
     m_profileCombo->blockSignals(true);
     m_profileCombo->clear();
-    m_profileCombo->addItems(effectiveProfiles);
-    if (!effectiveProfiles.isEmpty()) {
+    for (const SpratProfile& profile : profiles) {
+        const QString name = profile.name.trimmed();
+        if (name.isEmpty() || m_profileCombo->findData(name) >= 0) {
+            continue;
+        }
+        const QString display = profile.label.trimmed().isEmpty() ? name : profile.label.trimmed();
+        m_profileCombo->addItem(display, name);
+    }
+    if (!effectiveNames.isEmpty()) {
         QString selected = preferred.trimmed();
         if (selected.isEmpty()) {
             selected = previousSelected;
         }
-        if (selected.isEmpty() || !effectiveProfiles.contains(selected)) {
-            selected = effectiveProfiles.first();
+        if (selected.isEmpty() || !effectiveNames.contains(selected)) {
+            selected = effectiveNames.first();
         }
-        m_profileCombo->setCurrentText(selected);
+        const int idx = m_profileCombo->findData(selected);
+        m_profileCombo->setCurrentIndex(idx >= 0 ? idx : 0);
     }
     m_profileCombo->blockSignals(false);
 
     if (m_profileSelectorStack) {
-        m_profileSelectorStack->setCurrentIndex(effectiveProfiles.isEmpty() ? 1 : 0);
+        m_profileSelectorStack->setCurrentIndex(effectiveNames.isEmpty() ? 1 : 0);
     }
 
-    if (!effectiveProfiles.contains(m_session->lastSuccessfulProfile)) {
+    if (!effectiveNames.contains(m_session->lastSuccessfulProfile)) {
         m_session->lastSuccessfulProfile.clear();
     }
 }
@@ -619,6 +640,61 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
             [&targets](const SpritePtr& sprite) { return sprite && targets.contains(sprite->path); }),
         m_session->selectedSprites.end()
     );
+
+    // If sourceFolder is set, use reversible TrashBin deletion with undo support
+    if (!m_session->sourceFolder.isEmpty()) {
+        const QStringList savedActivePaths = m_session->activeFramePaths;
+        const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+        const int savedTimelineIdx = m_session->selectedTimelineIndex;
+        const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
+        m_undoStack->push(new RemoveSpritesCommand(
+            &m_session->activeFramePaths, &m_session->timelines,
+            &m_session->selectedTimelineIndex, &m_session->layoutModels,
+            m_session->sourceFolder, targets,
+            savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
+            [this]() { return ensureFrameListInput(); },
+            [this, targets]() { // postExecuteRedo
+                if (m_session->activeFramePaths.isEmpty()) {
+                    m_session->layoutSourcePath.clear();
+                    m_session->layoutSourceIsList = false;
+                    if (!m_session->frameListPath.isEmpty()) {
+                        QFile::remove(m_session->frameListPath);
+                        m_session->frameListPath.clear();
+                    }
+                    m_session->layoutModels.clear();
+                    if (m_canvas) m_canvas->clearCanvas();
+                    m_session->selectedSprites.clear();
+                    m_session->selectedSprite.reset();
+                    m_statusLabel->setText(tr("No frames loaded"));
+                    m_folderLabel->setText(tr("Folder: none"));
+                    m_session->cachedLayoutOutput.clear();
+                    m_session->cachedLayoutScale = 1.0;
+                    updateMainContentView();
+                    updateUiState();
+                    refreshSpriteTree();
+                    refreshTimelineList();
+                    refreshTimelineFrames();
+                    refreshAnimationTest();
+                } else {
+                    captureOldSpritePositions();
+                    if (m_canvas) m_canvas->removeSprites(targets);
+                    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
+                    refreshTimelineFrames();
+                    refreshTimelineList();
+                    refreshAnimationTest();
+                    scheduleLayoutRebuild(true, true);
+                }
+            },
+            [this]() { // postExecuteUndo
+                refreshSpriteTree();
+                refreshTimelineFrames();
+                refreshTimelineList();
+                refreshAnimationTest();
+                scheduleLayoutRebuild(true);
+            }
+        ));
+        return;
+    }
 
     QStringList remainingFramePaths = m_session->activeFramePaths;
     for (const QString& path : targets) {
@@ -792,6 +868,61 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
             [&targets](const SpritePtr& sprite) { return sprite && targets.contains(sprite->path); }),
         m_session->selectedSprites.end()
     );
+
+    // If sourceFolder is set, use reversible TrashBin deletion with undo support
+    if (!m_session->sourceFolder.isEmpty()) {
+        const QStringList savedActivePaths = m_session->activeFramePaths;
+        const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+        const int savedTimelineIdx = m_session->selectedTimelineIndex;
+        const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
+        m_undoStack->push(new RemoveSpritesCommand(
+            &m_session->activeFramePaths, &m_session->timelines,
+            &m_session->selectedTimelineIndex, &m_session->layoutModels,
+            m_session->sourceFolder, targets,
+            savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
+            [this]() { return ensureFrameListInput(); },
+            [this, targets]() { // postExecuteRedo
+                if (m_session->activeFramePaths.isEmpty()) {
+                    m_session->layoutSourcePath.clear();
+                    m_session->layoutSourceIsList = false;
+                    if (!m_session->frameListPath.isEmpty()) {
+                        QFile::remove(m_session->frameListPath);
+                        m_session->frameListPath.clear();
+                    }
+                    m_session->layoutModels.clear();
+                    if (m_canvas) m_canvas->clearCanvas();
+                    m_session->selectedSprites.clear();
+                    m_session->selectedSprite.reset();
+                    m_statusLabel->setText(tr("No frames loaded"));
+                    m_folderLabel->setText(tr("Folder: none"));
+                    m_session->cachedLayoutOutput.clear();
+                    m_session->cachedLayoutScale = 1.0;
+                    updateMainContentView();
+                    updateUiState();
+                    refreshSpriteTree();
+                    refreshTimelineList();
+                    refreshTimelineFrames();
+                    refreshAnimationTest();
+                } else {
+                    captureOldSpritePositions();
+                    if (m_canvas) m_canvas->removeSprites(targets);
+                    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
+                    refreshTimelineFrames();
+                    refreshTimelineList();
+                    refreshAnimationTest();
+                    scheduleLayoutRebuild(false, true);
+                }
+            },
+            [this]() { // postExecuteUndo
+                refreshSpriteTree();
+                refreshTimelineFrames();
+                refreshTimelineList();
+                refreshAnimationTest();
+                scheduleLayoutRebuild(true);
+            }
+        ));
+        return;
+    }
 
     QStringList remainingFramePaths = m_session->activeFramePaths;
     for (const QString& path : targets) {
@@ -1003,15 +1134,37 @@ void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orient
         m_session->activeFramePaths.insert(idx, pathB);
         m_session->activeFramePaths.insert(idx, pathA);
     } else {
+        idx = m_session->activeFramePaths.size(); // will be appended
         m_session->activeFramePaths.append(pathA);
         m_session->activeFramePaths.append(pathB);
     }
+    // idx is the position where pathA was inserted
 
     ensureFrameListInput();
     // Explicit user action - rebuild immediately
     scheduleLayoutRebuild(true);
     m_statusLabel->setText(tr("Sprite split into %1 and %2").arg(
         QFileInfo(pathA).fileName(), QFileInfo(pathB).fileName()));
+
+    // Build trim rect for the command (used on subsequent redo to re-split)
+    QRect trimRect;
+    if (sprite->trimmed) {
+        trimRect = sprite->trimRect;
+    }
+
+    m_undoStack->push(new SplitSpriteCommand(
+        &m_session->activeFramePaths,
+        sprite->path,
+        pathA,
+        pathB,
+        idx,
+        orientation,
+        localPos,
+        sprite->rotated,
+        trimRect,
+        [this]() { return ensureFrameListInput(); },
+        [this]() { scheduleLayoutRebuild(true); }
+    ));
 }
 
 /**
@@ -1045,9 +1198,9 @@ void MainWindow::onManageProfiles() {
         return;
     }
 
-    const QString previousProfile = m_profileCombo ? m_profileCombo->currentText() : QString();
+    const QString previousProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
     applyConfiguredProfiles(profiles, previousProfile);
-    if (!m_session->layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentText().trimmed().isEmpty()) {
+    if (!m_session->layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentData().toString().trimmed().isEmpty()) {
         // Profiles dialog closed - rebuild immediately with new settings
         scheduleLayoutRebuild(true);
     }
@@ -1456,28 +1609,36 @@ void MainWindow::onWatchModePeriodicCheck() {
         return;
     }
 
-    LayoutModel& layout = m_session->layoutModels.first();
-    bool spriteRemoved = false;
+    // Check for any changes: missing sprites or new files in the folder
+    const LayoutModel& layout = m_session->layoutModels.first();
+    bool needsSync = false;
 
-    // Check if any sprites reference files that no longer exist
-    for (int i = layout.sprites.size() - 1; i >= 0; --i) {
-        const auto& sprite = layout.sprites[i];
+    for (const auto& sprite : layout.sprites) {
         if (sprite && !QFileInfo::exists(sprite->path)) {
-            qInfo() << "[Watch] Removing missing sprite:" << sprite->name;
-            layout.sprites.removeAt(i);
-            spriteRemoved = true;
+            qInfo() << "[Watch] Detected missing sprite:" << sprite->name;
+            needsSync = true;
+            break;
         }
     }
 
-    // If any sprites were removed, update the UI
-    if (spriteRemoved && m_canvas) {
-        qInfo() << "[Watch] Periodic check detected removed sprites, updating UI";
-        m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled, [this]() {
-            if (!m_isCanceled) {
-                refreshSpriteTree();
-                updateUiState();
+    if (!needsSync) {
+        QStringList folderImages = FolderSyncService::getImageFilesInFolder(m_session->sourceFolder);
+        QSet<QString> existingPaths;
+        for (const auto& sprite : layout.sprites) {
+            if (sprite) existingPaths.insert(sprite->path);
+        }
+        for (const QString& path : folderImages) {
+            if (!existingPaths.contains(path)) {
+                qInfo() << "[Watch] Detected new file in folder:" << path;
+                needsSync = true;
+                break;
             }
-        });
+        }
+    }
+
+    if (needsSync) {
+        qInfo() << "[Watch] Periodic check triggering sync";
+        performManualSync();
     }
 }
 
@@ -1506,7 +1667,6 @@ void MainWindow::initializeSourceFolderWatcher() {
     // The crash is unrelated to split sprites feature
     // File watching will be re-enabled after root cause is identified
     qInfo() << "[Watcher] File watching temporarily disabled (using manual mode)";
-    m_settings.syncMode = SyncMode::Manual;
     qInfo() << "[Watcher] Manual mode - folder ready for manual sync:" << m_session->sourceFolder;
 
     updateOpenSourceFolderAction();

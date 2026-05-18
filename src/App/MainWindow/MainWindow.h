@@ -13,6 +13,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPointer>
+#include <QUndoStack>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -63,6 +64,7 @@ class QAction;
 class QToolButton;
 class QMenu;
 class QUndoStack;
+class QVariantAnimation;
 class QMimeData;
 class QImage;
 class QUrl;
@@ -192,9 +194,14 @@ private slots:
     void loadAutosavedProject();
 
     /**
-     * @brief Handles save action from the user.
+     * @brief Handles save action from the user (silent, uses last destination).
      */
     void onSaveClicked();
+
+    /**
+     * @brief Handles save-as action from the user (always opens dialog).
+     */
+    void onSaveAsClicked();
 
     /**
      * @brief Handles when a generic process finishes execution.
@@ -403,7 +410,7 @@ private slots:
      * @param session Project session
      * @return QJsonObject Project payload
      */
-    QJsonObject buildProjectPayload(SaveConfig config, ProjectSession* session);
+    QJsonObject buildProjectPayload(SaveConfig config, ProjectSession* session, bool portable = false);
 
     /**
      * @brief Handles autosave timer timeout.
@@ -680,6 +687,7 @@ private:
      * @brief Checks CLI tools availability.
      */
     void checkCliTools();
+    void updateCliDiagnostics();
 
     /**
      * @brief Resolves CLI binaries and checks for missing ones.
@@ -998,6 +1006,11 @@ public:
     void onShowHotkeys();
 
     /**
+     * @brief Shows About dialog.
+     */
+    void onAboutClicked();
+
+    /**
      * @brief Loads an image file and performs frame detection.
      * 
      * @param imagePath Path to the image file
@@ -1082,6 +1095,7 @@ private:
     QDockWidget* m_animationDock = nullptr;
     QDockWidget* m_debugDock = nullptr;
     QPlainTextEdit* m_cliLog = nullptr;
+    QPlainTextEdit* m_cliInfoText = nullptr;
     QMenu* m_viewMenu = nullptr;
 
     // Atlas view stack (Layout / Navigator)
@@ -1134,6 +1148,7 @@ private:
 
     QAction* m_loadAction;
     QAction* m_saveAction;
+    QAction* m_saveAsAction = nullptr;
     QLabel* m_statusLabel;
     QProgressBar* m_statusProgressBar = nullptr;
     QToolButton* m_recentProjectsBtn = nullptr;
@@ -1162,6 +1177,7 @@ private:
     QTimer* m_animTimer;
     int m_animFrameIndex = 0;
     bool m_animPlaying = false;
+    QElapsedTimer m_animElapsed; // wall-clock time since last rendered frame
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
     std::atomic<bool> m_isCanceled{false};
@@ -1192,7 +1208,7 @@ private:
     // === Async Loading Helpers ===
     struct FolderDiscoveryResult {
         QString root;
-        QStringList directories;
+        QStringList imagePaths;
         MainWindow::DropAction action;
     };
     QFutureWatcher<FolderDiscoveryResult> m_folderDiscoveryWatcher;
@@ -1206,6 +1222,7 @@ private:
         bool success;
     };
     QFutureWatcher<ProjectLoadResult> m_projectLoadWatcher;
+    void processProjectLoadResult(const ProjectLoadResult& result);
 
     struct ZipDiscoveryResult {
         QString tempPath;
@@ -1264,6 +1281,8 @@ private:
     QMap<QString, QRect>   m_oldSpritePackedRects; // sprite->rect (packed size) before rebuild
     QMap<QString, bool>    m_oldSpriteRotated;     // sprite->rotated flag before rebuild
     bool m_enableSpriteAnimation = true;
+    QPointer<QVariantAnimation> m_spriteAnimation;  // currently running sprite transition
+    QStringList m_spriteAnimationPaths;             // sprite paths with hidden labels in m_spriteAnimation
     bool m_layoutRunPending = false;
     bool m_layoutRunPendingQuiet = false;  // quiet flag for deferred pending run
     bool m_layoutDirty = false;            // rebuild needed but Navigator view is active

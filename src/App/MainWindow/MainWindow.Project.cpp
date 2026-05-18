@@ -538,6 +538,14 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
 }
 
 void MainWindow::onSaveClicked() {
+    if (m_lastSaveConfig.destination.isEmpty()) {
+        onSaveAsClicked();   // First save: fall through to dialog
+        return;
+    }
+    saveProjectWithConfig(m_lastSaveConfig);
+}
+
+void MainWindow::onSaveAsClicked() {
     QString defaultPath;
 #ifdef Q_OS_WASM
     QString baseName = m_session ? QFileInfo(m_session->currentFolder).fileName().trimmed() : QString();
@@ -549,7 +557,7 @@ void MainWindow::onSaveClicked() {
     dialogConfig.destination = defaultPath;
     SaveDialog dlg(defaultPath,
                    configuredProfiles(),
-                   m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
+                   m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
                    dialogConfig,
                    this,
                    false);
@@ -558,17 +566,38 @@ void MainWindow::onSaveClicked() {
     if (!m_session->currentFolder.isEmpty()) {
         defaultPath = QFileInfo(m_session->currentFolder).dir().filePath("export");
     }
-    SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(), m_lastSaveConfig, this);
+    SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentData().toString() : QString(), m_lastSaveConfig, this);
 #endif
     const int result = dlg.exec();
-    m_lastSaveConfig = dlg.getConfig();
+    SaveConfig config = dlg.getConfig();
 #ifdef Q_OS_WASM
-    m_lastSaveConfig.destination = defaultPath;
+    config.destination = defaultPath;
 #endif
     if (result != QDialog::Accepted) {
         return;
     }
 
+    // Warn if overwriting an existing folder project (non-ZIP destinations only)
+    const bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
+    if (!isZip) {
+        const QDir dest(config.destination);
+        const bool hasProject =
+            QFile::exists(dest.filePath("project.spart.json")) ||
+            QDir(dest.filePath("output")).exists() ||
+            QDir(dest.filePath("sprites")).exists();
+        if (hasProject) {
+            const int answer = QMessageBox::warning(
+                this, tr("Overwrite Project?"),
+                tr("The folder \"%1\" already contains a project.\n"
+                   "The output and sprites folders will be cleared and replaced.\n\n"
+                   "Continue?").arg(config.destination),
+                QMessageBox::Yes | QMessageBox::Cancel,
+                QMessageBox::Cancel);
+            if (answer != QMessageBox::Yes) return;
+        }
+    }
+
+    m_lastSaveConfig = config;
     saveProjectWithConfig(m_lastSaveConfig);
 }
 
@@ -635,12 +664,13 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
             config,
             m_session->layoutSourcePath,
             m_session->activeFramePaths,
+            m_session->sourceFolder,
             configuredProfiles(),
-            m_profileCombo ? m_profileCombo->currentText().trimmed() : QString(),
+            m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
             m_spratLayoutBin,
             m_spratPackBin,
             m_spratConvertBin,
-            buildProjectPayload(config, m_session),
+            buildProjectPayload(config, m_session, true),
             result.savedDestination,
             result.error,
             m_settings.deduplicateMode,
@@ -725,9 +755,10 @@ void MainWindow::handleProjectSaveResult(const ProjectSaveResult& result) {
     }
 }
 
-QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* session) {
+QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* session, bool portable) {
     ProjectPayloadBuildInput input;
     input.currentFolder = session->currentFolder;
+    input.sourceFolder = session->sourceFolder;
     input.activeFramePaths = session->activeFramePaths;
     input.layoutSourceIsList = session->layoutSourceIsList;
     input.timelines = session->timelines;
@@ -753,7 +784,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.layoutModels = session->layoutModels;
     input.layoutOutput = session->cachedLayoutOutput;
     input.layoutScale = session->cachedLayoutScale;
-    input.profile = m_profileCombo->currentText();
+    input.profile = m_profileCombo->currentData().toString();
     SpratProfile selectedProfile;
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
     input.padding = hasSelectedProfile ? selectedProfile.padding : 0;
@@ -771,6 +802,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.appSettings = m_settings;
     input.cliPaths = m_cliPaths;
     input.saveConfig = config;
+    input.portablePaths = portable;
     return ProjectPayloadCodec::build(input);
 }
 
@@ -800,13 +832,10 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     if (m_previewView) m_previewView->setZoomManual(false);
 
     const QString lowerPath = path.toLower();
-    
-    // Delegate to specific loaders based on extension
-    if (lowerPath.endsWith(".zip")) {
-        loadImagesFromZip(path, action);
-        return;
-    }
-    
+
+    // ZIP files: try loading as a project first (checks for project.spart.json).
+    // If that fails, onProjectLoadFinished falls back to loadImagesFromZip.
+    // Other archive formats and images are delegated directly.
     if (lowerPath.endsWith(".tar") || lowerPath.endsWith(".tar.gz") ||
         lowerPath.endsWith(".tar.bz2") || lowerPath.endsWith(".tar.xz")) {
         loadTarFile(path, action);
@@ -836,17 +865,33 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
         return result;
     };
 
+#ifdef Q_OS_WASM
+    // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously
+    // via a deferred timer so the loading overlay paints before we block.
+    QTimer::singleShot(0, this, [this, loadTask]() {
+        processProjectLoadResult(loadTask());
+    });
+#else
     m_projectLoadWatcher.setFuture(QtConcurrent::run(loadTask));
+#endif
 }
 
 void MainWindow::onProjectLoadFinished() {
-    ProjectLoadResult result = m_projectLoadWatcher.result();
+    processProjectLoadResult(m_projectLoadWatcher.result());
+}
+
+void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
     const QString path = result.path;
     const DropAction action = result.action;
 
     if (!result.success) {
         if (path.endsWith(".zip", Qt::CaseInsensitive)) {
-            loadImagesFromZip(path, action);
+            // Clear loading state before fallback — loadImagesFromZip
+            // checks m_isLoading and would reject the call otherwise.
+            setLoading(false);
+            if (!loadImagesFromZip(path, action)) {
+                QMessageBox::warning(this, tr("Load Failed"), tr("Could not load ZIP as a project or as an image archive."));
+            }
             return;
         }
         setLoading(false);
@@ -861,23 +906,62 @@ void MainWindow::onProjectLoadFinished() {
     m_projectFilePath = path;
     m_sourceFolderIsTemp = false;
 
-    // Prefer a pre-existing sprites subfolder next to the project file
-    const QString projectDir = QFileInfo(path).absolutePath();
-    const QString spritesDir = QDir(projectDir).filePath("sprites");
-    if (QDir(spritesDir).exists()) {
-        m_session->sourceFolder = spritesDir;
+    QJsonObject root = result.root;
+    const int projectVersion = root["version"].toInt(1);
+    const bool isZipProject = path.endsWith(".zip", Qt::CaseInsensitive);
+
+    // For ZIP projects with embedded sprites (v2+), extract the entire archive
+    // to a temp dir so sprites become accessible on disk.
+    QString projectDir = QFileInfo(path).absolutePath();
+    if (isZipProject && projectVersion >= 2) {
+        auto tempDir = std::make_unique<QTemporaryDir>();
+        if (!tempDir->isValid()) {
+            setLoading(false);
+            QMessageBox::warning(this, tr("Load Failed"), tr("Could not create temporary directory for ZIP extraction."));
+            return;
+        }
+        const QString tempPath = tempDir->path();
+        QString extractError;
+        if (!ArchiveExtractor::extractToDirectory(path, tempPath, extractError)) {
+            setLoading(false);
+            QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(extractError));
+            return;
+        }
+        projectDir = tempPath;
+        const QString spritesDir = QDir(tempPath).filePath("sprites");
+        if (QDir(spritesDir).exists()) {
+            m_session->sourceFolder = spritesDir;
+        }
+        m_sourceFolderIsTemp = true;
+        m_session->addTempDir(std::move(tempDir));
+    } else {
+        // Prefer a pre-existing sprites subfolder next to the project file
+        const QString spritesDir = QDir(projectDir).filePath("sprites");
+        if (QDir(spritesDir).exists()) {
+            m_session->sourceFolder = spritesDir;
+        }
     }
     // If no sprites dir found, applyProjectPayload will set sourceFolder from layoutSourcePath
 
-    QJsonObject root = result.root;
     QJsonObject layoutInfo = root["layout"].toObject();
     QString folder = layoutInfo["folder"].toString();
+
+    // Resolve relative folder paths (version 2+) against the project directory
+    if (projectVersion >= 2 || QDir::isRelativePath(folder)) {
+        folder = QDir(projectDir).filePath(folder);
+    }
+
     QStringList framePaths;
     for (const auto& frameVal : layoutInfo["frame_paths"].toArray()) {
-        const QString framePath = frameVal.toString().trimmed();
-        if (!framePath.isEmpty()) {
-            framePaths.append(framePath);
+        QString framePath = frameVal.toString().trimmed();
+        if (framePath.isEmpty()) {
+            continue;
         }
+        // Resolve relative frame paths against the resolved folder
+        if (projectVersion >= 2 || QDir::isRelativePath(framePath)) {
+            framePath = QDir(folder).filePath(framePath);
+        }
+        framePaths.append(framePath);
     }
 
     if (action == DropAction::Merge) {
@@ -888,6 +972,9 @@ void MainWindow::onProjectLoadFinished() {
         }
         return;
     }
+
+    // Clear undo history when loading a new project
+    if (m_undoStack) m_undoStack->clear();
 
     // Clear selection state when loading a new project to avoid stale pointers
     m_session->selectedSprite.reset();
@@ -902,10 +989,10 @@ void MainWindow::onProjectLoadFinished() {
     QJsonObject layoutOpts = root["layout_options"].toObject();
     if (layoutOpts.contains("profile")) {
         const QString profile = layoutOpts["profile"].toString();
-        if (!profile.isEmpty() && m_profileCombo->findText(profile) < 0) {
-            m_profileCombo->addItem(profile);
+        if (!profile.isEmpty() && m_profileCombo->findData(profile) < 0) {
+            m_profileCombo->addItem(profile, profile);
         }
-        m_profileCombo->setCurrentText(profile);
+        m_profileCombo->setCurrentIndex(m_profileCombo->findData(profile));
         if (m_profileSelectorStack) {
             m_profileSelectorStack->setCurrentIndex(m_profileCombo->count() > 0 ? 0 : 1);
         }
@@ -1038,9 +1125,12 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         return;
     }
 
+    // Hide loading overlay before showing the folder selection dialog
+    setLoading(false);
+
     QStringList selectedFolders;
     bool selectionCanceled = false;
-    
+
     if (imageDirectories.size() == 1) {
         selectedFolders = imageDirectories;
     } else {
@@ -1207,25 +1297,47 @@ void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
 
     if (m_session->sourceFolder == newSpritesPath) return; // already correct
 
-    if (m_sourceFolderIsTemp && !m_session->sourceFolder.isEmpty()) {
-        QDir newDir;
-        if (newDir.mkpath(newSpritesPath)) {
-            // Move all files and subdirectories preserving structure
-            QDirIterator it(m_session->sourceFolder, QDir::Files,
-                            QDirIterator::Subdirectories);
-            QDir srcRoot(m_session->sourceFolder);
-            while (it.hasNext()) {
-                it.next();
-                const QString relPath = srcRoot.relativeFilePath(it.filePath());
-                const QString dst = QDir(newSpritesPath).filePath(relPath);
-                QDir().mkpath(QFileInfo(dst).absolutePath());
-                QFile::rename(it.filePath(), dst);
+    // Only promote if the sprites directory actually exists on disk.
+    // For ZIP saves, sprites are written to a temp dir that gets zipped and deleted,
+    // so the newSpritesPath won't exist — keep current paths intact.
+    if (!QDir(newSpritesPath).exists()) return;
+
+    // The save service already copied sprites into newSpritesPath.
+    // Update the session to point there and rebuild frame paths accordingly.
+    const QString oldFolder = m_session->sourceFolder;
+    m_session->sourceFolder = newSpritesPath;
+    m_session->currentFolder = newSpritesPath;
+    m_sourceFolderIsTemp = false;
+
+    // Rewrite activeFramePaths to reference the new sprites location
+    if (!oldFolder.isEmpty() && !m_session->activeFramePaths.isEmpty()) {
+        QDir oldDir(oldFolder);
+        QStringList updated;
+        updated.reserve(m_session->activeFramePaths.size());
+        for (const QString& fp : m_session->activeFramePaths) {
+            QString rel = oldDir.relativeFilePath(fp);
+            if (rel.startsWith("..")) {
+                rel = QFileInfo(fp).fileName();
             }
+            updated.append(QDir(newSpritesPath).filePath(rel));
         }
+        m_session->activeFramePaths = updated;
     }
 
-    m_session->sourceFolder = newSpritesPath;
-    m_sourceFolderIsTemp = false;
+    // Rebuild frame list input if in list mode
+    if (m_session->layoutSourceIsList) {
+        ensureFrameListInput();
+    } else {
+        m_session->layoutSourcePath = newSpritesPath;
+    }
+
+    // Release old temp dir if applicable
+    m_session->clearSourceFolderTempDir();
+
+    // The cached layout may reference paths inside the now-deleted temp dir.
+    // Clear it so the next save runs spratlayout fresh against the promoted paths.
+    m_session->cachedLayoutOutput.clear();
+    m_session->cachedLayoutScale = 1.0;
 
     if (m_folderWatcher && m_settings.syncMode == SyncMode::Watch) {
         m_folderWatcher->stopWatching();

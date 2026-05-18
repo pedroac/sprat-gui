@@ -11,5 +11,6 @@ public:
         bool hasSprites,
         QAction* loadAction,
         QComboBox* profileCombo,
-        QAction* saveAction);
+        QAction* saveAction,
+        QAction* saveAsAction = nullptr);
 };

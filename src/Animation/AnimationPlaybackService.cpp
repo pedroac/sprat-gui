@@ -50,11 +50,19 @@ bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines,
     return true;
 }
 
-bool AnimationPlaybackService::tick(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex) {
+bool AnimationPlaybackService::tick(const QVector<AnimationTimeline>& timelines,
+                                    int selectedTimelineIndex,
+                                    int& frameIndex,
+                                    qint64 elapsedMs,
+                                    int fps) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
-    return AnimationTestOps::tick(timelines[selectedTimelineIndex].frames, frameIndex);
+    // How many frame-durations elapsed in real time?
+    // Capped at 8 to prevent large jumps after the tab was backgrounded.
+    const double msPerFrame = 1000.0 / qMax(1, fps);
+    const int count = qBound(1, qRound(static_cast<double>(elapsedMs) / msPerFrame), 8);
+    return AnimationTestOps::tick(timelines[selectedTimelineIndex].frames, frameIndex, count);
 }
 
 bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer, QPushButton* playPauseButton) {
@@ -68,7 +76,14 @@ bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>&
     playPauseButton->setIcon(playing ? pauseIcon() : playIcon());
     playPauseButton->setText(playing ? "⏸" : "▶");  // Unicode pause and play symbols as visual feedback
     if (playing) {
+#ifdef Q_OS_WASM
+        // In WASM, Qt's event loop is driven by requestAnimationFrame (~60 fps).
+        // interval=0 fires on every RAF callback; QElapsedTimer in onAnimTimerTimeout
+        // enforces the actual frame rate so we don't render more often than needed.
+        timer->start(0);
+#else
         timer->start(qRound(1000.0 / fps));
+#endif
     } else {
         timer->stop();
     }

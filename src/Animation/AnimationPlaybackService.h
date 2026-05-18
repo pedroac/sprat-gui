@@ -42,14 +42,22 @@ public:
     static bool next(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer, QPushButton* playPauseButton);
 
     /**
-     * @brief Advances the animation by one tick based on FPS.
-     * 
+     * @brief Advances the animation based on elapsed real time.
+     *
+     * Computes how many frames should have advanced in elapsedMs at the given
+     * fps and advances by that many frames (minimum 1, maximum 8).  Skipping
+     * frames keeps the perceived playback speed correct even when rendering is
+     * slower than the target frame rate.
+     *
      * @param timelines List of available animation timelines
      * @param selectedTimelineIndex Index of the currently selected timeline
      * @param frameIndex Current frame index (will be updated)
-     * @return bool True if frame was advanced, false if at end of timeline
+     * @param elapsedMs Wall-clock milliseconds since the previous tick
+     * @param fps Target playback speed in frames per second
+     * @return bool True if the frame index changed
      */
-    static bool tick(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex);
+    static bool tick(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex,
+                     int& frameIndex, qint64 elapsedMs, int fps);
 
     /**
      * @brief Toggles play/pause state of the animation.

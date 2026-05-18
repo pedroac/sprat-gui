@@ -4,16 +4,18 @@
 #include <functional>
 #include <QDrag>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QMimeData>
 #include <QPainter>
 #include <QPixmap>
+#include <QTreeWidgetItemIterator>
 
 NavigatorTreeWidget::NavigatorTreeWidget(QWidget* parent)
     : QTreeWidget(parent)
 {
     setDragEnabled(true);
     setDragDropMode(QAbstractItemView::DragOnly);
-    setSelectionMode(QAbstractItemView::ExtendedSelection);
+    setSelectionMode(QAbstractItemView::SingleSelection);
 }
 
 void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
@@ -64,6 +66,60 @@ void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
     drag->setMimeData(mimeData);
     drag->setPixmap(pixmap);
     drag->exec(Qt::CopyAction);
+}
+
+void NavigatorTreeWidget::mousePressEvent(QMouseEvent* event)
+{
+    QTreeWidgetItem* item = itemAt(event->pos());
+    if (item && event->button() == Qt::LeftButton) {
+        const Qt::KeyboardModifiers mods = event->modifiers();
+
+        if (mods & Qt::ShiftModifier) {
+            // Range-check: set all visible items from anchor to this item as Checked.
+            QTreeWidgetItem* anchor = m_checkboxAnchor ? m_checkboxAnchor : item;
+            setCheckStateRange(anchor, item, Qt::Checked);
+            setCurrentItem(item);
+            event->accept();
+            return;
+        }
+
+        if (mods & Qt::ControlModifier) {
+            // Ctrl+click: toggle the item's checkbox and select it for the editor.
+            if (item->flags() & Qt::ItemIsUserCheckable)
+                item->setCheckState(0, item->checkState(0) == Qt::Checked ? Qt::Unchecked : Qt::Checked);
+            setCurrentItem(item);
+            m_checkboxAnchor = item;
+            event->accept();
+            return;
+        }
+
+        // Normal click: update the anchor for future Shift+clicks.
+        m_checkboxAnchor = item;
+    }
+
+    QTreeWidget::mousePressEvent(event);
+}
+
+void NavigatorTreeWidget::setCheckStateRange(QTreeWidgetItem* from, QTreeWidgetItem* to, Qt::CheckState state)
+{
+    // Collect all currently visible items in visual (top-to-bottom) order.
+    QList<QTreeWidgetItem*> visible;
+    QTreeWidgetItemIterator it(this, QTreeWidgetItemIterator::NotHidden);
+    while (*it) {
+        visible.append(*it);
+        ++it;
+    }
+
+    int fromIdx = visible.indexOf(from);
+    int toIdx   = visible.indexOf(to);
+    if (fromIdx < 0 || toIdx < 0) return;
+    if (fromIdx > toIdx) qSwap(fromIdx, toIdx);
+
+    for (int i = fromIdx; i <= toIdx; ++i) {
+        QTreeWidgetItem* node = visible[i];
+        if (node->flags() & Qt::ItemIsUserCheckable)
+            node->setCheckState(0, state);
+    }
 }
 
 void NavigatorTreeWidget::keyPressEvent(QKeyEvent* event)
