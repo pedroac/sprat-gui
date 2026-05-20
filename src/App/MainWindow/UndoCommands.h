@@ -1,6 +1,7 @@
 #pragma once
 #include <QUndoCommand>
 #include <QUndoStack>
+#include <QApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -28,6 +29,9 @@ public:
     static QString send(const QString& filePath, const QString& sourceFolder) {
         QDir srcDir(sourceFolder);
         QString relPath = srcDir.relativeFilePath(filePath);
+        if (relPath == ".." || relPath.startsWith("../")) {
+            relPath = QFileInfo(filePath).fileName();
+        }
         QString trashPath = QDir(trashRoot(sourceFolder)).filePath(relPath);
         QFileInfo trashInfo(trashPath);
         if (!QDir().mkpath(trashInfo.absolutePath())) {
@@ -37,10 +41,19 @@ public:
         if (QFile::exists(trashPath)) {
             QFile::remove(trashPath);
         }
-        if (!QFile::rename(filePath, trashPath)) {
-            return {};
+        if (QFile::rename(filePath, trashPath)) {
+            return trashPath;
         }
-        return trashPath;
+
+        // Some platforms/filesystems can refuse rename for files that are still
+        // being touched by another process. Fall back to copy + remove so the
+        // session state cannot drift from what remains on disk.
+        if (QFile::copy(filePath, trashPath) && QFile::remove(filePath)) {
+            return trashPath;
+        }
+
+        QFile::remove(trashPath);
+        return {};
     }
 
     // Move trashPath back to originalPath
@@ -317,21 +330,30 @@ public:
         , m_selectedTimelineIndex(selectedTimelineIndex)
         , m_postExecute(std::move(postExecute))
         , m_skipFirstRedo(true)
-    {}
+    {
+        m_addedIndex = m_timelines->size() - 1;
+    }
 
     void redo() override {
         if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        m_addedIndex = m_timelines->size();
         m_timelines->append(m_timeline);
         *m_selectedTimelineIndex = m_timelines->size() - 1;
-        if (m_postExecute) m_postExecute();
+        if (m_postExecute) {
+            // Defer UI refresh to ensure it runs in the event loop after the command is fully processed
+            QMetaObject::invokeMethod(QApplication::instance(), m_postExecute, Qt::QueuedConnection);
+        }
     }
 
     void undo() override {
-        if (!m_timelines->isEmpty()) {
-            m_timelines->removeLast();
+        if (m_addedIndex >= 0 && m_addedIndex < m_timelines->size()) {
+            m_timelines->removeAt(m_addedIndex);
         }
         *m_selectedTimelineIndex = qMax(-1, m_timelines->size() - 1);
-        if (m_postExecute) m_postExecute();
+        if (m_postExecute) {
+            // Defer UI refresh to ensure it runs in the event loop after the command is fully processed
+            QMetaObject::invokeMethod(QApplication::instance(), m_postExecute, Qt::QueuedConnection);
+        }
     }
 
     int id() const override { return 1006; }
@@ -342,10 +364,66 @@ private:
     int* m_selectedTimelineIndex;
     std::function<void()> m_postExecute;
     mutable bool m_skipFirstRedo;
+    int m_addedIndex = -1; // Added for precise undo
 };
 
 // ---------------------------------------------------------------------------
-// (1007) TimelineRemoveCommand — remove the selected timeline
+// (1007) TimelinesUpdateCommand — bulk update timelines state
+// ---------------------------------------------------------------------------
+class TimelinesUpdateCommand : public QUndoCommand {
+public:
+    TimelinesUpdateCommand(QVector<AnimationTimeline>* timelines,
+                          const QVector<AnimationTimeline>& oldState,
+                          const QVector<AnimationTimeline>& newState,
+                          int oldSelection,
+                          int newSelection,
+                          int* selectedIndexPtr,
+                          std::function<void()> postExecute,
+                          const QString& text = QObject::tr("Update Timelines"),
+                          QUndoCommand* parent = nullptr)
+        : QUndoCommand(text, parent)
+        , m_timelines(timelines)
+        , m_oldState(oldState)
+        , m_newState(newState)
+        , m_oldSelection(oldSelection)
+        , m_newSelection(newSelection)
+        , m_selectedIndexPtr(selectedIndexPtr)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        *m_timelines = m_newState;
+        *m_selectedIndexPtr = m_newSelection;
+        if (m_postExecute) {
+            QMetaObject::invokeMethod(QApplication::instance(), m_postExecute, Qt::QueuedConnection);
+        }
+    }
+
+    void undo() override {
+        *m_timelines = m_oldState;
+        *m_selectedIndexPtr = m_oldSelection;
+        if (m_postExecute) {
+            QMetaObject::invokeMethod(QApplication::instance(), m_postExecute, Qt::QueuedConnection);
+        }
+    }
+
+    int id() const override { return 1007; }
+
+private:
+    QVector<AnimationTimeline>* m_timelines;
+    QVector<AnimationTimeline> m_oldState;
+    QVector<AnimationTimeline> m_newState;
+    int m_oldSelection;
+    int m_newSelection;
+    int* m_selectedIndexPtr;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1008) TimelineRemoveCommand — remove the selected timeline
 // ---------------------------------------------------------------------------
 class TimelineRemoveCommand : public QUndoCommand {
 public:
@@ -370,17 +448,21 @@ public:
             m_timelines->removeAt(m_index);
         }
         *m_selectedTimelineIndex = qMin(m_index, m_timelines->size() - 1);
-        if (m_postExecute) m_postExecute();
+        if (m_postExecute) {
+            QMetaObject::invokeMethod(QApplication::instance(), m_postExecute, Qt::QueuedConnection);
+        }
     }
 
     void undo() override {
         int insertIdx = qMin(m_index, (int)m_timelines->size());
         m_timelines->insert(insertIdx, m_savedTimeline);
         *m_selectedTimelineIndex = insertIdx;
-        if (m_postExecute) m_postExecute();
+        if (m_postExecute) {
+            QMetaObject::invokeMethod(QApplication::instance(), m_postExecute, Qt::QueuedConnection);
+        }
     }
 
-    int id() const override { return 1007; }
+    int id() const override { return 1008; }
 
 private:
     QVector<AnimationTimeline>* m_timelines;
@@ -420,7 +502,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1008; }
+    int id() const override { return 1009; }
 
 private:
     SpritePtr m_sprite;
@@ -469,7 +551,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1009; }
+    int id() const override { return 1010; }
 
 private:
     QVector<QPair<SpritePtr, QPair<int,int>>> m_targets;
@@ -534,7 +616,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1010; }
+    int id() const override { return 1011; }
 
 private:
     QVector<QPair<SpritePtr, std::optional<NamedPoint>>> m_targets;
@@ -595,7 +677,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1011; }
+    int id() const override { return 1012; }
 
 private:
     QStringList* m_activeFramePaths;
@@ -666,7 +748,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1012; }
+    int id() const override { return 1013; }
 
 private:
     QStringList* m_activeFramePaths;
@@ -716,19 +798,31 @@ public:
 
     void redo() override {
         m_trashMap.clear();
+        QStringList removedTargets;
+        removedTargets.reserve(m_targets.size());
+
         // Move files to trash
         for (const QString& path : m_targets) {
             QString trashPath = TrashBin::send(path, m_sourceFolder);
             if (!trashPath.isEmpty()) {
                 m_trashMap[path] = trashPath;
+                removedTargets.append(path);
+            } else if (!QFileInfo::exists(path)) {
+                removedTargets.append(path);
+            } else {
+                qWarning() << "RemoveSpritesCommand: failed to remove source file, keeping sprite in layout:" << path;
             }
         }
+        if (removedTargets.isEmpty()) {
+            return;
+        }
+
         // Remove from activeFramePaths
-        for (const QString& path : m_targets) {
+        for (const QString& path : removedTargets) {
             m_activeFramePaths->removeAll(path);
         }
         // Remove from timelines
-        const QSet<QString> targetSet(m_targets.begin(), m_targets.end());
+        const QSet<QString> targetSet(removedTargets.begin(), removedTargets.end());
         for (auto& timeline : *m_timelines) {
             for (int i = timeline.frames.size() - 1; i >= 0; --i) {
                 if (targetSet.contains(timeline.frames[i])) {
@@ -774,7 +868,7 @@ public:
         if (m_postExecuteUndo) m_postExecuteUndo();
     }
 
-    int id() const override { return 1013; }
+    int id() const override { return 1014; }
 
 private:
     QStringList* m_activeFramePaths;
@@ -884,7 +978,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1014; }
+    int id() const override { return 1015; }
 
 private:
     QStringList* m_activeFramePaths;
@@ -930,7 +1024,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1015; }
+    int id() const override { return 1016; }
 
     bool mergeWith(const QUndoCommand* other) override {
         const auto* o = static_cast<const SetTimelineNameCommand*>(other);
@@ -976,7 +1070,7 @@ public:
         if (m_postExecute) m_postExecute();
     }
 
-    int id() const override { return 1016; }
+    int id() const override { return 1017; }
 
     bool mergeWith(const QUndoCommand* other) override {
         const auto* o = static_cast<const SetTimelineFpsCommand*>(other);

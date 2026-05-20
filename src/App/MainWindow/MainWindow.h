@@ -452,7 +452,6 @@ private slots:
     void onRedo();
 
     // === Asynchronous Loading Slots ===
-    void onFolderDiscoveryFinished();
     void onProjectLoadFinished();
     void onZipDiscoveryFinished();
     void onFrameDetectionFinished();
@@ -555,6 +554,18 @@ private:
      * @return bool True if all active frames are in the source folder
      */
     bool activeFramesAreInSourceFolder() const;
+
+    /**
+     * @brief Checks if the source folder contains exactly the current active frames.
+     *
+     * @return bool True if the source folder image set matches the active frame list
+     */
+    bool sourceFolderMatchesActiveFrames() const;
+
+    /**
+     * @brief Returns whether removing sprites should also remove their backing files.
+     */
+    bool shouldDeleteRemovedSpritesFromSource() const;
 
     /**
      * @brief Copies active frames to the source folder.
@@ -994,7 +1005,9 @@ public:
     void onSettingsClicked();
     void onSettingsStylesClicked();
     void onSettingsSpritesheetClicked();
+#ifndef Q_OS_WASM
     void onSettingsCliToolsClicked();
+#endif
 
     /**
      * @brief Applies settings to the UI.
@@ -1170,7 +1183,7 @@ private:
     QString m_spratFramesBin;
     QString m_spratUnpackBin;
     LayoutRunner* m_layoutRunner;
-    SourceFolderWatcher* m_folderWatcher;
+    SourceFolderWatcher* m_folderWatcher = nullptr;
     QAction* m_openSourceFolderAction = nullptr;
     QString  m_projectFilePath;            // path of the last loaded project file
     bool     m_sourceFolderIsTemp = false; // true when sourceFolder is a QTemporaryDir
@@ -1212,13 +1225,6 @@ private:
     QStringList m_recentProjects;
 
     // === Async Loading Helpers ===
-    struct FolderDiscoveryResult {
-        QString root;
-        QStringList imagePaths;
-        MainWindow::DropAction action;
-    };
-    QFutureWatcher<FolderDiscoveryResult> m_folderDiscoveryWatcher;
-    void processFolderDiscoveryResult(const FolderDiscoveryResult& result);
 
     struct ProjectLoadResult {
         QString path;
@@ -1292,6 +1298,7 @@ private:
     bool m_layoutRunPending = false;
     bool m_layoutRunPendingQuiet = false;  // quiet flag for deferred pending run
     bool m_layoutDirty = false;            // rebuild needed but Navigator view is active
+    int  m_layoutGeneration = 0;           // incremented on each successful layout completion
     bool m_layoutRebuildPaused = false;    // rebuild paused because user is hovering over canvas
     int m_pendingChangeCount = 0;
     static constexpr int kLayoutBufferFullThreshold = 20;

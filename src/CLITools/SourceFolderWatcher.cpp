@@ -161,10 +161,11 @@ void SourceFolderWatcher::setDebounceInterval(int ms) {
 
 void SourceFolderWatcher::watchSubdirectories() {
     if (!m_watcher || m_watchedPath.isEmpty()) return;
-    QDirIterator it(m_watchedPath, QDir::Dirs | QDir::NoDotAndDotDot,
-                    QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        m_watcher->addPath(it.next());
+    
+    // Use optimized directory discovery to skip .git, node_modules, etc.
+    const QStringList dirs = ImageDiscoveryService::imageDirectoriesRecursive(m_watchedPath);
+    for (const QString& dir : dirs) {
+        m_watcher->addPath(dir);
     }
 }
 
@@ -231,16 +232,10 @@ void SourceFolderWatcher::updatePreviousFilesList() {
 }
 
 QSet<QString> SourceFolderWatcher::getCurrentFiles() const {
-    QSet<QString> files;
-    // Use the shared filter list (includes tga/dds, lowercase only matching
-    // ImageDiscoveryService behaviour).  QDirIterator with Subdirectories
-    // scans the full tree so subdirectory changes are reflected correctly.
-    QDirIterator it(m_watchedPath,
-                    ImageDiscoveryService::supportedImageFilters(),
-                    QDir::Files | QDir::Readable,
-                    QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        files.insert(it.next());
+    if (m_watchedPath.isEmpty()) {
+        return QSet<QString>();
     }
-    return files;
+    // Use the optimized recursive collector which skips .git, node_modules, etc.
+    const QStringList files = ImageDiscoveryService::collectImagesRecursive({m_watchedPath});
+    return QSet<QString>(files.begin(), files.end());
 }

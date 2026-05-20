@@ -39,16 +39,23 @@ int legacyDefaultPivotY(const SpritePtr& sprite) {
 }
 
 void MainWindow::onRunLayout(bool quiet) {
+    QElapsedTimer totalTimer;
+    totalTimer.start();
+
     // If sync is active, ensure active frames have been copied to the sprites folder.
     if (m_settings.syncMode != SyncMode::None
         && m_session
         && !m_session->sourceFolder.isEmpty()
         && !m_session->activeFramePaths.isEmpty()
         && !activeFramesAreInSourceFolder()) {
+        
+        QElapsedTimer syncTimer;
+        syncTimer.start();
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
         if (m_session->layoutSourceIsList) {
             ensureFrameListInput();
         }
+        qInfo() << "[Performance] onRunLayout sync/copy took" << syncTimer.elapsed() << "ms";
     }
 
     if (m_session->layoutSourcePath.isEmpty()) {
@@ -69,7 +76,13 @@ void MainWindow::onRunLayout(bool quiet) {
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
 
     LayoutRunConfig config;
-    config.sourcePath = m_session->layoutSourcePath;
+    // Optimization: if all active frames are in the source folder, use the folder directly
+    // instead of the .txt list file. This is faster for spratlayout and avoids file scanning overhead.
+    if (m_settings.syncMode != SyncMode::None && sourceFolderMatchesActiveFrames()) {
+        config.sourcePath = m_session->sourceFolder;
+    } else {
+        config.sourcePath = m_session->layoutSourcePath;
+    }
     config.layoutBinary = m_spratLayoutBin;
 
     if (hasSelectedProfile) {
@@ -96,8 +109,10 @@ void MainWindow::onRunLayout(bool quiet) {
     m_layoutFailureDialogShown = false;
 
     qInfo() << "[Layout] Dispatching run, sourcePath=" << config.sourcePath
-            << "exists=" << QFile::exists(config.sourcePath)
-            << "isList=" << m_session->layoutSourceIsList;
+            << "exists=" << (QFileInfo(config.sourcePath).exists())
+            << "isList=" << !QFileInfo(config.sourcePath).isDir();
+    
+    qInfo() << "[Performance] onRunLayout preparation took" << totalTimer.elapsed() << "ms";
     m_layoutRunner->run(config);
 }
 
@@ -206,6 +221,21 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
     ensureUniqueSpriteNames(newModels, m_session->sourceFolder);
 
+    // Update session state immediately — before the animation starts.
+    // This prevents a race condition where the watcher's debounce fires during
+    // the ~180 ms animation window and performManualSync() reads stale models
+    // (which would include the just-deleted sprite and trigger a second layout run).
+    m_session->layoutModels = newModels;
+    AnimationPreviewService::invalidateSpriteMap();
+    populateActiveFrameListFromModel();
+    // Ensure the file watcher is tracking the current source folder.
+    // Covers all load paths (folder, ZIP, image, project restore).
+    initializeSourceFolderWatcher();
+
+    // Bump the generation counter so that any doSetModels lambda still in flight
+    // from a previous run can detect it is stale and skip the canvas update.
+    const int myGeneration = ++m_layoutGeneration;
+
     QStringList selectedPaths;
     for (const auto& s : m_session->selectedSprites) {
         selectedPaths << s->path;
@@ -215,16 +245,40 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     auto newScenePositions = LayoutCanvas::computeItemScenePositions(newModels);
     auto newAtlasRects     = LayoutCanvas::computeAtlasRects(newModels);
 
-    // Capture the post-load work as a reusable lambda (called after setModelsAsync).
-    auto doSetModels = [this, newModels, selectedPaths, primaryPath]() {
-        m_session->layoutModels = newModels;
-        AnimationPreviewService::invalidateSpriteMap();
+    // Capture the post-animation canvas update as a lambda.
+    // Session state (layoutModels, activeFramePaths, watcher) was already updated above.
+    auto doSetModels = [this, newModels, selectedPaths, primaryPath, myGeneration]() {
+        // A newer layout run has already completed — skip this stale canvas update.
+        // The newer run's doSetModels already owns the canvas.
+        if (myGeneration != m_layoutGeneration) {
+            qInfo() << "[Layout] Skipping stale canvas update for generation" << myGeneration
+                    << "(current:" << m_layoutGeneration << ")";
+            return;
+        }
+        if (m_isLoading) {
+            m_loadingUiMessage = tr("Loading sprites...");
+            if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
+        }
         qInfo() << "[WASM] setModelsAsync start"
                 << "models=" << m_session->layoutModels.size();
-        m_canvas->setModelsAsync(m_session->layoutModels, &m_isCanceled,
-            [this, selectedPaths, primaryPath]() {
+        m_canvas->setModelsAsync(newModels, &m_isCanceled,
+            [this, selectedPaths, primaryPath, myGeneration]() {
                 if (m_isCanceled) {
                     m_statusLabel->setText(tr("Loading images canceled"));
+                    return;
+                }
+
+                // Re-check: if a newer run completed while pixmaps were loading,
+                // skip the UI updates that belong to this run.
+                if (myGeneration != m_layoutGeneration) {
+                    qInfo() << "[Layout] Skipping stale UI update for generation" << myGeneration;
+                    m_pendingChangeCount = 0;
+                    if (m_layoutRunPending) {
+                        const bool q = m_layoutRunPendingQuiet;
+                        m_layoutRunPending = false;
+                        m_layoutRunPendingQuiet = false;
+                        onRunLayout(q);
+                    }
                     return;
                 }
 
@@ -242,7 +296,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
 
                 setLoading(false);
 
-                populateActiveFrameListFromModel();
+                // populateActiveFrameListFromModel() and initializeSourceFolderWatcher()
+                // were already called immediately above (before the animation started).
                 if (m_session->layoutSourceIsList) {
                     updateManualFrameLabel();
                 }

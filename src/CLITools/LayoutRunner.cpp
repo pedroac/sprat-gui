@@ -166,7 +166,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
             if (!result.error.isEmpty()) {
                 logEntry += QStringLiteral("\n  stderr: %1").arg(result.error);
             }
-            // When input is a list file, log whether it exists and its contents
+            // When input is a list file, log whether it exists and its size
             if (!args.isEmpty()) {
                 QFileInfo inputInfo(args.first());
                 if (inputInfo.isFile()) {
@@ -174,12 +174,6 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
                         .arg(args.first(),
                              QFile::exists(args.first()) ? "yes" : "no",
                              QString::number(inputInfo.size()));
-                    QFile f(args.first());
-                    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                        QString contents = QString::fromUtf8(f.readAll()).trimmed();
-                        if (contents.size() > 2000) contents = contents.left(2000) + QStringLiteral("...(truncated)");
-                        logEntry += QStringLiteral("\n  input contents:\n%1").arg(contents);
-                    }
                 } else {
                     logEntry += QStringLiteral("\n  input: %1 (isDir=%2, exists=%3)")
                         .arg(args.first(),

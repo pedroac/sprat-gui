@@ -441,9 +441,9 @@ struct AppSettings {
      *
      * Options: None (no sync), Manual (user-initiated), Watch (live monitoring)
      *
-     * Default: None
+     * Default: Watch
      */
-    SyncMode syncMode = SyncMode::None;
+    SyncMode syncMode = SyncMode::Watch;
 
     /**
      * @brief Recently opened project file paths (most recent first, max 5)

@@ -10,6 +10,10 @@
 #include <QKeySequence>
 #include <QtGlobal>
 
+namespace {
+const char kFolderBrowserMimeType[] = "application/x-sprat-folder-browser-paths";
+}
+
 /**
  * @brief Constructs the TimelineListWidget.
  * 
@@ -33,6 +37,7 @@ TimelineListWidget::TimelineListWidget(QWidget* parent) : QListWidget(parent) {
  */
 void TimelineListWidget::dragEnterEvent(QDragEnterEvent* event) {
     if (event->mimeData()->hasFormat("application/x-sprat-sprite") ||
+        event->mimeData()->hasFormat(kFolderBrowserMimeType) ||
         event->source() == this) {
         updatePlaceholder(event->position().toPoint());
         event->acceptProposedAction();
@@ -46,6 +51,7 @@ void TimelineListWidget::dragEnterEvent(QDragEnterEvent* event) {
  */
 void TimelineListWidget::dragMoveEvent(QDragMoveEvent* event) {
     if (event->mimeData()->hasFormat("application/x-sprat-sprite") ||
+        event->mimeData()->hasFormat(kFolderBrowserMimeType) ||
         event->source() == this) {
         updatePlaceholder(event->position().toPoint());
         event->acceptProposedAction();
@@ -77,6 +83,13 @@ void TimelineListWidget::dropEvent(QDropEvent* event) {
 
     if (event->mimeData()->hasFormat("application/x-sprat-sprite")) {
         QByteArray data = event->mimeData()->data("application/x-sprat-sprite");
+        QStringList paths = QString::fromUtf8(data).split('\n', Qt::SkipEmptyParts);
+        for (const QString& path : paths) {
+            emit frameDropped(path, targetRow++);
+        }
+        event->acceptProposedAction();
+    } else if (event->mimeData()->hasFormat(kFolderBrowserMimeType)) {
+        QByteArray data = event->mimeData()->data(kFolderBrowserMimeType);
         QStringList paths = QString::fromUtf8(data).split('\n', Qt::SkipEmptyParts);
         for (const QString& path : paths) {
             emit frameDropped(path, targetRow++);
@@ -149,10 +162,7 @@ Qt::DropActions TimelineListWidget::supportedDropActions() const {
  */
 void TimelineListWidget::startDrag(Qt::DropActions supportedActions)
 {
-#ifdef Q_OS_WASM
-    Q_UNUSED(supportedActions);
-    return;
-#endif
+
     QList<QListWidgetItem*> items = selectedItems();
     if (items.isEmpty()) {
         return;

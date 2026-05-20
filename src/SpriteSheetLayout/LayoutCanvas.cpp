@@ -738,10 +738,7 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
 
     ZoomableGraphicsView::mouseMoveEvent(event);
-#ifdef Q_OS_WASM
-    // Drag-and-drop is not reliable in WebAssembly builds.
-    return;
-#endif
+
     if (m_isPanning) {
         m_pendingDeselect = false;
         return;

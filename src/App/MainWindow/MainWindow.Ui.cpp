@@ -701,9 +701,11 @@ void MainWindow::setupToolbar() {
     spritesheetAction->setToolTip(tr("Open spritesheet settings"));
     connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
 
+#ifndef Q_OS_WASM
     QAction* cliToolsAction = settingsMenu->addAction(tr("CLI Tools..."));
     cliToolsAction->setToolTip(tr("Open CLI tools settings"));
     connect(cliToolsAction, &QAction::triggered, this, &MainWindow::onSettingsCliToolsClicked);
+#endif
 
     QAction* manageProfilesAction = settingsMenu->addAction(tr("Manage Profiles..."));
     manageProfilesAction->setToolTip(tr("Create and edit layout profiles"));

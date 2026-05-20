@@ -1,11 +1,17 @@
 #pragma once
 
 #include <QString>
+#include <functional>
 
 #ifdef Q_OS_WASM
 // Open a browser file picker and import into the Emscripten virtual FS.
 // When files are ready, sprat_on_file_picked will be called.
 void wasmOpenFileDialog(bool selectFolder);
+void wasmOpenFileDialogMode(int mode);
+
+// Override the default MainWindow file-picked handler until cleared.
+void wasmSetFilePickedHandler(const std::function<void(const QString&, int)>& handler);
+void wasmClearFilePickedHandler();
 
 // Install HTML5 drag-and-drop handlers that upload files into the virtual FS.
 void wasmInstallDropHandlers();

@@ -129,18 +129,8 @@ QString FolderSyncService::describeSyncResult(const SyncResult& result) {
 }
 
 QStringList FolderSyncService::getImageFilesInFolder(const QString& folderPath) {
-    QStringList result;
-
-    // Use the shared filter list so formats stay in sync with ImageDiscoveryService
-    // (includes tga/dds; removes the redundant uppercase duplicates).
-    QDirIterator it(folderPath, ImageDiscoveryService::supportedImageFilters(),
-                    QDir::Files | QDir::Readable, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        result.append(it.next());
-    }
-
-    result.sort();
-    return result;
+    // Use the optimized recursive collector which skips .git, node_modules, etc.
+    return ImageDiscoveryService::collectImagesRecursive({folderPath});
 }
 
 QStringList FolderSyncService::getSpritePaths(const QVector<SpritePtr>& sprites) {

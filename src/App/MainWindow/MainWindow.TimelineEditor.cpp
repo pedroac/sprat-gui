@@ -2,6 +2,7 @@
 #include "UndoCommands.h"
 
 #include <QLineEdit>
+#include <QLabel>
 #include <QListWidget>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -107,6 +108,7 @@ void MainWindow::onTimelineSelectionChanged() {
     }
     m_timelineFpsSpin->setEnabled(false);
     m_timelineEditorContainer->setVisible(false);
+    m_timelineDragHintLabel->setVisible(false);
     m_timelineFramesList->clear();
     refreshAnimationTest();
 }

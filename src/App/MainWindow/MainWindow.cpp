@@ -75,6 +75,21 @@ Q_LOGGING_CATEGORY(cli, "cli")
 Q_LOGGING_CATEGORY(project, "project")
 Q_LOGGING_CATEGORY(autosave, "autosave")
 
+namespace {
+bool isUnderSpratTrash(const QString& sourceFolder, const QString& path) {
+    if (sourceFolder.isEmpty() || path.isEmpty()) {
+        return false;
+    }
+
+    const QString trashRoot = QDir(sourceFolder).filePath(".sprat-trash");
+    const QString absolutePath = QFileInfo(path).absoluteFilePath();
+    const QString absoluteTrashRoot = QFileInfo(trashRoot).absoluteFilePath();
+
+    return absolutePath == absoluteTrashRoot
+        || absolutePath.startsWith(absoluteTrashRoot + '/');
+}
+}
+
 void MainWindow::openSettingsDialogForSection(SettingsDialog::Section section) {
     SettingsDialog dlg(m_settings, m_cliPaths, this, section);
     QObject::connect(&dlg, &SettingsDialog::installCliToolsRequested, this, &MainWindow::installCliTools);
@@ -185,7 +200,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
     m_autosaveTimer->start(AppConstants::kAutosaveIntervalMs);
 
-    connect(&m_folderDiscoveryWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFolderDiscoveryFinished);
     connect(&m_projectLoadWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectLoadFinished);
     connect(&m_zipDiscoveryWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onZipDiscoveryFinished);
     connect(&m_frameDetectionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameDetectionFinished);
@@ -264,7 +278,6 @@ MainWindow::~MainWindow() {
     // Ensure all background tasks are stopped/finished before we destroy members
     m_zipDiscoveryWatcher.waitForFinished();
     m_projectLoadWatcher.waitForFinished();
-    m_folderDiscoveryWatcher.waitForFinished();
     m_frameDetectionWatcher.waitForFinished();
     m_tarExtractionWatcher.waitForFinished();
     m_frameExtractionWatcher.waitForFinished();
@@ -337,11 +350,43 @@ bool MainWindow::ensureFrameListInput() {
     if (m_session->activeFramePaths.isEmpty()) {
         return false;
     }
-    QString fileName = QString("sprat-gui-frames-%1.txt").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-    const QString newFrameListPath = QDir::temp().filePath(fileName);
-    QFile file(newFrameListPath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qWarning() << "[FrameList] Failed to create:" << newFrameListPath;
+
+    // Compute common parent directory of all frames before writing the list
+    QString commonFolder;
+    if (!m_session->activeFramePaths.isEmpty()) {
+        commonFolder = QFileInfo(m_session->activeFramePaths.first()).absolutePath();
+        for (int i = 1; i < m_session->activeFramePaths.size(); ++i) {
+            const QString path = m_session->activeFramePaths.at(i);
+            // Quick check: if path starts with commonFolder (and is in a subfolder), we're good
+            if (path.startsWith(commonFolder + "/")) {
+                continue;
+            }
+            
+            // Otherwise, we need to find the common ancestor.
+            // Moving up the directory tree using string manipulation is faster than QFileInfo.
+            while (!commonFolder.isEmpty() && !path.startsWith(commonFolder + "/")) {
+                int lastSlash = commonFolder.lastIndexOf('/');
+                if (lastSlash <= 0) { // Reached root or empty
+                    commonFolder = (lastSlash == 0) ? "/" : "";
+                    break;
+                }
+                commonFolder = commonFolder.left(lastSlash);
+            }
+        }
+    }
+
+    // Reuse the same path across calls to avoid a race where spratlayout tries to
+    // open the file just after a second ensureFrameListInput() call has deleted it.
+    if (m_session->frameListPath.isEmpty()) {
+        const QString fileName = QString("sprat-gui-frames-%1.txt")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        m_session->frameListPath = QDir::temp().filePath(fileName);
+    }
+    const QString frameListPath = m_session->frameListPath;
+
+    QFile file(frameListPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        qWarning() << "[FrameList] Failed to write:" << frameListPath;
         return false;
     }
     QTextStream out(&file);
@@ -350,35 +395,13 @@ bool MainWindow::ensureFrameListInput() {
     }
     out.flush();
     file.close();
-    qInfo() << "[FrameList] Created:" << newFrameListPath
-            << "exists=" << QFile::exists(newFrameListPath)
+    qInfo() << "[FrameList] Written:" << frameListPath
+            << "exists=" << QFile::exists(frameListPath)
             << "frames=" << m_session->activeFramePaths.size();
 
-    const QString oldFrameListPath = m_session->frameListPath;
-    m_session->frameListPath = newFrameListPath;
-    m_session->layoutSourcePath = m_session->frameListPath;
+    m_session->layoutSourcePath = frameListPath;
     m_session->layoutSourceIsList = true;
-    if (!m_session->activeFramePaths.isEmpty()) {
-        // Find the common parent directory of all frames
-        QString commonFolder = QFileInfo(m_session->activeFramePaths.first()).absoluteDir().absolutePath();
-        for (int i = 1; i < m_session->activeFramePaths.size(); ++i) {
-            const QString path = m_session->activeFramePaths.at(i);
-            const QString dir = QFileInfo(path).absoluteDir().absolutePath();
-            // Find common ancestor between commonFolder and dir
-            while (!commonFolder.isEmpty()
-                   && dir != commonFolder
-                   && !dir.startsWith(commonFolder + "/")) {
-                const QString parent = QFileInfo(commonFolder).absoluteDir().absolutePath();
-                if (parent == commonFolder) break; // reached filesystem root
-                commonFolder = parent;
-            }
-        }
-        m_session->currentFolder = commonFolder;
-    }
-    if (!oldFrameListPath.isEmpty() && oldFrameListPath != m_session->frameListPath) {
-        qInfo() << "[FrameList] Deleting old:" << oldFrameListPath;
-        QFile::remove(oldFrameListPath);
-    }
+    m_session->currentFolder = commonFolder;
     updateManualFrameLabel();
     return true;
 }
@@ -642,8 +665,8 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         m_session->selectedSprites.end()
     );
 
-    // If sourceFolder is set, use reversible TrashBin deletion with undo support
-    if (!m_session->sourceFolder.isEmpty()) {
+    // In Manual/Watch mode, removal also deletes the backing source files with undo support.
+    if (shouldDeleteRemovedSpritesFromSource()) {
         const QStringList savedActivePaths = m_session->activeFramePaths;
         const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
         const int savedTimelineIdx = m_session->selectedTimelineIndex;
@@ -749,9 +772,10 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
 
-        // Delete the image files for removed sprites
-        for (const QString& path : targets) {
-            QFile(path).remove();
+        if (shouldDeleteRemovedSpritesFromSource()) {
+            for (const QString& path : targets) {
+                QFile(path).remove();
+            }
         }
         m_statusLabel->setText(tr("No frames loaded"));
         m_folderLabel->setText(tr("Folder: none"));
@@ -802,9 +826,10 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         refreshAnimationTest();
     }
 
-    // Delete the image files for removed sprites
-    for (const QString& path : targets) {
-        QFile(path).remove();
+    if (shouldDeleteRemovedSpritesFromSource()) {
+        for (const QString& path : targets) {
+            QFile(path).remove();
+        }
     }
 
     // Capture sprite positions BEFORE removing them for smooth animation
@@ -870,8 +895,8 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         m_session->selectedSprites.end()
     );
 
-    // If sourceFolder is set, use reversible TrashBin deletion with undo support
-    if (!m_session->sourceFolder.isEmpty()) {
+    // In Manual/Watch mode, removal also deletes the backing source files with undo support.
+    if (shouldDeleteRemovedSpritesFromSource()) {
         const QStringList savedActivePaths = m_session->activeFramePaths;
         const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
         const int savedTimelineIdx = m_session->selectedTimelineIndex;
@@ -977,9 +1002,10 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
 
-        // Delete the image files for removed sprites
-        for (const QString& path : targets) {
-            QFile(path).remove();
+        if (shouldDeleteRemovedSpritesFromSource()) {
+            for (const QString& path : targets) {
+                QFile(path).remove();
+            }
         }
         m_statusLabel->setText(tr("No frames loaded"));
         m_folderLabel->setText(tr("Folder: none"));
@@ -1030,9 +1056,10 @@ void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
         refreshAnimationTest();
     }
 
-    // Delete the image files for removed sprites
-    for (const QString& path : targets) {
-        QFile(path).remove();
+    if (shouldDeleteRemovedSpritesFromSource()) {
+        for (const QString& path : targets) {
+            QFile(path).remove();
+        }
     }
 
     // Capture sprite positions BEFORE removing them for smooth animation
@@ -1183,9 +1210,11 @@ void MainWindow::onSettingsSpritesheetClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::Spritesheet);
 }
 
+#ifndef Q_OS_WASM
 void MainWindow::onSettingsCliToolsClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::CliTools);
 }
+#endif
 
 void MainWindow::onManageProfiles() {
     ProfilesDialog dialog(configuredProfiles(), this);
@@ -1224,15 +1253,9 @@ void MainWindow::applySettings() {
         // which handles the mode internally via its own if branches
         initializeSourceFolderWatcher();
 
-        // Set up periodic check for Watch mode to detect file deletions
-        if (m_settings.syncMode == SyncMode::Watch) {
-            if (!m_watchModePeriodicCheckTimer) {
-                m_watchModePeriodicCheckTimer = new QTimer(this);
-                connect(m_watchModePeriodicCheckTimer, &QTimer::timeout,
-                        this, &MainWindow::onWatchModePeriodicCheck);
-            }
-            // Check every 2 seconds for deleted files
-            m_watchModePeriodicCheckTimer->start(AppConstants::kWatchModeCheckMs);
+        // Stop polling timer — QFileSystemWatcher handles changes event-driven
+        if (m_watchModePeriodicCheckTimer) {
+            m_watchModePeriodicCheckTimer->stop();
         }
     }
 
@@ -1327,6 +1350,24 @@ void MainWindow::onFolderWatcherFilesAdded(const QStringList& paths) {
         return;
     }
 
+    // Check if these are files we already know about (e.g. added via GUI)
+    bool hasNewFiles = false;
+    for (const QString& path : paths) {
+        if (isUnderSpratTrash(m_session->sourceFolder, path)) {
+            qInfo() << "[Watch] Ignoring add inside .sprat-trash:" << path;
+            continue;
+        }
+        if (!m_session->activeFramePaths.contains(path)) {
+            hasNewFiles = true;
+            break;
+        }
+    }
+
+    if (!hasNewFiles) {
+        qInfo() << "[Watch] All added files already in session, skipping sync";
+        return;
+    }
+
     qInfo() << "[Watch] Processing additions...";
     QString message = QString(tr("Detected %1 new sprite(s). Syncing...")).arg(paths.size());
     showSyncNotification(message);
@@ -1342,6 +1383,24 @@ void MainWindow::onFolderWatcherFilesRemoved(const QStringList& paths) {
         return;
     }
 
+    // Check if these are files we already removed via GUI
+    bool hasRemainingFiles = false;
+    for (const QString& path : paths) {
+        if (isUnderSpratTrash(m_session->sourceFolder, path)) {
+            qInfo() << "[Watch] Ignoring removal inside .sprat-trash:" << path;
+            continue;
+        }
+        if (m_session->activeFramePaths.contains(path)) {
+            hasRemainingFiles = true;
+            break;
+        }
+    }
+
+    if (!hasRemainingFiles) {
+        qInfo() << "[Watch] All removed files already gone from session, skipping sync";
+        return;
+    }
+
     qInfo() << "[Watch] Processing removals...";
     QString message = QString(tr("%1 sprite(s) removed from source folder.")).arg(paths.size());
     showSyncNotification(message);
@@ -1354,6 +1413,24 @@ void MainWindow::onFolderWatcherFilesModified(const QStringList& paths) {
 
     if (m_settings.syncMode != SyncMode::Watch) {
         qWarning() << "[Watch] Not in Watch mode, ignoring";
+        return;
+    }
+
+    // Only rebuild if the modified files are actually part of our layout
+    bool inModel = false;
+    for (const QString& path : paths) {
+        if (isUnderSpratTrash(m_session->sourceFolder, path)) {
+            qInfo() << "[Watch] Ignoring modification inside .sprat-trash:" << path;
+            continue;
+        }
+        if (m_session->activeFramePaths.contains(path)) {
+            inModel = true;
+            break;
+        }
+    }
+
+    if (!inModel) {
+        qInfo() << "[Watch] Modified files not in session, skipping rebuild";
         return;
     }
 
@@ -1570,13 +1647,19 @@ void MainWindow::performManualSync() {
         .arg(removedCount).arg(addedCount);
     showSyncNotification(summary);
 
-    // Step 4: Refresh layout
+    // Step 4: Refresh layout — only rebuild when the sprite set actually changed.
+    // Rebuilding unconditionally (even on zero-change calls) caused the periodic
+    // Watch-mode check to trigger continuous sprite animation when nothing changed.
     qInfo() << "[Sync] Step 4: Refreshing layout...";
     if (!m_session->activeFramePaths.isEmpty()) {
-        qInfo() << "[Sync]   Running layout...";
-        m_statusLabel->setText(tr("Regenerating layout..."));
-        // Folder sync completed - rebuild immediately
-        scheduleLayoutRebuild(true);
+        if (removedCount > 0 || addedCount > 0) {
+            qInfo() << "[Sync]   Running layout...";
+            m_statusLabel->setText(tr("Regenerating layout..."));
+            // Folder sync completed - rebuild immediately
+            scheduleLayoutRebuild(true);
+        } else {
+            qInfo() << "[Sync]   No changes - skipping layout rebuild";
+        }
     } else {
         qWarning() << "[Sync]   No sprites left!";
         m_statusLabel->setText(tr("No sprites to display."));
@@ -1664,11 +1747,17 @@ void MainWindow::initializeSourceFolderWatcher() {
 
     qInfo() << "[Watcher] Source folder:" << m_session->sourceFolder;
 
-    // NOTE: File watcher disabled due to intermittent crash on initialization
-    // The crash is unrelated to split sprites feature
-    // File watching will be re-enabled after root cause is identified
-    qInfo() << "[Watcher] File watching temporarily disabled (using manual mode)";
-    qInfo() << "[Watcher] Manual mode - folder ready for manual sync:" << m_session->sourceFolder;
+    if (m_settings.syncMode == SyncMode::Watch) {
+        // Only restart if not already watching this exact folder
+        if (m_folderWatcher->watchedPath() != m_session->sourceFolder) {
+            m_folderWatcher->watchFolder(m_session->sourceFolder);
+        }
+    } else {
+        if (m_folderWatcher->isWatching()) {
+            m_folderWatcher->stopWatching();
+        }
+        qInfo() << "[Watcher] Manual mode - folder ready:" << m_session->sourceFolder;
+    }
 
     updateOpenSourceFolderAction();
 }
@@ -1714,9 +1803,14 @@ void MainWindow::onOpenSourceFolderClicked() {
     // after exec() returns so the layout rebuild runs in the parent event loop,
     // not inside the modal's nested event loop (avoids a WASM UI freeze).
     QStringList accumulatedDeleted;
+    QStringList accumulatedAdded;
     connect(dlg, &WasmFolderBrowserDialog::filesDeleted,
             dlg, [&accumulatedDeleted](const QStringList& paths) {
         accumulatedDeleted << paths;
+    });
+    connect(dlg, &WasmFolderBrowserDialog::filesAdded,
+            dlg, [&accumulatedAdded](const QStringList& paths) {
+        accumulatedAdded << paths;
     });
 
     dlg->setAttribute(Qt::WA_DeleteOnClose);
@@ -1724,6 +1818,9 @@ void MainWindow::onOpenSourceFolderClicked() {
 
     if (!accumulatedDeleted.isEmpty()) {
         onSpritesDeleted(accumulatedDeleted);
+    }
+    if (!accumulatedAdded.isEmpty()) {
+        performManualSync();
     }
 #else
     const QString folder = m_session ? m_session->sourceFolder : QString();
@@ -1833,68 +1930,126 @@ bool MainWindow::activeFramesAreInSourceFolder() const {
     if (m_session->sourceFolder.isEmpty() || m_session->activeFramePaths.isEmpty()) {
         return false;
     }
-    QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
-    if (!canonicalFolder.endsWith('/')) canonicalFolder += '/';
+    
+    QElapsedTimer timer;
+    timer.start();
+
+    QDir sourceDir(m_session->sourceFolder);
+    // Use an absolute path for faster prefix matching
+    const QString absoluteSourcePath = sourceDir.absolutePath() + "/";
+
     for (const QString& path : m_session->activeFramePaths) {
+        // Optimization: avoid QFileInfo if path already starts with the source folder
+        if (path.startsWith(absoluteSourcePath)) {
+            continue;
+        }
+        
+        // If not, it might be a relative path or an absolute path outside.
+        // We still need QFileInfo for canonical/absolute resolution if it's not a direct prefix match.
         const QString absPath = QFileInfo(path).absoluteFilePath();
-        if (!absPath.startsWith(canonicalFolder)) {
+        if (!absPath.startsWith(absoluteSourcePath)) {
+            qInfo() << "[Performance] activeFramesAreInSourceFolder check failed in" << timer.elapsed() << "ms";
             return false;
         }
     }
+    
+    qInfo() << "[Performance] activeFramesAreInSourceFolder checked" << m_session->activeFramePaths.size() << "files in" << timer.elapsed() << "ms";
     return true;
+}
+
+bool MainWindow::sourceFolderMatchesActiveFrames() const {
+    if (!m_session || m_session->sourceFolder.isEmpty() || m_session->activeFramePaths.isEmpty()) {
+        return false;
+    }
+    if (!activeFramesAreInSourceFolder()) {
+        return false;
+    }
+    if (QDir(QDir(m_session->sourceFolder).filePath(".sprat-trash")).exists()) {
+        return false;
+    }
+
+    const QStringList folderImages = FolderSyncService::getImageFilesInFolder(m_session->sourceFolder);
+    if (folderImages.size() != m_session->activeFramePaths.size()) {
+        return false;
+    }
+
+    const QSet<QString> folderSet(folderImages.begin(), folderImages.end());
+    const QSet<QString> activeSet(m_session->activeFramePaths.begin(), m_session->activeFramePaths.end());
+    return folderSet == activeSet;
+}
+
+bool MainWindow::shouldDeleteRemovedSpritesFromSource() const {
+    return m_session
+        && m_settings.syncMode != SyncMode::None
+        && !m_session->sourceFolder.isEmpty();
 }
 
 void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
     if (m_session->activeFramePaths.isEmpty() || m_session->sourceFolder.isEmpty()) {
         return;
     }
-    QDir().mkpath(m_session->sourceFolder);
-    QString canonicalFolder = QDir(m_session->sourceFolder).absolutePath();
+    
+    QElapsedTimer timer;
+    timer.start();
+
+    QDir sourceDir(m_session->sourceFolder);
+    sourceDir.mkpath(".");
+    QString canonicalFolder = sourceDir.absolutePath();
     if (!canonicalFolder.endsWith('/')) canonicalFolder += '/';
 
     // Determine the common root of active frames for relative path computation
-    const QString originalRoot = m_session->currentFolder;
+    const QString originalRootPath = m_session->currentFolder;
+    QDir originalRootDir(originalRootPath);
 
     QStringList newPaths;
     newPaths.reserve(m_session->activeFramePaths.size());
 
     for (const QString& path : m_session->activeFramePaths) {
+        // Optimization: if path already starts with the source folder, keep as-is
+        if (path.startsWith(canonicalFolder)) {
+            newPaths.append(path);
+            continue;
+        }
+
         const QFileInfo srcInfo(path);
         const QString absPath = srcInfo.absoluteFilePath();
 
-        // Already in source folder (including subfolders) — keep as-is.
+        // Check again after resolving absolute path
         if (absPath.startsWith(canonicalFolder)) {
-            newPaths.append(path);
+            newPaths.append(absPath);
             continue;
         }
 
         // Compute relative path from original root to preserve subfolder structure
         QString relPath;
-        if (!originalRoot.isEmpty() && absPath.startsWith(originalRoot)) {
-            relPath = QDir(originalRoot).relativeFilePath(absPath);
+        if (!originalRootPath.isEmpty() && absPath.startsWith(originalRootPath)) {
+            relPath = originalRootDir.relativeFilePath(absPath);
         } else {
             relPath = srcInfo.fileName();
         }
 
-        QString dst = QDir(m_session->sourceFolder).filePath(relPath);
+        QString dst = sourceDir.filePath(relPath);
+        QFileInfo dstInfo(dst);
 
-        // Create intermediate subdirectories
-        QDir().mkpath(QFileInfo(dst).absolutePath());
+        // Create intermediate subdirectories if needed
+        QString dstDir = dstInfo.absolutePath();
+        if (!QDir(dstDir).exists()) {
+            sourceDir.mkpath(sourceDir.relativeFilePath(dstDir));
+        }
 
         // Handle existing files
-        if (QFileInfo::exists(dst)) {
+        if (dstInfo.exists()) {
             if (overwriteDuplicates) {
                 // Replace the existing file
                 QFile::remove(dst);
             } else {
                 // Resolve name conflicts: try baseName_1, baseName_2, ..., baseName_99.
-                const QString baseName = QFileInfo(dst).completeBaseName();
-                const QString suffix   = QFileInfo(dst).suffix();
-                const QString dstDir   = QFileInfo(dst).absolutePath();
+                const QString baseName = dstInfo.completeBaseName();
+                const QString suffix   = dstInfo.suffix();
                 bool resolved = false;
                 for (int i = 1; i <= 99; ++i) {
-                    const QString candidate = QDir(dstDir).filePath(
-                        QString("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
+                    const QString candidateName = QStringLiteral("%1_%2.%3").arg(baseName).arg(i).arg(suffix);
+                    const QString candidate = QDir(dstDir).filePath(candidateName);
                     if (!QFileInfo::exists(candidate)) {
                         dst = candidate;
                         resolved = true;
@@ -1910,16 +2065,15 @@ void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
             }
         }
 
-        if (!QFile::copy(path, dst)) {
-            qWarning() << "copyActiveFramesToSourceFolder: copy failed" << path << "->" << dst;
-            newPaths.append(path);
-            continue;
+        if (QFile::copy(absPath, dst)) {
+            newPaths.append(dst);
+        } else {
+            qWarning() << "copyActiveFramesToSourceFolder: copy failed" << absPath << "->" << dst;
+            newPaths.append(absPath);
         }
-
-        newPaths.append(dst);
     }
-
     m_session->activeFramePaths = newPaths;
+    qInfo() << "[Performance] copyActiveFramesToSourceFolder took" << timer.elapsed() << "ms for" << newPaths.size() << "files";
 }
 
 void MainWindow::clearSourceFolderImages(const QString& excludePath) {

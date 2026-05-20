@@ -518,27 +518,6 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
 
     const QString parentFolderPath = folderPathForTreeItem(parentGroup);
 
-    QVector<AnimationTimeline> added;
-    for (int i = 0; i < parentGroup->childCount(); ++i) {
-        QTreeWidgetItem* childItem = parentGroup->child(i);
-        QStringList paths = collectDescendantSpritePaths(childItem);
-        if (paths.isEmpty()) continue;
-        AnimationTimeline timeline;
-        timeline.name = getUniqueTimelineName(childItem->text(0), parentFolderPath);
-        timeline.fps = 8;
-        timeline.frames = paths;
-        m_session->timelines.append(timeline);
-        added.append(timeline);
-    }
-
-    if (added.isEmpty()) return;
-
-    m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
-    refreshTimelineList();
-    m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
-    refreshTimelineFrames();
-    refreshAnimationTest();
-
     auto postExecute = [this]() {
         refreshTimelineList();
         if (m_session->selectedTimelineIndex >= 0)
@@ -549,18 +528,41 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
         refreshAnimationTest();
     };
 
-    if (added.size() == 1) {
-        m_undoStack->push(new TimelineAddCommand(
-            &m_session->timelines, added[0],
-            &m_session->selectedTimelineIndex, postExecute));
-    } else {
+    bool useMacro = parentGroup->childCount() > 1;
+    if (useMacro) {
         m_undoStack->beginMacro(tr("Auto-create Timelines"));
-        for (const AnimationTimeline& tl : added) {
-            m_undoStack->push(new TimelineAddCommand(
-                &m_session->timelines, tl,
-                &m_session->selectedTimelineIndex, postExecute));
-        }
+    }
+
+    int addedCount = 0;
+    for (int i = 0; i < parentGroup->childCount(); ++i) {
+        QTreeWidgetItem* childItem = parentGroup->child(i);
+        QStringList paths = collectDescendantSpritePaths(childItem);
+        if (paths.isEmpty()) continue;
+
+        AnimationTimeline timeline;
+        timeline.name = getUniqueTimelineName(childItem->text(0), parentFolderPath);
+        timeline.fps = 8;
+        timeline.frames = paths;
+
+        m_session->timelines.append(timeline);
+        m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
+        
+        m_undoStack->push(new TimelineAddCommand(
+            &m_session->timelines, timeline,
+            &m_session->selectedTimelineIndex, postExecute));
+        
+        addedCount++;
+    }
+
+    if (useMacro) {
         m_undoStack->endMacro();
+    }
+
+    if (addedCount > 0) {
+        refreshTimelineList();
+        m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+        refreshTimelineFrames();
+        refreshAnimationTest();
     }
 }
 

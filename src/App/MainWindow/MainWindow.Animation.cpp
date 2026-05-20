@@ -61,6 +61,9 @@ void MainWindow::refreshTimelineList() {
     }
     m_timelineList->blockSignals(false);
     m_timelineList->setVisible(!m_session->timelines.isEmpty());
+    if (m_session->timelines.isEmpty()) {
+        onTimelineSelectionChanged();
+    }
 }
 
 void MainWindow::refreshTimelineFrames() {
@@ -81,6 +84,7 @@ void MainWindow::refreshTimelineFrames() {
     }
 
     const auto& timeline = m_session->timelines[m_session->selectedTimelineIndex];
+    m_timelineDragHintLabel->setVisible(timeline.frames.isEmpty());
     for (const QString& path : timeline.frames) {
         QFileInfo fi(path);
         QIcon icon = m_timelineFrameIconCache.value(path);
@@ -247,6 +251,9 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         return;
     }
 
+    const QVector<AnimationTimeline> oldState = m_session->timelines;
+    const int oldSelection = m_session->selectedTimelineIndex;
+
     int focusIndex = -1;
     QString status;
     bool changed = TimelineGenerationService::generateFromLayout(
@@ -259,13 +266,34 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         status);
 
     if (changed) {
-        refreshTimelineList();
         if (focusIndex >= 0) {
-            m_timelineList->setCurrentRow(focusIndex);
+            m_session->selectedTimelineIndex = focusIndex;
         }
-        if (m_animCanvas) m_animCanvas->setZoomManual(false);
-        fitAnimationToViewport();
-        refreshAnimationTest();
+
+        auto postExecute = [this]() {
+            refreshTimelineList();
+            if (m_session->selectedTimelineIndex >= 0)
+                m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+            else
+                onTimelineSelectionChanged();
+
+            if (m_animCanvas) m_animCanvas->setZoomManual(false);
+            fitAnimationToViewport();
+            refreshAnimationTest();
+        };
+
+        m_undoStack->push(new TimelinesUpdateCommand(
+            &m_session->timelines,
+            oldState,
+            m_session->timelines,
+            oldSelection,
+            m_session->selectedTimelineIndex,
+            &m_session->selectedTimelineIndex,
+            postExecute,
+            tr("Auto-create Timelines")
+        ));
+
+        postExecute();
         m_statusLabel->setText(status);
     } else {
         QMessageBox::information(this, tr("Generate Timelines"), status);

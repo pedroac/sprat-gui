@@ -23,7 +23,6 @@
 #include <QProgressDialog>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QtConcurrent>
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
 #include <QScrollBar>
@@ -205,60 +204,17 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         return;
     }
 
-    m_loadingUiMessage = tr("Scanning folder...");
-    setLoading(true);
-
     const QString folderPath = QDir(path).absolutePath();
+    qInfo() << "[loadFolder] path=" << folderPath << "action=" << (int)action;
 
-#ifdef Q_OS_WASM
-    // WASM is single-threaded; defer via singleShot(0) so the loading overlay
-    // gets a chance to paint before the synchronous directory scan begins.
-    QTimer::singleShot(0, this, [this, folderPath, action]() {
-        processFolderDiscoveryResult({folderPath,
-                                      ImageDiscoveryService::collectImagesRecursive({folderPath}),
-                                      action});
-    });
-#else
-    // Desktop: run the filesystem scan on a worker thread so the UI stays
-    // responsive. Result is delivered back on the main thread via the watcher.
-    if (m_folderDiscoveryWatcher.isRunning()) {
-        m_folderDiscoveryWatcher.cancel();
-    }
-    m_folderDiscoveryWatcher.setFuture(
-        QtConcurrent::run([folderPath, action]() -> FolderDiscoveryResult {
-            return {folderPath,
-                    ImageDiscoveryService::collectImagesRecursive({folderPath}),
-                    action};
-        })
-    );
-#endif
-}
-
-void MainWindow::onFolderDiscoveryFinished() {
-    processFolderDiscoveryResult(m_folderDiscoveryWatcher.result());
-}
-
-void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& result) {
-    const QString&     folderPath    = result.root;
-    const QStringList& absolutePaths = result.imagePaths;
-    const DropAction   action        = result.action;
-
-    qInfo() << "[loadFolder] path=" << folderPath
-            << "images=" << absolutePaths.size();
-
-    if (absolutePaths.isEmpty()) {
-        setLoading(false);
-        QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
-        return;
-    }
-
-    // Clean up any previous frame list
+    // Clean up any previous frame list file
     if (!m_session->frameListPath.isEmpty()) {
         QFile::remove(m_session->frameListPath);
         m_session->frameListPath.clear();
     }
 
     if (action == DropAction::Merge) {
+        // Ask about duplicates before showing the loading overlay
         QMessageBox msg(this);
         msg.setWindowTitle(tr("Merge with duplicates"));
         msg.setText(tr("When merging, what should happen to files with the same name?"));
@@ -267,39 +223,102 @@ void MainWindow::processFolderDiscoveryResult(const FolderDiscoveryResult& resul
         msg.exec();
         m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
 
-        m_session->activeFramePaths.append(absolutePaths);
-        m_shouldClearSpritesFolder = false;
-    } else {
-        // On Replace, delete all contents from sprites folder (including subdirectories)
-        if (!m_session->sourceFolder.isEmpty()) {
-            QDir dir(m_session->sourceFolder);
-            dir.removeRecursively();
-            QDir().mkpath(m_session->sourceFolder);
+        // Enumerate the new folder's images so we can copy them into sourceFolder.
+        // spratlayout will traverse sourceFolder itself; no .txt list is needed.
+        const QStringList newImages = ImageDiscoveryService::collectImagesRecursive({folderPath});
+        if (newImages.isEmpty()) {
+            QMessageBox::warning(this, tr("Merge Failed"), tr("No image files found in the selected folder."));
+            return;
         }
 
-        m_session->sourceFolder.clear();
+        m_loadingUiMessage = tr("Copying files...");
+        setLoading(true);
+
         ensureSourceFolder();
+        QDir srcRoot(folderPath);
+        QDir dstRoot(m_session->sourceFolder);
+        for (const QString& imgPath : newImages) {
+            const QString relPath = srcRoot.relativeFilePath(imgPath);
+            const QString dstPath = dstRoot.filePath(relPath);
+            QFileInfo dstInfo(dstPath);
+            dstRoot.mkpath(dstInfo.absolutePath());
+            if (QFile::exists(dstPath)) {
+                if (m_mergeReplaceAllDuplicates) {
+                    QFile::remove(dstPath);
+                    QFile::copy(imgPath, dstPath);
+                } else {
+                    int n = 2;
+                    QString newDst;
+                    do {
+                        newDst = dstInfo.absolutePath() + '/' +
+                                 dstInfo.baseName() + '_' + QString::number(n++) +
+                                 '.' + dstInfo.suffix();
+                    } while (QFile::exists(newDst));
+                    QFile::copy(imgPath, newDst);
+                }
+            } else {
+                QFile::copy(imgPath, dstPath);
+            }
+        }
+
+        m_shouldClearSpritesFolder = false;
+        m_session->layoutSourcePath = m_session->sourceFolder;
+        m_session->layoutSourceIsList = false;
+        m_statusLabel->setText(QString(tr("Merging %1 image frame(s) from %2"))
+                               .arg(newImages.size()).arg(folderPath));
+        m_loadingUiMessage = tr("Building layout...");
+        if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
+    } else {
+        // Replace: copy into a fresh temp source folder so the original is never modified.
+        // spratlayout traverses the temp folder; activeFramePaths is rebuilt from its output.
+        const QStringList newImages = ImageDiscoveryService::collectImagesRecursive({folderPath});
+        if (newImages.isEmpty()) {
+            QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
+            return;
+        }
+
+        m_session->clearSourceFolderTempDir();
+        m_session->sourceFolder.clear();
         m_session->timelines.clear();
         m_session->selectedTimelineIndex = -1;
         refreshTimelineList();
         refreshAnimationTest();
         m_projectFilePath.clear();
-        m_sourceFolderIsTemp = false;
         m_session->currentFolder = folderPath;
         m_folderLabel->setText(tr("Folder: ") + folderPath);
         m_session->cachedLayoutOutput.clear();
         m_session->cachedLayoutScale = 1.0;
-        m_session->activeFramePaths = absolutePaths;
+        m_session->activeFramePaths.clear();
         m_shouldClearSpritesFolder = false;
-        // Clear undo history when loading a new project
         if (m_undoStack) m_undoStack->clear();
+
+        m_loadingUiMessage = tr("Copying files...");
+        setLoading(true);
+        m_statusLabel->setText(QString(tr("Loading %1...")).arg(folderPath));
+
+        ensureSourceFolder();
+        QDir srcRoot(folderPath);
+        QDir dstRoot(m_session->sourceFolder);
+        for (const QString& imgPath : newImages) {
+            const QString relPath = srcRoot.relativeFilePath(imgPath);
+            const QString dstPath = dstRoot.filePath(relPath);
+            QFileInfo dstInfo(dstPath);
+            dstRoot.mkpath(dstInfo.absolutePath());
+            QFile::copy(imgPath, dstPath);
+        }
+
+        m_session->layoutSourcePath = m_session->sourceFolder;
+        m_session->layoutSourceIsList = false;
+        m_loadingUiMessage = tr("Building layout...");
+        if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
     }
 
-    // Build a frame list so spratlayout sees all images (including subdirectories)
-    ensureFrameListInput();
-
-    m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from %2")).arg(absolutePaths.size()).arg(folderPath));
+#ifdef Q_OS_WASM
+    // Defer on WASM so the loading overlay can paint before the synchronous layout run.
+    QTimer::singleShot(0, this, [this]() { scheduleLayoutRebuild(true); });
+#else
     scheduleLayoutRebuild(true);
+#endif
 }
 
 bool MainWindow::confirmLayoutReplacement() {
@@ -448,7 +467,6 @@ void MainWindow::onCancelLoading() {
     if (m_layoutRunner && m_layoutRunner->isRunning()) {
         m_layoutRunner->stop();
     }
-    m_folderDiscoveryWatcher.cancel();
     m_projectLoadWatcher.cancel();
     m_zipDiscoveryWatcher.cancel();
     m_frameDetectionWatcher.cancel();

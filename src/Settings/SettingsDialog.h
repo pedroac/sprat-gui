@@ -15,7 +15,9 @@ public:
     enum class Section {
         Styles,
         Spritesheet,
+#ifndef Q_OS_WASM
         CliTools
+#endif
     };
 
     explicit SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent = nullptr, Section section = Section::Styles);
@@ -29,7 +31,9 @@ signals:
 private slots:
     void pickColor(QPushButton* btn, QColor& color);
     void resetToDefaults();
+#ifndef Q_OS_WASM
     void pickCliBaseDir();
+#endif
     void onSyncModeChanged(int index);
     void onSyncNowClicked();
 
@@ -46,7 +50,9 @@ private:
     QScrollArea* m_scrollArea = nullptr;
     QGroupBox* m_stylesGroup = nullptr;
     QGroupBox* m_spritesheetGroup = nullptr;
+#ifndef Q_OS_WASM
     QGroupBox* m_cliGroup = nullptr;
+#endif
     
     QPushButton* m_canvasColorBtn;
     QPushButton* m_frameColorBtn;
@@ -56,8 +62,10 @@ private:
     QComboBox* m_borderStyleCombo;
     QComboBox* m_deduplicateModeCombo;
 
+#ifndef Q_OS_WASM
     QLineEdit* m_cliBaseDirEdit;
     QPushButton* m_cliBaseDirBtn;
+#endif
 
     // Sync controls
     QComboBox* m_syncModeCombo;

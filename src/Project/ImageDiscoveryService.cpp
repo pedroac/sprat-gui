@@ -56,28 +56,40 @@ QStringList ImageDiscoveryService::imageDirectoriesOneLevel(const QString& root)
 }
 
 QStringList ImageDiscoveryService::imageDirectoriesRecursive(const QString& root) {
+    QElapsedTimer timer;
+    timer.start();
     QSet<QString> imageDirs;
-    QDir base(root);
-    if (!base.exists()) {
-        return QStringList();
-    }
+    QStringList stack = { root };
 
-    // Pre-compute trash path fragments to avoid per-iteration string allocation.
-    const QString trashInfix  = QStringLiteral("/.sprat-trash/");
-    const QString trashSuffix = QStringLiteral("/.sprat-trash");
+    while (!stack.isEmpty()) {
+        QString currentPath = stack.takeLast();
+        QDir dir(currentPath);
+        if (!dir.exists()) continue;
 
-    QDirIterator it(base.absolutePath(), supportedImageFilters(), QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        it.next();
-        const QString absPath = it.fileInfo().absolutePath();
-        if (absPath.contains(trashInfix) || absPath.endsWith(trashSuffix)) {
+        QString dirName = dir.dirName();
+        if (dirName == QLatin1String(".git") || 
+            dirName == QLatin1String(".svn") || 
+            dirName == QLatin1String("node_modules") ||
+            dirName == QLatin1String(".sprat-trash")) {
             continue;
         }
-        imageDirs.insert(absPath);
+
+        if (hasImageFiles(currentPath)) {
+            imageDirs.insert(dir.absolutePath());
+        }
+
+        QDirIterator dirIt(currentPath, QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+        while (dirIt.hasNext()) {
+            stack.append(dirIt.next());
+        }
     }
 
     QStringList result = imageDirs.values();
     std::sort(result.begin(), result.end());
+    
+    qInfo() << "[ImageDiscovery] imageDirectoriesRecursive total ms=" << timer.elapsed()
+            << "dirs=" << result.size();
+            
     return result;
 }
 
@@ -103,24 +115,55 @@ QStringList ImageDiscoveryService::imagesInDirectory(const QString& path) {
 }
 
 QStringList ImageDiscoveryService::collectImagesRecursive(const QStringList& roots) {
-    QSet<QString> absolutePaths;
+    QElapsedTimer timer;
+    timer.start();
 
-    // Pre-compute trash path fragments to avoid per-iteration string allocation.
-    const QString trashInfix  = QStringLiteral("/.sprat-trash/");
-    const QString trashInfixW = QStringLiteral("/.sprat-trash\\");
+    QStringList result;
+    QSet<QString> seen; // To avoid duplicates if roots overlap
+    QStringList stack = roots;
+    
+    const QStringList& filters = supportedImageFilters();
 
-    for (const QString& root : roots) {
-        QDirIterator imageIt(root, supportedImageFilters(), QDir::Files, QDirIterator::Subdirectories);
-        while (imageIt.hasNext()) {
-            const QString path = imageIt.next();
-            if (path.contains(trashInfix) || path.contains(trashInfixW)) {
-                continue;
+    while (!stack.isEmpty()) {
+        QString currentPath = stack.takeLast();
+        QDir dir(currentPath);
+        if (!dir.exists()) continue;
+
+        QString dirName = dir.dirName();
+        // Skip common large/irrelevant directories
+        if (dirName == QLatin1String(".git") || 
+            dirName == QLatin1String(".svn") || 
+            dirName == QLatin1String("node_modules") ||
+            dirName == QLatin1String(".sprat-trash")) {
+            continue;
+        }
+
+        // 1. Collect image files in the current directory
+        QDirIterator fileIt(currentPath, filters, QDir::Files | QDir::Readable | QDir::NoDotAndDotDot);
+        while (fileIt.hasNext()) {
+            QString path = fileIt.next();
+            if (roots.size() > 1) {
+                if (!seen.contains(path)) {
+                    seen.insert(path);
+                    result.append(path);
+                }
+            } else {
+                result.append(path);
             }
-            absolutePaths.insert(path);
+        }
+
+        // 2. Add subdirectories to the stack for further exploration
+        QDirIterator dirIt(currentPath, QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+        while (dirIt.hasNext()) {
+            stack.append(dirIt.next());
         }
     }
 
-    QStringList result = absolutePaths.values();
     std::sort(result.begin(), result.end());
+
+    qInfo() << "[ImageDiscovery] collectImagesRecursive total ms=" << timer.elapsed()
+            << "files=" << result.size()
+            << "roots=" << roots.size();
+
     return result;
 }

@@ -24,7 +24,9 @@ void SettingsDialog::setupUi() {
     switch (m_initialSection) {
         case Section::Styles: setWindowTitle(tr("Style Settings")); break;
         case Section::Spritesheet: setWindowTitle(tr("Spritesheet Settings")); break;
+#ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
+#endif
     }
 
     QVBoxLayout* layout = new QVBoxLayout(this);
@@ -188,6 +190,7 @@ void SettingsDialog::pickColor(QPushButton* btn, QColor& color) {
     }
 }
 
+#ifndef Q_OS_WASM
 void SettingsDialog::pickCliBaseDir() {
     QString dir = QFileDialog::getExistingDirectory(this, tr("Select CLI Tools Directory"), m_cliPaths.baseDir);
     if (!dir.isEmpty()) {
@@ -195,6 +198,7 @@ void SettingsDialog::pickCliBaseDir() {
         m_cliBaseDirEdit->setText(dir);
     }
 }
+#endif
 
 void SettingsDialog::resetToDefaults() {
     m_settings = AppSettings();

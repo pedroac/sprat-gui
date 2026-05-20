@@ -3,11 +3,14 @@
 #ifdef Q_OS_WASM
 #include <emscripten.h>
 #include <QMetaObject>
+#include <QPointer>
 #include <QTimer>
 #include <QFileInfo>
 #include "MainWindow.h"
 
 namespace {
+std::function<void(const QString&, int)> g_filePickedHandler;
+
 EM_JS(void, sprat_open_file_dialog, (int mode), {
     console.log('[sprat] open file dialog mode=', mode);
     function ensureUploadOverlay() {
@@ -72,6 +75,8 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
     if (mode === 1) {
         input.multiple = true;
         input.webkitdirectory = true;
+    } else if (mode === 2) {
+        input.multiple = true;
     }
 
     input.onchange = function () {
@@ -82,7 +87,7 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
         }
         console.log('[sprat] File picker selected', files.length, 'files');
         showUploadOverlay('Preparing files... (0/' + files.length + ')', 0);
-        var base = '/home/webuser/uploads';
+        var base = '/home/webuser/uploads/' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
         FS.mkdirTree(base);
         var firstRoot = null;
         for (var i = 0; i < files.length; i++) {
@@ -100,6 +105,8 @@ EM_JS(void, sprat_open_file_dialog, (int mode), {
                     if (firstRoot) {
                         finalPath = base + '/' + firstRoot;
                     }
+                } else if (mode === 2) {
+                    finalPath = base;
                 } else {
                     finalPath = base + '/' + files[0].name;
                 }
@@ -793,6 +800,18 @@ void wasmOpenFileDialog(bool selectFolder) {
     sprat_open_file_dialog(selectFolder ? 1 : 0);
 }
 
+void wasmOpenFileDialogMode(int mode) {
+    sprat_open_file_dialog(mode);
+}
+
+void wasmSetFilePickedHandler(const std::function<void(const QString&, int)>& handler) {
+    g_filePickedHandler = handler;
+}
+
+void wasmClearFilePickedHandler() {
+    g_filePickedHandler = {};
+}
+
 void wasmInstallDropHandlers() {
     sprat_install_drop_handlers();
 }
@@ -806,6 +825,11 @@ void wasmBlockAllDrags() {
 }
 
 void wasmHandleFilePicked(const QString& path, int mode) {
+    if (g_filePickedHandler) {
+        g_filePickedHandler(path, mode);
+        return;
+    }
+
     MainWindow* window = MainWindow::wasmInstance();
     if (!window) {
         return;
