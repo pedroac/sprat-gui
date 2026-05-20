@@ -997,6 +997,8 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
             m_profileSelectorStack->setCurrentIndex(m_profileCombo->count() > 0 ? 0 : 1);
         }
     }
+    m_currentProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolutionText(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
@@ -1006,6 +1008,7 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
         hasSourceResolution ? sourceResolutionHeight : 1024);
     if (m_sourceResolutionCombo) {
         m_sourceResolutionCombo->setEnabled(true);
+        m_currentResolution = m_sourceResolutionCombo->currentText();
     }
     
     const QString sourceMode = layoutInfo["source_mode"].toString();

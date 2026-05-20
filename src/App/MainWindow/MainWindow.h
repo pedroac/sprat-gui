@@ -1253,6 +1253,47 @@ private:
         FrameDetectionResult detection;
     };
     QFutureWatcher<FrameDetectionTaskResult> m_frameDetectionWatcher;
+
+public:
+    struct SessionUndoState {
+        QString currentFolder;
+        QString layoutSourcePath;
+        bool layoutSourceIsList = false;
+        QString sourceFolder;
+        QStringList activeFramePaths;
+        QString frameListPath;
+        QVector<LayoutModel> layoutModels;
+        QString cachedLayoutOutput;
+        double cachedLayoutScale = 1.0;
+        QString lastSuccessfulProfile;
+        bool lastRunUsedTrim = false;
+        QVector<AnimationTimeline> timelines;
+        int selectedTimelineIndex = -1;
+        QString selectedPointName;
+        QStringList selectedSpritePaths;
+        QString primarySelectedSpritePath;
+        bool sourceFolderIsTemp = false;
+    };
+
+    struct PendingSessionUndoCommand {
+        QString text;
+        SessionUndoState before;
+    };
+
+    SessionUndoState captureSessionUndoState() const;
+    void applySessionUndoState(const SessionUndoState& state);
+    void pushSessionUndoCommand(const QString& text,
+                                const SessionUndoState& before,
+                                const SessionUndoState& after,
+                                bool alreadyApplied = true);
+    void beginPendingSessionUndoCommand(const QString& text);
+    void finalizePendingSessionUndoCommand();
+    void discardPendingSessionUndoCommand();
+    bool hasMeaningfulLayout(const SessionUndoState& state) const;
+
+private:
+
+    std::optional<PendingSessionUndoCommand> m_pendingSessionUndoCommand;
     void processFrameDetectionResult(const FrameDetectionTaskResult& result);
 
     struct TarExtractionResult {
@@ -1301,6 +1342,8 @@ private:
     int  m_layoutGeneration = 0;           // incremented on each successful layout completion
     bool m_layoutRebuildPaused = false;    // rebuild paused because user is hovering over canvas
     int m_pendingChangeCount = 0;
+    QString m_currentProfile;
+    QString m_currentResolution;
     static constexpr int kLayoutBufferFullThreshold = 20;
     QTimer* m_layoutDebounceTimer = nullptr;
     bool m_layoutFailureDialogShown = false;

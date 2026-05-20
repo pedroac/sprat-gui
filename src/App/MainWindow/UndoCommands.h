@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QComboBox>
 #include <QMap>
 #include <QSet>
 #include <QVector>
@@ -522,7 +523,7 @@ public:
                                int newX, int newY,
                                std::function<void()> postExecute,
                                QUndoCommand* parent = nullptr)
-        : QUndoCommand(QObject::tr("Apply Pivot to Frames"), parent)
+        : QUndoCommand(QObject::tr("Apply Pivot to %1 Sprites").arg(targets.size()), parent)
         , m_targets(targets)
         , m_newX(newX)
         , m_newY(newY)
@@ -570,7 +571,7 @@ public:
                                 const NamedPoint& newMarker,
                                 std::function<void()> postExecute,
                                 QUndoCommand* parent = nullptr)
-        : QUndoCommand(QObject::tr("Apply Marker to Frames"), parent)
+        : QUndoCommand(QObject::tr("Apply Marker to %1 Sprites").arg(targets.size()), parent)
         , m_targets(targets)
         , m_newMarker(newMarker)
         , m_postExecute(std::move(postExecute))
@@ -1085,4 +1086,232 @@ private:
     int m_oldFps, m_newFps;
     std::function<void()> m_postExecute;
     mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1017) SetProfileCommand — change the active layout profile
+// ---------------------------------------------------------------------------
+class SetProfileCommand : public QUndoCommand {
+public:
+    SetProfileCommand(QComboBox* profileCombo, const QString& oldProfile, const QString& newProfile,
+                      std::function<void()> postExecute, QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Change Profile"), parent)
+        , m_profileCombo(profileCombo), m_oldProfile(oldProfile), m_newProfile(newProfile)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        int idx = m_profileCombo->findData(m_newProfile);
+        if (idx >= 0) {
+            m_profileCombo->blockSignals(true);
+            m_profileCombo->setCurrentIndex(idx);
+            m_profileCombo->blockSignals(false);
+            if (m_postExecute) m_postExecute();
+        }
+    }
+
+    void undo() override {
+        int idx = m_profileCombo->findData(m_oldProfile);
+        if (idx >= 0) {
+            m_profileCombo->blockSignals(true);
+            m_profileCombo->setCurrentIndex(idx);
+            m_profileCombo->blockSignals(false);
+            if (m_postExecute) m_postExecute();
+        }
+    }
+
+    int id() const override { return 1018; }
+
+private:
+    QComboBox* m_profileCombo;
+    QString m_oldProfile, m_newProfile;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1018) SetSourceResolutionCommand — change the source resolution preset
+// ---------------------------------------------------------------------------
+class SetSourceResolutionCommand : public QUndoCommand {
+public:
+    SetSourceResolutionCommand(QComboBox* resCombo, const QString& oldRes, const QString& newRes,
+                               std::function<void()> postExecute, QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Change Source Resolution"), parent)
+        , m_resCombo(resCombo), m_oldRes(oldRes), m_newRes(newRes)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        int idx = m_resCombo->findText(m_newRes);
+        if (idx >= 0) {
+            m_resCombo->blockSignals(true);
+            m_resCombo->setCurrentIndex(idx);
+            m_resCombo->blockSignals(false);
+            if (m_postExecute) m_postExecute();
+        }
+    }
+
+    void undo() override {
+        int idx = m_resCombo->findText(m_oldRes);
+        if (idx >= 0) {
+            m_resCombo->blockSignals(true);
+            m_resCombo->setCurrentIndex(idx);
+            m_resCombo->blockSignals(false);
+            if (m_postExecute) m_postExecute();
+        }
+    }
+
+    int id() const override { return 1019; }
+
+private:
+    QComboBox* m_resCombo;
+    QString m_oldRes, m_newRes;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1019) AddFramesCommand — add new frames to the session
+// ---------------------------------------------------------------------------
+class AddFramesCommand : public QUndoCommand {
+public:
+    AddFramesCommand(QStringList* activeFramePaths,
+                      const QStringList& addedPaths,
+                      const QStringList& oldPaths,
+                      std::function<bool()> ensureFrameList,
+                      std::function<void()> postExecute,
+                      QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Add Frames"), parent)
+        , m_activeFramePaths(activeFramePaths)
+        , m_addedPaths(addedPaths)
+        , m_oldPaths(oldPaths)
+        , m_ensureFrameList(std::move(ensureFrameList))
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        *m_activeFramePaths = m_oldPaths;
+        m_activeFramePaths->append(m_addedPaths);
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecute) m_postExecute();
+    }
+
+    void undo() override {
+        *m_activeFramePaths = m_oldPaths;
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecute) m_postExecute();
+    }
+
+    int id() const override { return 1020; }
+
+private:
+    QStringList* m_activeFramePaths;
+    QStringList m_addedPaths;
+    QStringList m_oldPaths;
+    std::function<bool()> m_ensureFrameList;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1020) RemoveFramesCommand — remove frames from session only (no file delete)
+// ---------------------------------------------------------------------------
+class RemoveFramesCommand : public QUndoCommand {
+public:
+    RemoveFramesCommand(QStringList* activeFramePaths,
+                         QVector<AnimationTimeline>* timelines,
+                         int* selectedTimelineIndex,
+                         QVector<LayoutModel>* layoutModels,
+                         const QStringList& targets,
+                         const QStringList& savedActivePaths,
+                         const QVector<AnimationTimeline>& savedTimelines,
+                         int savedTimelineIdx,
+                         const QVector<LayoutModel>& savedLayoutModels,
+                         std::function<bool()> ensureFrameList,
+                         std::function<void()> postExecuteRedo,
+                         std::function<void()> postExecuteUndo,
+                         QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Remove Frames"), parent)
+        , m_activeFramePaths(activeFramePaths)
+        , m_timelines(timelines)
+        , m_selectedTimelineIndex(selectedTimelineIndex)
+        , m_layoutModels(layoutModels)
+        , m_targets(targets)
+        , m_savedActivePaths(savedActivePaths)
+        , m_savedTimelines(savedTimelines)
+        , m_savedTimelineIdx(savedTimelineIdx)
+        , m_savedLayoutModels(savedLayoutModels)
+        , m_ensureFrameList(std::move(ensureFrameList))
+        , m_postExecuteRedo(std::move(postExecuteRedo))
+        , m_postExecuteUndo(std::move(postExecuteUndo))
+    {}
+
+    void redo() override {
+        // Remove from activeFramePaths
+        for (const QString& path : m_targets) {
+            m_activeFramePaths->removeAll(path);
+        }
+        // Remove from timelines
+        const QSet<QString> targetSet(m_targets.begin(), m_targets.end());
+        for (auto& timeline : *m_timelines) {
+            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+                if (targetSet.contains(timeline.frames[i])) {
+                    timeline.frames.removeAt(i);
+                }
+            }
+        }
+        // Remove empty timelines and fix selectedTimelineIndex
+        for (int i = m_timelines->size() - 1; i >= 0; --i) {
+            if ((*m_timelines)[i].frames.isEmpty()) {
+                m_timelines->removeAt(i);
+                if (*m_selectedTimelineIndex > i) {
+                    --(*m_selectedTimelineIndex);
+                } else if (*m_selectedTimelineIndex == i) {
+                    *m_selectedTimelineIndex = -1;
+                }
+            }
+        }
+        // Remove from layoutModels
+        for (auto& model : *m_layoutModels) {
+            model.sprites.erase(
+                std::remove_if(model.sprites.begin(), model.sprites.end(),
+                    [&targetSet](const SpritePtr& s) {
+                        return s && targetSet.contains(s->path);
+                    }),
+                model.sprites.end());
+        }
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecuteRedo) m_postExecuteRedo();
+    }
+
+    void undo() override {
+        *m_activeFramePaths = m_savedActivePaths;
+        *m_timelines = m_savedTimelines;
+        *m_selectedTimelineIndex = m_savedTimelineIdx;
+        *m_layoutModels = m_savedLayoutModels;
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecuteUndo) m_postExecuteUndo();
+    }
+
+    int id() const override { return 1021; }
+
+private:
+    QStringList* m_activeFramePaths;
+    QVector<AnimationTimeline>* m_timelines;
+    int* m_selectedTimelineIndex;
+    QVector<LayoutModel>* m_layoutModels;
+    QStringList m_targets;
+    QStringList m_savedActivePaths;
+    QVector<AnimationTimeline> m_savedTimelines;
+    int m_savedTimelineIdx;
+    QVector<LayoutModel> m_savedLayoutModels;
+    std::function<bool()> m_ensureFrameList;
+    std::function<void()> m_postExecuteRedo;
+    std::function<void()> m_postExecuteUndo;
 };

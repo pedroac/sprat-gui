@@ -276,14 +276,28 @@ void MainWindow::onNavigatorAddFrames(const QString& subfolder)
     // Organize files by pattern before adding to session
     added = FolderSyncService::organizeNewImagesByPattern(added);
 
-    const QStringList previousFramePaths = m_session->activeFramePaths;
-    m_session->activeFramePaths.append(added);
+    const QStringList oldFramePaths = m_session->activeFramePaths;
+    QStringList newFramePaths = oldFramePaths;
+    newFramePaths.append(added);
+
+    m_undoStack->push(new AddFramesCommand(
+        &m_session->activeFramePaths,
+        added,
+        oldFramePaths,
+        [this]() { return ensureFrameListInput(); },
+        [this]() { 
+            updateManualFrameLabel();
+            scheduleLayoutRebuild(); 
+        }
+    ));
+
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
-        m_session->activeFramePaths = previousFramePaths;
+        m_session->activeFramePaths = oldFramePaths;
         QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
+    updateManualFrameLabel();
     scheduleLayoutRebuild();
 }
 

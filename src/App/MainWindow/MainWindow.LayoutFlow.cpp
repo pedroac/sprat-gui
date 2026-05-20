@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "UndoCommands.h"
 
 #include "SpriteSelectionPresenter.h"
 #include "LayoutRunner.h"
@@ -508,6 +509,21 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 
 void MainWindow::onProfileChanged() {
     const QString requestedProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+    if (requestedProfile == m_currentProfile) return;
+
+    QString oldProfile = m_currentProfile;
+    m_currentProfile = requestedProfile;
+
+    m_undoStack->push(new SetProfileCommand(
+        m_profileCombo,
+        oldProfile,
+        requestedProfile,
+        [this]() {
+            m_currentProfile = m_profileCombo->currentData().toString();
+            scheduleLayoutRebuild(true);
+        }
+    ));
+
     // Profile changes should rebuild layout immediately - user expects visual feedback
     scheduleLayoutRebuild(true);
 }

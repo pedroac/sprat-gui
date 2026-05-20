@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "UndoCommands.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
 #include "ResolutionUtils.h"
@@ -154,6 +155,7 @@ void MainWindow::setupUi() {
             }
         }
         m_sourceResolutionCombo->setCurrentIndex(bestIndex);
+        m_currentResolution = m_sourceResolutionCombo->currentText();
     }
 
     canvasControls->addWidget(m_sourceResolutionCombo);
@@ -163,6 +165,22 @@ void MainWindow::setupUi() {
         connect(m_sourceResolutionDebounceTimer, &QTimer::timeout, this, [this]() { scheduleLayoutRebuild(); });
     }
     auto scheduleSourceResolutionLayoutRun = [this](int) {
+        const QString requestedRes = m_sourceResolutionCombo->currentText();
+        if (requestedRes == m_currentResolution) return;
+
+        QString oldRes = m_currentResolution;
+        m_currentResolution = requestedRes;
+
+        m_undoStack->push(new SetSourceResolutionCommand(
+            m_sourceResolutionCombo,
+            oldRes,
+            requestedRes,
+            [this]() {
+                m_currentResolution = m_sourceResolutionCombo->currentText();
+                scheduleLayoutRebuild();
+            }
+        ));
+
         if (!m_sourceResolutionDebounceTimer) {
             scheduleLayoutRebuild();
             return;

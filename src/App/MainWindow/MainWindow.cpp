@@ -533,6 +533,7 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
     if (m_profileSelectorStack) {
         m_profileSelectorStack->setCurrentIndex(effectiveNames.isEmpty() ? 1 : 0);
     }
+    m_currentProfile = m_profileCombo->currentData().toString();
 
     if (!effectiveNames.contains(m_session->lastSuccessfulProfile)) {
         m_session->lastSuccessfulProfile.clear();
@@ -569,15 +570,26 @@ void MainWindow::onCanvasAddFramesRequested() {
         return;
     }
 
-    const QStringList previousFramePaths = m_session->activeFramePaths;
-    m_session->activeFramePaths.append(added);
+    const QStringList oldFramePaths = m_session->activeFramePaths;
+    m_undoStack->push(new AddFramesCommand(
+        &m_session->activeFramePaths,
+        added,
+        oldFramePaths,
+        [this]() { return ensureFrameListInput(); },
+        [this]() { 
+            updateManualFrameLabel();
+            scheduleLayoutRebuild(true); 
+        }
+    ));
+
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
-        m_session->activeFramePaths = previousFramePaths;
+        m_session->activeFramePaths = oldFramePaths;
         QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
     // Canvas action - rebuild immediately with loading UI
+    updateManualFrameLabel();
     scheduleLayoutRebuild(true);
 }
 
@@ -611,17 +623,29 @@ void MainWindow::onAddFramesRequested() {
         return;
     }
 
-    const QStringList previousFramePaths = m_session->activeFramePaths;
-    m_session->activeFramePaths.append(added);
+    const QStringList oldFramePaths = m_session->activeFramePaths;
+    m_undoStack->push(new AddFramesCommand(
+        &m_session->activeFramePaths,
+        added,
+        oldFramePaths,
+        [this]() { return ensureFrameListInput(); },
+        [this]() { 
+            updateManualFrameLabel();
+            scheduleLayoutRebuild(); 
+        }
+    ));
+
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
-        m_session->activeFramePaths = previousFramePaths;
+        m_session->activeFramePaths = oldFramePaths;
         QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
+    updateManualFrameLabel();
     // Navigator/deferred action - use lazy loading (debounce)
     scheduleLayoutRebuild();
 }
+
 
 void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     if (paths.isEmpty()) {
@@ -665,422 +689,79 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         m_session->selectedSprites.end()
     );
 
+    const QStringList savedActivePaths = m_session->activeFramePaths;
+    const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+    const int savedTimelineIdx = m_session->selectedTimelineIndex;
+    const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
+
+    auto postExecuteRedo = [this, targets]() {
+        if (m_session->activeFramePaths.isEmpty()) {
+            m_session->layoutSourcePath.clear();
+            m_session->layoutSourceIsList = false;
+            if (!m_session->frameListPath.isEmpty()) {
+                QFile::remove(m_session->frameListPath);
+                m_session->frameListPath.clear();
+            }
+            m_session->layoutModels.clear();
+            if (m_canvas) m_canvas->clearCanvas();
+            m_session->selectedSprites.clear();
+            m_session->selectedSprite.reset();
+            m_statusLabel->setText(tr("No frames loaded"));
+            m_folderLabel->setText(tr("Folder: none"));
+            m_session->cachedLayoutOutput.clear();
+            m_session->cachedLayoutScale = 1.0;
+            updateMainContentView();
+            updateUiState();
+            refreshSpriteTree();
+            refreshTimelineList();
+            refreshTimelineFrames();
+            refreshAnimationTest();
+        } else {
+            captureOldSpritePositions();
+            if (m_canvas) m_canvas->removeSprites(targets);
+            m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
+            refreshTimelineFrames();
+            refreshTimelineList();
+            refreshAnimationTest();
+            scheduleLayoutRebuild(true, true);
+        }
+    };
+
+    auto postExecuteUndo = [this]() {
+        refreshSpriteTree();
+        refreshTimelineFrames();
+        refreshTimelineList();
+        refreshAnimationTest();
+        scheduleLayoutRebuild(true);
+    };
+
     // In Manual/Watch mode, removal also deletes the backing source files with undo support.
     if (shouldDeleteRemovedSpritesFromSource()) {
-        const QStringList savedActivePaths = m_session->activeFramePaths;
-        const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
-        const int savedTimelineIdx = m_session->selectedTimelineIndex;
-        const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
         m_undoStack->push(new RemoveSpritesCommand(
             &m_session->activeFramePaths, &m_session->timelines,
             &m_session->selectedTimelineIndex, &m_session->layoutModels,
             m_session->sourceFolder, targets,
             savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
             [this]() { return ensureFrameListInput(); },
-            [this, targets]() { // postExecuteRedo
-                if (m_session->activeFramePaths.isEmpty()) {
-                    m_session->layoutSourcePath.clear();
-                    m_session->layoutSourceIsList = false;
-                    if (!m_session->frameListPath.isEmpty()) {
-                        QFile::remove(m_session->frameListPath);
-                        m_session->frameListPath.clear();
-                    }
-                    m_session->layoutModels.clear();
-                    if (m_canvas) m_canvas->clearCanvas();
-                    m_session->selectedSprites.clear();
-                    m_session->selectedSprite.reset();
-                    m_statusLabel->setText(tr("No frames loaded"));
-                    m_folderLabel->setText(tr("Folder: none"));
-                    m_session->cachedLayoutOutput.clear();
-                    m_session->cachedLayoutScale = 1.0;
-                    updateMainContentView();
-                    updateUiState();
-                    refreshSpriteTree();
-                    refreshTimelineList();
-                    refreshTimelineFrames();
-                    refreshAnimationTest();
-                } else {
-                    captureOldSpritePositions();
-                    if (m_canvas) m_canvas->removeSprites(targets);
-                    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-                    refreshTimelineFrames();
-                    refreshTimelineList();
-                    refreshAnimationTest();
-                    scheduleLayoutRebuild(true, true);
-                }
-            },
-            [this]() { // postExecuteUndo
-                refreshSpriteTree();
-                refreshTimelineFrames();
-                refreshTimelineList();
-                refreshAnimationTest();
-                scheduleLayoutRebuild(true);
-            }
+            postExecuteRedo,
+            postExecuteUndo
         ));
         return;
     }
 
-    QStringList remainingFramePaths = m_session->activeFramePaths;
-    for (const QString& path : targets) {
-        remainingFramePaths.removeAll(path);
-    }
-
-    if (remainingFramePaths.isEmpty()) {
-        bool timelineChanged = false;
-        for (auto& timeline : m_session->timelines) {
-            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
-                if (targets.contains(timeline.frames[i])) {
-                    timeline.frames.removeAt(i);
-                    timelineChanged = true;
-                }
-            }
-        }
-        if (timelineChanged) {
-            refreshTimelineFrames();
-            refreshAnimationTest();
-        }
-
-        // Remove animations that became empty because their sprites were removed from layout
-        for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
-            if (m_session->timelines[i].frames.isEmpty()) {
-                m_session->timelines.removeAt(i);
-                if (m_session->selectedTimelineIndex > i) {
-                    --m_session->selectedTimelineIndex;
-                } else if (m_session->selectedTimelineIndex == i) {
-                    m_session->selectedTimelineIndex = -1;
-                }
-                timelineChanged = true;
-            }
-        }
-        if (timelineChanged) {
-            refreshTimelineList();
-            refreshTimelineFrames();
-            refreshAnimationTest();
-        }
-
-        m_session->activeFramePaths.clear();
-        m_session->layoutSourcePath.clear();
-        m_session->layoutSourceIsList = false;
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
-        }
-        m_session->layoutModels.clear();
-        if (m_canvas) {
-            m_canvas->clearCanvas();
-        }
-        m_session->selectedSprites.clear();
-        m_session->selectedSprite.reset();
-
-        if (shouldDeleteRemovedSpritesFromSource()) {
-            for (const QString& path : targets) {
-                QFile(path).remove();
-            }
-        }
-        m_statusLabel->setText(tr("No frames loaded"));
-        m_folderLabel->setText(tr("Folder: none"));
-        m_session->cachedLayoutOutput.clear();
-        m_session->cachedLayoutScale = 1.0;
-        updateMainContentView();
-        updateUiState();
-        return;
-    }
-
-    const QStringList previousFramePaths = m_session->activeFramePaths;
-    m_session->activeFramePaths = remainingFramePaths;
-    if (!ensureFrameListInput()) {
-        m_session->activeFramePaths = previousFramePaths;
-        QMessageBox::warning(this, tr("Remove Frames"), tr("Could not refresh the frame list after removal."));
-        return;
-    }
-
-    bool timelineChanged = false;
-    for (auto& timeline : m_session->timelines) {
-        for (int i = timeline.frames.size() - 1; i >= 0; --i) {
-            if (targets.contains(timeline.frames[i])) {
-                timeline.frames.removeAt(i);
-                timelineChanged = true;
-            }
-        }
-    }
-    if (timelineChanged) {
-        refreshTimelineFrames();
-        refreshAnimationTest();
-    }
-
-    // Remove animations that became empty because their sprites were removed from layout
-    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
-        if (m_session->timelines[i].frames.isEmpty()) {
-            m_session->timelines.removeAt(i);
-            if (m_session->selectedTimelineIndex > i) {
-                --m_session->selectedTimelineIndex;
-            } else if (m_session->selectedTimelineIndex == i) {
-                m_session->selectedTimelineIndex = -1;
-            }
-            timelineChanged = true;
-        }
-    }
-    if (timelineChanged) {
-        refreshTimelineList();
-        refreshTimelineFrames();
-        refreshAnimationTest();
-    }
-
-    if (shouldDeleteRemovedSpritesFromSource()) {
-        for (const QString& path : targets) {
-            QFile(path).remove();
-        }
-    }
-
-    // Capture sprite positions BEFORE removing them for smooth animation
-    captureOldSpritePositions();
-
-    // Immediately remove deleted sprites from canvas (leaves a gap until rebuild)
-    if (m_canvas) {
-        m_canvas->removeSprites(targets);
-    }
-    // Keep session layout models in sync so the next rebuild sees the correct sprite list
-    const QSet<QString> targetSet(targets.begin(), targets.end());
-    for (auto& model : m_session->layoutModels) {
-        model.sprites.erase(
-            std::remove_if(model.sprites.begin(), model.sprites.end(),
-                [&targetSet](const SpritePtr& s) { return targetSet.contains(s->path); }),
-            model.sprites.end());
-    }
-
-    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-    // Canvas action - rebuild immediately with loading UI (skip second capture since we already captured)
-    scheduleLayoutRebuild(true, true);
+    m_undoStack->push(new RemoveFramesCommand(
+        &m_session->activeFramePaths, &m_session->timelines,
+        &m_session->selectedTimelineIndex, &m_session->layoutModels,
+        targets,
+        savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
+        [this]() { return ensureFrameListInput(); },
+        postExecuteRedo,
+        postExecuteUndo
+    ));
 }
 
 void MainWindow::onRemoveFramesRequested(const QStringList& paths) {
-    if (paths.isEmpty()) {
-        return;
-    }
-    QStringList targets;
-    for (const QString& path : paths) {
-        if (m_session->activeFramePaths.contains(path)) {
-            targets.append(path);
-        }
-    }
-    if (targets.isEmpty()) {
-        return;
-    }
-
-    QSet<QString> timelineNames;
-    for (const auto& timeline : m_session->timelines) {
-        for (const QString& frame : timeline.frames) {
-            if (targets.contains(frame)) {
-                timelineNames.insert(timeline.name);
-                break;
-            }
-        }
-    }
-
-    if (!timelineNames.isEmpty()) {
-        QString warning = QString(tr("The selected frame(s) are referenced by the following timelines:\n%1\nRemoving them will drop those entries from the timelines. Continue?"))
-                          .arg(QStringList(timelineNames.values()).join(", "));
-        if (QMessageBox::warning(this, tr("Remove Frames"), warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
-            return;
-        }
-    }
-
-    // Deselect sprite if it's being removed, and clear the editor immediately.
-    if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path)) {
-        onSpriteSelected(nullptr);
-    }
-    m_session->selectedSprites.erase(
-        std::remove_if(m_session->selectedSprites.begin(), m_session->selectedSprites.end(),
-            [&targets](const SpritePtr& sprite) { return sprite && targets.contains(sprite->path); }),
-        m_session->selectedSprites.end()
-    );
-
-    // In Manual/Watch mode, removal also deletes the backing source files with undo support.
-    if (shouldDeleteRemovedSpritesFromSource()) {
-        const QStringList savedActivePaths = m_session->activeFramePaths;
-        const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
-        const int savedTimelineIdx = m_session->selectedTimelineIndex;
-        const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
-        m_undoStack->push(new RemoveSpritesCommand(
-            &m_session->activeFramePaths, &m_session->timelines,
-            &m_session->selectedTimelineIndex, &m_session->layoutModels,
-            m_session->sourceFolder, targets,
-            savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
-            [this]() { return ensureFrameListInput(); },
-            [this, targets]() { // postExecuteRedo
-                if (m_session->activeFramePaths.isEmpty()) {
-                    m_session->layoutSourcePath.clear();
-                    m_session->layoutSourceIsList = false;
-                    if (!m_session->frameListPath.isEmpty()) {
-                        QFile::remove(m_session->frameListPath);
-                        m_session->frameListPath.clear();
-                    }
-                    m_session->layoutModels.clear();
-                    if (m_canvas) m_canvas->clearCanvas();
-                    m_session->selectedSprites.clear();
-                    m_session->selectedSprite.reset();
-                    m_statusLabel->setText(tr("No frames loaded"));
-                    m_folderLabel->setText(tr("Folder: none"));
-                    m_session->cachedLayoutOutput.clear();
-                    m_session->cachedLayoutScale = 1.0;
-                    updateMainContentView();
-                    updateUiState();
-                    refreshSpriteTree();
-                    refreshTimelineList();
-                    refreshTimelineFrames();
-                    refreshAnimationTest();
-                } else {
-                    captureOldSpritePositions();
-                    if (m_canvas) m_canvas->removeSprites(targets);
-                    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-                    refreshTimelineFrames();
-                    refreshTimelineList();
-                    refreshAnimationTest();
-                    scheduleLayoutRebuild(false, true);
-                }
-            },
-            [this]() { // postExecuteUndo
-                refreshSpriteTree();
-                refreshTimelineFrames();
-                refreshTimelineList();
-                refreshAnimationTest();
-                scheduleLayoutRebuild(true);
-            }
-        ));
-        return;
-    }
-
-    QStringList remainingFramePaths = m_session->activeFramePaths;
-    for (const QString& path : targets) {
-        remainingFramePaths.removeAll(path);
-    }
-
-    if (remainingFramePaths.isEmpty()) {
-        bool timelineChanged = false;
-        for (auto& timeline : m_session->timelines) {
-            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
-                if (targets.contains(timeline.frames[i])) {
-                    timeline.frames.removeAt(i);
-                    timelineChanged = true;
-                }
-            }
-        }
-        if (timelineChanged) {
-            refreshTimelineFrames();
-            refreshAnimationTest();
-        }
-
-        // Remove animations that became empty because their sprites were removed from layout
-        for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
-            if (m_session->timelines[i].frames.isEmpty()) {
-                m_session->timelines.removeAt(i);
-                if (m_session->selectedTimelineIndex > i) {
-                    --m_session->selectedTimelineIndex;
-                } else if (m_session->selectedTimelineIndex == i) {
-                    m_session->selectedTimelineIndex = -1;
-                }
-                timelineChanged = true;
-            }
-        }
-        if (timelineChanged) {
-            refreshTimelineList();
-            refreshTimelineFrames();
-            refreshAnimationTest();
-        }
-
-        m_session->activeFramePaths.clear();
-        m_session->layoutSourcePath.clear();
-        m_session->layoutSourceIsList = false;
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
-        }
-        m_session->layoutModels.clear();
-        if (m_canvas) {
-            m_canvas->clearCanvas();
-        }
-        m_session->selectedSprites.clear();
-        m_session->selectedSprite.reset();
-
-        if (shouldDeleteRemovedSpritesFromSource()) {
-            for (const QString& path : targets) {
-                QFile(path).remove();
-            }
-        }
-        m_statusLabel->setText(tr("No frames loaded"));
-        m_folderLabel->setText(tr("Folder: none"));
-        m_session->cachedLayoutOutput.clear();
-        m_session->cachedLayoutScale = 1.0;
-        updateMainContentView();
-        updateUiState();
-        return;
-    }
-
-    const QStringList previousFramePaths = m_session->activeFramePaths;
-    m_session->activeFramePaths = remainingFramePaths;
-    if (!ensureFrameListInput()) {
-        m_session->activeFramePaths = previousFramePaths;
-        QMessageBox::warning(this, tr("Remove Frames"), tr("Could not refresh the frame list after removal."));
-        return;
-    }
-
-    bool timelineChanged = false;
-    for (auto& timeline : m_session->timelines) {
-        for (int i = timeline.frames.size() - 1; i >= 0; --i) {
-            if (targets.contains(timeline.frames[i])) {
-                timeline.frames.removeAt(i);
-                timelineChanged = true;
-            }
-        }
-    }
-    if (timelineChanged) {
-        refreshTimelineFrames();
-        refreshAnimationTest();
-    }
-
-    // Remove animations that became empty because their sprites were removed from layout
-    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
-        if (m_session->timelines[i].frames.isEmpty()) {
-            m_session->timelines.removeAt(i);
-            if (m_session->selectedTimelineIndex > i) {
-                --m_session->selectedTimelineIndex;
-            } else if (m_session->selectedTimelineIndex == i) {
-                m_session->selectedTimelineIndex = -1;
-            }
-            timelineChanged = true;
-        }
-    }
-    if (timelineChanged) {
-        refreshTimelineList();
-        refreshTimelineFrames();
-        refreshAnimationTest();
-    }
-
-    if (shouldDeleteRemovedSpritesFromSource()) {
-        for (const QString& path : targets) {
-            QFile(path).remove();
-        }
-    }
-
-    // Capture sprite positions BEFORE removing them for smooth animation
-    captureOldSpritePositions();
-
-    // Immediately remove deleted sprites from canvas (leaves a gap until rebuild)
-    if (m_canvas) {
-        m_canvas->removeSprites(targets);
-    }
-    // Keep session layout models in sync so the next rebuild sees the correct sprite list
-    const QSet<QString> targetSet(targets.begin(), targets.end());
-    for (auto& model : m_session->layoutModels) {
-        model.sprites.erase(
-            std::remove_if(model.sprites.begin(), model.sprites.end(),
-                [&targetSet](const SpritePtr& s) { return targetSet.contains(s->path); }),
-            model.sprites.end());
-    }
-
-    m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
-    // Navigator/deferred action - use lazy loading (debounce) (skip second capture since we already captured)
-    scheduleLayoutRebuild(false, true);
+    onCanvasRemoveFramesRequested(paths);
 }
 
 void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos) {
@@ -2304,4 +1985,126 @@ void MainWindow::onShowHotkeys() {
     connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
 
     dlg.exec();
+}
+
+MainWindow::SessionUndoState MainWindow::captureSessionUndoState() const {
+    SessionUndoState state;
+    state.currentFolder = m_session->currentFolder;
+    state.layoutSourcePath = m_session->layoutSourcePath;
+    state.layoutSourceIsList = m_session->layoutSourceIsList;
+    state.sourceFolder = m_session->sourceFolder;
+    state.activeFramePaths = m_session->activeFramePaths;
+    state.frameListPath = m_session->frameListPath;
+    state.layoutModels = m_session->layoutModels;
+    state.cachedLayoutOutput = m_session->cachedLayoutOutput;
+    state.cachedLayoutScale = m_session->cachedLayoutScale;
+    state.lastSuccessfulProfile = m_session->lastSuccessfulProfile;
+    state.lastRunUsedTrim = m_session->lastRunUsedTrim;
+    state.timelines = m_session->timelines;
+    state.selectedTimelineIndex = m_session->selectedTimelineIndex;
+    state.selectedPointName = m_session->selectedPointName;
+    state.selectedSpritePaths.clear();
+    for (const auto& s : m_session->selectedSprites) if (s) state.selectedSpritePaths << s->path;
+    state.primarySelectedSpritePath = m_session->selectedSprite ? m_session->selectedSprite->path : QString();
+    state.sourceFolderIsTemp = m_sourceFolderIsTemp;
+    return state;
+}
+
+namespace {
+SpritePtr spriteByPath(const QVector<LayoutModel>& models, const QString& path) {
+    if (path.isEmpty()) return nullptr;
+    for (const auto& model : models) {
+        for (const auto& sprite : model.sprites) {
+            if (sprite && sprite->path == path) return sprite;
+        }
+    }
+    return nullptr;
+}
+}
+
+void MainWindow::applySessionUndoState(const SessionUndoState& state) {
+    m_session->currentFolder = state.currentFolder;
+    m_session->layoutSourcePath = state.layoutSourcePath;
+    m_session->layoutSourceIsList = state.layoutSourceIsList;
+    m_session->sourceFolder = state.sourceFolder;
+    m_session->activeFramePaths = state.activeFramePaths;
+    m_session->frameListPath = state.frameListPath;
+    m_session->layoutModels = state.layoutModels;
+    m_session->cachedLayoutOutput = state.cachedLayoutOutput;
+    m_session->cachedLayoutScale = state.cachedLayoutScale;
+    m_session->lastSuccessfulProfile = state.lastSuccessfulProfile;
+    m_session->lastRunUsedTrim = state.lastRunUsedTrim;
+    m_session->timelines = state.timelines;
+    m_session->selectedTimelineIndex = state.selectedTimelineIndex;
+    m_session->selectedPointName = state.selectedPointName;
+    m_sourceFolderIsTemp = state.sourceFolderIsTemp;
+
+    // Restore selections
+    m_session->selectedSprites.clear();
+    for (const QString& p : state.selectedSpritePaths) {
+        SpritePtr s = spriteByPath(m_session->layoutModels, p);
+        if (s) m_session->selectedSprites.push_back(s);
+    }
+    m_session->selectedSprite = spriteByPath(m_session->layoutModels, state.primarySelectedSpritePath);
+
+    // Refresh UI
+    updateMainContentView();
+    updateUiState();
+    refreshSpriteTree();
+    refreshTimelineList();
+    refreshTimelineFrames();
+    refreshAnimationTest();
+    if (m_canvas) m_canvas->update();
+    m_previewView->overlay()->updateLayout();
+    refreshHandleCombo();
+    updateManualFrameLabel();
+    updateOpenSourceFolderAction();
+}
+
+namespace {
+class SessionUndoCommand : public QUndoCommand {
+public:
+    SessionUndoCommand(MainWindow* mw, const QString& text,
+                       const MainWindow::SessionUndoState& before,
+                       const MainWindow::SessionUndoState& after,
+                       bool alreadyApplied)
+        : QUndoCommand(text), m_mw(mw), m_before(before), m_after(after), m_skipFirstRedo(alreadyApplied) {}
+
+    void undo() override { m_mw->applySessionUndoState(m_before); }
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        m_mw->applySessionUndoState(m_after);
+    }
+
+private:
+    MainWindow* m_mw;
+    MainWindow::SessionUndoState m_before;
+    MainWindow::SessionUndoState m_after;
+    mutable bool m_skipFirstRedo;
+};
+}
+
+void MainWindow::pushSessionUndoCommand(const QString& text,
+                                        const SessionUndoState& before,
+                                        const SessionUndoState& after,
+                                        bool alreadyApplied) {
+    m_undoStack->push(new SessionUndoCommand(this, text, before, after, alreadyApplied));
+}
+
+void MainWindow::beginPendingSessionUndoCommand(const QString& text) {
+    m_pendingSessionUndoCommand = { text, captureSessionUndoState() };
+}
+
+void MainWindow::finalizePendingSessionUndoCommand() {
+    if (m_pendingSessionUndoCommand) {
+        pushSessionUndoCommand(m_pendingSessionUndoCommand->text,
+                               m_pendingSessionUndoCommand->before,
+                               captureSessionUndoState(),
+                               true);
+        m_pendingSessionUndoCommand.reset();
+    }
+}
+
+void MainWindow::discardPendingSessionUndoCommand() {
+    m_pendingSessionUndoCommand.reset();
 }
