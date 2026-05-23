@@ -97,6 +97,9 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             framesArr.append(f);
         }
         tObj["frames"] = framesArr;
+        if (!t.aliasOf.isEmpty()) tObj["alias_of"] = t.aliasOf;
+        if (t.hFlip) tObj["h_flip"] = true;
+        if (t.vFlip) tObj["v_flip"] = true;
         timelinesArr.append(tObj);
     }
     if (!input.timelines.isEmpty()) {
@@ -149,6 +152,12 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
                 markersArr.append(mObj);
             }
             sObj["markers"] = markersArr;
+
+            if (!s->aliases.isEmpty()) {
+                QJsonArray aliasArr;
+                for (const auto& a : s->aliases) aliasArr.append(a);
+                sObj["aliases"] = aliasArr;
+            }
 
             QString key = QDir(input.currentFolder).relativeFilePath(s->path);
             if (key.isEmpty()) {
@@ -225,6 +234,9 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             if (state.contains("name")) {
                 sprite->name = state["name"].toString();
             }
+            sprite->aliases.clear();
+            for (const auto& a : state["aliases"].toArray())
+                sprite->aliases.append(a.toString());
             if (state.contains("pivot_x")) {
                 sprite->pivotX = state["pivot_x"].toInt();
             }
@@ -296,6 +308,9 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         for (const auto& fVal : framesArr) {
             t.frames.append(fVal.toString());
         }
+        t.aliasOf = tObj["alias_of"].toString();
+        t.hFlip   = tObj["h_flip"].toBool(false);
+        t.vFlip   = tObj["v_flip"].toBool(false);
         out.timelines.append(t);
     }
 

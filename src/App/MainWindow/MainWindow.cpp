@@ -194,10 +194,36 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     QTimer::singleShot(AppConstants::kCliStartupDelayMs, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
-    
     // Autosave setup
     m_autosaveTimer = new QTimer(this);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
+
+#ifndef Q_OS_WASM
+    // One-time Choose default projects folder on very first launch
+    // We consider it first launch if the setting is explicitly empty in the config file,
+    // even if loadAppSettings() provides a runtime fallback.
+    QSettings settings(CliToolsConfig::configPath(), QSettings::IniFormat);
+    if (!settings.contains("settings/default_projects_folder")) {
+        QTimer::singleShot(1000, this, [this]() {
+            QString defaultPath = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
+            QMessageBox::information(this, tr("Welcome to Sprat"),
+                tr("Please choose a default folder for your projects.\n\n"
+                   "Sprat works best when projects have a permanent home on your disk."));
+
+            QString dir = QFileDialog::getExistingDirectory(this, tr("Choose Default Projects Folder"), defaultPath);
+            if (!dir.isEmpty()) {
+                m_settings.defaultProjectsFolder = dir;
+                CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+            } else {
+                // Use default if cancelled
+                m_settings.defaultProjectsFolder = defaultPath;
+                QDir().mkpath(defaultPath);
+                CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+            }
+        });
+    }
+#endif
+
     m_autosaveTimer->start(AppConstants::kAutosaveIntervalMs);
 
     connect(&m_projectLoadWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectLoadFinished);
@@ -205,7 +231,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(&m_frameDetectionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameDetectionFinished);
     connect(&m_tarExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onTarExtractionFinished);
     connect(&m_frameExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameExtractionFinished);
-    connect(&m_projectSaveWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectSaveFinished);
+    connect(&m_exportWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onExportFinished);
 
     m_isRestoringProject = false;
 }
@@ -281,7 +307,7 @@ MainWindow::~MainWindow() {
     m_frameDetectionWatcher.waitForFinished();
     m_tarExtractionWatcher.waitForFinished();
     m_frameExtractionWatcher.waitForFinished();
-    m_projectSaveWatcher.waitForFinished();
+    m_exportWatcher.waitForFinished();
 
     if (m_autosaveTimer) {
         m_autosaveTimer->stop();

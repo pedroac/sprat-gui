@@ -15,6 +15,11 @@ public:
      */
     explicit TimelineListWidget(QWidget* parent = nullptr);
 
+    /**
+     * @brief Sets the widget to read-only mode, disabling drag-drop and edits.
+     */
+    void setReadOnly(bool readOnly);
+
 signals:
     /**
      * @brief Emitted when a frame is dropped from outside.
@@ -47,6 +52,7 @@ private slots:
     void onCustomContextMenuRequested(const QPoint& pos);
 
 private:
+    bool m_readOnly = false;
     QListWidgetItem* m_placeholderItem = nullptr;
     void updatePlaceholder(const QPoint& pos);
     void clearPlaceholder();

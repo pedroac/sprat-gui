@@ -1,8 +1,9 @@
 #include "AnimationPlaybackService.h"
 
 #include <QCoreApplication>
-#include <QIcon>
+#include <QApplication>
 #include <QPushButton>
+#include <QStyle>
 #include <QTimer>
 #include "AnimationTestOps.h"
 
@@ -11,13 +12,28 @@ QString trAnimationPlayback(const char* text) {
     return QCoreApplication::translate("AnimationPlaybackService", text);
 }
 
+// Resolve the effective frame list for playback, following alias references.
+const QStringList& effectiveFrames(const QVector<AnimationTimeline>& timelines, int index) {
+    static const QStringList kEmpty;
+    if (index < 0 || index >= timelines.size())
+        return kEmpty;
+    const auto& tl = timelines[index];
+    if (!tl.aliasOf.isEmpty()) {
+        for (const auto& src : timelines) {
+            if (src.name == tl.aliasOf && src.aliasOf.isEmpty())
+                return src.frames;
+        }
+    }
+    return tl.frames;
+}
+
 const QIcon& playIcon() {
-    static const QIcon icon = QIcon::fromTheme("media-playback-start");
+    static const QIcon icon = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
     return icon;
 }
 
 const QIcon& pauseIcon() {
-    static const QIcon icon = QIcon::fromTheme("media-playback-pause");
+    static const QIcon icon = QApplication::style()->standardIcon(QStyle::SP_MediaPause);
     return icon;
 }
 }
@@ -26,13 +42,12 @@ bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines,
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
-    if (!AnimationTestOps::stepPrev(timelines[selectedTimelineIndex].frames, frameIndex)) {
+    if (!AnimationTestOps::stepPrev(effectiveFrames(timelines, selectedTimelineIndex), frameIndex)) {
         return false;
     }
     playing = false;
     timer->stop();
     playPauseButton->setIcon(playIcon());
-    playPauseButton->setText("▶");  // Show play symbol
     return true;
 }
 
@@ -40,13 +55,12 @@ bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines,
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
-    if (!AnimationTestOps::stepNext(timelines[selectedTimelineIndex].frames, frameIndex)) {
+    if (!AnimationTestOps::stepNext(effectiveFrames(timelines, selectedTimelineIndex), frameIndex)) {
         return false;
     }
     playing = false;
     timer->stop();
     playPauseButton->setIcon(playIcon());
-    playPauseButton->setText("▶");  // Show play symbol
     return true;
 }
 
@@ -62,19 +76,18 @@ bool AnimationPlaybackService::tick(const QVector<AnimationTimeline>& timelines,
     // Capped at 8 to prevent large jumps after the tab was backgrounded.
     const double msPerFrame = 1000.0 / qMax(1, fps);
     const int count = qBound(1, qRound(static_cast<double>(elapsedMs) / msPerFrame), 8);
-    return AnimationTestOps::tick(timelines[selectedTimelineIndex].frames, frameIndex, count);
+    return AnimationTestOps::tick(effectiveFrames(timelines, selectedTimelineIndex), frameIndex, count);
 }
 
 bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer, QPushButton* playPauseButton) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
-    if (timelines[selectedTimelineIndex].frames.isEmpty()) {
+    if (effectiveFrames(timelines, selectedTimelineIndex).isEmpty()) {
         return false;
     }
     playing = !playing;
     playPauseButton->setIcon(playing ? pauseIcon() : playIcon());
-    playPauseButton->setText(playing ? "⏸" : "▶");  // Unicode pause and play symbols as visual feedback
     if (playing) {
 #ifdef Q_OS_WASM
         // In WASM, Qt's event loop is driven by requestAnimationFrame (~60 fps).

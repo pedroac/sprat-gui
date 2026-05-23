@@ -1,17 +1,20 @@
 #include "MainWindow.h"
 #include "NavigatorTreeWidget.h"
 #include "AnimationTimelineOps.h"
+#include "AnimationPreviewService.h"
 #include "FolderSyncService.h"
 #include "UndoCommands.h"
 
 #include <functional>
 #include <QDir>
+#include <QLabel>
+#include <QSpinBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
-#include <QLabel>
 #include <QLineEdit>
+#include <QMap>
 #include <QMenu>
 #include <QMessageBox>
 #include <QTreeWidget>
@@ -205,6 +208,50 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
         if (clickedIsGroup) { ungroupAction       = menu.addAction(tr("Ungroup (move up)"));        hadItems = true; }
     }
 
+    // ── Section 5: sync ────────────────────────────────────────────────────
+    // Build path → SpritePtr map and determine reference frame early (needed to
+    // populate sub-menu items before menu.exec() blocks).
+    QMap<QString, SpritePtr> syncByPath;
+    SpritePtr syncRefSprite;
+    QMenu*            syncSubMenu       = nullptr;
+    QAction*          syncPivotAction   = nullptr;
+    QAction*          syncAllAction     = nullptr;
+    QVector<QAction*> syncMarkerActions;
+
+    if (clickedIsGroup && clickedPaths.size() >= 2) {
+        for (const auto& model : m_session->layoutModels)
+            for (const auto& s : model.sprites)
+                if (s && clickedPaths.contains(s->path))
+                    syncByPath[s->path] = s;
+
+        if (syncByPath.size() >= 2) {
+            // Prefer the currently selected frame if it belongs to the group.
+            if (m_session->selectedSprite && syncByPath.contains(m_session->selectedSprite->path))
+                syncRefSprite = m_session->selectedSprite;
+            else
+                syncRefSprite = syncByPath.value(clickedPaths.first());
+
+            if (syncRefSprite) {
+                const QString refLabel = syncRefSprite->name.isEmpty()
+                    ? QFileInfo(syncRefSprite->path).baseName()
+                    : syncRefSprite->name;
+                addSep();
+                syncSubMenu = menu.addMenu(tr("Sync from \"%1\"").arg(refLabel));
+                hadItems = true;
+
+                syncPivotAction = syncSubMenu->addAction(tr("Pivot"));
+                for (const auto& pt : syncRefSprite->points) {
+                    auto* act = syncSubMenu->addAction(pt.name);
+                    act->setData(pt.name);
+                    syncMarkerActions.append(act);
+                }
+                if (!syncRefSprite->points.isEmpty())
+                    syncSubMenu->addSeparator();
+                syncAllAction = syncSubMenu->addAction(tr("All properties"));
+            }
+        }
+    }
+
     // ── Dispatch ───────────────────────────────────────────────────────────
     QAction* chosen = menu.exec(m_spriteTree->viewport()->mapToGlobal(pos));
     if (!chosen) return;
@@ -218,6 +265,19 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     else if (chosen == addToTimelineAction)                               onNavigatorAddToTimeline(checkedPaths);
     else if (chosen == groupSelectedAction)                               onNavigatorCreateGroup(checkedPaths, subfolder);
     else if (chosen == ungroupAction)                                     onNavigatorUngroup(clickedItem);
+    else if (syncRefSprite && (chosen == syncPivotAction || chosen == syncAllAction
+                               || syncMarkerActions.contains(chosen))) {
+        const bool doAll   = (chosen == syncAllAction);
+        const bool doPivot = doAll || (chosen == syncPivotAction);
+        QStringList markerNames;
+        if (doAll) {
+            for (const auto& pt : syncRefSprite->points)
+                markerNames << pt.name;
+        } else if (chosen != syncPivotAction) {
+            markerNames << chosen->data().toString();
+        }
+        onNavigatorSyncGroup(syncByPath, syncRefSprite, clickedPaths, doPivot, markerNames);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -614,4 +674,83 @@ void MainWindow::filterSpriteTree(const QString& text) {
         item->setHidden(!itemsToShow.contains(item));
         ++it2;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Action: Sync pivot / markers from one frame to all others in the group.
+// Called after the user picks an item from the "Sync from …" submenu.
+// ---------------------------------------------------------------------------
+void MainWindow::onNavigatorSyncGroup(const QMap<QString, SpritePtr>& byPath,
+                                      SpritePtr refSprite,
+                                      const QStringList& groupPaths,
+                                      bool syncPivot,
+                                      const QStringList& syncMarkerNames)
+{
+    if (!m_session || !refSprite) return;
+    if (!syncPivot && syncMarkerNames.isEmpty()) return;
+
+    auto postExecute = [this]() {
+        AnimationPreviewService::invalidateBounds();
+        if (!m_session || !m_session->selectedSprite) return;
+        if (m_pivotXSpin) { m_pivotXSpin->blockSignals(true); m_pivotXSpin->setValue(m_session->selectedSprite->pivotX); m_pivotXSpin->blockSignals(false); }
+        if (m_pivotYSpin) { m_pivotYSpin->blockSignals(true); m_pivotYSpin->setValue(m_session->selectedSprite->pivotY); m_pivotYSpin->blockSignals(false); }
+    };
+
+    const int commandCount = (syncPivot ? 1 : 0) + syncMarkerNames.size();
+    const bool useMacro = commandCount > 1;
+    if (useMacro) m_undoStack->beginMacro(tr("Sync Group"));
+
+    // ── Pivot ────────────────────────────────────────────────────────────────
+    if (syncPivot) {
+        QVector<QPair<SpritePtr, QPair<int,int>>> targets;
+        for (const QString& path : groupPaths) {
+            if (!byPath.contains(path) || byPath[path] == refSprite) continue;
+            SpritePtr tgt = byPath[path];
+            targets.append({tgt, {tgt->pivotX, tgt->pivotY}});
+            tgt->pivotX = refSprite->pivotX;
+            tgt->pivotY = refSprite->pivotY;
+        }
+        if (!targets.isEmpty()) {
+            AnimationPreviewService::invalidateBounds();
+            if (m_session->selectedSprite) {
+                for (const auto& pair : targets) {
+                    if (pair.first == m_session->selectedSprite) {
+                        if (m_pivotXSpin) { m_pivotXSpin->blockSignals(true); m_pivotXSpin->setValue(refSprite->pivotX); m_pivotXSpin->blockSignals(false); }
+                        if (m_pivotYSpin) { m_pivotYSpin->blockSignals(true); m_pivotYSpin->setValue(refSprite->pivotY); m_pivotYSpin->blockSignals(false); }
+                        break;
+                    }
+                }
+            }
+            m_undoStack->push(new ApplyPivotToFramesCommand(
+                targets, refSprite->pivotX, refSprite->pivotY, postExecute));
+        }
+    }
+
+    // ── Markers ──────────────────────────────────────────────────────────────
+    for (const QString& markerName : syncMarkerNames) {
+        const NamedPoint* srcPt = nullptr;
+        for (const auto& p : refSprite->points)
+            if (p.name == markerName) { srcPt = &p; break; }
+        if (!srcPt) continue;
+
+        QVector<QPair<SpritePtr, std::optional<NamedPoint>>> targets;
+        for (const QString& path : groupPaths) {
+            if (!byPath.contains(path) || byPath[path] == refSprite) continue;
+            SpritePtr tgt = byPath[path];
+            std::optional<NamedPoint> oldPt;
+            for (const auto& p : tgt->points)
+                if (p.name == markerName) { oldPt = p; break; }
+            targets.append({tgt, oldPt});
+            // Apply immediately (command skips first redo).
+            auto it = std::find_if(tgt->points.begin(), tgt->points.end(),
+                [&markerName](const NamedPoint& p){ return p.name == markerName; });
+            if (it != tgt->points.end()) *it = *srcPt;
+            else tgt->points.append(*srcPt);
+        }
+        if (!targets.isEmpty())
+            m_undoStack->push(new ApplyMarkerToFramesCommand(targets, *srcPt, postExecute));
+    }
+
+    AnimationPreviewService::invalidateBounds();
+    if (useMacro) m_undoStack->endMacro();
 }

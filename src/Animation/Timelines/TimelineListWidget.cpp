@@ -108,6 +108,12 @@ void TimelineListWidget::dropEvent(QDropEvent* event) {
     }
 }
 
+void TimelineListWidget::setReadOnly(bool readOnly) {
+    m_readOnly = readOnly;
+    setDragEnabled(!readOnly);
+    setAcceptDrops(!readOnly);
+}
+
 /**
  * @brief Handles key press events (Delete/Backspace to remove frames).
  */
@@ -119,7 +125,9 @@ void TimelineListWidget::keyPressEvent(QKeyEvent* event) {
     }
 
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-        emit removeSelectedRequested();
+        if (!m_readOnly) {
+            emit removeSelectedRequested();
+        }
         event->accept();
         return;
     }
@@ -197,6 +205,8 @@ void TimelineListWidget::startDrag(Qt::DropActions supportedActions)
  * @brief Shows the context menu for a timeline item.
  */
 void TimelineListWidget::onCustomContextMenuRequested(const QPoint& pos) {
+    if (m_readOnly) return;
+
     QListWidgetItem* item = itemAt(pos);
     if (!item) {
         return;

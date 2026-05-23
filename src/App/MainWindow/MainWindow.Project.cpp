@@ -12,11 +12,15 @@
 #include "ProjectPayloadCodec.h"
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
+#ifndef Q_OS_WASM
+#include "NewProjectDialog.h"
+#endif
 #include <QDockWidget>
 #include "ResolutionUtils.h"
 #include "FolderSyncService.h"
 #include "ImportPathSupport.h"
 
+#include <QMenu>
 #include <QComboBox>
 #include <QDirIterator>
 #include <QBuffer>
@@ -142,6 +146,90 @@ void syncSourceResolutionPresetSelection(QComboBox* combo, int width, int height
     combo->blockSignals(blocked);
 }
 }
+#ifndef Q_OS_WASM
+void MainWindow::onNewProjectRequested() {
+    NewProjectDialog dlg(m_settings.defaultProjectsFolder, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        NewProjectDialog::Result result = dlg.getResult();
+        QString projectDir = result.location;
+        if (result.createSubfolder) {
+            projectDir = QDir(projectDir).filePath(result.name);
+        }
+
+        QDir().mkpath(projectDir);
+        QString projectPath = QDir(projectDir).filePath("project.spart.json");
+
+        // Initialize a new project session
+        m_session->clear();
+        m_session->currentFolder = projectDir;
+        m_session->sourceFolder = QDir(projectDir).filePath("sprites");
+        QDir().mkpath(m_session->sourceFolder);
+        m_sourceFolderIsTemp = false;
+        m_session->layoutSourcePath = m_session->sourceFolder;
+        m_session->layoutSourceIsList = false;
+
+        m_projectFilePath = projectPath;
+
+        // Initialize last save config with default destination
+        m_lastSaveConfig.destination = projectDir;
+
+        // Write project.spart.json immediately (synchronous, no pipeline)
+        QString saveError;
+        if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(SaveConfig{}, m_session, true), saveError)) {
+            m_statusLabel->setText(tr("Failed to write project JSON: ") + saveError);
+        }
+
+        m_statusLabel->setText(tr("Project created in: %1").arg(projectDir));
+        updateMainContentView();
+        updateUiState();
+
+        // Update window title
+        setWindowTitle(tr("%1 — %2").arg(result.name).arg(projectDir));
+    }
+}
+#endif
+
+void MainWindow::onOpenRecentProjectRequested() {
+    if (m_recentProjects.isEmpty()) {
+        onLoadProject();
+        return;
+    }
+
+    if (m_recentProjectsMenu) {
+        // Show the recent projects menu at the button's position
+        m_recentProjectsMenu->exec(m_recentProjectBtn->mapToGlobal(QPoint(0, m_recentProjectBtn->height())));
+    }
+}
+
+#ifndef Q_OS_WASM
+void MainWindow::onProjectSettingsRequested() {
+    // Project settings allows renaming or moving the project
+    QString currentName = QFileInfo(m_projectFilePath).dir().dirName();
+    QString currentLocation = QFileInfo(m_projectFilePath).dir().absolutePath();
+    if (currentName.isEmpty() || currentName == ".") currentName = tr("Untitled Project");
+
+    // The location in NewProjectDialog is the parent folder
+    QString parentFolder = QFileInfo(currentLocation).absolutePath();
+
+    NewProjectDialog dlg(parentFolder, this);
+    dlg.setWindowTitle(tr("Project Settings"));
+    dlg.setProjectName(currentName);
+    dlg.setLocation(parentFolder);
+    dlg.setCreateSubfolder(true);
+
+    if (dlg.exec() == QDialog::Accepted) {
+        NewProjectDialog::Result result = dlg.getResult();
+        // Rename/move logic would go here
+        // For now just update the title if name changed
+        QString newDir = result.location;
+        if (result.createSubfolder) {
+            newDir = QDir(newDir).filePath(result.name);
+        }
+        setWindowTitle(tr("%1 — %2").arg(result.name).arg(newDir));
+    }
+}
+#endif
+
 void MainWindow::cacheLayoutOutputFromPayload(const QJsonObject& payload) {
     QJsonObject layoutInfo = payload["layout"].toObject();
     m_session->cachedLayoutOutput = layoutInfo["output"].toString();
@@ -538,14 +626,64 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
 }
 
 void MainWindow::onSaveClicked() {
-    if (m_lastSaveConfig.destination.isEmpty()) {
-        onSaveAsClicked();   // First save: fall through to dialog
+#ifdef Q_OS_WASM
+    return; // Save is disabled on WASM (no persistent project folder)
+#else
+    if (m_projectFilePath.isEmpty()) {
+        // Ensure a default projects folder exists before showing the name dialog.
+        if (m_settings.defaultProjectsFolder.isEmpty()
+                || !QDir(m_settings.defaultProjectsFolder).exists()) {
+            const QString fallback = QDir(QStandardPaths::writableLocation(
+                QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
+            QString dir = QFileDialog::getExistingDirectory(
+                this, tr("Choose Projects Folder"), fallback);
+            if (dir.isEmpty()) return;
+            m_settings.defaultProjectsFolder = dir;
+            CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+        }
+
+        NewProjectDialog dlg(m_settings.defaultProjectsFolder, this);
+        if (dlg.exec() != QDialog::Accepted) return;
+        const NewProjectDialog::Result result = dlg.getResult();
+
+        QString projectDir = result.location;
+        if (result.createSubfolder) {
+            projectDir = QDir(projectDir).filePath(result.name);
+        }
+        QDir().mkpath(projectDir);
+        m_projectFilePath = QDir(projectDir).filePath("project.spart.json");
+        m_lastSaveConfig.destination = projectDir;
+
+        if (m_session->sourceFolder.isEmpty()) {
+            m_session->sourceFolder = QDir(projectDir).filePath("sprites");
+            QDir().mkpath(m_session->sourceFolder);
+            m_sourceFolderIsTemp = false;
+        }
+
+        setWindowTitle(tr("%1 — %2").arg(result.name).arg(projectDir));
+    }
+
+    const QString projectDir = QFileInfo(m_projectFilePath).absolutePath();
+    QString error;
+    if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
+        m_statusLabel->setText(tr("Save failed: ") + error);
+        QMessageBox::critical(this, tr("Save Failed"), error);
         return;
     }
-    saveProjectWithConfig(m_lastSaveConfig);
+    m_statusLabel->setText(tr("Saved"));
+    updateUiState();
+#endif
 }
 
-void MainWindow::onSaveAsClicked() {
+void MainWindow::onExportClicked() {
+    if (m_lastSaveConfig.destination.isEmpty()) {
+        onExportAsClicked();
+        return;
+    }
+    runExport(m_lastSaveConfig);
+}
+
+void MainWindow::onExportAsClicked() {
     QString defaultPath;
 #ifdef Q_OS_WASM
     QString baseName = m_session ? QFileInfo(m_session->currentFolder).fileName().trimmed() : QString();
@@ -577,19 +715,15 @@ void MainWindow::onSaveAsClicked() {
         return;
     }
 
-    // Warn if overwriting an existing folder project (non-ZIP destinations only)
+    // Warn if overwriting an existing export (non-ZIP destinations only)
     const bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
     if (!isZip) {
         const QDir dest(config.destination);
-        const bool hasProject =
-            QFile::exists(dest.filePath("project.spart.json")) ||
-            QDir(dest.filePath("output")).exists() ||
-            QDir(dest.filePath("sprites")).exists();
-        if (hasProject) {
+        if (QDir(dest.filePath("output")).exists()) {
             const int answer = QMessageBox::warning(
-                this, tr("Overwrite Project?"),
-                tr("The folder \"%1\" already contains a project.\n"
-                   "The output and sprites folders will be cleared and replaced.\n\n"
+                this, tr("Overwrite Export?"),
+                tr("The folder \"%1\" already contains an export.\n"
+                   "The output folder will be cleared and replaced.\n\n"
                    "Continue?").arg(config.destination),
                 QMessageBox::Yes | QMessageBox::Cancel,
                 QMessageBox::Cancel);
@@ -598,10 +732,10 @@ void MainWindow::onSaveAsClicked() {
     }
 
     m_lastSaveConfig = config;
-    saveProjectWithConfig(m_lastSaveConfig);
+    runExport(m_lastSaveConfig);
 }
 
-bool MainWindow::saveProjectWithConfig(SaveConfig config) {
+bool MainWindow::runExport(SaveConfig config) {
     if (m_spratLayoutBin.isEmpty() || m_spratPackBin.isEmpty()) {
         QMessageBox::critical(this, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
         return false;
@@ -611,7 +745,7 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
         return false;
     }
 
-    if (m_projectSaveWatcher.isRunning()) {
+    if (m_exportWatcher.isRunning()) {
         return false;
     }
 
@@ -653,7 +787,7 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
     };
 
     auto saveTask = [this, config, setStatus, shouldCancel]() {
-        ProjectSaveResult result;
+        ExportResult result;
         
         auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& step, const QByteArray* input, QByteArray* output) {
             // Error output is discarded here but we could pass another QByteArray to runTool if needed
@@ -687,20 +821,20 @@ bool MainWindow::saveProjectWithConfig(SaveConfig config) {
 
     #ifdef Q_OS_WASM
     QTimer::singleShot(0, this, [this, saveTask]() {
-        ProjectSaveResult result = saveTask();
-        handleProjectSaveResult(result);
+        ExportResult result = saveTask();
+        handleExportResult(result);
     });
     #else
-    m_projectSaveWatcher.setFuture(QtConcurrent::run(saveTask));
+    m_exportWatcher.setFuture(QtConcurrent::run(saveTask));
     #endif
     return true;
 }
 
-void MainWindow::onProjectSaveFinished() {
-    handleProjectSaveResult(m_projectSaveWatcher.result());
+void MainWindow::onExportFinished() {
+    handleExportResult(m_exportWatcher.result());
 }
 
-void MainWindow::handleProjectSaveResult(const ProjectSaveResult& result) {
+void MainWindow::handleExportResult(const ExportResult& result) {
     setLoading(false);
 
     if (result.canceled) {
@@ -1014,10 +1148,25 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
     const QString sourceMode = layoutInfo["source_mode"].toString();
     if (!folder.isEmpty()) {
         m_session->currentFolder = folder;
-        if (sourceMode == "list" && !framePaths.isEmpty()) {
-            m_session->activeFramePaths = framePaths;
-            if (!ensureFrameListInput()) {
-                QMessageBox::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
+        if (!QDir(folder).exists()) {
+            // Source folder missing: restore project settings but skip layout rebuild.
+            // A folder will be assigned when sprites are loaded.
+            setLoading(false);
+            applyProjectPayload();
+        } else {
+            if (sourceMode == "list" && !framePaths.isEmpty()) {
+                m_session->activeFramePaths = framePaths;
+                if (!ensureFrameListInput()) {
+                    QMessageBox::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
+                    m_session->layoutSourcePath = QDir(folder).absolutePath();
+                    m_session->layoutSourceIsList = false;
+                    if (!m_session->frameListPath.isEmpty()) {
+                        QFile::remove(m_session->frameListPath);
+                        m_session->frameListPath.clear();
+                    }
+                    m_folderLabel->setText(tr("Folder: ") + folder);
+                }
+            } else {
                 m_session->layoutSourcePath = QDir(folder).absolutePath();
                 m_session->layoutSourceIsList = false;
                 if (!m_session->frameListPath.isEmpty()) {
@@ -1026,16 +1175,8 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
                 }
                 m_folderLabel->setText(tr("Folder: ") + folder);
             }
-        } else {
-            m_session->layoutSourcePath = QDir(folder).absolutePath();
-            m_session->layoutSourceIsList = false;
-            if (!m_session->frameListPath.isEmpty()) {
-                QFile::remove(m_session->frameListPath);
-                m_session->frameListPath.clear();
-            }
-            m_folderLabel->setText(tr("Folder: ") + folder);
+            scheduleLayoutRebuild(true);
         }
-        scheduleLayoutRebuild(true);
     } else {
         setLoading(false);
     }
@@ -1255,7 +1396,9 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
             QDir().mkpath(m_session->sourceFolder);
         }
 
-        m_projectFilePath.clear();
+        if (m_sourceFolderIsTemp) {
+            m_projectFilePath.clear();
+        }
         m_sourceFolderIsTemp = false;
         if (!m_session->frameListPath.isEmpty()) {
             QFile::remove(m_session->frameListPath);

@@ -10,10 +10,12 @@ void MainWindowUiState::apply(
     QAction* loadAction,
     QComboBox* profileCombo,
     QAction* saveAction,
-    QAction* saveAsAction) {
-    bool enabled = cliReady && !isLoading;
-    loadAction->setEnabled(enabled);
-    profileCombo->setEnabled(enabled);
-    saveAction->setEnabled(enabled && hasSprites);
-    if (saveAsAction) saveAsAction->setEnabled(enabled && hasSprites);
+    QAction* exportAction,
+    QAction* exportAsAction) {
+    bool cliEnabled = cliReady && !isLoading;
+    loadAction->setEnabled(cliEnabled);
+    profileCombo->setEnabled(cliEnabled);
+    saveAction->setEnabled(!isLoading && hasSprites);
+    if (exportAction)   exportAction->setEnabled(cliEnabled && hasSprites);
+    if (exportAsAction) exportAsAction->setEnabled(cliEnabled && hasSprites);
 }

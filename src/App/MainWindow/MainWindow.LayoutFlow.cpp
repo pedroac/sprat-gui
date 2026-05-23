@@ -2,6 +2,12 @@
 #include "UndoCommands.h"
 
 #include "SpriteSelectionPresenter.h"
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QHBoxLayout>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QVBoxLayout>
 #include "LayoutRunner.h"
 #include "LayoutParser.h"
 #include "ResolutionUtils.h"
@@ -9,9 +15,11 @@
 #include "AppConstants.h"
 #include "AnimationPreviewService.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QStyle>
 #include <QCoreApplication>
 #include <QMap>
 #include <QMessageBox>
@@ -206,7 +214,8 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                     continue;
                 }
                 auto oldS = oldSprites[s->path];
-                s->name = oldS->name;
+                s->name    = oldS->name;
+                s->aliases = oldS->aliases;
                 const bool oldPivotIsLegacyDefault =
                     oldS->pivotX == legacyDefaultPivotX(oldS) &&
                     oldS->pivotY == legacyDefaultPivotY(oldS);
@@ -505,6 +514,146 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
         m_previewZoomSpin,
         m_handleCombo,
         m_isRestoringProject);
+
+    if (m_editAliasesBtn) m_editAliasesBtn->setEnabled(sprite != nullptr);
+    updateAliasesButton();
+}
+
+void MainWindow::updateAliasesButton() {
+    if (!m_editAliasesBtn) return;
+    if (!m_session || !m_session->selectedSprite) {
+        m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
+        return;
+    }
+    const int count = m_session->selectedSprite->aliases.size();
+    if (count > 0)
+        m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases (%1)").arg(count));
+    else
+        m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
+}
+
+void MainWindow::onSpriteNameEditingFinished() {
+    if (!m_session || !m_session->selectedSprite || !m_spriteNameEdit) return;
+    const QString newName = m_spriteNameEdit->text().trimmed();
+    const QString oldName = m_session->selectedSprite->name;
+
+    if (newName.isEmpty()) {
+        // Revert display — don't allow clearing the name.
+        m_spriteNameEdit->blockSignals(true);
+        m_spriteNameEdit->setText(oldName);
+        m_spriteNameEdit->blockSignals(false);
+        return;
+    }
+    if (newName == oldName) return;
+
+    const QStringList aliases = m_session->selectedSprite->aliases;
+    m_session->selectedSprite->name = newName;
+    if (m_statusLabel) m_statusLabel->setText(tr("Selected: ") + newName);
+
+    SpritePtr sprite = m_session->selectedSprite;
+    m_undoStack->push(new SetSpriteNamesCommand(
+        sprite,
+        oldName, aliases,
+        newName, aliases,
+        [this, sprite]() {
+            if (m_session && m_session->selectedSprite == sprite) {
+                m_spriteNameEdit->blockSignals(true);
+                m_spriteNameEdit->setText(sprite->name);
+                m_spriteNameEdit->blockSignals(false);
+                if (m_statusLabel)
+                    m_statusLabel->setText(tr("Selected: ") + sprite->name);
+            }
+        }
+    ));
+}
+
+void MainWindow::onEditAliases() {
+    if (!m_session || !m_session->selectedSprite) return;
+
+    SpritePtr sprite            = m_session->selectedSprite;
+    const QString canonicalName = sprite->name;
+    const QStringList oldAliases = sprite->aliases;
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Aliases for \"%1\"").arg(canonicalName));
+    auto* layout = new QVBoxLayout(&dlg);
+
+    auto* list = new QListWidget(&dlg);
+    list->setMinimumWidth(240);
+    list->setMinimumHeight(120);
+    for (const auto& a : oldAliases) {
+        auto* item = new QListWidgetItem(a);
+        item->setFlags(item->flags() | Qt::ItemIsEditable);
+        list->addItem(item);
+    }
+    layout->addWidget(list);
+
+    auto* btnRow   = new QHBoxLayout();
+    auto* style_ = QApplication::style();
+    auto* addBtn   = new QPushButton(style_->standardIcon(QStyle::SP_FileDialogNewFolder), "", &dlg);
+    addBtn->setToolTip(tr("Add alias"));
+    addBtn->setFixedSize(24, 24);
+    auto* removeBtn = new QPushButton(style_->standardIcon(QStyle::SP_DialogDiscardButton), "", &dlg);
+    removeBtn->setToolTip(tr("Remove selected alias"));
+    removeBtn->setFixedSize(24, 24);
+    removeBtn->setEnabled(false);
+    btnRow->addWidget(addBtn);
+    btnRow->addWidget(removeBtn);
+    btnRow->addStretch();
+    layout->addLayout(btnRow);
+
+    auto* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    layout->addWidget(bbox);
+
+    connect(list, &QListWidget::currentRowChanged, &dlg, [removeBtn, list](int row) {
+        removeBtn->setEnabled(row >= 0 && list->count() > 0);
+    });
+
+    connect(addBtn, &QPushButton::clicked, &dlg, [&]() {
+        // Collect current names in the dialog list.
+        QStringList current;
+        for (int i = 0; i < list->count(); ++i)
+            current << list->item(i)->text();
+        // Generate a unique suffixed name.
+        QString aliasName;
+        for (int i = 1; ; ++i) {
+            QString candidate = canonicalName + "_" + QString::number(i);
+            if (!current.contains(candidate)) { aliasName = candidate; break; }
+        }
+        auto* item = new QListWidgetItem(aliasName);
+        item->setFlags(item->flags() | Qt::ItemIsEditable);
+        list->addItem(item);
+        list->editItem(item);
+    });
+
+    connect(removeBtn, &QPushButton::clicked, &dlg, [list]() {
+        delete list->takeItem(list->currentRow());
+    });
+
+    connect(bbox, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bbox, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    QStringList newAliases;
+    for (int i = 0; i < list->count(); ++i) {
+        const QString a = list->item(i)->text().trimmed();
+        if (!a.isEmpty()) newAliases << a;
+    }
+    if (newAliases == oldAliases) return;
+
+    sprite->aliases = newAliases;
+    updateAliasesButton();
+
+    m_undoStack->push(new SetSpriteNamesCommand(
+        sprite,
+        canonicalName, oldAliases,
+        canonicalName, newAliases,
+        [this, sprite]() {
+            if (m_session && m_session->selectedSprite == sprite)
+                updateAliasesButton();
+        }
+    ));
 }
 
 void MainWindow::onProfileChanged() {

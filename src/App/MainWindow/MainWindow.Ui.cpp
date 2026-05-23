@@ -73,9 +73,35 @@ void MainWindow::setupUi() {
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);
     QVBoxLayout* welcomeLayout = new QVBoxLayout(m_welcomePage);
-    m_welcomeLabel = new QLabel(tr("Drag and drop a folder, image file, archive (zip/tar), or URL"), m_welcomePage);
+    welcomeLayout->addStretch();
+
+    QHBoxLayout* welcomeButtons = new QHBoxLayout();
+    welcomeButtons->setAlignment(Qt::AlignCenter);
+    welcomeButtons->setSpacing(20);
+
+#ifndef Q_OS_WASM
+    m_newProjectBtn = new QPushButton(tr("New Project"), m_welcomePage);
+    m_newProjectBtn->setFixedSize(180, 50);
+    m_newProjectBtn->setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }");
+    connect(m_newProjectBtn, &QPushButton::clicked, this, &MainWindow::onNewProjectRequested);
+    welcomeButtons->addWidget(m_newProjectBtn);
+#endif
+
+    m_recentProjectBtn = new QPushButton(tr("Open Recent Project"), m_welcomePage);
+    m_recentProjectBtn->setFixedSize(180, 50);
+    m_recentProjectBtn->setStyleSheet("QPushButton { font-size: 14px; }");
+    connect(m_recentProjectBtn, &QPushButton::clicked, this, &MainWindow::onOpenRecentProjectRequested);
+    welcomeButtons->addWidget(m_recentProjectBtn);
+
+    welcomeLayout->addLayout(welcomeButtons);
+
+    m_welcomeLabel = new QLabel(tr("Or: drag and drop folders, files, or URLs"), m_welcomePage);
     m_welcomeLabel->setAlignment(Qt::AlignCenter);
+    m_welcomeLabel->setStyleSheet("font-size: 13px; color: #888; margin-top: 12px;");
     welcomeLayout->addWidget(m_welcomeLabel);
+
+    welcomeLayout->addStretch();
+    
     m_mainStack->addWidget(m_welcomePage);
 
     // --- Create Docks ---
@@ -94,7 +120,23 @@ void MainWindow::setupUi() {
     canvasControlsWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     QHBoxLayout* canvasControls = new QHBoxLayout(canvasControlsWidget);
     canvasControls->setContentsMargins(0, 0, 0, 0);
-    canvasControls->addWidget(new QLabel(tr("Profile:")));
+    {
+        QPixmap pix(16, 16);
+        pix.fill(Qt::transparent);
+        QPainter painter(&pix);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QPen pen(palette().color(QPalette::WindowText), 1.2);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(1, 1,  13, 4);   // top layer
+        painter.drawRect(1, 6,  13, 4);   // middle layer
+        painter.drawRect(1, 11, 13, 4);   // bottom layer
+        painter.end();
+        auto* profileLabel = new QLabel(this);
+        profileLabel->setPixmap(pix);
+        profileLabel->setToolTip(tr("Layout profile: controls packing mode, atlas size, padding, and other export settings"));
+        canvasControls->addWidget(profileLabel);
+    }
     m_profileSelectorStack = new QStackedWidget(this);
     m_profileSelectorStack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     QWidget* profileSelectPage = new QWidget(m_profileSelectorStack);
@@ -106,13 +148,6 @@ void MainWindow::setupUi() {
     m_profileCombo->setAccessibleName(tr("Layout profile"));
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
     profileSelectLayout->addWidget(m_profileCombo);
-    QIcon profileManageIcon = QIcon::fromTheme("document-properties");
-    m_manageProfilesBtn = new QPushButton(profileManageIcon, profileManageIcon.isNull() ? tr("Manage") : "", profileSelectPage);
-    m_manageProfilesBtn->setToolTip(tr("Manage Profiles"));
-    m_manageProfilesBtn->setAccessibleName(tr("Manage profiles"));
-    m_manageProfilesBtn->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    connect(m_manageProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
-    profileSelectLayout->addWidget(m_manageProfilesBtn);
     m_profileSelectorStack->addWidget(profileSelectPage);
 
     QWidget* addProfilesPage = new QWidget(m_profileSelectorStack);
@@ -120,7 +155,7 @@ void MainWindow::setupUi() {
     addProfilesLayout->setContentsMargins(0, 0, 0, 0);
     addProfilesLayout->setSpacing(0);
     m_addProfilesBtn = new QPushButton(tr("Add Profiles"), addProfilesPage);
-    m_addProfilesBtn->setIcon(QIcon::fromTheme("document-new"));
+    m_addProfilesBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder));
     connect(m_addProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
     addProfilesLayout->addWidget(m_addProfilesBtn);
     m_profileSelectorStack->addWidget(addProfilesPage);
@@ -129,7 +164,23 @@ void MainWindow::setupUi() {
     applyConfiguredProfiles(configuredProfiles(), QString());
 
     canvasControls->addSpacing(8);
-    canvasControls->addWidget(new QLabel(tr("Source resolution:")));
+    {
+        QPixmap pix(16, 16);
+        pix.fill(Qt::transparent);
+        QPainter painter(&pix);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QPen pen(palette().color(QPalette::WindowText), 1.2);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(1, 1, 13, 9);       // screen
+        painter.drawLine(6, 10, 6, 12);      // neck
+        painter.drawLine(4, 12, 11, 12);     // base
+        painter.end();
+        auto* resLabel = new QLabel(this);
+        resLabel->setPixmap(pix);
+        resLabel->setToolTip(tr("Source resolution"));
+        canvasControls->addWidget(resLabel);
+    }
     m_sourceResolutionCombo = new QComboBox(canvasControlsWidget);
     m_sourceResolutionCombo->setToolTip(tr("Target source resolution for layout"));
     m_sourceResolutionCombo->setAccessibleName(tr("Source resolution"));
@@ -190,7 +241,22 @@ void MainWindow::setupUi() {
     connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, scheduleSourceResolutionLayoutRun);
 
     canvasControls->addStretch();
-    canvasControls->addWidget(new QLabel(tr("Zoom:")));
+    auto makeZoomLabel = [this]() {
+        QPixmap pix(16, 16);
+        pix.fill(Qt::transparent);
+        QPainter painter(&pix);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(palette().color(QPalette::WindowText), 1.5));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(6, 6), 4.5, 4.5);
+        painter.drawLine(QPointF(9.2, 9.2), QPointF(14, 14));
+        painter.end();
+        auto* label = new QLabel(this);
+        label->setPixmap(pix);
+        label->setToolTip(tr("Zoom"));
+        return label;
+    };
+    canvasControls->addWidget(makeZoomLabel());
     m_layoutZoomSpin = new QDoubleSpinBox(this);
     m_layoutZoomSpin->setRange(10.0, 800.0);
     m_layoutZoomSpin->setValue(100.0);
@@ -312,10 +378,14 @@ void MainWindow::setupUi() {
         if (sprite) onSpriteSelected(sprite);
     });
 
-    // Atlas view stack: page 0 = Layout, page 1 = Navigator
+    // Atlas view stack: page 0 = Layout, page 1 = Navigator, page 2 = Empty state
     m_atlasViewStack = new QStackedWidget(this);
     m_atlasViewStack->addWidget(canvasContent);
     m_atlasViewStack->addWidget(navigatorContent);
+    auto* emptyAtlasLabel = new QLabel(tr("Drag and drop folder, files or URLs"), m_atlasViewStack);
+    emptyAtlasLabel->setAlignment(Qt::AlignCenter);
+    emptyAtlasLabel->setStyleSheet("font-size: 14px; color: #888;");
+    m_atlasViewStack->addWidget(emptyAtlasLabel);
     m_atlasViewStack->setCurrentIndex(0);
 
     // 2. Animation Timelines panel
@@ -329,7 +399,9 @@ void MainWindow::setupUi() {
     m_timelineCreateEdit = new QLineEdit(this);
     m_timelineCreateEdit->setPlaceholderText(tr("Timeline name (optional)"));
     timelineAddLayout->addWidget(m_timelineCreateEdit);
-    QPushButton* addTimelineBtn = new QPushButton(QIcon::fromTheme("list-add"), tr("Add"), this);
+    QPushButton* addTimelineBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), "", this);
+    addTimelineBtn->setToolTip(tr("Add timeline"));
     connect(addTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineAddClicked);
     connect(m_timelineCreateEdit, &QLineEdit::returnPressed, this, &MainWindow::onTimelineAddClicked);
     timelineAddLayout->addWidget(addTimelineBtn);
@@ -341,6 +413,16 @@ void MainWindow::setupUi() {
     connect(m_timelineList, &QListWidget::itemSelectionChanged, this, &MainWindow::onTimelineSelectionChanged);
     timelineLayout->addWidget(m_timelineList, 1); // Give it a stretch factor
     m_timelineList->setVisible(false);
+    m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_timelineList, &QWidget::customContextMenuRequested, this,
+        [this](const QPoint& pos) {
+            QListWidgetItem* item = m_timelineList->itemAt(pos);
+            if (!item) return;
+            m_timelineList->setCurrentItem(item);
+            QMenu menu(this);
+            menu.addAction(tr("Create Alias"), this, &MainWindow::onTimelineCreateAlias);
+            menu.exec(m_timelineList->mapToGlobal(pos));
+        });
 
     // Add a gap between the list and the editor
     timelineLayout->addSpacing(8);
@@ -371,10 +453,32 @@ void MainWindow::setupUi() {
     m_timelineFpsSpin->setAccessibleName(tr("Timeline FPS"));
     connect(m_timelineFpsSpin, &QSpinBox::valueChanged, this, &MainWindow::onTimelineFpsChanged);
     timelineNameLayout->addWidget(m_timelineFpsSpin);
-    QPushButton* removeTimelineBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove"), this);
+    QPushButton* removeTimelineBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton), "", this);
+    removeTimelineBtn->setToolTip(tr("Remove timeline"));
     connect(removeTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineRemoveClicked);
     timelineNameLayout->addWidget(removeTimelineBtn);
     groupLayout->addLayout(timelineNameLayout);
+
+    m_timelineAliasLabel = new QLabel(this);
+    m_timelineAliasLabel->setVisible(false);
+    groupLayout->addWidget(m_timelineAliasLabel);
+
+    QHBoxLayout* flipRow = new QHBoxLayout();
+    m_timelineFlipLabel = new QLabel(tr("Flip:"), this);
+    m_timelineFlipLabel->setVisible(false);
+    flipRow->addWidget(m_timelineFlipLabel);
+    m_timelineFlipCombo = new QComboBox(this);
+    m_timelineFlipCombo->addItem(tr("None"),       0);
+    m_timelineFlipCombo->addItem(tr("Horizontal"), 1);
+    m_timelineFlipCombo->addItem(tr("Vertical"),   2);
+    m_timelineFlipCombo->addItem(tr("Both"),       3);
+    m_timelineFlipCombo->setVisible(false);
+    connect(m_timelineFlipCombo, &QComboBox::currentIndexChanged,
+            this, &MainWindow::onTimelineFlipChanged);
+    flipRow->addWidget(m_timelineFlipCombo);
+    flipRow->addStretch();
+    groupLayout->addLayout(flipRow);
 
     m_timelineDropArea = new QWidget(this); // No longer a group box, replaced by Selected Timeline group
     QVBoxLayout* dropAreaLayout = new QVBoxLayout(m_timelineDropArea);
@@ -405,24 +509,50 @@ void MainWindow::setupUi() {
     QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorContent);
     editorLayoutBox->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
+    // Name row: label + editable name field + aliases button
     QHBoxLayout* nameRow = new QHBoxLayout();
     nameRow->addWidget(new QLabel(tr("Name:")));
     m_spriteNameEdit = new QLineEdit(this);
+    m_spriteNameEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_spriteNameEdit->setEnabled(false);
+    connect(m_spriteNameEdit, &QLineEdit::editingFinished,
+            this, &MainWindow::onSpriteNameEditingFinished);
     nameRow->addWidget(m_spriteNameEdit);
-
-    nameRow->addWidget(new QLabel(tr("Zoom:")));
+    m_editAliasesBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView), "", this);
+    m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
+    m_editAliasesBtn->setEnabled(false);
+    connect(m_editAliasesBtn, &QPushButton::clicked, this, &MainWindow::onEditAliases);
+    nameRow->addWidget(m_editAliasesBtn);
+    nameRow->addWidget(makeZoomLabel());
     m_previewZoomSpin = new QDoubleSpinBox(this);
     m_previewZoomSpin->setRange(10.0, 1600.0);
     m_previewZoomSpin->setValue(200.0);
     m_previewZoomSpin->setSuffix("%");
     m_previewZoomSpin->setSingleStep(10.0);
     nameRow->addWidget(m_previewZoomSpin);
-
     editorLayoutBox->addLayout(nameRow);
 
     QHBoxLayout* pivotRow = new QHBoxLayout();
-    pivotRow->addWidget(new QLabel(tr("Handle:")));
+    {
+        QPixmap pix(16, 16);
+        pix.fill(Qt::transparent);
+        QPainter painter(&pix);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QPen pen(palette().color(QPalette::WindowText), 1.2);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(8, 8), 3.5, 3.5);  // center circle
+        painter.drawLine(QPointF(8, 1),  QPointF(8, 4));   // top tick
+        painter.drawLine(QPointF(8, 12), QPointF(8, 15));  // bottom tick
+        painter.drawLine(QPointF(1, 8),  QPointF(4, 8));   // left tick
+        painter.drawLine(QPointF(12, 8), QPointF(15, 8));  // right tick
+        painter.end();
+        auto* handleLabel = new QLabel(this);
+        handleLabel->setPixmap(pix);
+        handleLabel->setToolTip(tr("Handle: the pivot point or named marker used as the origin when placing this sprite in the game engine"));
+        pivotRow->addWidget(handleLabel);
+    }
     m_handleCombo = new QComboBox(this);
     m_handleCombo->addItem(tr("pivot"));
     m_handleCombo->setToolTip(tr("Select pivot or a named marker to edit"));
@@ -445,8 +575,8 @@ void MainWindow::setupUi() {
     m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
     connect(m_pivotYSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
     pivotRow->addWidget(m_pivotYSpin);
-    QIcon manageIcon = QIcon::fromTheme("document-properties");
-    m_configPointsBtn = new QPushButton(manageIcon, manageIcon.isNull() ? tr("Manage") : "", this);
+    m_configPointsBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView), "", this);
     m_configPointsBtn->setToolTip(tr("Manage Markers"));
     m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     connect(m_configPointsBtn, &QPushButton::clicked, this, &MainWindow::onPointsConfigClicked);
@@ -478,26 +608,24 @@ void MainWindow::setupUi() {
     animLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
     QHBoxLayout* animControls = new QHBoxLayout();
-    m_animPrevBtn = new QPushButton(tr("◀◀"));
-    m_animPrevBtn->setIcon(QIcon::fromTheme("media-skip-backward"));
+    auto* style_ = QApplication::style();
+    m_animPrevBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaSkipBackward), "");
     m_animPrevBtn->setToolTip(tr("Step to previous frame"));
     m_animPrevBtn->setAccessibleName(tr("Previous frame"));
     connect(m_animPrevBtn, &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
     animControls->addWidget(m_animPrevBtn);
-    m_animPlayPauseBtn = new QPushButton(tr("▶"));
-    m_animPlayPauseBtn->setIcon(QIcon::fromTheme("media-playback-start"));
+    m_animPlayPauseBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaPlay), "");
     m_animPlayPauseBtn->setToolTip(tr("Play or pause animation"));
     m_animPlayPauseBtn->setAccessibleName(tr("Play or pause"));
     connect(m_animPlayPauseBtn, &QPushButton::clicked, this, &MainWindow::onAnimPlayPauseClicked);
     animControls->addWidget(m_animPlayPauseBtn);
-    m_animNextBtn = new QPushButton(tr("▶▶"));
-    m_animNextBtn->setIcon(QIcon::fromTheme("media-skip-forward"));
+    m_animNextBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaSkipForward), "");
     m_animNextBtn->setToolTip(tr("Step to next frame"));
     m_animNextBtn->setAccessibleName(tr("Next frame"));
     connect(m_animNextBtn, &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
     animControls->addWidget(m_animNextBtn);
     animControls->addStretch();
-    animControls->addWidget(new QLabel(tr("Zoom:")));
+    animControls->addWidget(makeZoomLabel());
     m_animZoomSpin = new QDoubleSpinBox(this);
     m_animZoomSpin->setRange(10.0, 1600.0);
     m_animZoomSpin->setValue(200.0);
@@ -534,7 +662,7 @@ void MainWindow::setupUi() {
     QHBoxLayout* cliLogBtnLayout = new QHBoxLayout();
     cliLogBtnLayout->setContentsMargins(4, 2, 4, 4);
     cliLogBtnLayout->addStretch();
-    QPushButton* clearLogBtn = new QPushButton(QIcon::fromTheme("edit-clear"), tr("Clear"), cliLogContent);
+    QPushButton* clearLogBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_LineEditClearButton), tr("Clear"), cliLogContent);
     clearLogBtn->setToolTip(tr("Clear log output"));
     connect(clearLogBtn, &QPushButton::clicked, m_cliLog, &QPlainTextEdit::clear);
     cliLogBtnLayout->addWidget(clearLogBtn);
@@ -572,10 +700,15 @@ void MainWindow::setupUi() {
     m_cliInfoText->setStyleSheet("font-weight: normal;");
     m_cliInfoText->setPlaceholderText(tr("CLI diagnostics not yet available."));
 
-    auto* debugTabs = new QTabWidget(this);
-    debugTabs->addTab(cliLogContent, tr("Log"));
-    debugTabs->addTab(m_cliInfoText, tr("Diagnostics"));
-    m_debugDock->setWidget(debugTabs);
+    m_debugTabs = new QTabWidget(this);
+    m_debugTabs->addTab(cliLogContent, tr("Log"));
+    m_debugTabs->addTab(m_cliInfoText, tr("Diagnostics"));
+    m_debugDock->setWidget(m_debugTabs);
+    connect(m_debugDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (visible && m_cliLog && m_cliLog->document()->isEmpty()) {
+            m_debugTabs->setCurrentIndex(1); // Diagnostics
+        }
+    });
 
     // Layout: three rows
     addDockWidget(Qt::TopDockWidgetArea, m_atlasDock);
@@ -620,7 +753,8 @@ void MainWindow::setupUi() {
         refreshSpriteTree();
     });
 
-    m_viewMenu->addAction(m_animationDock->toggleViewAction());
+    m_animationToggleAction = m_animationDock->toggleViewAction();
+    m_viewMenu->addAction(m_animationToggleAction);
     m_viewMenu->addSeparator();
     m_viewMenu->addAction(m_debugDock->toggleViewAction());
 
@@ -657,33 +791,67 @@ void MainWindow::setupToolbar() {
     QMenuBar* mainMenuBar = menuBar();
     QMenu* fileMenu = mainMenuBar->addMenu(tr("File"));
 
-    m_loadAction = fileMenu->addAction(tr("Load Images Folder"));
-    m_loadAction->setToolTip(tr("Load a folder of sprite images"));
-    connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
+    auto* style = QApplication::style();
 
-    QAction* loadProjectAction = fileMenu->addAction(tr("Load..."));
+#ifndef Q_OS_WASM
+    QAction* newProjectAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_FileIcon), tr("New Project"));
+    newProjectAction->setShortcut(QKeySequence::New);
+    connect(newProjectAction, &QAction::triggered, this, &MainWindow::onNewProjectRequested);
+#endif
+
+    QAction* loadProjectAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Project..."));
+    loadProjectAction->setShortcut(QKeySequence::Open);
     loadProjectAction->setToolTip(tr("Load a project or archive file"));
     connect(loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
 
-    QAction* loadUrlAction = fileMenu->addAction(tr("Load URL..."));
-    loadUrlAction->setToolTip(tr("Download and load an image, project, or archive from a URL"));
+    m_recentProjectsMenu = fileMenu->addMenu(tr("Open Recent"));
+
+    fileMenu->addSeparator();
+
+#ifndef Q_OS_WASM
+    QAction* projectSettingsAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Project Settings..."));
+    connect(projectSettingsAction, &QAction::triggered, this, &MainWindow::onProjectSettingsRequested);
+#endif
+
+    fileMenu->addSeparator();
+
+    m_loadAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DirOpenIcon), tr("Import Images Folder..."));
+    m_loadAction->setToolTip(tr("Import a folder of sprite images into the current project"));
+    connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
+
+    QAction* loadUrlAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_CommandLink), tr("Import from URL..."));
+    loadUrlAction->setToolTip(tr("Download and import an image, project, or archive from a URL"));
     connect(loadUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
 
     fileMenu->addSeparator();
-    m_saveAction = fileMenu->addAction(tr("Save"));
+    m_saveAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"));
     m_saveAction->setShortcut(QKeySequence::Save);      // Ctrl+S
     m_saveAction->setEnabled(false);
-    m_saveAction->setToolTip(tr("Save to the last-used destination"));
+    m_saveAction->setToolTip(tr("Write project.spart.json to the project folder"));
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveClicked);
 
-    m_saveAsAction = fileMenu->addAction(tr("Save As..."));
-    m_saveAsAction->setShortcut(QKeySequence::SaveAs);  // Ctrl+Shift+S
-    m_saveAsAction->setEnabled(false);
-    m_saveAsAction->setToolTip(tr("Save to a new destination"));
-    connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::onSaveAsClicked);
+    m_exportAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export"));
+    m_exportAction->setShortcut(QKeySequence::SaveAs);  // Ctrl+Shift+S
+    m_exportAction->setEnabled(false);
+    m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
+    connect(m_exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
+
+    m_exportAsAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export As..."));
+    m_exportAsAction->setEnabled(false);
+    m_exportAsAction->setToolTip(tr("Run the export pipeline to a new destination"));
+    connect(m_exportAsAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
     fileMenu->addSeparator();
-    m_openSourceFolderAction = fileMenu->addAction(tr("Open Sprites Folder"));
+    m_openSourceFolderAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DirIcon), tr("Open Sprites Folder"));
     m_openSourceFolderAction->setToolTip(tr("Open the sprites source folder in the file manager"));
     m_openSourceFolderAction->setEnabled(false);
     connect(m_openSourceFolderAction, &QAction::triggered,
@@ -694,38 +862,42 @@ void MainWindow::setupToolbar() {
 #endif
 
     fileMenu->addSeparator();
-    m_recentProjectsMenu = fileMenu->addMenu(tr("Recent"));
-
-    fileMenu->addSeparator();
-    QAction* quitAction = fileMenu->addAction(tr("Quit"));
+    QAction* quitAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogCloseButton), tr("Quit"));
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
 
     QMenu* editMenu = mainMenuBar->addMenu(tr("&Edit"));
-    QAction* undoAction = editMenu->addAction(tr("&Undo"));
+    QAction* undoAction = editMenu->addAction(
+        style->standardIcon(QStyle::SP_ArrowBack), tr("&Undo"));
     undoAction->setShortcut(QKeySequence::Undo);
     connect(undoAction, &QAction::triggered, this, &MainWindow::onUndo);
 
-    QAction* redoAction = editMenu->addAction(tr("&Redo"));
+    QAction* redoAction = editMenu->addAction(
+        style->standardIcon(QStyle::SP_ArrowForward), tr("&Redo"));
     redoAction->setShortcut(QKeySequence::Redo);
     connect(redoAction, &QAction::triggered, this, &MainWindow::onRedo);
 
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
-    QAction* stylesAction = settingsMenu->addAction(tr("Styles..."));
+    QAction* stylesAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_DesktopIcon), tr("Styles..."));
     stylesAction->setToolTip(tr("Open style settings"));
     connect(stylesAction, &QAction::triggered, this, &MainWindow::onSettingsStylesClicked);
 
-    QAction* spritesheetAction = settingsMenu->addAction(tr("Spritesheet..."));
+    QAction* spritesheetAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_FileDialogListView), tr("Spritesheet..."));
     spritesheetAction->setToolTip(tr("Open spritesheet settings"));
     connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
 
 #ifndef Q_OS_WASM
-    QAction* cliToolsAction = settingsMenu->addAction(tr("CLI Tools..."));
+    QAction* cliToolsAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_ComputerIcon), tr("CLI Tools..."));
     cliToolsAction->setToolTip(tr("Open CLI tools settings"));
     connect(cliToolsAction, &QAction::triggered, this, &MainWindow::onSettingsCliToolsClicked);
 #endif
 
-    QAction* manageProfilesAction = settingsMenu->addAction(tr("Manage Profiles..."));
+    QAction* manageProfilesAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Manage Profiles..."));
     manageProfilesAction->setToolTip(tr("Create and edit layout profiles"));
     connect(manageProfilesAction, &QAction::triggered, this, &MainWindow::onManageProfiles);
 }
@@ -745,6 +917,15 @@ void MainWindow::setupStatusBarUi() {
 
     m_statusLabel = new QLabel(tr("Idle"), this);
     m_statusLabel->setContentsMargins(0, 0, 12, 0);
+    m_statusLabel->setTextFormat(Qt::RichText);
+    m_statusLabel->setOpenExternalLinks(false);
+    connect(m_statusLabel, &QLabel::linkActivated, this, [this](const QString& link) {
+        if (link == "rename") {
+#ifndef Q_OS_WASM
+            onProjectSettingsRequested();
+#endif
+        }
+    });
     statusBar()->addPermanentWidget(m_statusLabel);
 }
 
@@ -818,7 +999,7 @@ void MainWindow::setupKeyboardShortcuts() {
 void MainWindow::updateUiState() {
     const bool enabled = m_cliReady && !m_isLoading;
     const bool hasModels = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
-    
+
     MainWindowUiState::apply(
         m_cliReady,
         m_isLoading,
@@ -826,11 +1007,13 @@ void MainWindow::updateUiState() {
         m_loadAction,
         m_profileCombo,
         m_saveAction,
-        m_saveAsAction);
+        m_exportAction,
+        m_exportAsAction);
 
-    if (m_manageProfilesBtn) {
-        m_manageProfilesBtn->setEnabled(enabled);
+    if (m_recentProjectBtn) {
+        m_recentProjectBtn->setEnabled(!m_isLoading);
     }
+
     if (m_addProfilesBtn) {
         m_addProfilesBtn->setEnabled(enabled);
     }
@@ -838,11 +1021,28 @@ void MainWindow::updateUiState() {
         m_sourceResolutionCombo->setEnabled(enabled);
     }
 
-    // Toggle editor page and docks (only Atlas + Animation auto-show; Debug stays hidden)
+    // View menu items: enabled once a project is open or sprites are loaded
+    const bool hasProject = !m_projectFilePath.isEmpty();
+    const bool viewEnabled = hasProject || hasModels;
+    if (m_showLayoutAction)       m_showLayoutAction->setEnabled(viewEnabled);
+    if (m_showNavigatorAction)    m_showNavigatorAction->setEnabled(viewEnabled);
+    if (m_animationToggleAction)  m_animationToggleAction->setEnabled(viewEnabled);
+
+    // Toggle docks and welcome page based on project / sprite state
     if (hasModels) {
         m_mainStack->hide();
         if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
         if (m_animationDock && m_animationDock->isHidden()) m_animationDock->show();
+        // Leave Layout/Navigator selection as-is; only move away from empty-state page
+        if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 2) {
+            m_atlasViewStack->setCurrentIndex(0);
+            if (m_showLayoutAction) m_showLayoutAction->setChecked(true);
+        }
+    } else if (hasProject) {
+        m_mainStack->hide();
+        if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
+        if (m_animationDock && m_animationDock->isHidden()) m_animationDock->show();
+        if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(2); // Empty-state placeholder
     } else {
         m_mainStack->setCurrentIndex(0); // Welcome page
         m_mainStack->show();
@@ -854,12 +1054,21 @@ void MainWindow::updateUiState() {
 
 void MainWindow::updateMainContentView() {
     const bool hasLayout = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
-    m_mainStack->setVisible(!hasLayout);
-    if (!hasLayout) {
-        m_mainStack->setCurrentIndex(0);
-    }
-}
+    const bool hasProject = !m_projectFilePath.isEmpty();
 
+    m_mainStack->setVisible(!hasLayout && !hasProject);
+    if (!hasLayout && !hasProject) {
+        m_mainStack->setCurrentIndex(0);
+        setWindowTitle(tr("Sprat GUI %1").arg(SPRAT_GUI_VERSION));
+    } else if (hasLayout) {
+        QString projectName = QFileInfo(m_projectFilePath).dir().dirName();
+        if (projectName.isEmpty() || projectName == ".") {
+            projectName = tr("Untitled Project");
+        }
+        setWindowTitle(tr("%1 — %2").arg(projectName).arg(m_session->currentFolder));
+    }
+    // hasProject && !hasLayout: title was set when the project was created/opened; leave it.
+}
 void MainWindow::updateRecentProjectsMenu() {
     if (!m_recentProjectsMenu) return;
     m_recentProjectsMenu->clear();
@@ -927,7 +1136,7 @@ void MainWindow::refreshSpriteTree() {
         return !name.isEmpty() && name.back().isDigit();
     };
 
-    const QIcon folderIcon = QIcon::fromTheme("folder");
+    const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
 
     auto makeLeaf = [&](QTreeWidgetItem* parent, const SpritePtr& sprite, const QString& leafName) {
         auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);

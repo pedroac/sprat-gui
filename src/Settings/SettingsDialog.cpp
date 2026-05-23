@@ -10,8 +10,9 @@
 #include <QLineEdit>
 #include <QFileDialog>
 #include <QCheckBox>
-#include <QIcon>
+#include <QApplication>
 #include <QScrollArea>
+#include <QStyle>
 #include <QScrollBar>
 #include <QTimer>
 
@@ -122,7 +123,7 @@ void SettingsDialog::setupUi() {
     spritesheetForm->addRow(tr("Sync Mode:"), m_syncModeCombo);
 
     m_syncNowBtn = new QPushButton(tr("Sync Now"), this);
-    m_syncNowBtn->setIcon(QIcon::fromTheme("edit-paste", QIcon::fromTheme("document-save")));
+    m_syncNowBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_BrowserReload));
     m_syncNowBtn->setEnabled(m_settings.syncMode != SyncMode::None);
     connect(m_syncNowBtn, &QPushButton::clicked, this, &SettingsDialog::onSyncNowClicked);
     spritesheetForm->addRow("", m_syncNowBtn);
@@ -138,7 +139,7 @@ void SettingsDialog::setupUi() {
     m_cliBaseDirEdit = new QLineEdit(m_cliPaths.baseDir, this);
     m_cliBaseDirEdit->setReadOnly(true);
     m_cliBaseDirBtn = new QPushButton(tr("Change..."), this);
-    m_cliBaseDirBtn->setIcon(QIcon::fromTheme("document-open-folder", QIcon::fromTheme("document-open")));
+    m_cliBaseDirBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon));
     connect(m_cliBaseDirBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
     baseDirLayout->addWidget(m_cliBaseDirEdit);
     baseDirLayout->addWidget(m_cliBaseDirBtn);
@@ -158,7 +159,7 @@ void SettingsDialog::setupUi() {
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton* resetBtn = buttons->addButton(tr("Reset"), QDialogButtonBox::ResetRole);
-    resetBtn->setIcon(QIcon::fromTheme("edit-undo"));
+    resetBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DialogResetButton));
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);

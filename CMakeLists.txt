@@ -281,6 +281,8 @@ set(PROJECT_SOURCES
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
     src/Project/ProjectSession.h
+    src/Project/NewProjectDialog.cpp
+    src/Project/NewProjectDialog.h
     src/Animation/Timelines/AnimationTimelineOps.cpp
     src/Animation/Timelines/AnimationTimelineOps.h
     src/Animation/Test/AnimationTestOps.cpp

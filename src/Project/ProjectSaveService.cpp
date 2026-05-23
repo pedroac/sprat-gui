@@ -59,6 +59,31 @@ namespace {
     }
 }
 
+bool ProjectSaveService::writeProjectJson(
+    const QString& projectFolder,
+    const QJsonObject& payload,
+    QString& error
+) {
+    QDir dir(projectFolder);
+    if (!dir.exists()) {
+        if (!dir.mkpath(".")) {
+            error = trPS("Could not create project directory.");
+            return false;
+        }
+    }
+    QFile projectFile(dir.filePath("project.spart.json"));
+    if (!projectFile.open(QIODevice::WriteOnly)) {
+        error = trPS("Could not write project.spart.json.");
+        return false;
+    }
+    if (projectFile.write(QJsonDocument(payload).toJson()) < 0) {
+        error = trPS("Failed to write project.spart.json.");
+        return false;
+    }
+    projectFile.close();
+    return true;
+}
+
 bool ProjectSaveService::save(
     SaveConfig config,
     const QString& layoutInputPath,
@@ -117,16 +142,15 @@ bool ProjectSaveService::save(
         }
     }
 
-    // For folder saves, remove stale output/ and sprites/ first.
+    // For folder exports, remove stale output/ first.
     if (!isZip) {
         const QDir wd(workingPath);
         QDir(wd.filePath("output")).removeRecursively();
-        QDir(wd.filePath("sprites")).removeRecursively();
     }
 
     if (setLoading) setLoading(true);
     LoadingGuard loadingGuard{setLoading};
-    if (setStatus) setStatus(trPS("Saving..."));
+    if (setStatus) setStatus(trPS("Exporting..."));
 
     auto checkCanceled = [&]() -> bool {
         if (shouldCancel && shouldCancel()) {
@@ -149,45 +173,6 @@ bool ProjectSaveService::save(
         if (!destDir.mkpath(".")) {
             error = trPS("Could not create destination directory.");
             return false;
-        }
-    }
-
-    QFile projectFile(destDir.filePath("project.spart.json"));
-    if (!projectFile.open(QIODevice::WriteOnly)) {
-        error = trPS("Could not write project.spart.json.");
-        return false;
-    }
-    if (projectFile.write(QJsonDocument(projectPayload).toJson()) < 0) {
-        error = trPS("Failed to write project.spart.json.");
-        return false;
-    }
-    projectFile.close();
-    updateStatus(trPS("Writing metadata..."));
-    if (checkCanceled()) {
-        return false;
-    }
-
-    // Copy source sprites into the save output
-    if (!framePaths.isEmpty() && !sourceFolder.isEmpty()) {
-        updateStatus(trPS("Copying sprites..."));
-        const QString spritesPath = destDir.filePath("sprites");
-        QDir().mkpath(spritesPath);
-        QDir srcRoot(sourceFolder);
-        for (const QString& framePath : framePaths) {
-            if (checkCanceled()) {
-                return false;
-            }
-            QString relPath = srcRoot.relativeFilePath(framePath);
-            if (relPath.startsWith("..")) {
-                relPath = QFileInfo(framePath).fileName();
-            }
-            const QString dstPath = QDir(spritesPath).filePath(relPath);
-            if (QFileInfo(framePath).absoluteFilePath() == QFileInfo(dstPath).absoluteFilePath()) {
-                continue; // re-save in place
-            }
-            QDir().mkpath(QFileInfo(dstPath).absolutePath());
-            QFile::remove(dstPath);
-            QFile::copy(framePath, dstPath);
         }
     }
 
@@ -263,10 +248,22 @@ bool ProjectSaveService::save(
         }
         
         if (!hasPivotMarker) {
-            markersStream << "- marker \"pivot\" point " 
+            markersStream << "- marker \"pivot\" point "
                           << spriteState["pivot_x"].toInt() << "," << spriteState["pivot_y"].toInt() << "\n";
         }
         markersStream << "\n";
+    }
+
+    // Emit top-level alias directives for each sprite that has aliases.
+    for (auto it = spritesState.begin(); it != spritesState.end(); ++it) {
+        const QJsonObject spriteState = it.value().toObject();
+        const QString canonicalName = spriteState["name"].toString();
+        if (canonicalName.isEmpty()) continue;
+        for (const auto& a : spriteState["aliases"].toArray()) {
+            const QString alias = a.toString().trimmed();
+            if (!alias.isEmpty())
+                markersStream << "alias \"" << alias << "\" \"" << canonicalName << "\"\n";
+        }
     }
 
     QJsonObject animInfo = projectPayload["animations"].toObject();
@@ -285,9 +282,22 @@ bool ProjectSaveService::save(
         }
         
         animStream << "animation \"" << timeline["name"].toString() << "\" " << timelineFps << "\n";
-        QJsonArray frames = timeline["frames"].toArray();
-        for (const auto& fVal : frames) {
-            animStream << "- frame \"" << fVal.toString() << "\"\n";
+        const QString aliasOf = timeline["alias_of"].toString();
+        if (!aliasOf.isEmpty()) {
+            animStream << "alias \"" << aliasOf << "\"";
+            const bool hFlip = timeline["h_flip"].toBool();
+            const bool vFlip = timeline["v_flip"].toBool();
+            if (hFlip || vFlip) {
+                animStream << " flip ";
+                if (hFlip) animStream << "h";
+                if (vFlip) animStream << "v";
+            }
+            animStream << "\n";
+        } else {
+            QJsonArray frames = timeline["frames"].toArray();
+            for (const auto& fVal : frames) {
+                animStream << "- frame \"" << fVal.toString() << "\"\n";
+            }
         }
         animStream << "\n";
     }

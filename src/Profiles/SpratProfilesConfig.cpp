@@ -95,7 +95,10 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
             p.scale = 1.0;
         }
         p.sort = p.sort.trimmed().toLower();
-        if (p.sort != "name" && p.sort != "none") {
+        if (p.sort != "name" && p.sort != "none" &&
+            p.sort != "stable" && p.sort != "stable:area" &&
+            p.sort != "stable:maxside" && p.sort != "stable:height" &&
+            p.sort != "stable:width" && p.sort != "stable:perimeter") {
             p.sort = "none";
         }
         p.gpuCompress = p.gpuCompress.trimmed().toLower();

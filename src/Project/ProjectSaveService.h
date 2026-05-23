@@ -29,4 +29,18 @@ public:
         const std::function<bool()>& shouldCancel = nullptr,
         const std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)>& runProcessFunc = nullptr
     );
+
+    static bool writeProjectJson(
+        const QString& projectFolder,
+        const QJsonObject& payload,
+        QString& error
+    );
+
+    static bool create(
+        const QString& name,
+        const QString& parentDir,
+        bool createSubfolder,
+        QString& outProjectPath,
+        QString& error
+    );
 };

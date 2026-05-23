@@ -1,5 +1,6 @@
 #pragma once
 #include <QString>
+#include <QStringList>
 #include <QStringView>
 #include <QRect>
 #include <QVector>
@@ -210,10 +211,19 @@ struct Sprite {
 
     /**
      * @brief Display name of the sprite.
-     * 
+     *
      * Used for UI display and identification.
      */
     QString name;
+
+    /**
+     * @brief Additional names for the sprite.
+     *
+     * Each alias produces an `alias "alias_name" "canonical_name"` directive
+     * in the combined layout file so downstream tools generate duplicate output
+     * entries automatically.
+     */
+    QStringList aliases;
 
     /**
      * @brief Rectangle defining the sprite's position and size in the atlas.
@@ -332,10 +342,27 @@ struct AnimationTimeline {
 
     /**
      * @brief List of frame paths in sequence.
-     * 
+     *
      * Each path should point to a valid sprite image file.
      */
     QStringList frames;
+
+    /**
+     * @brief If non-empty, this timeline is an alias of the named timeline.
+     *
+     * Alias timelines derive their frame sequence from the source (read-only).
+     */
+    QString aliasOf;
+
+    /**
+     * @brief Flip frames horizontally during playback.
+     */
+    bool hFlip = false;
+
+    /**
+     * @brief Flip frames vertically during playback.
+     */
+    bool vFlip = false;
 };
 
 /**
@@ -444,6 +471,11 @@ struct AppSettings {
      * Default: Watch
      */
     SyncMode syncMode = SyncMode::Watch;
+
+    /**
+     * @brief Default folder for new projects.
+     */
+    QString defaultProjectsFolder;
 
     /**
      * @brief Recently opened project file paths (most recent first, max 5)

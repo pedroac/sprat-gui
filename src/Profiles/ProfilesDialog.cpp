@@ -116,6 +116,11 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     m_sortCombo = new QComboBox(this);
     m_sortCombo->addItem(tr("By filename"), "name");
     m_sortCombo->addItem(tr("None"), "none");
+    m_sortCombo->addItem(tr("Stable (area)"), "stable");
+    m_sortCombo->addItem(tr("Stable (max side)"), "stable:maxside");
+    m_sortCombo->addItem(tr("Stable (height)"), "stable:height");
+    m_sortCombo->addItem(tr("Stable (width)"), "stable:width");
+    m_sortCombo->addItem(tr("Stable (perimeter)"), "stable:perimeter");
     generalLayout->addRow(tr("Sort:"), m_sortCombo);
 
     detailsScrollLayout->addWidget(generalGroup);

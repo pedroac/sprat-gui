@@ -54,6 +54,8 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.deduplicateMode = settings.value("settings/deduplicate_mode", out.deduplicateMode).toString();
     out.syncMode = syncModeFromString(settings.value("settings/sync_mode", syncModeToString(out.syncMode)).toString());
     out.theme = settings.value("settings/theme", out.theme).toString();
+    out.defaultProjectsFolder = settings.value("settings/default_projects_folder", 
+        QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects")).toString();
     out.recentProjects = settings.value("recent/projects", out.recentProjects).toStringList();
     return out;
 }
@@ -89,6 +91,7 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/deduplicate_mode", settings.deduplicateMode);
     qsettings.setValue("settings/sync_mode", syncModeToString(settings.syncMode));
     qsettings.setValue("settings/theme", settings.theme);
+    qsettings.setValue("settings/default_projects_folder", settings.defaultProjectsFolder);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

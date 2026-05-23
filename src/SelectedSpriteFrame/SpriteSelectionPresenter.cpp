@@ -16,7 +16,9 @@ void SpriteSelectionPresenter::applySpriteSelection(
     QComboBox* handleCombo,
     bool useCurrentZoom) {
     if (sprite) {
+        spriteNameEdit->blockSignals(true);
         spriteNameEdit->setText(sprite->name);
+        spriteNameEdit->blockSignals(false);
         spriteNameEdit->setEnabled(true);
         pivotXSpin->setValue(sprite->pivotX);
         pivotXSpin->setEnabled(true);
@@ -32,7 +34,9 @@ void SpriteSelectionPresenter::applySpriteSelection(
         }
         configPointsBtn->setEnabled(true);
     } else {
+        spriteNameEdit->blockSignals(true);
         spriteNameEdit->clear();
+        spriteNameEdit->blockSignals(false);
         spriteNameEdit->setEnabled(false);
         pivotXSpin->setEnabled(false);
         pivotYSpin->setEnabled(false);

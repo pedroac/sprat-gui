@@ -11,6 +11,7 @@
 #include "ImageFolderSelectionDialog.h"
 
 #include <QApplication>
+#include <QStyle>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -283,7 +284,9 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         m_session->selectedTimelineIndex = -1;
         refreshTimelineList();
         refreshAnimationTest();
-        m_projectFilePath.clear();
+        if (m_sourceFolderIsTemp) {
+            m_projectFilePath.clear();
+        }
         m_session->currentFolder = folderPath;
         m_folderLabel->setText(tr("Folder: ") + folderPath);
         m_session->cachedLayoutOutput.clear();
@@ -329,10 +332,11 @@ bool MainWindow::confirmLayoutReplacement() {
     QMessageBox msg(this);
     msg.setWindowTitle(tr("Layout Already Loaded"));
     msg.setText(tr("A layout is already loaded. Do you want to replace it?"));
+    auto* style_ = QApplication::style();
     QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-    replaceBtn->setIcon(QIcon::fromTheme("document-save"));
+    replaceBtn->setIcon(style_->standardIcon(QStyle::SP_DialogSaveButton));
     QPushButton* ignoreBtn = msg.addButton(tr("Ignore"), QMessageBox::RejectRole);
-    ignoreBtn->setIcon(QIcon::fromTheme("process-stop"));
+    ignoreBtn->setIcon(style_->standardIcon(QStyle::SP_DialogCancelButton));
     msg.exec();
     return msg.clickedButton() == replaceBtn;
 }
@@ -447,8 +451,8 @@ void MainWindow::setupCliInstallOverlay() {
     m_cliInstallLog->hide();
     layout->addWidget(m_cliInstallLog);
 
-    m_cancelLoadingButton = new QPushButton(tr("Cancel"), m_cliInstallOverlay);
-    m_cancelLoadingButton->setIcon(QIcon::fromTheme("process-stop"));
+    m_cancelLoadingButton = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_DialogCancelButton), tr("Cancel"), m_cliInstallOverlay);
     m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 4px 8px; font-weight: bold; font-size: 11px;");
     m_cancelLoadingButton->setCursor(Qt::PointingHandCursor);
     m_cancelLoadingButton->setMaximumWidth(80);
@@ -472,7 +476,7 @@ void MainWindow::onCancelLoading() {
     m_frameDetectionWatcher.cancel();
     m_tarExtractionWatcher.cancel();
     m_frameExtractionWatcher.cancel();
-    m_projectSaveWatcher.cancel();
+    m_exportWatcher.cancel();
     
     m_statusLabel->setText(tr("Operation canceled"));
     setLoading(false);

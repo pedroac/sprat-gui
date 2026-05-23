@@ -630,7 +630,9 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         onSpriteSelected(SpritePtr());
         refreshTimelineList();
         refreshAnimationTest();
-        m_projectFilePath.clear();
+        if (m_sourceFolderIsTemp) {
+            m_projectFilePath.clear();
+        }
         m_sourceFolderIsTemp = false;
         m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;
@@ -712,7 +714,9 @@ void MainWindow::onTransparencyProcessingFinished() {
         onSpriteSelected(SpritePtr());
         refreshTimelineList();
         refreshAnimationTest();
-        m_projectFilePath.clear();
+        if (m_sourceFolderIsTemp) {
+            m_projectFilePath.clear();
+        }
         m_sourceFolderIsTemp = false;
         m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;

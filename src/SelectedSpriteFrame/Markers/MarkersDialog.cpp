@@ -1,6 +1,8 @@
 #include "MarkersDialog.h"
 #include "MarkerUtils.h"
+#include <QApplication>
 #include <QCoreApplication>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QListWidget>
@@ -64,7 +66,7 @@ void MarkersDialog::setupUi() {
     m_addNameEdit->setPlaceholderText(tr("New marker name"));
     addLayout->addWidget(m_addNameEdit);
     
-    QPushButton* addBtn = new QPushButton(QIcon::fromTheme("list-add"), tr("Add"));
+    QPushButton* addBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), tr("Add"));
     addBtn->setAutoDefault(false);
     connect(addBtn, &QPushButton::clicked, this, &MarkersDialog::onAddClicked);
     connect(m_addNameEdit, &QLineEdit::returnPressed, this, &MarkersDialog::onAddClicked);
@@ -76,7 +78,7 @@ void MarkersDialog::setupUi() {
     connect(m_listWidget, &QListWidget::itemSelectionChanged, this, &MarkersDialog::onSelectionChanged);
     mainLayout->addWidget(m_listWidget);
 
-    QPushButton* removeBtn = new QPushButton(QIcon::fromTheme("list-remove"), tr("Remove Selected"));
+    QPushButton* removeBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton), tr("Remove Selected"));
     removeBtn->setAutoDefault(false);
     connect(removeBtn, &QPushButton::clicked, this, &MarkersDialog::onRemoveClicked);
     mainLayout->addWidget(removeBtn);

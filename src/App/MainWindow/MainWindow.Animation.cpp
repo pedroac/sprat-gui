@@ -12,6 +12,7 @@
 
 #include <QDoubleSpinBox>
 #include <QApplication>
+#include <QStyle>
 #include <QFileInfo>
 #include <QIcon>
 #include <QLabel>
@@ -36,22 +37,37 @@ void MainWindow::refreshTimelineList() {
     m_timelineList->blockSignals(true);
     m_timelineList->clear();
     for (const auto& timeline : m_session->timelines) {
+        // For aliases, display source frames and add [alias] prefix
+        const QStringList* displayFrames = &timeline.frames;
+        if (!timeline.aliasOf.isEmpty()) {
+            for (const auto& src : m_session->timelines) {
+                if (src.name == timeline.aliasOf && src.aliasOf.isEmpty()) {
+                    displayFrames = &src.frames;
+                    break;
+                }
+            }
+        }
+
         QIcon icon;
-        if (!timeline.frames.isEmpty()) {
-            int middleIndex = timeline.frames.size() / 2;
-            QString middlePath = timeline.frames[middleIndex];
+        if (!displayFrames->isEmpty()) {
+            int middleIndex = displayFrames->size() / 2;
+            QString middlePath = (*displayFrames)[middleIndex];
             icon = m_timelineListIconCache.value(middlePath);
             if (icon.isNull()) {
                 icon = QIcon(middlePath);
                 m_timelineListIconCache.insert(middlePath, icon);
             }
         }
-        
+
+        const QString displayName = timeline.aliasOf.isEmpty()
+            ? timeline.name
+            : QStringLiteral("[alias] %1").arg(timeline.name);
+
         QListWidgetItem* item = new QListWidgetItem(
             icon,
             QStringLiteral("%1 | %2 frames | %3 fps")
-                .arg(timeline.name)
-                .arg(timeline.frames.size())
+                .arg(displayName)
+                .arg(displayFrames->size())
                 .arg(timeline.fps)
         );
         m_timelineList->addItem(item);
@@ -84,8 +100,19 @@ void MainWindow::refreshTimelineFrames() {
     }
 
     const auto& timeline = m_session->timelines[m_session->selectedTimelineIndex];
-    m_timelineDragHintLabel->setVisible(timeline.frames.isEmpty());
-    for (const QString& path : timeline.frames) {
+
+    // Resolve effective frames for display (alias support)
+    const QStringList* framesToShow = &timeline.frames;
+    if (!timeline.aliasOf.isEmpty()) {
+        for (const auto& src : m_session->timelines) {
+            if (src.name == timeline.aliasOf && src.aliasOf.isEmpty()) {
+                framesToShow = &src.frames;
+                break;
+            }
+        }
+    }
+    m_timelineDragHintLabel->setVisible(framesToShow->isEmpty() && timeline.aliasOf.isEmpty());
+    for (const QString& path : *framesToShow) {
         QFileInfo fi(path);
         QIcon icon = m_timelineFrameIconCache.value(path);
         if (icon.isNull()) {
@@ -390,8 +417,17 @@ void MainWindow::refreshAnimationTest() {
     // preloadTimeline() is a no-op when the timeline has not changed.
     if (m_session->selectedTimelineIndex >= 0
             && m_session->selectedTimelineIndex < m_session->timelines.size()) {
-        AnimationPreviewService::preloadTimeline(
-            m_session->timelines[m_session->selectedTimelineIndex].frames);
+        const auto& selTl = m_session->timelines[m_session->selectedTimelineIndex];
+        const QStringList* preloadFrames = &selTl.frames;
+        if (!selTl.aliasOf.isEmpty()) {
+            for (const auto& src : m_session->timelines) {
+                if (src.name == selTl.aliasOf && src.aliasOf.isEmpty()) {
+                    preloadFrames = &src.frames;
+                    break;
+                }
+            }
+        }
+        AnimationPreviewService::preloadTimeline(*preloadFrames);
     }
 
     QString statusText;
@@ -412,8 +448,8 @@ void MainWindow::refreshAnimationTest() {
     }
     // Update button icon to reflect current playing state
     if (m_animPlayPauseBtn) {
-        static const QIcon kPlayIcon = QIcon::fromTheme("media-playback-start");
-        static const QIcon kPauseIcon = QIcon::fromTheme("media-playback-pause");
+        static const QIcon kPlayIcon = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
+        static const QIcon kPauseIcon = QApplication::style()->standardIcon(QStyle::SP_MediaPause);
         m_animPlayPauseBtn->setIcon(m_animPlaying ? kPauseIcon : kPlayIcon);
     }
 

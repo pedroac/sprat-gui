@@ -1220,6 +1220,110 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// (1022) SetTimelineFlipCommand — change hFlip/vFlip on an alias timeline
+// ---------------------------------------------------------------------------
+class SetTimelineFlipCommand : public QUndoCommand {
+public:
+    SetTimelineFlipCommand(QVector<AnimationTimeline>* timelines, int index,
+                           bool oldH, bool oldV, bool newH, bool newV,
+                           std::function<void()> postExecute,
+                           QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Change Timeline Flip"), parent)
+        , m_timelines(timelines), m_index(index)
+        , m_oldH(oldH), m_oldV(oldV), m_newH(newH), m_newV(newV)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        if (m_index >= 0 && m_index < m_timelines->size()) {
+            (*m_timelines)[m_index].hFlip = m_newH;
+            (*m_timelines)[m_index].vFlip = m_newV;
+        }
+        if (m_postExecute) m_postExecute();
+    }
+
+    void undo() override {
+        if (m_index >= 0 && m_index < m_timelines->size()) {
+            (*m_timelines)[m_index].hFlip = m_oldH;
+            (*m_timelines)[m_index].vFlip = m_oldV;
+        }
+        if (m_postExecute) m_postExecute();
+    }
+
+    int id() const override { return 1022; }
+
+    bool mergeWith(const QUndoCommand* other) override {
+        const auto* o = static_cast<const SetTimelineFlipCommand*>(other);
+        if (o->m_timelines != m_timelines || o->m_index != m_index) return false;
+        m_newH = o->m_newH;
+        m_newV = o->m_newV;
+        return true;
+    }
+
+private:
+    QVector<AnimationTimeline>* m_timelines;
+    int m_index;
+    bool m_oldH, m_oldV, m_newH, m_newV;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1023) SetSpriteNamesCommand — edit canonical name and/or aliases of a sprite
+// ---------------------------------------------------------------------------
+class SetSpriteNamesCommand : public QUndoCommand {
+public:
+    SetSpriteNamesCommand(SpritePtr sprite,
+                          const QString& oldName,    const QStringList& oldAliases,
+                          const QString& newName,    const QStringList& newAliases,
+                          std::function<void()> postExecute,
+                          QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Edit Sprite Name"), parent)
+        , m_sprite(sprite)
+        , m_oldName(oldName), m_oldAliases(oldAliases)
+        , m_newName(newName), m_newAliases(newAliases)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        if (m_sprite) {
+            m_sprite->name    = m_newName;
+            m_sprite->aliases = m_newAliases;
+        }
+        if (m_postExecute) m_postExecute();
+    }
+
+    void undo() override {
+        if (m_sprite) {
+            m_sprite->name    = m_oldName;
+            m_sprite->aliases = m_oldAliases;
+        }
+        if (m_postExecute) m_postExecute();
+    }
+
+    int id() const override { return 1023; }
+
+    bool mergeWith(const QUndoCommand* other) override {
+        const auto* o = static_cast<const SetSpriteNamesCommand*>(other);
+        if (o->m_sprite != m_sprite) return false;
+        m_newName    = o->m_newName;
+        m_newAliases = o->m_newAliases;
+        return true;
+    }
+
+private:
+    SpritePtr m_sprite;
+    QString m_oldName, m_newName;
+    QStringList m_oldAliases, m_newAliases;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo = true;
+};
+
+// ---------------------------------------------------------------------------
 // (1020) RemoveFramesCommand — remove frames from session only (no file delete)
 // ---------------------------------------------------------------------------
 class RemoveFramesCommand : public QUndoCommand {

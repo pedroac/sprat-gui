@@ -2,9 +2,11 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
-#include <QIcon>
+#include <QApplication>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QPainter>
+#include <QStyle>
 #include <QShortcut>
 #include <QDialog>
 #include <QSpinBox>
@@ -28,7 +30,21 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     // Top Bar
     QHBoxLayout* topBarLayout = new QHBoxLayout();
     topBarLayout->addStretch();
-    topBarLayout->addWidget(new QLabel(tr("Zoom:")));
+    {
+        QPixmap pix(16, 16);
+        pix.fill(Qt::transparent);
+        QPainter painter(&pix);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(palette().color(QPalette::WindowText), 1.5));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(6, 6), 4.5, 4.5);
+        painter.drawLine(QPointF(9.2, 9.2), QPointF(14, 14));
+        painter.end();
+        auto* zoomLabel = new QLabel(this);
+        zoomLabel->setPixmap(pix);
+        zoomLabel->setToolTip(tr("Zoom"));
+        topBarLayout->addWidget(zoomLabel);
+    }
     m_zoomSpin = new QDoubleSpinBox(this);
     m_zoomSpin->setRange(10.0, 5000.0);
     m_zoomSpin->setValue(100.0);
@@ -44,12 +60,10 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     });
     topBarLayout->addWidget(m_zoomSpin);
 
-    m_acceptBtn = new QPushButton(tr("Accept Frames"), this);
-    m_acceptBtn->setIcon(QIcon::fromTheme("document-save"));
-    m_rejectBtn = new QPushButton(tr("Use as Single Frame"), this);
-    m_rejectBtn->setIcon(QIcon::fromTheme("document-new"));
-    m_cancelBtn = new QPushButton(tr("Cancel"), this);
-    m_cancelBtn->setIcon(QIcon::fromTheme("process-stop"));
+    auto* style_ = QApplication::style();
+    m_acceptBtn = new QPushButton(style_->standardIcon(QStyle::SP_DialogApplyButton), tr("Accept Frames"), this);
+    m_rejectBtn = new QPushButton(style_->standardIcon(QStyle::SP_FileIcon), tr("Use as Single Frame"), this);
+    m_cancelBtn = new QPushButton(style_->standardIcon(QStyle::SP_DialogCancelButton), tr("Cancel"), this);
 
     connect(m_acceptBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onAcceptClicked);
     connect(m_rejectBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onRejectClicked);

@@ -112,6 +112,25 @@ public:
 #endif
 
 private slots:
+#ifndef Q_OS_WASM
+    /**
+     * @brief Handles request to create a new project.
+     */
+    void onNewProjectRequested();
+#endif
+
+    /**
+     * @brief Handles request to open a recent project.
+     */
+    void onOpenRecentProjectRequested();
+
+#ifndef Q_OS_WASM
+    /**
+     * @brief Handles request to edit project settings.
+     */
+    void onProjectSettingsRequested();
+#endif
+
     // === Layout Canvas Events ===
     /**
      * @brief Handles when a path is dropped onto the layout canvas.
@@ -202,9 +221,14 @@ private slots:
     void onSaveClicked();
 
     /**
-     * @brief Handles save-as action from the user (always opens dialog).
+     * @brief Re-runs export to the last-used destination; opens dialog on first use.
      */
-    void onSaveAsClicked();
+    void onExportClicked();
+
+    /**
+     * @brief Always opens the export dialog to choose a destination.
+     */
+    void onExportAsClicked();
 
     /**
      * @brief Handles when a generic process finishes execution.
@@ -432,10 +456,22 @@ private slots:
 
     /**
      * @brief Handles changes to timeline FPS.
-     * 
+     *
      * @param fps New frames per second
      */
     void onTimelineFpsChanged(int fps);
+
+    /**
+     * @brief Creates an alias of the currently selected timeline.
+     */
+    void onTimelineCreateAlias();
+
+    /**
+     * @brief Handles changes to the flip combo box for alias timelines.
+     *
+     * @param index Selected flip mode index
+     */
+    void onTimelineFlipChanged(int index);
 
     /**
      * @brief Handles animation timer timeout.
@@ -444,12 +480,16 @@ private slots:
     void onPasteImport();
 
 private:
-    struct ProjectSaveResult;
+    struct ExportResult;
 
 private slots:
     // === Undo/Redo ===
     void onUndo();
     void onRedo();
+
+    // === Sprite Name ===
+    void onSpriteNameEditingFinished();
+    void onEditAliases();
 
     // === Asynchronous Loading Slots ===
     void onProjectLoadFinished();
@@ -457,8 +497,8 @@ private slots:
     void onFrameDetectionFinished();
     void onTarExtractionFinished();
     void onFrameExtractionFinished();
-    void onProjectSaveFinished();
-    void handleProjectSaveResult(const ProjectSaveResult& result);
+    void onExportFinished();
+    void handleExportResult(const ExportResult& result);
     void onTransparencyProcessingFinished();
 
     // === CLI Installation Logging ===
@@ -776,12 +816,12 @@ private:
     bool confirmLayoutReplacement();
 
     /**
-     * @brief Saves project with given configuration.
-     * 
+     * @brief Runs the export pipeline with the given configuration.
+     *
      * @param config Save configuration
-     * @return bool True if save was successful
+     * @return bool True if export was started successfully
      */
-    bool saveProjectWithConfig(SaveConfig config);
+    bool runExport(SaveConfig config);
 
     /**
      * @brief Checks if a drop path is supported.
@@ -924,12 +964,22 @@ private:
     void refreshHandleCombo();
     void refreshSpriteTree();
 
+    /**
+     * @brief Updates the Aliases button label to reflect the current alias count.
+     */
+    void updateAliasesButton();
+
     // Navigator context menu helpers
     QStringList collectCheckedSpritePaths() const;
     QStringList collectDescendantSpritePaths(QTreeWidgetItem* item) const;
     QString folderPathForTreeItem(QTreeWidgetItem* item) const;
     void onNavigatorDeleteFrames(const QStringList& paths);
     void onNavigatorAddFrames(const QString& subfolder);
+    void onNavigatorSyncGroup(const QMap<QString, SpritePtr>& byPath,
+                              SpritePtr refSprite,
+                              const QStringList& groupPaths,
+                              bool syncPivot,
+                              const QStringList& syncMarkerNames);
     void onNavigatorAddToTimeline(const QStringList& paths);
     void onNavigatorCreateTimeline(const QStringList& paths, QTreeWidgetItem* contextItem = nullptr);
     void onNavigatorCreateGroup(const QStringList& paths, const QString& parentFolder);
@@ -1108,12 +1158,17 @@ private:
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
     QLabel* m_welcomeLabel;
+#ifndef Q_OS_WASM
+    QPushButton* m_newProjectBtn = nullptr;
+#endif
+    QPushButton* m_recentProjectBtn;
     QLabel* m_folderLabel;
 
     QDockWidget* m_atlasDock = nullptr;
     QDockWidget* m_animationDock = nullptr;
     QDockWidget* m_debugDock = nullptr;
     QPlainTextEdit* m_cliLog = nullptr;
+    QTabWidget*     m_debugTabs = nullptr;
     QPlainTextEdit* m_cliInfoText = nullptr;
     QMenu* m_viewMenu = nullptr;
 
@@ -1121,15 +1176,15 @@ private:
     QStackedWidget* m_atlasViewStack      = nullptr;
     NavigatorTreeWidget* m_spriteTree      = nullptr;
     QLineEdit*      m_spriteFilterEdit    = nullptr;
-    QAction*        m_showLayoutAction    = nullptr;
-    QAction*        m_showNavigatorAction = nullptr;
+    QAction*        m_showLayoutAction      = nullptr;
+    QAction*        m_showNavigatorAction  = nullptr;
+    QAction*        m_animationToggleAction = nullptr;
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas = nullptr;
     QStackedWidget* m_profileSelectorStack = nullptr;
     QComboBox* m_profileCombo = nullptr;
     QPushButton* m_addProfilesBtn = nullptr;
-    QPushButton* m_manageProfilesBtn = nullptr;
     QComboBox* m_sourceResolutionCombo = nullptr;
     QDoubleSpinBox* m_layoutZoomSpin = nullptr;
     QTimer* m_sourceResolutionDebounceTimer = nullptr;
@@ -1146,8 +1201,14 @@ private:
     QHash<QString, QIcon> m_timelineFrameIconCache;
     QHash<QString, QIcon> m_timelineListIconCache;
 
+    // Alias UI
+    QLabel*    m_timelineAliasLabel  = nullptr;
+    QLabel*    m_timelineFlipLabel   = nullptr;
+    QComboBox* m_timelineFlipCombo   = nullptr;
+
     // Selected Frame Editor Area
-    QLineEdit* m_spriteNameEdit;
+    QLineEdit*   m_spriteNameEdit   = nullptr;
+    QPushButton* m_editAliasesBtn   = nullptr;
     QLabel* m_multiSelectionLabel;
     QComboBox* m_handleCombo;
     QPushButton* m_configPointsBtn;
@@ -1167,7 +1228,8 @@ private:
 
     QAction* m_loadAction;
     QAction* m_saveAction;
-    QAction* m_saveAsAction = nullptr;
+    QAction* m_exportAction = nullptr;
+    QAction* m_exportAsAction = nullptr;
     QLabel* m_statusLabel;
     QProgressBar* m_statusProgressBar = nullptr;
     QToolButton* m_recentProjectsBtn = nullptr;
@@ -1315,13 +1377,13 @@ private:
     QFutureWatcher<FrameExtractionResult> m_frameExtractionWatcher;
     void processFrameExtractionResult(const FrameExtractionResult& result);
 
-    struct ProjectSaveResult {
+    struct ExportResult {
         QString savedDestination;
         QString error;
         bool success;
         bool canceled = false;
     };
-    QFutureWatcher<ProjectSaveResult> m_projectSaveWatcher;
+    QFutureWatcher<ExportResult> m_exportWatcher;
     QFutureWatcher<void> m_transparencyWatcher;  // For background transparency processing
     QNetworkAccessManager* m_importNetworkManager = nullptr;
     QPointer<QNetworkReply> m_activeImportReply;

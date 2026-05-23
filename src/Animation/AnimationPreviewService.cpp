@@ -150,8 +150,33 @@ QPixmap AnimationPreviewService::refresh(
     bool& playing,
     QTimer* timer)
 {
-    if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()
-            || timelines[selectedTimelineIndex].frames.isEmpty()) {
+    if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
+        statusText = trAnimationPreview("Create/select a timeline and drag frames into it.");
+        hasFrames = false;
+        if (playing) {
+            playing = false;
+            timer->stop();
+        }
+        return QPixmap();
+    }
+
+    const auto& selectedTimeline = timelines[selectedTimelineIndex];
+
+    // Resolve effective frames (alias support)
+    const QStringList* effectiveFrames = &selectedTimeline.frames;
+    bool hFlip = selectedTimeline.hFlip;
+    bool vFlip = selectedTimeline.vFlip;
+
+    if (!selectedTimeline.aliasOf.isEmpty()) {
+        for (const auto& tl : timelines) {
+            if (tl.name == selectedTimeline.aliasOf && tl.aliasOf.isEmpty()) {
+                effectiveFrames = &tl.frames;
+                break;
+            }
+        }
+    }
+
+    if (effectiveFrames->isEmpty()) {
         statusText = trAnimationPreview("Create/select a timeline and drag frames into it.");
         hasFrames = false;
         if (playing) {
@@ -162,7 +187,7 @@ QPixmap AnimationPreviewService::refresh(
     }
 
     hasFrames = true;
-    const auto& frames = timelines[selectedTimelineIndex].frames;
+    const QStringList& frames = *effectiveFrames;
     if (frameIndex >= frames.size())
         frameIndex = 0;
 
@@ -221,6 +246,11 @@ QPixmap AnimationPreviewService::refresh(
     QPainter p(&canvas);
     int pivotX = currentSprite ? qBound(0, currentSprite->pivotX, pix.width())  : pix.width()  / 2;
     int pivotY = currentSprite ? qBound(0, currentSprite->pivotY, pix.height()) : pix.height() / 2;
+    if (hFlip || vFlip) {
+        pix = pix.transformed(QTransform().scale(hFlip ? -1.0 : 1.0, vFlip ? -1.0 : 1.0));
+        if (hFlip) pivotX = pix.width()  - pivotX;
+        if (vFlip) pivotY = pix.height() - pivotY;
+    }
     p.drawPixmap(maxLeftExtent - pivotX, maxTopExtent - pivotY, pix);
     p.end();
 
@@ -236,12 +266,26 @@ QSize AnimationPreviewService::calculateAnimationSize(
     double zoom,
     int previewPadding)
 {
-    if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()
-            || timelines[selectedTimelineIndex].frames.isEmpty()) {
+    if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return QSize(280, 180);
     }
 
-    const auto& frames = timelines[selectedTimelineIndex].frames;
+    const auto& calcTimeline = timelines[selectedTimelineIndex];
+    const QStringList* effectiveFramesCalc = &calcTimeline.frames;
+    if (!calcTimeline.aliasOf.isEmpty()) {
+        for (const auto& tl : timelines) {
+            if (tl.name == calcTimeline.aliasOf && tl.aliasOf.isEmpty()) {
+                effectiveFramesCalc = &tl.frames;
+                break;
+            }
+        }
+    }
+
+    if (effectiveFramesCalc->isEmpty()) {
+        return QSize(280, 180);
+    }
+
+    const QStringList& frames = *effectiveFramesCalc;
 
     if (g_cachedSpriteMapGen != g_spriteMapGeneration) {
         g_cachedSpriteMap    = buildSpriteMap(layoutModels);
