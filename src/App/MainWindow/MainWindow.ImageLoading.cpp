@@ -20,6 +20,7 @@
 #include <algorithm>
 
 #include "MainWindow.h"
+#include "MessageDialog.h"
 #include "FrameDetectionDialog.h"
 #include "AnimatedImageImport.h"
 #include "ArchiveExtractor.h"
@@ -34,7 +35,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
 
     if (AnimatedImageImport::isAnimatedGif(imagePath)) {
         if (!m_cliReady || m_isLoading) {
-            QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+            MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
             return;
         }
 
@@ -57,7 +58,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         QString error;
         if (!AnimatedImageImport::extractAnimatedFrames(imagePath, tempPath, &error)) {
             setLoading(false);
-            QMessageBox::warning(this, tr("Load Failed"), error.isEmpty() ? tr("Could not decode animated GIF.") : error);
+            MessageDialog::warning(this, tr("Load Failed"), error.isEmpty() ? tr("Could not decode animated GIF.") : error);
             return;
         }
 
@@ -69,12 +70,12 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
 
 #ifdef Q_OS_WASM
     if (!m_cliReady || m_isLoading) {
-        QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
         return;
     }
     
     if (m_spratFramesBin.isEmpty()) {
-        QMessageBox::warning(this, tr("Error"), tr("spratframes binary not found."));
+        MessageDialog::warning(this, tr("Error"), tr("spratframes binary not found."));
         return;
     }
 
@@ -90,12 +91,12 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     });
 #else
     if (!m_cliReady || m_isLoading) {
-        QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
         return;
     }
     
     if (m_spratFramesBin.isEmpty()) {
-        QMessageBox::warning(this, tr("Error"), tr("spratframes binary not found."));
+        MessageDialog::warning(this, tr("Error"), tr("spratframes binary not found."));
         return;
     }
 
@@ -206,12 +207,12 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     }
     
     if (!m_cliReady || m_isLoading) {
-        QMessageBox::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
         return;
     }
     
     if (m_spratUnpackBin.isEmpty()) {
-        QMessageBox::warning(this, tr("Error"), tr("spratunpack binary not found."));
+        MessageDialog::warning(this, tr("Error"), tr("spratunpack binary not found."));
         return;
     }
 
@@ -442,20 +443,16 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     }
 
     if (action == DropAction::Merge) {
-        // Ask if files with same names should be replaced
-        QMessageBox msg(this);
-        msg.setWindowTitle(tr("Merge with duplicates"));
-        msg.setText(tr("When merging, what should happen to files with the same name?"));
-        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
-        msg.exec();
-        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
-
-        m_session->activeFramePaths.append(finalPath);
-        // Copy the image to source folder so it persists after temp dir cleanup
-        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        const QString subName = computeSourceSubfolderName(imagePath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        const QStringList copied = copyFramesToSourceSubfolder(
+            {finalPath}, subfolderPath, m_mergeReplaceAllDuplicates);
+        m_session->activeFramePaths.append(copied);
+        registerLoadedSource(imagePath, action, subfolderPath);
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
+        m_centerPivotsOnNextLayout = true;
+        refreshSourcesDialogIfVisible();
         scheduleLayoutRebuild(true);
         return;
     }
@@ -481,12 +478,16 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     refreshTimelineList();
     refreshAnimationTest();
 
-    // Copy the single image to source folder on Replace
-    m_session->activeFramePaths = { finalPath };
-    copyActiveFramesToSourceFolder();
+    // Copy the single image into its own subfolder on Replace
+    const QString subName = computeSourceSubfolderName(imagePath);
+    const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+    const QStringList copied = copyFramesToSourceSubfolder({finalPath}, subfolderPath);
+    m_session->activeFramePaths = copied;
     m_shouldClearSpritesFolder = false;
+    registerLoadedSource(imagePath, action, subfolderPath);
     // After copying, update to the copied path
-    QString copiedPath = m_session->activeFramePaths.first();
+    QString copiedPath = m_session->activeFramePaths.isEmpty()
+                         ? finalPath : m_session->activeFramePaths.first();
 
     // For a single image, we need to create a simple layout model
     LayoutModel singleImageModel;
@@ -542,7 +543,8 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
             refreshSpriteTree();
             updateMainContentView();
             updateUiState();
-            
+            refreshSourcesDialogIfVisible();
+
             setLoading(false);
             qInfo() << "[WASM] handleSingleImageLayout done";
         });
@@ -595,18 +597,14 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     }
     
     if (action == DropAction::Merge) {
-        // Ask if files with same names should be replaced
-        QMessageBox msg(this);
-        msg.setWindowTitle(tr("Merge with duplicates"));
-        msg.setText(tr("When merging, what should happen to files with the same name?"));
-        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
-        msg.exec();
-        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
-
-        m_session->activeFramePaths.append(framePaths);
-        // Copy extracted frames to source folder so they persist after temp dir cleanup
-        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        // currentFolder must be set so relative subfolder structure is preserved
+        m_session->currentFolder = tempPath;
+        const QStringList copied = copyFramesToSourceSubfolder(
+            framePaths, subfolderPath, m_mergeReplaceAllDuplicates);
+        m_session->activeFramePaths.append(copied);
+        registerLoadedSource(sourcePath, action, subfolderPath);
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
     } else {
@@ -634,30 +632,34 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
             m_projectFilePath.clear();
         }
         m_sourceFolderIsTemp = false;
-        m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;
         m_session->layoutSourceIsList = false;
-        // Set currentFolder to extraction root so copyActiveFramesToSourceFolder
-        // preserves the subfolder hierarchy from the archive
+        // Set currentFolder to extraction root so relative subfolder structure is preserved
         m_session->currentFolder = tempPath;
-        // Copy sprites to source folder on Replace
-        copyActiveFramesToSourceFolder();
+        // Copy sprites into a dedicated subfolder on Replace
+        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        m_session->activeFramePaths = copyFramesToSourceSubfolder(framePaths, subfolderPath);
         m_shouldClearSpritesFolder = false;
+
+        registerLoadedSource(sourcePath, action, subfolderPath);
     }
-    
+
     if (!m_session->frameListPath.isEmpty()) {
         QFile::remove(m_session->frameListPath);
         m_session->frameListPath.clear();
     }
-    
+
     // Ensure we generate a list file so spratlayout respects our sort order
     if (!ensureFrameListInput()) {
         m_statusLabel->setText(tr("Error: Could not create frame list for layout"));
         setLoading(false);
         return false;
     }
-    
+
     m_statusLabel->setText(QString(tr("Loaded %1 frames")).arg(framePaths.size()));
+    m_centerPivotsOnNextLayout = true;
+    refreshSourcesDialogIfVisible();
     return true;
 }
 
@@ -678,20 +680,16 @@ void MainWindow::onTransparencyProcessingFinished() {
     const DropAction& action = m_pendingTransparencyAction;
 
     if (action == DropAction::Merge) {
-        // Ask if files with same names should be replaced
-        QMessageBox msg(this);
-        msg.setWindowTitle(tr("Merge with duplicates"));
-        msg.setText(tr("When merging, what should happen to files with the same name?"));
-        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
-        msg.exec();
-        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
-
-        m_session->activeFramePaths.append(framePaths);
-        // Copy extracted frames to source folder so they persist after temp dir cleanup
-        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        m_session->currentFolder = tempPath;
+        const QStringList copied = copyFramesToSourceSubfolder(
+            framePaths, subfolderPath, m_mergeReplaceAllDuplicates);
+        m_session->activeFramePaths.append(copied);
+        registerLoadedSource(sourcePath, action, subfolderPath);
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
+        m_centerPivotsOnNextLayout = true;
         scheduleLayoutRebuild(true);
     } else {
         // On Replace, delete all contents from sprites folder (including subdirectories)
@@ -718,15 +716,16 @@ void MainWindow::onTransparencyProcessingFinished() {
             m_projectFilePath.clear();
         }
         m_sourceFolderIsTemp = false;
-        m_session->activeFramePaths = framePaths;
         m_session->layoutSourcePath = tempPath;
         m_session->layoutSourceIsList = false;
-        // Set currentFolder to extraction root so copyActiveFramesToSourceFolder
-        // preserves the subfolder hierarchy from the archive
+        // Set currentFolder to extraction root so relative subfolder structure is preserved
         m_session->currentFolder = tempPath;
-        // Copy sprites to source folder on Replace
-        copyActiveFramesToSourceFolder();
+        // Copy sprites into a dedicated subfolder on Replace
+        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        m_session->activeFramePaths = copyFramesToSourceSubfolder(framePaths, subfolderPath);
         m_shouldClearSpritesFolder = false;
+        registerLoadedSource(sourcePath, action, subfolderPath);
     }
 
     if (!m_session->frameListPath.isEmpty()) {
@@ -741,5 +740,7 @@ void MainWindow::onTransparencyProcessingFinished() {
     }
 
     m_statusLabel->setText(QString(tr("Loaded %1 frames")).arg(framePaths.size()));
+    m_centerPivotsOnNextLayout = true;
+    refreshSourcesDialogIfVisible();
     scheduleLayoutRebuild(true);
 }

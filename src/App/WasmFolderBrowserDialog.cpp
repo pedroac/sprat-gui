@@ -24,6 +24,7 @@
 #include <QPixmap>
 #include <QSet>
 #include <QStyle>
+#include "MessageDialog.h"
 #include <QDrag> // Added for QDrag
 #include <QDragEnterEvent> // Added for QDragEnterEvent
 #include <QDragMoveEvent> // Added for QDragMoveEvent
@@ -469,7 +470,7 @@ void WasmFolderBrowserDialog::onDeleteSelected()
     }
     if (paths.isEmpty()) return;
 
-    const auto reply = QMessageBox::warning(
+    const int reply = MessageDialog::confirmWarning(
         this,
         tr("Delete Files"),
         tr("Delete %1 file(s)? This cannot be undone.").arg(paths.size()),
@@ -524,11 +525,11 @@ void WasmFolderBrowserDialog::onCreateFolder()
     const QString parentPath = selectedDirectoryPath();
     const QString fullPath = QDir(parentPath).filePath(name);
     if (QFileInfo::exists(fullPath)) {
-        QMessageBox::information(this, tr("Create Folder"), tr("A file or folder with that name already exists."));
+        MessageDialog::information(this, tr("Create Folder"), tr("A file or folder with that name already exists."));
         return;
     }
     if (!QDir().mkpath(fullPath)) {
-        QMessageBox::warning(this, tr("Create Folder"), tr("Could not create folder."));
+        MessageDialog::warning(this, tr("Create Folder"), tr("Could not create folder at: %1").arg(fullPath));
         return;
     }
 
@@ -564,7 +565,7 @@ void WasmFolderBrowserDialog::importPickedFiles(const QString& pickedPath, int m
     }
 
     if (addedFiles.isEmpty()) {
-        QMessageBox::warning(this, tr("Add Files"), tr("No files were imported."));
+        MessageDialog::warning(this, tr("Add Files"), tr("No files were imported."));
         return;
     }
 

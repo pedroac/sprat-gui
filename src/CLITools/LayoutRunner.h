@@ -10,7 +10,9 @@
 #include "SpratProfilesConfig.h"
 
 struct LayoutRunConfig {
-    QString sourcePath;
+    // Provide exactly one of the two input fields:
+    QString sourceFolderPath; // Pass folder as a positional argument (fast path)
+    QStringList imagePathList; // Pass image list via --stdin-list
     QString layoutBinary;
     SpratProfile profile;
     double scale = 1.0;

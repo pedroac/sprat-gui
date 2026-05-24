@@ -233,6 +233,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.Navigator.cpp
     src/App/MainWindow/NavigatorTreeWidget.h
     src/App/MainWindow/NavigatorTreeWidget.cpp
+    src/App/MainWindow/TimelineTreeWidget.h
+    src/App/MainWindow/TimelineTreeWidget.cpp
     src/App/MainWindow/MainWindow.h
     src/App/WasmFileDialog.cpp
     src/App/WasmFileDialog.h
@@ -281,8 +283,7 @@ set(PROJECT_SOURCES
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
     src/Project/ProjectSession.h
-    src/Project/NewProjectDialog.cpp
-    src/Project/NewProjectDialog.h
+
     src/Animation/Timelines/AnimationTimelineOps.cpp
     src/Animation/Timelines/AnimationTimelineOps.h
     src/Animation/Test/AnimationTestOps.cpp
@@ -321,6 +322,10 @@ set(PROJECT_SOURCES
     src/Profiles/ProfilesDialog.h
     src/Animation/Timelines/TimelineBuilder.cpp
     src/Animation/Timelines/TimelineBuilder.h
+    src/Core/MessageDialog.cpp
+    src/Core/MessageDialog.h
+    src/App/MainWindow/SourcesDialog.cpp
+    src/App/MainWindow/SourcesDialog.h
     src/Core/ZoomableGraphicsView.cpp
     src/Core/ZoomableGraphicsView.h
     src/Core/ArchiveExtractor.cpp

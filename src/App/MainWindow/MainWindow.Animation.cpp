@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "MessageDialog.h"
 #include "AnimationCanvas.h"
 #include "UndoCommands.h"
 
@@ -13,6 +14,7 @@
 #include <QDoubleSpinBox>
 #include <QApplication>
 #include <QStyle>
+#include <QDir>
 #include <QFileInfo>
 #include <QIcon>
 #include <QLabel>
@@ -20,8 +22,12 @@
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QSpinBox>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 #include <QtGlobal>
 #include <algorithm>
+#include <numeric>
 
 namespace {
 int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex) {
@@ -32,12 +38,74 @@ int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selecte
 }
 }
 
+QTreeWidgetItem* MainWindow::timelineItemForIndex(int idx) const {
+    QTreeWidgetItemIterator it(m_timelineList);
+    while (*it) {
+        if ((*it)->data(0, Qt::UserRole).isValid() &&
+            (*it)->data(0, Qt::UserRole).toInt() == idx) return *it;
+        ++it;
+    }
+    return nullptr;
+}
+
 void MainWindow::refreshTimelineList() {
-    int currentRow = m_timelineList->currentRow();
+    const int savedIndex = m_session->selectedTimelineIndex;
     m_timelineList->blockSignals(true);
     m_timelineList->clear();
-    for (const auto& timeline : m_session->timelines) {
-        // For aliases, display source frames and add [alias] prefix
+
+    // Build sorted order by timeline name (case-insensitive)
+    const int count = m_session->timelines.size();
+    QVector<int> sortedIndices(count);
+    std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
+    std::sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b) {
+        return m_session->timelines[a].name.compare(
+            m_session->timelines[b].name, Qt::CaseInsensitive) < 0;
+    });
+
+    const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
+
+    // Find or create folder nodes along a path like ["hero", "walk"]
+    auto findOrCreateFolderPath = [&](const QStringList& parts) -> QTreeWidgetItem* {
+        QTreeWidgetItem* current = nullptr;
+        for (int pi = 0; pi < parts.size(); ++pi) {
+            const QString& part = parts[pi];
+            QTreeWidgetItem* found = nullptr;
+            int childCount = current ? current->childCount() : m_timelineList->topLevelItemCount();
+            for (int i = 0; i < childCount; ++i) {
+                QTreeWidgetItem* child = current ? current->child(i) : m_timelineList->topLevelItem(i);
+                if (child->text(0) == part && !child->data(0, Qt::UserRole).isValid()) {
+                    found = child;
+                    break;
+                }
+            }
+            if (!found) {
+                found = current ? new QTreeWidgetItem(current) : new QTreeWidgetItem(m_timelineList);
+                found->setText(0, part);
+                found->setIcon(0, folderIcon);
+                found->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+                found->setCheckState(0, Qt::Unchecked);
+                found->setToolTip(0, parts.mid(0, pi + 1).join('/'));
+            }
+            current = found;
+        }
+        return current;
+    };
+
+    for (int idx : sortedIndices) {
+        const auto& timeline = m_session->timelines[idx];
+
+        // Split name on '/' → folder path + leaf name
+        QStringList parts = timeline.name.split('/');
+        const QString leafName = parts.last();
+        parts.removeLast();
+
+        // Find or create folder hierarchy; nullptr means top-level
+        QTreeWidgetItem* parent = nullptr;
+        if (!parts.isEmpty()) {
+            parent = findOrCreateFolderPath(parts);
+        }
+
+        // For aliases, display source frames
         const QStringList* displayFrames = &timeline.frames;
         if (!timeline.aliasOf.isEmpty()) {
             for (const auto& src : m_session->timelines) {
@@ -51,7 +119,7 @@ void MainWindow::refreshTimelineList() {
         QIcon icon;
         if (!displayFrames->isEmpty()) {
             int middleIndex = displayFrames->size() / 2;
-            QString middlePath = (*displayFrames)[middleIndex];
+            const QString middlePath = (*displayFrames)[middleIndex];
             icon = m_timelineListIconCache.value(middlePath);
             if (icon.isNull()) {
                 icon = QIcon(middlePath);
@@ -60,26 +128,31 @@ void MainWindow::refreshTimelineList() {
         }
 
         const QString displayName = timeline.aliasOf.isEmpty()
-            ? timeline.name
-            : QStringLiteral("[alias] %1").arg(timeline.name);
+            ? leafName
+            : QStringLiteral("[alias] %1").arg(leafName);
 
-        QListWidgetItem* item = new QListWidgetItem(
-            icon,
-            QStringLiteral("%1 | %2 frames | %3 fps")
-                .arg(displayName)
-                .arg(displayFrames->size())
-                .arg(timeline.fps)
-        );
-        m_timelineList->addItem(item);
+        QTreeWidgetItem* item = parent
+            ? new QTreeWidgetItem(parent)
+            : new QTreeWidgetItem(m_timelineList);
+        item->setIcon(0, icon);
+        item->setText(0, QStringLiteral("%1 | %2 frames | %3 fps")
+            .arg(displayName)
+            .arg(displayFrames->size())
+            .arg(timeline.fps));
+        item->setData(0, Qt::UserRole, idx);
+        item->setToolTip(0, timeline.name);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, Qt::Unchecked);
     }
-    if (currentRow >= 0 && currentRow < m_timelineList->count()) {
-        m_timelineList->setCurrentRow(currentRow);
-    }
+
+    m_timelineList->expandAll();
+    m_timelineList->setCurrentItem(timelineItemForIndex(savedIndex));
     m_timelineList->blockSignals(false);
     m_timelineList->setVisible(!m_session->timelines.isEmpty());
-    if (m_session->timelines.isEmpty()) {
-        onTimelineSelectionChanged();
-    }
+    // setCurrentItem() above was called with signals blocked, so
+    // onTimelineSelectionChanged() never fired. Call it explicitly so the
+    // editor container visibility is always in sync with the selection.
+    onTimelineSelectionChanged();
 }
 
 void MainWindow::refreshTimelineFrames() {
@@ -274,17 +347,59 @@ void MainWindow::onTimelineFrameSelectionChanged() {
 
 void MainWindow::onGenerateTimelinesFromFrames() {
     if (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty()) {
-        QMessageBox::information(this, tr("Generate Timelines"), tr("Load or generate a layout before creating timelines."));
+        MessageDialog::information(this, tr("Generate Timelines"), tr("Load or generate a layout before creating timelines."));
         return;
     }
 
     const QVector<AnimationTimeline> oldState = m_session->timelines;
     const int oldSelection = m_session->selectedTimelineIndex;
 
+    // Build sprites with names relative to their cachedFolderPath so that
+    // timeline names are clean and never include temp-dir path components.
+    QVector<SpritePtr> renamedSprites;
+    const bool multiSource = m_session->sources.size() > 1;
+    for (const auto& model : m_session->layoutModels) {
+        for (const auto& sprite : model.sprites) {
+            if (!sprite) continue;
+            const QString cp = QDir::cleanPath(sprite->path);
+
+            int bestMatchLen = -1;
+            QString localName;
+            QString srcDisplayName;
+            for (const auto& src : m_session->sources) {
+                if (src.cachedFolderPath.isEmpty()) continue;
+                const QString cleanedCache = QDir::cleanPath(src.cachedFolderPath);
+                if (cp.startsWith(cleanedCache + QLatin1Char('/'))
+                        && cleanedCache.length() > bestMatchLen) {
+                    bestMatchLen = cleanedCache.length();
+                    const QString rel  = cp.mid(cleanedCache.length() + 1);
+                    const QString dir  = QFileInfo(rel).path();
+                    const QString base = QFileInfo(rel).baseName();
+                    localName      = (dir.isEmpty() || dir == QLatin1String("."))
+                                     ? base : dir + QLatin1Char('/') + base;
+                    srcDisplayName = src.name;
+                }
+            }
+
+            if (localName.isEmpty())
+                localName = QFileInfo(sprite->path).baseName(); // fallback
+
+            // When multiple sources are loaded, prefix with source name to avoid
+            // cross-source animation name collisions.
+            const QString finalName = (multiSource && !srcDisplayName.isEmpty())
+                                      ? srcDisplayName + QLatin1Char('/') + localName
+                                      : localName;
+
+            auto namedSprite = std::make_shared<Sprite>(*sprite);
+            namedSprite->name = finalName;
+            renamedSprites.append(namedSprite);
+        }
+    }
+
     int focusIndex = -1;
     QString status;
-    bool changed = TimelineGenerationService::generateFromLayout(
-        m_session->layoutModels,
+    bool changed = TimelineGenerationService::generateFromSprites(
+        renamedSprites,
         m_session->timelines,
         focusIndex,
         [this](const QString& timelineName) {
@@ -300,7 +415,7 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         auto postExecute = [this]() {
             refreshTimelineList();
             if (m_session->selectedTimelineIndex >= 0)
-                m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+                m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
             else
                 onTimelineSelectionChanged();
 
@@ -323,7 +438,7 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         postExecute();
         m_statusLabel->setText(status);
     } else {
-        QMessageBox::information(this, tr("Generate Timelines"), status);
+        MessageDialog::information(this, tr("Generate Timelines"), status);
     }
 }
 
@@ -454,6 +569,10 @@ void MainWindow::refreshAnimationTest() {
     }
 
     m_animStatusLabel->setText(statusText);
+    m_animStatusLabel->setAlignment(hasFrames ? Qt::AlignLeft | Qt::AlignVCenter : Qt::AlignCenter);
+    m_animStatusLabel->setStyleSheet(hasFrames
+        ? "color: #808080;"
+        : "color: #808080; font-style: italic; padding: 8px 0;");
     m_animPrevBtn->setEnabled(hasFrames);
     m_animPlayPauseBtn->setEnabled(hasFrames);
     m_animNextBtn->setEnabled(hasFrames);

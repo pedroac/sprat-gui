@@ -1,12 +1,18 @@
 #include "MainWindow.h"
 #include "UndoCommands.h"
+#include "TimelineTreeWidget.h"
+#include "MessageDialog.h"
 
 #include <QComboBox>
+#include <QInputDialog>
 #include <QLineEdit>
 #include <QLabel>
-#include <QListWidget>
+#include <QMenu>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 
 void MainWindow::onTimelineAddClicked() {
     QString name = m_timelineCreateEdit->text().trimmed();
@@ -21,7 +27,7 @@ void MainWindow::onTimelineAddClicked() {
 
     m_timelineCreateEdit->clear();
     refreshTimelineList();
-    m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+    m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
 
     m_undoStack->push(new TimelineAddCommand(
         &m_session->timelines,
@@ -30,7 +36,7 @@ void MainWindow::onTimelineAddClicked() {
         [this]() {
             refreshTimelineList();
             if (m_session->selectedTimelineIndex >= 0) {
-                m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+                m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
             } else {
                 onTimelineSelectionChanged();
             }
@@ -52,7 +58,7 @@ void MainWindow::onTimelineRemoveClicked() {
 
     refreshTimelineList();
     if (m_session->selectedTimelineIndex >= 0) {
-        m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+        m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
     } else {
         // No timelines left, hide the timeline editor
         onTimelineSelectionChanged();
@@ -66,7 +72,7 @@ void MainWindow::onTimelineRemoveClicked() {
         [this]() {
             refreshTimelineList();
             if (m_session->selectedTimelineIndex >= 0) {
-                m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+                m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
             } else {
                 onTimelineSelectionChanged();
             }
@@ -77,10 +83,16 @@ void MainWindow::onTimelineRemoveClicked() {
 }
 
 void MainWindow::onTimelineSelectionChanged() {
-    const int row = m_timelineList->currentRow();
-    if (row >= 0 && row < m_session->timelines.size()) {
-        m_session->selectedTimelineIndex = row;
-        const auto& tl = m_session->timelines[row];
+    QTreeWidgetItem* item = m_timelineList->currentItem();
+    // Folder node: keep current state unchanged (click only expands/collapses)
+    if (item && !item->data(0, Qt::UserRole).isValid()) {
+        return;
+    }
+    const int idx = (item && item->data(0, Qt::UserRole).isValid())
+        ? item->data(0, Qt::UserRole).toInt() : -1;
+    if (idx >= 0 && idx < m_session->timelines.size()) {
+        m_session->selectedTimelineIndex = idx;
+        const auto& tl = m_session->timelines[idx];
         const bool isAlias = !tl.aliasOf.isEmpty();
 
         m_timelineNameEdit->setText(tl.name);
@@ -234,7 +246,7 @@ void MainWindow::onTimelineCreateAlias() {
     m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
 
     refreshTimelineList();
-    m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+    m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
 
     m_undoStack->push(new TimelineAddCommand(
         &m_session->timelines,
@@ -243,7 +255,7 @@ void MainWindow::onTimelineCreateAlias() {
         [this]() {
             refreshTimelineList();
             if (m_session->selectedTimelineIndex >= 0) {
-                m_timelineList->setCurrentRow(m_session->selectedTimelineIndex);
+                m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
             } else {
                 onTimelineSelectionChanged();
             }
@@ -269,4 +281,441 @@ void MainWindow::onTimelineFlipChanged(int index) {
         &m_session->timelines, idx, oldH, oldV, newH, newV,
         [this]() { refreshAnimationTest(); }
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Helper: compute the folder path for a folder node item by walking its
+// parent chain and collecting folder node text segments.
+// ---------------------------------------------------------------------------
+QString MainWindow::timelineItemFolderPath(QTreeWidgetItem* item) const
+{
+    if (!item) return QString();
+    QStringList parts;
+    QTreeWidgetItem* cur = item;
+    while (cur) {
+        if (!cur->data(0, Qt::UserRole).isValid())
+            parts.prepend(cur->text(0));
+        cur = cur->parent();
+    }
+    return parts.join('/');
+}
+
+// ---------------------------------------------------------------------------
+// Helper: collect indices of all checked leaf timeline items.
+// ---------------------------------------------------------------------------
+QVector<int> MainWindow::collectCheckedTimelineIndices() const
+{
+    QVector<int> result;
+    QTreeWidgetItemIterator it(m_timelineList);
+    while (*it) {
+        const QVariant v = (*it)->data(0, Qt::UserRole);
+        if (v.isValid() && (*it)->checkState(0) == Qt::Checked)
+            result.append(v.toInt());
+        ++it;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Checkbox state management helpers
+// ---------------------------------------------------------------------------
+static void setCheckStateRecursive(QTreeWidgetItem* item, Qt::CheckState state)
+{
+    item->setCheckState(0, state);
+    for (int i = 0; i < item->childCount(); ++i)
+        setCheckStateRecursive(item->child(i), state);
+}
+
+static void updateParentCheckState(QTreeWidgetItem* parent)
+{
+    if (!parent) return;
+    if (parent->data(0, Qt::UserRole).isValid()) return; // leaf — skip
+
+    int checked = 0, unchecked = 0;
+    for (int i = 0; i < parent->childCount(); ++i) {
+        Qt::CheckState cs = parent->child(i)->checkState(0);
+        if (cs == Qt::Checked)        ++checked;
+        else if (cs == Qt::Unchecked) ++unchecked;
+        else { ++checked; ++unchecked; } // PartiallyChecked counts as mixed
+    }
+
+    Qt::CheckState newState;
+    if (checked == 0)
+        newState = Qt::Unchecked;
+    else if (unchecked == 0)
+        newState = Qt::Checked;
+    else
+        newState = Qt::PartiallyChecked;
+
+    parent->setCheckState(0, newState);
+    updateParentCheckState(parent->parent());
+}
+
+void MainWindow::onTimelineItemChanged(QTreeWidgetItem* item, int column)
+{
+    if (column != 0) return;
+    QSignalBlocker blocker(m_timelineList);
+    if (!item->data(0, Qt::UserRole).isValid()) {
+        // Folder node: propagate to children unless PartiallyChecked
+        Qt::CheckState state = item->checkState(0);
+        if (state != Qt::PartiallyChecked)
+            setCheckStateRecursive(item, state);
+    } else {
+        // Leaf node: update parent tristate
+        updateParentCheckState(item->parent());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Context menu
+// ---------------------------------------------------------------------------
+void MainWindow::onTimelineContextMenu(const QPoint& pos)
+{
+    QTreeWidgetItem* item = m_timelineList->itemAt(pos);
+    const QVector<int> checkedIndices = collectCheckedTimelineIndices();
+    const bool hasChecked = !checkedIndices.isEmpty();
+
+    auto refreshAndSelect = [this]() {
+        refreshTimelineList();
+        if (m_session->selectedTimelineIndex >= 0)
+            m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
+        else
+            onTimelineSelectionChanged();
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    };
+
+    QMenu menu(this);
+    bool hasItems = false;
+
+    if (item && !item->data(0, Qt::UserRole).isValid()) {
+        // Folder node
+        const QString folderPath = timelineItemFolderPath(item);
+        menu.addAction(tr("Ungroup"), this, [this, folderPath, refreshAndSelect]() {
+            const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+            const int oldSel = m_session->selectedTimelineIndex;
+
+            const QString oldPrefix = folderPath + "/";
+            const int lastSlash = folderPath.lastIndexOf('/');
+            const QString parentPath = (lastSlash < 0) ? QString() : folderPath.left(lastSlash);
+            const QString newPrefix = parentPath.isEmpty() ? QString() : parentPath + "/";
+
+            // Collision check
+            for (const auto& tl : m_session->timelines) {
+                if (tl.name.startsWith(oldPrefix)) {
+                    const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
+                    for (const auto& other : m_session->timelines) {
+                        if (other.name == newName && !other.name.startsWith(oldPrefix)) {
+                            MessageDialog::warning(this, tr("Ungroup"),
+                                tr("Cannot ungroup: \"%1\" would conflict with an existing timeline.").arg(newName));
+                            return;
+                        }
+                    }
+                }
+            }
+
+            for (auto& tl : m_session->timelines) {
+                if (tl.name.startsWith(oldPrefix)) {
+                    const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
+                    // Cascade aliasOf
+                    const QString oldName = tl.name;
+                    tl.name = newName;
+                    for (auto& other : m_session->timelines) {
+                        if (other.aliasOf == oldName)
+                            other.aliasOf = newName;
+                    }
+                }
+            }
+
+            m_undoStack->push(new TimelinesUpdateCommand(
+                &m_session->timelines, oldTimelines, m_session->timelines,
+                oldSel, m_session->selectedTimelineIndex,
+                &m_session->selectedTimelineIndex,
+                refreshAndSelect, tr("Ungroup")));
+            refreshAndSelect();
+        });
+
+        menu.addAction(tr("Remove Group"), this, [this, folderPath, refreshAndSelect]() {
+            const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+            const int oldSel = m_session->selectedTimelineIndex;
+
+            const QString prefix = folderPath + "/";
+            QVector<QString> toRemove;
+            for (const auto& tl : m_session->timelines) {
+                if (tl.name.startsWith(prefix))
+                    toRemove.append(tl.name);
+            }
+            const QSet<QString> removeSet(toRemove.begin(), toRemove.end());
+            m_session->timelines.erase(
+                std::remove_if(m_session->timelines.begin(), m_session->timelines.end(),
+                    [&removeSet](const AnimationTimeline& tl) {
+                        return removeSet.contains(tl.name) || removeSet.contains(tl.aliasOf);
+                    }),
+                m_session->timelines.end());
+            m_session->selectedTimelineIndex = qMin(oldSel, m_session->timelines.size() - 1);
+
+            m_undoStack->push(new TimelinesUpdateCommand(
+                &m_session->timelines, oldTimelines, m_session->timelines,
+                oldSel, m_session->selectedTimelineIndex,
+                &m_session->selectedTimelineIndex,
+                refreshAndSelect, tr("Remove Group")));
+            refreshAndSelect();
+        });
+
+        menu.addSeparator();
+
+        menu.addAction(tr("Add Timeline Into Group"), this, [this, folderPath, refreshAndSelect]() {
+            bool ok = false;
+            const QString suggested = folderPath + "/";
+            const QString name = QInputDialog::getText(this, tr("Add Timeline Into Group"),
+                tr("Timeline name:"), QLineEdit::Normal, suggested, &ok);
+            if (!ok || name.trimmed().isEmpty()) return;
+            const QString trimmed = name.trimmed();
+            if (hasDuplicateTimelineName(trimmed)) {
+                MessageDialog::warning(this, tr("Add Timeline"),
+                    tr("A timeline named \"%1\" already exists.").arg(trimmed));
+                return;
+            }
+
+            AnimationTimeline tl;
+            tl.name = trimmed;
+            m_session->timelines.append(tl);
+            m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
+
+            m_undoStack->push(new TimelineAddCommand(
+                &m_session->timelines, tl,
+                &m_session->selectedTimelineIndex,
+                refreshAndSelect));
+            refreshAndSelect();
+        });
+
+        hasItems = true;
+    } else if (item && item->data(0, Qt::UserRole).isValid()) {
+        // Leaf node
+        const int idx = item->data(0, Qt::UserRole).toInt();
+        m_timelineList->setCurrentItem(item);
+
+        menu.addAction(tr("Remove Timeline"), this, [this, idx, refreshAndSelect]() {
+            if (idx < 0 || idx >= m_session->timelines.size()) return;
+            const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+            const int oldSel = m_session->selectedTimelineIndex;
+            const QString name = m_session->timelines[idx].name;
+
+            m_session->timelines.erase(
+                std::remove_if(m_session->timelines.begin(), m_session->timelines.end(),
+                    [&name](const AnimationTimeline& tl) {
+                        return tl.name == name || tl.aliasOf == name;
+                    }),
+                m_session->timelines.end());
+            m_session->selectedTimelineIndex = qMin(oldSel, m_session->timelines.size() - 1);
+
+            m_undoStack->push(new TimelinesUpdateCommand(
+                &m_session->timelines, oldTimelines, m_session->timelines,
+                oldSel, m_session->selectedTimelineIndex,
+                &m_session->selectedTimelineIndex,
+                refreshAndSelect, tr("Remove Timeline")));
+            refreshAndSelect();
+        });
+
+        menu.addAction(tr("Create Alias"), this, &MainWindow::onTimelineCreateAlias);
+        hasItems = true;
+    }
+
+    if (hasChecked) {
+        if (hasItems) menu.addSeparator();
+        menu.addAction(tr("Remove Selected"), this, [this, checkedIndices, refreshAndSelect]() {
+            const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+            const int oldSel = m_session->selectedTimelineIndex;
+
+            // Sort descending to remove by index safely
+            QVector<int> sorted = checkedIndices;
+            std::sort(sorted.begin(), sorted.end(), std::greater<int>());
+
+            QSet<QString> removedNames;
+            for (int i : sorted) {
+                if (i >= 0 && i < m_session->timelines.size()) {
+                    removedNames.insert(m_session->timelines[i].name);
+                }
+            }
+            m_session->timelines.erase(
+                std::remove_if(m_session->timelines.begin(), m_session->timelines.end(),
+                    [&removedNames](const AnimationTimeline& tl) {
+                        return removedNames.contains(tl.name) || removedNames.contains(tl.aliasOf);
+                    }),
+                m_session->timelines.end());
+            m_session->selectedTimelineIndex = qMin(oldSel, m_session->timelines.size() - 1);
+
+            m_undoStack->push(new TimelinesUpdateCommand(
+                &m_session->timelines, oldTimelines, m_session->timelines,
+                oldSel, m_session->selectedTimelineIndex,
+                &m_session->selectedTimelineIndex,
+                refreshAndSelect, tr("Remove Selected Timelines")));
+            refreshAndSelect();
+        });
+    }
+
+    if (!item && !hasChecked) {
+        QMenu menu(this);
+        menu.addAction(tr("Add Timeline"), this, &MainWindow::onTimelineAddClicked);
+        menu.exec(m_timelineList->mapToGlobal(pos));
+        return;
+    }
+
+    if (!menu.isEmpty())
+        menu.exec(m_timelineList->mapToGlobal(pos));
+}
+
+// ---------------------------------------------------------------------------
+// DEL key on timeline tree
+// ---------------------------------------------------------------------------
+void MainWindow::onTimelineDeleteKey()
+{
+    QTreeWidgetItem* item = m_timelineList->currentItem();
+    if (!item) return;
+
+    auto refreshAndSelect = [this]() {
+        refreshTimelineList();
+        if (m_session->selectedTimelineIndex >= 0)
+            m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
+        else
+            onTimelineSelectionChanged();
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    };
+
+    if (!item->data(0, Qt::UserRole).isValid()) {
+        // Folder node
+        const QString folderPath = timelineItemFolderPath(item);
+        const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+        const int oldSel = m_session->selectedTimelineIndex;
+
+        const QString prefix = folderPath + "/";
+        QSet<QString> removedNames;
+        for (const auto& tl : m_session->timelines) {
+            if (tl.name.startsWith(prefix))
+                removedNames.insert(tl.name);
+        }
+        m_session->timelines.erase(
+            std::remove_if(m_session->timelines.begin(), m_session->timelines.end(),
+                [&removedNames](const AnimationTimeline& tl) {
+                    return removedNames.contains(tl.name) || removedNames.contains(tl.aliasOf);
+                }),
+            m_session->timelines.end());
+        m_session->selectedTimelineIndex = qMin(oldSel, m_session->timelines.size() - 1);
+
+        m_undoStack->push(new TimelinesUpdateCommand(
+            &m_session->timelines, oldTimelines, m_session->timelines,
+            oldSel, m_session->selectedTimelineIndex,
+            &m_session->selectedTimelineIndex,
+            refreshAndSelect, tr("Remove Group")));
+        refreshAndSelect();
+    } else {
+        // Leaf node
+        const int idx = item->data(0, Qt::UserRole).toInt();
+        if (idx < 0 || idx >= m_session->timelines.size()) return;
+
+        const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+        const int oldSel = m_session->selectedTimelineIndex;
+        const QString name = m_session->timelines[idx].name;
+
+        m_session->timelines.erase(
+            std::remove_if(m_session->timelines.begin(), m_session->timelines.end(),
+                [&name](const AnimationTimeline& tl) {
+                    return tl.name == name || tl.aliasOf == name;
+                }),
+            m_session->timelines.end());
+        m_session->selectedTimelineIndex = qMin(oldSel, m_session->timelines.size() - 1);
+
+        m_undoStack->push(new TimelinesUpdateCommand(
+            &m_session->timelines, oldTimelines, m_session->timelines,
+            oldSel, m_session->selectedTimelineIndex,
+            &m_session->selectedTimelineIndex,
+            refreshAndSelect, tr("Remove Timeline")));
+        refreshAndSelect();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Drag & drop in timeline tree
+// ---------------------------------------------------------------------------
+void MainWindow::onTimelineTreeDropCompleted(int draggedIndex,
+                                              const QString& draggedFolder,
+                                              const QString& targetFolder)
+{
+    auto refreshAndSelect = [this]() {
+        refreshTimelineList();
+        if (m_session->selectedTimelineIndex >= 0)
+            m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
+        else
+            onTimelineSelectionChanged();
+        refreshTimelineFrames();
+        refreshAnimationTest();
+    };
+
+    const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+    const int oldSel = m_session->selectedTimelineIndex;
+
+    if (draggedIndex >= 0) {
+        // Leaf drag
+        if (draggedIndex >= m_session->timelines.size()) return;
+        const QString oldName = m_session->timelines[draggedIndex].name;
+        const QString leafName = oldName.split('/').last();
+        const QString newName = targetFolder.isEmpty() ? leafName : targetFolder + "/" + leafName;
+        if (newName == oldName) return;
+
+        // Collision check
+        for (const auto& tl : m_session->timelines) {
+            if (tl.name == newName) {
+                MessageDialog::warning(this, tr("Move Timeline"),
+                    tr("A timeline named \"%1\" already exists.").arg(newName));
+                return;
+            }
+        }
+
+        m_session->timelines[draggedIndex].name = newName;
+        for (auto& tl : m_session->timelines) {
+            if (tl.aliasOf == oldName)
+                tl.aliasOf = newName;
+        }
+    } else {
+        // Folder drag
+        const QString lastSegment = draggedFolder.split('/').last();
+        const QString oldPrefix = draggedFolder + "/";
+        const QString newPrefix = targetFolder.isEmpty()
+            ? lastSegment + "/"
+            : targetFolder + "/" + lastSegment + "/";
+        if (newPrefix == oldPrefix) return;
+
+        // Collision check
+        for (const auto& tl : m_session->timelines) {
+            if (tl.name.startsWith(oldPrefix)) {
+                const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
+                for (const auto& other : m_session->timelines) {
+                    if (other.name == newName && !other.name.startsWith(oldPrefix)) {
+                        MessageDialog::warning(this, tr("Move Timeline"),
+                            tr("Cannot move: \"%1\" would conflict with an existing timeline.").arg(newName));
+                        return;
+                    }
+                }
+            }
+        }
+
+        for (auto& tl : m_session->timelines) {
+            if (tl.name.startsWith(oldPrefix)) {
+                const QString oldName = tl.name;
+                tl.name = newPrefix + tl.name.mid(oldPrefix.length());
+                for (auto& other : m_session->timelines) {
+                    if (other.aliasOf == oldName)
+                        other.aliasOf = tl.name;
+                }
+            }
+        }
+    }
+
+    m_undoStack->push(new TimelinesUpdateCommand(
+        &m_session->timelines, oldTimelines, m_session->timelines,
+        oldSel, m_session->selectedTimelineIndex,
+        &m_session->selectedTimelineIndex,
+        refreshAndSelect, tr("Move Timeline")));
+    refreshAndSelect();
 }

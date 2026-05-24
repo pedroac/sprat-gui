@@ -5,7 +5,10 @@
 
 struct ProjectPayloadBuildInput {
     QString currentFolder;
-    QString sourceFolder;   // Source folder for sprite files (used as base for relative paths)
+    QString sourceFolder;          // Primary source folder for sprite files (used as base for relative paths)
+    QVector<SmartFolder> smartFolders; // Smart folders list (saved as "smart_folders" in project JSON)
+    QVector<ProjectSource> sources;    // Named sources (new model; serialized as "sources" alongside "smart_folders")
+    QString projectDir;            // Directory containing project.spart.json (used to compute portable relative folder path)
     QStringList activeFramePaths;
     bool layoutSourceIsList = false;
     QVector<AnimationTimeline> timelines;
@@ -33,9 +36,13 @@ struct ProjectPayloadBuildInput {
     CliPaths cliPaths;
     SaveConfig saveConfig;
     bool portablePaths = false;  // When true, store relative paths for portable saves
+    QStringList orphanedSpritePaths; // Sprite paths recorded as orphaned (no backing file)
 };
 
 struct ProjectPayloadApplyResult {
+    QVector<SmartFolder> smartFolders; // Smart folders resolved from the project file
+    QVector<ProjectSource> sources;    // Named sources resolved from the project file
+    QStringList orphanedSpritePaths;   // Sprite paths recorded as orphaned in the project file
     QVector<AnimationTimeline> timelines;
     int selectedTimelineIndex = -1;
     QVector<int> selectedTimelineFrameRows;

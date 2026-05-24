@@ -42,10 +42,11 @@
 #include <QActionGroup>
 #include <QMessageBox>
 #include "NavigatorTreeWidget.h"
+#include "TimelineTreeWidget.h"
 
 void MainWindow::setupUi() {
     resize(1400, 860);
-    setWindowTitle(tr("Sprat GUI %1").arg(SPRAT_GUI_VERSION));
+    setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
     setupToolbar();
 
     // Add a 10px gap between the menu bar and the dock widgets
@@ -78,14 +79,6 @@ void MainWindow::setupUi() {
     QHBoxLayout* welcomeButtons = new QHBoxLayout();
     welcomeButtons->setAlignment(Qt::AlignCenter);
     welcomeButtons->setSpacing(20);
-
-#ifndef Q_OS_WASM
-    m_newProjectBtn = new QPushButton(tr("New Project"), m_welcomePage);
-    m_newProjectBtn->setFixedSize(180, 50);
-    m_newProjectBtn->setStyleSheet("QPushButton { font-weight: bold; font-size: 14px; }");
-    connect(m_newProjectBtn, &QPushButton::clicked, this, &MainWindow::onNewProjectRequested);
-    welcomeButtons->addWidget(m_newProjectBtn);
-#endif
 
     m_recentProjectBtn = new QPushButton(tr("Open Recent Project"), m_welcomePage);
     m_recentProjectBtn->setFixedSize(180, 50);
@@ -285,6 +278,11 @@ void MainWindow::setupUi() {
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
     connect(m_canvas, &LayoutCanvas::userInteractionStarted, this, &MainWindow::pauseLayoutRebuild);
     connect(m_canvas, &LayoutCanvas::userInteractionEnded, this, &MainWindow::resumeLayoutRebuild);
+    connect(m_canvas, &LayoutCanvas::splitModeChanged, this, [this](bool enabled) {
+        m_statusLabel->setText(enabled
+            ? tr("Split mode — click a sprite edge to split it. Press S or right-click to exit.")
+            : tr("Idle"));
+    });
     m_canvas->viewport()->installEventFilter(this);
 
     // Navigator panel (tree view of sprites)
@@ -293,10 +291,16 @@ void MainWindow::setupUi() {
     QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
     navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
-    // Sprite filter search box
+    // Sprite filter search box + result count label
+    QHBoxLayout* filterRow = new QHBoxLayout();
     m_spriteFilterEdit = new QLineEdit(navigatorContent);
     m_spriteFilterEdit->setPlaceholderText(tr("Search sprites..."));
-    navigatorLayout->addWidget(m_spriteFilterEdit);
+    filterRow->addWidget(m_spriteFilterEdit);
+    m_spriteFilterResultLabel = new QLabel(navigatorContent);
+    m_spriteFilterResultLabel->setStyleSheet("color: #888; font-size: 11px;");
+    m_spriteFilterResultLabel->setVisible(false);
+    filterRow->addWidget(m_spriteFilterResultLabel);
+    navigatorLayout->addLayout(filterRow);
 
     m_spriteTree = new NavigatorTreeWidget(navigatorContent);
     m_spriteTree->setHeaderLabel(tr("Sprites"));
@@ -366,6 +370,18 @@ void MainWindow::setupUi() {
             for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
                 collectChecked(m_spriteTree->topLevelItem(i));
             m_session->selectedSprites = checked;
+
+            // Update multi-selection label in the sprite editor panel
+            if (m_multiSelectionLabel) {
+                const int n = checked.size();
+                if (n > 1) {
+                    m_multiSelectionLabel->setText(
+                        tr("%1 sprites selected — pivot and marker changes apply to all").arg(n));
+                    m_multiSelectionLabel->setVisible(true);
+                } else {
+                    m_multiSelectionLabel->setVisible(false);
+                }
+            }
         }
     });
 
@@ -407,22 +423,23 @@ void MainWindow::setupUi() {
     timelineAddLayout->addWidget(addTimelineBtn);
     timelineLayout->addLayout(timelineAddLayout);
 
-    m_timelineList = new QListWidget(this);
+    m_timelineList = new TimelineTreeWidget(this);
+    m_timelineList->setHeaderHidden(true);
     m_timelineList->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     m_timelineList->setIconSize(QSize(32, 32));
-    connect(m_timelineList, &QListWidget::itemSelectionChanged, this, &MainWindow::onTimelineSelectionChanged);
+    m_timelineList->setDragEnabled(true);
+    connect(m_timelineList, &QTreeWidget::itemSelectionChanged, this, &MainWindow::onTimelineSelectionChanged);
     timelineLayout->addWidget(m_timelineList, 1); // Give it a stretch factor
     m_timelineList->setVisible(false);
     m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_timelineList, &QWidget::customContextMenuRequested, this,
-        [this](const QPoint& pos) {
-            QListWidgetItem* item = m_timelineList->itemAt(pos);
-            if (!item) return;
-            m_timelineList->setCurrentItem(item);
-            QMenu menu(this);
-            menu.addAction(tr("Create Alias"), this, &MainWindow::onTimelineCreateAlias);
-            menu.exec(m_timelineList->mapToGlobal(pos));
-        });
+    connect(m_timelineList, &QWidget::customContextMenuRequested,
+            this, &MainWindow::onTimelineContextMenu);
+    connect(m_timelineList, &TimelineTreeWidget::deleteKeyPressed,
+            this, &MainWindow::onTimelineDeleteKey);
+    connect(m_timelineList, &TimelineTreeWidget::dropCompleted,
+            this, &MainWindow::onTimelineTreeDropCompleted);
+    connect(m_timelineList, &QTreeWidget::itemChanged,
+            this, &MainWindow::onTimelineItemChanged);
 
     // Add a gap between the list and the editor
     timelineLayout->addSpacing(8);
@@ -462,6 +479,7 @@ void MainWindow::setupUi() {
 
     m_timelineAliasLabel = new QLabel(this);
     m_timelineAliasLabel->setVisible(false);
+    m_timelineAliasLabel->setToolTip(tr("An alias timeline references another timeline's frames but can have its own flip and transform settings."));
     groupLayout->addWidget(m_timelineAliasLabel);
 
     QHBoxLayout* flipRow = new QHBoxLayout();
@@ -490,10 +508,10 @@ void MainWindow::setupUi() {
     m_timelineFramesList->setFlow(QListWidget::LeftToRight);
     m_timelineFramesList->setWrapping(false);
     m_timelineFramesList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_timelineFramesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_timelineFramesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     m_timelineFramesList->setResizeMode(QListWidget::Adjust);
     m_timelineFramesList->setIconSize(QSize(48, 48));
-    m_timelineFramesList->setFixedHeight(80); // Reduced height for the tape
+    m_timelineFramesList->setFixedHeight(96);
     connect(m_timelineFramesList, &TimelineListWidget::frameDropped, this, &MainWindow::onFrameDropped);
     connect(m_timelineFramesList, &TimelineListWidget::frameMoved, this, &MainWindow::onFrameMoved);
     connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested, this, &MainWindow::onFrameRemoveRequested);
@@ -509,6 +527,13 @@ void MainWindow::setupUi() {
     QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorContent);
     editorLayoutBox->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
+    // Multi-selection indicator (shown when >1 sprite is checked in Navigator)
+    m_multiSelectionLabel = new QLabel(this);
+    m_multiSelectionLabel->setStyleSheet("color: #5a9fd4; font-style: italic; padding: 2px 0;");
+    m_multiSelectionLabel->setAlignment(Qt::AlignCenter);
+    m_multiSelectionLabel->setVisible(false);
+    editorLayoutBox->addWidget(m_multiSelectionLabel);
+
     // Name row: label + editable name field + aliases button
     QHBoxLayout* nameRow = new QHBoxLayout();
     nameRow->addWidget(new QLabel(tr("Name:")));
@@ -520,7 +545,7 @@ void MainWindow::setupUi() {
     nameRow->addWidget(m_spriteNameEdit);
     m_editAliasesBtn = new QPushButton(
         QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView), "", this);
-    m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
+    m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases (alternative names that share markers and pivots)"));
     m_editAliasesBtn->setEnabled(false);
     connect(m_editAliasesBtn, &QPushButton::clicked, this, &MainWindow::onEditAliases);
     nameRow->addWidget(m_editAliasesBtn);
@@ -550,7 +575,7 @@ void MainWindow::setupUi() {
         painter.end();
         auto* handleLabel = new QLabel(this);
         handleLabel->setPixmap(pix);
-        handleLabel->setToolTip(tr("Handle: the pivot point or named marker used as the origin when placing this sprite in the game engine"));
+        handleLabel->setToolTip(tr("Selected marker: the pivot point, a named point, or a named area."));
         pivotRow->addWidget(handleLabel);
     }
     m_handleCombo = new QComboBox(this);
@@ -565,7 +590,7 @@ void MainWindow::setupUi() {
     m_pivotXSpin->setRange(0, 9999);
     m_pivotXSpin->setToolTip(tr("Pivot X: horizontal origin for sprite rotation"));
     m_pivotXSpin->setAccessibleName(tr("Pivot X"));
-    connect(m_pivotXSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
+    connect(m_pivotXSpin, &QSpinBox::valueChanged, this, [this](int){ onPivotSpinChanged(); });
     pivotRow->addWidget(m_pivotXSpin);
     pivotRow->addWidget(new QLabel(tr("Y:")));
     m_pivotYSpin = new QSpinBox(this);
@@ -573,11 +598,11 @@ void MainWindow::setupUi() {
     m_pivotYSpin->setRange(0, 9999);
     m_pivotYSpin->setToolTip(tr("Pivot Y: vertical origin for sprite rotation"));
     m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
-    connect(m_pivotYSpin, &QSpinBox::editingFinished, this, &MainWindow::onPivotSpinChanged);
+    connect(m_pivotYSpin, &QSpinBox::valueChanged, this, [this](int){ onPivotSpinChanged(); });
     pivotRow->addWidget(m_pivotYSpin);
     m_configPointsBtn = new QPushButton(
         QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView), "", this);
-    m_configPointsBtn->setToolTip(tr("Manage Markers"));
+    m_configPointsBtn->setToolTip(tr("Manage Markers: define named points on this sprite, such as hitboxes, spawn positions, or attachment points"));
     m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     connect(m_configPointsBtn, &QPushButton::clicked, this, &MainWindow::onPointsConfigClicked);
     pivotRow->addWidget(m_configPointsBtn);
@@ -757,6 +782,11 @@ void MainWindow::setupUi() {
     m_viewMenu->addAction(m_animationToggleAction);
     m_viewMenu->addSeparator();
     m_viewMenu->addAction(m_debugDock->toggleViewAction());
+    m_viewMenu->addSeparator();
+    QAction* sourcesAction = m_viewMenu->addAction(
+        QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon), tr("Sources..."));
+    sourcesAction->setToolTip(tr("Show the project sources panel"));
+    connect(sourcesAction, &QAction::triggered, this, &MainWindow::onShowSources);
 
     // Help menu (added last so it sits on the right)
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -793,28 +823,7 @@ void MainWindow::setupToolbar() {
 
     auto* style = QApplication::style();
 
-#ifndef Q_OS_WASM
-    QAction* newProjectAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_FileIcon), tr("New Project"));
-    newProjectAction->setShortcut(QKeySequence::New);
-    connect(newProjectAction, &QAction::triggered, this, &MainWindow::onNewProjectRequested);
-#endif
-
-    QAction* loadProjectAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Project..."));
-    loadProjectAction->setShortcut(QKeySequence::Open);
-    loadProjectAction->setToolTip(tr("Load a project or archive file"));
-    connect(loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
-
     m_recentProjectsMenu = fileMenu->addMenu(tr("Open Recent"));
-
-    fileMenu->addSeparator();
-
-#ifndef Q_OS_WASM
-    QAction* projectSettingsAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Project Settings..."));
-    connect(projectSettingsAction, &QAction::triggered, this, &MainWindow::onProjectSettingsRequested);
-#endif
 
     fileMenu->addSeparator();
 
@@ -822,6 +831,11 @@ void MainWindow::setupToolbar() {
         style->standardIcon(QStyle::SP_DirOpenIcon), tr("Import Images Folder..."));
     m_loadAction->setToolTip(tr("Import a folder of sprite images into the current project"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
+
+    QAction* addSmartFolderAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DirOpenIcon), tr("Add Source Folder..."));
+    addSmartFolderAction->setToolTip(tr("Add an additional source folder — the tool reads images from it but never modifies its files"));
+    connect(addSmartFolderAction, &QAction::triggered, this, &MainWindow::onNavigatorAddSmartFolder);
 
     QAction* loadUrlAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_CommandLink), tr("Import from URL..."));
@@ -833,12 +847,20 @@ void MainWindow::setupToolbar() {
         style->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"));
     m_saveAction->setShortcut(QKeySequence::Save);      // Ctrl+S
     m_saveAction->setEnabled(false);
-    m_saveAction->setToolTip(tr("Write project.spart.json to the project folder"));
+    m_saveAction->setToolTip(tr("Save project state to the current folder"));
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::onSaveClicked);
+
+#ifndef Q_OS_WASM
+    m_saveAsAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Save As..."));
+    m_saveAsAction->setShortcut(QKeySequence::SaveAs);  // Ctrl+Shift+S
+    m_saveAsAction->setEnabled(false);
+    m_saveAsAction->setToolTip(tr("Save project state to a new folder"));
+    connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::onSaveAsClicked);
+#endif
 
     m_exportAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export"));
-    m_exportAction->setShortcut(QKeySequence::SaveAs);  // Ctrl+Shift+S
     m_exportAction->setEnabled(false);
     m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
     connect(m_exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
@@ -868,15 +890,15 @@ void MainWindow::setupToolbar() {
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
 
     QMenu* editMenu = mainMenuBar->addMenu(tr("&Edit"));
-    QAction* undoAction = editMenu->addAction(
-        style->standardIcon(QStyle::SP_ArrowBack), tr("&Undo"));
+    QAction* undoAction = m_undoStack->createUndoAction(this, tr("&Undo"));
+    undoAction->setIcon(style->standardIcon(QStyle::SP_ArrowBack));
     undoAction->setShortcut(QKeySequence::Undo);
-    connect(undoAction, &QAction::triggered, this, &MainWindow::onUndo);
+    editMenu->addAction(undoAction);
 
-    QAction* redoAction = editMenu->addAction(
-        style->standardIcon(QStyle::SP_ArrowForward), tr("&Redo"));
+    QAction* redoAction = m_undoStack->createRedoAction(this, tr("&Redo"));
+    redoAction->setIcon(style->standardIcon(QStyle::SP_ArrowForward));
     redoAction->setShortcut(QKeySequence::Redo);
-    connect(redoAction, &QAction::triggered, this, &MainWindow::onRedo);
+    editMenu->addAction(redoAction);
 
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
     QAction* stylesAction = settingsMenu->addAction(
@@ -920,11 +942,7 @@ void MainWindow::setupStatusBarUi() {
     m_statusLabel->setTextFormat(Qt::RichText);
     m_statusLabel->setOpenExternalLinks(false);
     connect(m_statusLabel, &QLabel::linkActivated, this, [this](const QString& link) {
-        if (link == "rename") {
-#ifndef Q_OS_WASM
-            onProjectSettingsRequested();
-#endif
-        }
+        Q_UNUSED(link)
     });
     statusBar()->addPermanentWidget(m_statusLabel);
 }
@@ -1008,7 +1026,8 @@ void MainWindow::updateUiState() {
         m_profileCombo,
         m_saveAction,
         m_exportAction,
-        m_exportAsAction);
+        m_exportAsAction,
+        m_saveAsAction);
 
     if (m_recentProjectBtn) {
         m_recentProjectBtn->setEnabled(!m_isLoading);
@@ -1059,13 +1078,13 @@ void MainWindow::updateMainContentView() {
     m_mainStack->setVisible(!hasLayout && !hasProject);
     if (!hasLayout && !hasProject) {
         m_mainStack->setCurrentIndex(0);
-        setWindowTitle(tr("Sprat GUI %1").arg(SPRAT_GUI_VERSION));
+        setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
     } else if (hasLayout) {
         QString projectName = QFileInfo(m_projectFilePath).dir().dirName();
         if (projectName.isEmpty() || projectName == ".") {
             projectName = tr("Untitled Project");
         }
-        setWindowTitle(tr("%1 — %2").arg(projectName).arg(m_session->currentFolder));
+        setWindowTitle(tr("%1 — %2[*]").arg(projectName).arg(m_session->currentFolder));
     }
     // hasProject && !hasLayout: title was set when the project was created/opened; leave it.
 }
@@ -1113,6 +1132,8 @@ void MainWindow::refreshSpriteTree() {
         m_spriteFilterEdit->clear();
         m_spriteFilterEdit->blockSignals(false);
     }
+    if (m_spriteFilterResultLabel) m_spriteFilterResultLabel->setVisible(false);
+    if (m_multiSelectionLabel)     m_multiSelectionLabel->setVisible(false);
     m_spriteTree->blockSignals(true);
     m_spriteTree->clear();
 
@@ -1127,11 +1148,10 @@ void MainWindow::refreshSpriteTree() {
     auto groupPrefix = [](const QString& name) -> QString {
         int end = name.size();
         while (end > 0 && name[end - 1].isDigit()) --end;
-        if (end == 0 || end == name.size()) return QString(); // No trailing digits
+        if (end == 0 || end == name.size()) return QString();
         return name.left(end);
     };
 
-    // Check if a filename ends with a digit
     auto endsWithDigit = [](const QString& name) -> bool {
         return !name.isEmpty() && name.back().isDigit();
     };
@@ -1171,49 +1191,37 @@ void MainWindow::refreshSpriteTree() {
                     break;
                 }
             }
-            if (!found) {
-                found = makeGroupNode(current, part);
-            }
+            if (!found) found = makeGroupNode(current, part);
             current = found;
         }
         return current;
     };
 
-    for (int mi = 0; mi < m_session->layoutModels.size(); ++mi) {
-        const auto& model = m_session->layoutModels[mi];
-
-        // Atlas root node (only when multiple atlases)
-        QTreeWidgetItem* atlasRoot = nullptr;
-        if (m_session->layoutModels.size() > 1) {
-            atlasRoot = makeGroupNode(nullptr, tr("Atlas %1").arg(mi + 1));
-        }
-
-        // Group sprites by their folder path (everything before the last `/` segment)
-        // and then within each folder, sub-group by digit-prefix for animation sequences.
-        QMap<QString, QVector<SpritePtr>> folderGroups;
-        for (const auto& sprite : model.sprites) {
-            int lastSlash = sprite->name.lastIndexOf('/');
-            QString folder = (lastSlash >= 0) ? sprite->name.left(lastSlash) : QString();
-            folderGroups[folder].append(sprite);
+    // Populate sprite-tree items under `root` for a set of (sprite, localName) pairs.
+    // `localName` is the display path used for folder/anim-group computation.
+    using SpriteLeaf = QPair<SpritePtr, QString>;
+    auto buildSubTree = [&](QTreeWidgetItem* root, const QVector<SpriteLeaf>& entries) {
+        // Group by folder (everything before the last '/')
+        QMap<QString, QVector<SpriteLeaf>> folderGroups;
+        for (const auto& [sprite, localName] : entries) {
+            int lastSlash = localName.lastIndexOf('/');
+            QString folder = (lastSlash >= 0) ? localName.left(lastSlash) : QString();
+            folderGroups[folder].append({sprite, localName});
         }
 
         for (auto it = folderGroups.constBegin(); it != folderGroups.constEnd(); ++it) {
             const QString& folderPath = it.key();
-            const QVector<SpritePtr>& sprites = it.value();
+            const QVector<SpriteLeaf>& sprites = it.value();
 
-            // Create folder hierarchy nodes
-            QTreeWidgetItem* folderNode = atlasRoot;
-            if (!folderPath.isEmpty()) {
-                folderNode = findOrCreateFolderPath(atlasRoot, folderPath.split('/'));
-            }
+            QTreeWidgetItem* folderNode = root;
+            if (!folderPath.isEmpty())
+                folderNode = findOrCreateFolderPath(root, folderPath.split('/'));
 
-            // Within this folder, apply digit-prefix subgrouping only for numbered files.
-            // Store leaf name alongside sprite to avoid recomputing lastIndexOf later.
-            using SpriteLeaf = QPair<SpritePtr, QString>; // (sprite, leafName)
+            // Sub-group numbered files by their digit-stripped prefix.
             QMap<QString, QVector<SpriteLeaf>> animGroups;
-            for (const auto& sprite : sprites) {
-                const int lastSlash = sprite->name.lastIndexOf('/');
-                const QString leafName = (lastSlash >= 0) ? sprite->name.mid(lastSlash + 1) : sprite->name;
+            for (const auto& [sprite, localName] : sprites) {
+                const int ls = localName.lastIndexOf('/');
+                const QString leafName = (ls >= 0) ? localName.mid(ls + 1) : localName;
                 if (endsWithDigit(leafName)) {
                     const QString prefix = groupPrefix(leafName);
                     animGroups[prefix.isEmpty() ? leafName : prefix].append({sprite, leafName});
@@ -1222,48 +1230,147 @@ void MainWindow::refreshSpriteTree() {
                 }
             }
 
-            // Single pass: determine which groups qualify as animation group nodes
-            // (multiple members, all leaf names end with digits, prefix came from digit-stripping).
-            // Also count how many such groups exist to decide whether to skip the single-sequence node.
             struct GroupInfo { bool isAnimGroup = false; };
             QMap<QString, GroupInfo> groupInfo;
             int groupNodeCount = 0;
             for (auto git = animGroups.constBegin(); git != animGroups.constEnd(); ++git) {
                 const QVector<SpriteLeaf>& members = git.value();
                 if (members.size() <= 1) continue;
-                bool allEndWithDigits = true;
-                for (const auto& [sprite, leafName] : members) {
-                    if (!endsWithDigit(leafName)) { allEndWithDigits = false; break; }
-                }
-                if (allEndWithDigits && !groupPrefix(members.first().second).isEmpty()) {
+                bool allDigits = true;
+                for (const auto& [s, ln] : members)
+                    if (!endsWithDigit(ln)) { allDigits = false; break; }
+                if (allDigits && !groupPrefix(members.first().second).isEmpty()) {
                     groupInfo[git.key()].isAnimGroup = true;
                     ++groupNodeCount;
                 }
             }
 
-            const bool skipGroupNodeForSingleSequence = (groupNodeCount == 1);
+            const bool skipSingleSequenceNode = (groupNodeCount == 1);
 
             for (auto git = animGroups.constBegin(); git != animGroups.constEnd(); ++git) {
                 const QString& prefix = git.key();
                 const QVector<SpriteLeaf>& members = git.value();
-
                 if (members.size() == 1) {
                     makeLeaf(folderNode, members.first().first, members.first().second);
-                } else if (groupInfo[prefix].isAnimGroup && !skipGroupNodeForSingleSequence) {
-                    auto* groupNode = makeGroupNode(folderNode, prefix);
+                } else if (groupInfo[prefix].isAnimGroup && !skipSingleSequenceNode) {
+                    auto* gNode = makeGroupNode(folderNode, prefix);
                     for (const auto& [sprite, leafName] : members)
-                        makeLeaf(groupNode, sprite, leafName);
+                        makeLeaf(gNode, sprite, leafName);
                 } else {
                     for (const auto& [sprite, leafName] : members)
                         makeLeaf(folderNode, sprite, leafName);
                 }
             }
         }
+    };
+
+    // Collect all sprites from every layout model.
+    QVector<SpritePtr> allSprites;
+    for (const auto& model : m_session->layoutModels)
+        allSprites.append(model.sprites);
+
+    if (!m_session->sources.isEmpty()) {
+        // One or more sources: group sprites under a top-level source node each.
+        // Use longest-prefix matching so a more-specific cachedFolderPath wins.
+        QVector<QVector<SpriteLeaf>> perSource(m_session->sources.size());
+        QVector<SpriteLeaf> unassigned;
+
+        for (const SpritePtr& sprite : allSprites) {
+            const QString cleanedPath = QDir::cleanPath(sprite->path);
+            int bestLen = -1;
+            int bestIdx = -1;
+            for (int si = 0; si < m_session->sources.size(); ++si) {
+                const QString& cached = m_session->sources[si].cachedFolderPath;
+                if (cached.isEmpty()) continue;
+                const QString cleaned = QDir::cleanPath(cached);
+                if ((cleanedPath.startsWith(cleaned + QLatin1Char('/'))
+                        || cleanedPath == cleaned)
+                        && cleaned.length() > bestLen) {
+                    bestLen = cleaned.length();
+                    bestIdx = si;
+                }
+            }
+
+            if (bestIdx >= 0) {
+                // Compute the display name relative to the source's cached folder.
+                // This avoids depending on sprite->name, which may contain the full
+                // tmp path structure (e.g. tmp/sprat-gui-XXX/source/...) when derived
+                // from an extraction directory that differs from sourceFolder.
+                const QString cleanedCache = QDir::cleanPath(
+                    m_session->sources[bestIdx].cachedFolderPath);
+                QString localName;
+                if (cleanedPath.startsWith(cleanedCache + QLatin1Char('/'))) {
+                    const QString rel = cleanedPath.mid(cleanedCache.length() + 1);
+                    const QString dir  = QFileInfo(rel).path();
+                    const QString base = QFileInfo(rel).baseName();
+                    localName = (dir.isEmpty() || dir == QLatin1String("."))
+                                ? base : dir + QLatin1Char('/') + base;
+                } else {
+                    localName = sprite->name; // fallback
+                }
+                perSource[bestIdx].append({sprite, localName});
+            } else {
+                unassigned.append({sprite, sprite->name});
+            }
+        }
+
+        for (int si = 0; si < m_session->sources.size(); ++si) {
+            if (perSource[si].isEmpty()) continue;
+            const auto& src = m_session->sources[si];
+            auto* sourceNode = makeGroupNode(nullptr, src.name);
+            QFont f = sourceNode->font(0);
+            f.setBold(true);
+            sourceNode->setFont(0, f);
+            sourceNode->setData(0, Qt::UserRole + 1, si); // source index for context menu
+
+            // Icon and tooltip reflecting the source type
+            QStyle::StandardPixmap pixmap;
+            QString typeLabel;
+            switch (src.type) {
+            case SourceType::Folder:
+                pixmap = QStyle::SP_DirOpenIcon;
+                typeLabel = tr("Folder");
+                break;
+            case SourceType::SingleImage:
+                pixmap = QStyle::SP_FileIcon;
+                typeLabel = tr("Image");
+                break;
+            case SourceType::Archive:
+                pixmap = QStyle::SP_DriveFDIcon;
+                typeLabel = tr("Archive");
+                break;
+            case SourceType::Url:
+                pixmap = QStyle::SP_CommandLink;
+                typeLabel = tr("URL");
+                break;
+            }
+            sourceNode->setIcon(0, QApplication::style()->standardIcon(pixmap));
+            sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
+
+            buildSubTree(sourceNode, perSource[si]);
+        }
+
+        if (!unassigned.isEmpty()) {
+            auto* otherNode = makeGroupNode(nullptr, tr("Other"));
+            buildSubTree(otherNode, unassigned);
+        }
+    } else {
+        // Single source (or no source tracking): existing atlas-based grouping.
+        for (int mi = 0; mi < m_session->layoutModels.size(); ++mi) {
+            const auto& model = m_session->layoutModels[mi];
+            QTreeWidgetItem* atlasRoot = nullptr;
+            if (m_session->layoutModels.size() > 1)
+                atlasRoot = makeGroupNode(nullptr, tr("Atlas %1").arg(mi + 1));
+            QVector<SpriteLeaf> entries;
+            entries.reserve(model.sprites.size());
+            for (const auto& sprite : model.sprites)
+                entries.append({sprite, sprite->name});
+            buildSubTree(atlasRoot, entries);
+        }
     }
 
     m_spriteTree->expandAll();
     m_spriteTree->sortItems(0, Qt::AscendingOrder);
-
     m_spriteTree->blockSignals(false);
 }
 

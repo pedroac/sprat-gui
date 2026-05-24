@@ -25,9 +25,12 @@ public:
     QString currentFolder;
     QString layoutSourcePath;
     bool layoutSourceIsList = false;
-    QString sourceFolder;  // Source folder for sync operations
+    QString sourceFolder;  // Primary source folder for sync operations (mirrors smartFolders[0].path when non-empty)
+    QVector<SmartFolder> smartFolders; // Smart folders — the tool reads from these but never modifies them
+    QVector<ProjectSource> sources;   // Named sources (new model, parallel to smartFolders during migration)
     QStringList activeFramePaths;
     QString frameListPath; // Temporary file path for frame list
+    QStringList orphanedSpritePaths; // Sprites whose source image is no longer available
 
     // --- Layout Model ---
     QVector<LayoutModel> layoutModels;

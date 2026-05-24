@@ -54,6 +54,127 @@ FolderSyncService::SyncResult FolderSyncService::detectChanges(
     return result;
 }
 
+FolderSyncService::SyncResult FolderSyncService::detectChangesFromSources(
+    const QVector<ProjectSource>& sources,
+    const QVector<SpritePtr>& currentSprites) {
+
+    SyncResult result;
+    if (sources.isEmpty()) {
+        result.error = "No sources configured";
+        return result;
+    }
+
+    // Build the union of all image files across all sources.
+    QSet<QString> sourceImagesSet;
+    for (const ProjectSource& src : sources) {
+        // For Folder type: scan originalPath
+        // For non-Folder types: scan cachedFolderPath if set, else skip (static between syncs)
+        QString scanPath;
+        if (src.type == SourceType::Folder) {
+            scanPath = src.originalPath;
+        } else if (!src.cachedFolderPath.isEmpty()) {
+            scanPath = src.cachedFolderPath;
+        } else {
+            continue;
+        }
+        if (scanPath.isEmpty()) continue;
+        QDir dir(scanPath);
+        if (!dir.exists()) continue;
+
+        const QStringList images = getImageFilesInFolder(scanPath);
+        // Build per-source exclusion set (resolved to absolute paths)
+        QSet<QString> excluded;
+        for (const QString& rel : src.excludedFiles) {
+            excluded.insert(dir.absoluteFilePath(rel));
+        }
+        for (const QString& imgPath : images) {
+            if (!excluded.contains(imgPath)) {
+                sourceImagesSet.insert(imgPath);
+            }
+        }
+    }
+
+    // Get current sprite paths
+    const QStringList currentPaths = getSpritePaths(currentSprites);
+    const QSet<QString> currentPathsSet(currentPaths.cbegin(), currentPaths.cend());
+
+    // Detect added files (in sources but not in sprites)
+    for (const QString& imagePath : sourceImagesSet) {
+        if (!currentPathsSet.contains(imagePath)) {
+            result.newImagePaths.append(imagePath);
+        }
+    }
+
+    // Detect removed / orphaned files (in sprites but not in any source)
+    for (const QString& spritePath : currentPaths) {
+        if (!sourceImagesSet.contains(spritePath)) {
+            result.deletedImagePaths.append(spritePath);
+        }
+    }
+
+    qInfo() << "FolderSyncService(sources): Detected"
+            << result.newImagePaths.size() << "new files,"
+            << result.deletedImagePaths.size() << "deleted/orphaned files";
+
+    return result;
+}
+
+FolderSyncService::SyncResult FolderSyncService::detectChangesFromSmartFolders(
+    const QVector<SmartFolder>& smartFolders,
+    const QVector<SpritePtr>& currentSprites) {
+
+    SyncResult result;
+    if (smartFolders.isEmpty()) {
+        result.error = "No smart folders configured";
+        return result;
+    }
+
+    // Build the union of all image files across all smart folders,
+    // subtracting each folder's excluded files.
+    QSet<QString> folderImagesSet;
+    for (const SmartFolder& sf : smartFolders) {
+        if (sf.path.isEmpty()) continue;
+        QDir dir(sf.path);
+        if (!dir.exists()) continue;
+
+        const QStringList images = getImageFilesInFolder(sf.path);
+        // Build per-folder exclusion set (resolved to absolute paths)
+        QSet<QString> excluded;
+        for (const QString& rel : sf.excludedFiles) {
+            excluded.insert(dir.absoluteFilePath(rel));
+        }
+        for (const QString& imgPath : images) {
+            if (!excluded.contains(imgPath)) {
+                folderImagesSet.insert(imgPath);
+            }
+        }
+    }
+
+    // Get current sprite paths
+    const QStringList currentPaths = getSpritePaths(currentSprites);
+    const QSet<QString> currentPathsSet(currentPaths.cbegin(), currentPaths.cend());
+
+    // Detect added files (in smart folders but not in sprites)
+    for (const QString& imagePath : folderImagesSet) {
+        if (!currentPathsSet.contains(imagePath)) {
+            result.newImagePaths.append(imagePath);
+        }
+    }
+
+    // Detect removed files (in sprites but not in any smart folder)
+    for (const QString& spritePath : currentPaths) {
+        if (!folderImagesSet.contains(spritePath)) {
+            result.deletedImagePaths.append(spritePath);
+        }
+    }
+
+    qInfo() << "FolderSyncService(smart): Detected"
+            << result.newImagePaths.size() << "new files,"
+            << result.deletedImagePaths.size() << "deleted files";
+
+    return result;
+}
+
 bool FolderSyncService::mergeSyncResults(
     LayoutModel& layout,
     const SyncResult& changes,

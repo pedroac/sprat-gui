@@ -41,6 +41,35 @@ public:
         const QVector<SpritePtr>& currentSprites);
 
     /**
+     * Scan multiple smart folders and detect changes compared to current layout.
+     * Files listed in each SmartFolder's excludedFiles are treated as already-excluded
+     * (not reported as new even if they exist on disk).
+     *
+     * @param smartFolders Smart folders to scan (with per-folder exclusion lists)
+     * @param currentSprites Current sprites in the layout
+     * @return SyncResult containing detected changes
+     */
+    static SyncResult detectChangesFromSmartFolders(
+        const QVector<SmartFolder>& smartFolders,
+        const QVector<SpritePtr>& currentSprites);
+
+    /**
+     * Scan multiple named sources and detect changes compared to current layout.
+     *
+     * For Folder-type sources the scan folder is originalPath.
+     * For non-Folder types the scan folder is cachedFolderPath (if set).
+     * Paths added or removed relative to the current sprites are returned in the result.
+     * Sprites that are in currentSprites but not in any source are returned as orphaned.
+     *
+     * @param sources Named sources to scan
+     * @param currentSprites Current sprites in the layout
+     * @return SyncResult containing detected changes; orphaned paths are in deletedImagePaths
+     */
+    static SyncResult detectChangesFromSources(
+        const QVector<ProjectSource>& sources,
+        const QVector<SpritePtr>& currentSprites);
+
+    /**
      * Merge sync results into the layout, adding new sprites.
      *
      * New sprites are appended with default metadata (no markers, default pivot).

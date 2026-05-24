@@ -9,6 +9,7 @@
 #include "SpratProfilesConfig.h"
 #include "ImageDiscoveryService.h"
 #include "ImageFolderSelectionDialog.h"
+#include "MessageDialog.h"
 
 #include <QApplication>
 #include <QStyle>
@@ -156,11 +157,11 @@ bool MainWindow::resolveCliBinaries(QStringList& missing) {
 void MainWindow::showCliExecutionError(const QString& tool) {
     m_cliReady = false;
     m_statusLabel->setText(tr("CLI error (failed to execute %1)").arg(tool));
-    QMessageBox::critical(this, tr("CLI Execution Failed"),
+    MessageDialog::critical(this, tr("CLI Execution Failed"),
         tr("The CLI tool '%1' was found but failed to execute.\n"
            "This is usually caused by missing dependencies like 'archive.dll' or 'zlib1.dll'.\n"
-           "Please ensure all required DLLs are in the 'cli' folder.").arg(tool));
-}
+           "Check logs or try installing the tools again.").arg(tool));
+    }
 
 void MainWindow::showMissingCliDialog(const QStringList& missing) {
     MissingCliAction action = CliToolsUi::askMissingCliAction(this, missing);
@@ -180,7 +181,7 @@ void MainWindow::showMissingCliDialog(const QStringList& missing) {
         if (resolveCliBinaries(stillMissing)) {
             checkCliTools();
         } else {
-            QMessageBox::warning(this, tr("Tools Not Found"),
+            MessageDialog::warning(this, tr("Tools Not Found"),
                 tr("Some CLI tools were not found in the selected folder:\n%1")
                 .arg(stillMissing.join(", ")));
             m_statusLabel->setText(tr("CLI missing"));
@@ -215,20 +216,19 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     }
 
     if (action == DropAction::Merge) {
-        // Ask about duplicates before showing the loading overlay
-        QMessageBox msg(this);
-        msg.setWindowTitle(tr("Merge with duplicates"));
-        msg.setText(tr("When merging, what should happen to files with the same name?"));
-        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
-        msg.exec();
-        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
+        // If this source is already loaded, sync it instead of re-importing.
+        for (const ProjectSource& s : m_session->sources) {
+            if (s.originalPath == folderPath) {
+                onRunLayout(true);
+                return;
+            }
+        }
 
         // Enumerate the new folder's images so we can copy them into sourceFolder.
         // spratlayout will traverse sourceFolder itself; no .txt list is needed.
         const QStringList newImages = ImageDiscoveryService::collectImagesRecursive({folderPath});
         if (newImages.isEmpty()) {
-            QMessageBox::warning(this, tr("Merge Failed"), tr("No image files found in the selected folder."));
+            MessageDialog::warning(this, tr("Merge Failed"), tr("No image files found in the selected folder."));
             return;
         }
 
@@ -236,35 +236,53 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         setLoading(true);
 
         ensureSourceFolder();
+
+        // Each merged folder gets its own subfolder so sources stay isolated.
+        const QString subName = computeSourceSubfolderName(folderPath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        QDir dstRoot(subfolderPath);
+        dstRoot.mkpath(QStringLiteral("."));
+
         QDir srcRoot(folderPath);
-        QDir dstRoot(m_session->sourceFolder);
+        QStringList copiedPaths;
         for (const QString& imgPath : newImages) {
             const QString relPath = srcRoot.relativeFilePath(imgPath);
             const QString dstPath = dstRoot.filePath(relPath);
-            QFileInfo dstInfo(dstPath);
-            dstRoot.mkpath(dstInfo.absolutePath());
+            const QFileInfo dstInfo(dstPath);
+            QDir().mkpath(dstInfo.absolutePath());
+            QString finalDst = dstPath;
             if (QFile::exists(dstPath)) {
                 if (m_mergeReplaceAllDuplicates) {
                     QFile::remove(dstPath);
-                    QFile::copy(imgPath, dstPath);
                 } else {
                     int n = 2;
-                    QString newDst;
                     do {
-                        newDst = dstInfo.absolutePath() + '/' +
-                                 dstInfo.baseName() + '_' + QString::number(n++) +
-                                 '.' + dstInfo.suffix();
-                    } while (QFile::exists(newDst));
-                    QFile::copy(imgPath, newDst);
+                        finalDst = dstInfo.absolutePath() + QLatin1Char('/') +
+                                   dstInfo.baseName() + QLatin1Char('_') +
+                                   QString::number(n++) + QLatin1Char('.') + dstInfo.suffix();
+                    } while (QFile::exists(finalDst));
                 }
-            } else {
-                QFile::copy(imgPath, dstPath);
+            }
+            if (QFile::copy(imgPath, finalDst)) {
+                copiedPaths.append(finalDst);
             }
         }
+        m_session->activeFramePaths.append(copiedPaths);
 
         m_shouldClearSpritesFolder = false;
         m_session->layoutSourcePath = m_session->sourceFolder;
         m_session->layoutSourceIsList = false;
+
+        ProjectSource src;
+        src.name = makeUniqueSourceName(QFileInfo(folderPath).fileName());
+        src.type = SourceType::Folder;
+        src.originalPath = folderPath;
+        src.cachedFolderPath = subfolderPath;
+        m_session->sources.append(src);
+        SmartFolder sf;
+        sf.path = folderPath;
+        m_session->smartFolders.append(sf);
+
         m_statusLabel->setText(QString(tr("Merging %1 image frame(s) from %2"))
                                .arg(newImages.size()).arg(folderPath));
         m_loadingUiMessage = tr("Building layout...");
@@ -274,7 +292,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         // spratlayout traverses the temp folder; activeFramePaths is rebuilt from its output.
         const QStringList newImages = ImageDiscoveryService::collectImagesRecursive({folderPath});
         if (newImages.isEmpty()) {
-            QMessageBox::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
+            MessageDialog::warning(this, tr("Load Failed"), tr("No image files found in the selected folder."));
             return;
         }
 
@@ -288,7 +306,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
             m_projectFilePath.clear();
         }
         m_session->currentFolder = folderPath;
-        m_folderLabel->setText(tr("Folder: ") + folderPath);
+        updateFolderLabel(folderPath);
         m_session->cachedLayoutOutput.clear();
         m_session->cachedLayoutScale = 1.0;
         m_session->activeFramePaths.clear();
@@ -300,22 +318,52 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         m_statusLabel->setText(QString(tr("Loading %1...")).arg(folderPath));
 
         ensureSourceFolder();
+
+        // Copy into a dedicated subfolder so all sources are consistently isolated.
+        const QString subName = computeSourceSubfolderName(folderPath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        QDir dstRoot(subfolderPath);
+        dstRoot.mkpath(QStringLiteral("."));
+
         QDir srcRoot(folderPath);
-        QDir dstRoot(m_session->sourceFolder);
+        QStringList copiedPaths;
         for (const QString& imgPath : newImages) {
             const QString relPath = srcRoot.relativeFilePath(imgPath);
             const QString dstPath = dstRoot.filePath(relPath);
             QFileInfo dstInfo(dstPath);
-            dstRoot.mkpath(dstInfo.absolutePath());
-            QFile::copy(imgPath, dstPath);
+            QDir().mkpath(dstInfo.absolutePath());
+            if (QFile::copy(imgPath, dstPath)) {
+                copiedPaths.append(dstPath);
+            }
         }
+        m_session->activeFramePaths = copiedPaths;
 
         m_session->layoutSourcePath = m_session->sourceFolder;
         m_session->layoutSourceIsList = false;
+
+        // Register the loaded folder as a ProjectSource
+        m_session->sources.clear();
+        {
+            ProjectSource src;
+            src.name = QFileInfo(folderPath).fileName();
+            src.type = SourceType::Folder;
+            src.originalPath = folderPath;
+            src.cachedFolderPath = subfolderPath;
+            m_session->sources.append(src);
+        }
+        m_session->smartFolders.clear();
+        {
+            SmartFolder sf;
+            sf.path = folderPath;
+            m_session->smartFolders.append(sf);
+        }
+
         m_loadingUiMessage = tr("Building layout...");
         if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
     }
 
+    m_centerPivotsOnNextLayout = true;
+    refreshSourcesDialogIfVisible();
 #ifdef Q_OS_WASM
     // Defer on WASM so the loading overlay can paint before the synchronous layout run.
     QTimer::singleShot(0, this, [this]() { scheduleLayoutRebuild(true); });
@@ -329,16 +377,17 @@ bool MainWindow::confirmLayoutReplacement() {
     if (!hasLayout) {
         return true;
     }
-    QMessageBox msg(this);
-    msg.setWindowTitle(tr("Layout Already Loaded"));
-    msg.setText(tr("A layout is already loaded. Do you want to replace it?"));
-    auto* style_ = QApplication::style();
-    QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-    replaceBtn->setIcon(style_->standardIcon(QStyle::SP_DialogSaveButton));
-    QPushButton* ignoreBtn = msg.addButton(tr("Ignore"), QMessageBox::RejectRole);
-    ignoreBtn->setIcon(style_->standardIcon(QStyle::SP_DialogCancelButton));
-    msg.exec();
-    return msg.clickedButton() == replaceBtn;
+
+    const QMessageBox::StandardButton answer = MessageDialog::question(
+        this,
+        tr("A layout is already loaded."),
+        tr("Do you want to replace it?"),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No,
+        tr("Layout Already Loaded")
+    );
+
+    return answer == QMessageBox::Yes;
 }
 
 void MainWindow::onLoadFolder() {
@@ -349,7 +398,7 @@ void MainWindow::onLoadFolder() {
     QString dir = QFileDialog::getExistingDirectory(this, tr("Select Frames Folder"));
     if (!dir.isEmpty()) {
         if (m_animCanvas) m_animCanvas->setZoomManual(false);
-        loadFolder(dir);
+        loadFolder(dir, confirmDropAction(dir));
     }
 }
 

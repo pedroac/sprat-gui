@@ -60,7 +60,13 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 
     emit started();
 
-    auto task = [this, config, args]() {
+    // Build stdin payload for --stdin-list mode
+    QByteArray stdinPayload;
+    if (!config.imagePathList.isEmpty()) {
+        stdinPayload = (config.imagePathList.join('\n') + '\n').toUtf8();
+    }
+
+    auto task = [this, config, args, stdinPayload]() {
         QMutexLocker locker(m_mutex);
 
         m_stdoutBuffer.clear();
@@ -77,10 +83,13 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         Q_UNUSED(config.layoutBinary);
         QElapsedTimer timer;
         timer.start();
+        const QString inputDesc = config.imagePathList.isEmpty()
+            ? config.sourceFolderPath
+            : QStringLiteral("--stdin-list (%1 paths)").arg(config.imagePathList.size());
         qInfo() << "[WASM] spratlayout start"
-                << "source=" << config.sourcePath
+                << "input=" << inputDesc
                 << "args=" << args.join(' ');
-        CliResult embeddedResult = EmbeddedCli::run("spratlayout", args);
+        CliResult embeddedResult = EmbeddedCli::run("spratlayout", args, stdinPayload);
         qInfo() << "[WASM] spratlayout done"
                 << "exit=" << embeddedResult.exitCode
                 << "stdoutBytes=" << embeddedResult.stdOut.size()
@@ -101,6 +110,12 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         if (!m_process->waitForStarted()) {
             emit errorOccurred("Failed to start process: " + config.layoutBinary);
             return;
+        }
+
+        // For --stdin-list mode: write image paths to process stdin then close the channel.
+        if (!stdinPayload.isEmpty()) {
+            m_process->write(stdinPayload);
+            m_process->closeWriteChannel();
         }
 
         QElapsedTimer timer;
@@ -166,20 +181,15 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
             if (!result.error.isEmpty()) {
                 logEntry += QStringLiteral("\n  stderr: %1").arg(result.error);
             }
-            // When input is a list file, log whether it exists and its size
-            if (!args.isEmpty()) {
-                QFileInfo inputInfo(args.first());
-                if (inputInfo.isFile()) {
-                    logEntry += QStringLiteral("\n  input file: %1 (exists=%2, size=%3)")
-                        .arg(args.first(),
-                             QFile::exists(args.first()) ? "yes" : "no",
-                             QString::number(inputInfo.size()));
-                } else {
-                    logEntry += QStringLiteral("\n  input: %1 (isDir=%2, exists=%3)")
-                        .arg(args.first(),
-                             inputInfo.isDir() ? "yes" : "no",
-                             inputInfo.exists() ? "yes" : "no");
-                }
+            // Log input details
+            if (!config.imagePathList.isEmpty()) {
+                logEntry += QStringLiteral("\n  input: --stdin-list (%1 paths)").arg(config.imagePathList.size());
+            } else if (!config.sourceFolderPath.isEmpty()) {
+                QFileInfo inputInfo(config.sourceFolderPath);
+                logEntry += QStringLiteral("\n  input: %1 (isDir=%2, exists=%3)")
+                    .arg(config.sourceFolderPath,
+                         inputInfo.isDir() ? "yes" : "no",
+                         inputInfo.exists() ? "yes" : "no");
             }
             emit logMessage(logEntry);
         }
@@ -209,7 +219,11 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 
 QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
     QStringList args;
-    args << config.sourcePath;
+    if (!config.imagePathList.isEmpty()) {
+        args << "--stdin-list";
+    } else if (!config.sourceFolderPath.isEmpty()) {
+        args << config.sourceFolderPath;
+    }
 
     const SpratProfile& p = config.profile;
     

@@ -1,6 +1,7 @@
 #include "ProfilesDialog.h"
 #include "ResolutionsConfig.h"
 #include "ResolutionUtils.h"
+#include "MessageDialog.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -59,6 +60,11 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     resize(680, 550);
 
     QVBoxLayout* rootLayout = new QVBoxLayout(this);
+
+    auto* descLabel = new QLabel(tr("Profiles define how the spritesheet is generated — resolution, padding, and other export settings."), this);
+    descLabel->setWordWrap(true);
+    rootLayout->addWidget(descLabel);
+
     QHBoxLayout* contentLayout = new QHBoxLayout();
 
     QVBoxLayout* listLayout = new QVBoxLayout();
@@ -290,12 +296,12 @@ void ProfilesDialog::accept() {
     for (int i = 0; i < m_profiles.size(); ++i) {
         const QString name = m_profiles[i].name.trimmed();
         if (name.isEmpty()) {
-            QMessageBox::warning(this, tr("Invalid profile"), tr("Profile name cannot be empty."));
+            MessageDialog::warning(this, tr("Empty Profile Name"), tr("Profile name cannot be empty."));
             m_listWidget->setCurrentRow(i);
             return;
         }
         if (hasDuplicateName(name, i)) {
-            QMessageBox::warning(this, tr("Duplicate profile"), tr("A profile with this name already exists."));
+            MessageDialog::warning(this, tr("Duplicate Profile Name"), tr("A profile named '%1' already exists.").arg(name));
             m_listWidget->setCurrentRow(i);
             return;
         }

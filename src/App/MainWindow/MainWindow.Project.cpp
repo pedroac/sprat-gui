@@ -12,9 +12,8 @@
 #include "ProjectPayloadCodec.h"
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
-#ifndef Q_OS_WASM
-#include "NewProjectDialog.h"
-#endif
+#include "MessageDialog.h"
+
 #include <QDockWidget>
 #include "ResolutionUtils.h"
 #include "FolderSyncService.h"
@@ -146,48 +145,6 @@ void syncSourceResolutionPresetSelection(QComboBox* combo, int width, int height
     combo->blockSignals(blocked);
 }
 }
-#ifndef Q_OS_WASM
-void MainWindow::onNewProjectRequested() {
-    NewProjectDialog dlg(m_settings.defaultProjectsFolder, this);
-    if (dlg.exec() == QDialog::Accepted) {
-        NewProjectDialog::Result result = dlg.getResult();
-        QString projectDir = result.location;
-        if (result.createSubfolder) {
-            projectDir = QDir(projectDir).filePath(result.name);
-        }
-
-        QDir().mkpath(projectDir);
-        QString projectPath = QDir(projectDir).filePath("project.spart.json");
-
-        // Initialize a new project session
-        m_session->clear();
-        m_session->currentFolder = projectDir;
-        m_session->sourceFolder = QDir(projectDir).filePath("sprites");
-        QDir().mkpath(m_session->sourceFolder);
-        m_sourceFolderIsTemp = false;
-        m_session->layoutSourcePath = m_session->sourceFolder;
-        m_session->layoutSourceIsList = false;
-
-        m_projectFilePath = projectPath;
-
-        // Initialize last save config with default destination
-        m_lastSaveConfig.destination = projectDir;
-
-        // Write project.spart.json immediately (synchronous, no pipeline)
-        QString saveError;
-        if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(SaveConfig{}, m_session, true), saveError)) {
-            m_statusLabel->setText(tr("Failed to write project JSON: ") + saveError);
-        }
-
-        m_statusLabel->setText(tr("Project created in: %1").arg(projectDir));
-        updateMainContentView();
-        updateUiState();
-
-        // Update window title
-        setWindowTitle(tr("%1 — %2").arg(result.name).arg(projectDir));
-    }
-}
-#endif
 
 void MainWindow::onOpenRecentProjectRequested() {
     if (m_recentProjects.isEmpty()) {
@@ -201,34 +158,6 @@ void MainWindow::onOpenRecentProjectRequested() {
     }
 }
 
-#ifndef Q_OS_WASM
-void MainWindow::onProjectSettingsRequested() {
-    // Project settings allows renaming or moving the project
-    QString currentName = QFileInfo(m_projectFilePath).dir().dirName();
-    QString currentLocation = QFileInfo(m_projectFilePath).dir().absolutePath();
-    if (currentName.isEmpty() || currentName == ".") currentName = tr("Untitled Project");
-
-    // The location in NewProjectDialog is the parent folder
-    QString parentFolder = QFileInfo(currentLocation).absolutePath();
-
-    NewProjectDialog dlg(parentFolder, this);
-    dlg.setWindowTitle(tr("Project Settings"));
-    dlg.setProjectName(currentName);
-    dlg.setLocation(parentFolder);
-    dlg.setCreateSubfolder(true);
-
-    if (dlg.exec() == QDialog::Accepted) {
-        NewProjectDialog::Result result = dlg.getResult();
-        // Rename/move logic would go here
-        // For now just update the title if name changed
-        QString newDir = result.location;
-        if (result.createSubfolder) {
-            newDir = QDir(newDir).filePath(result.name);
-        }
-        setWindowTitle(tr("%1 — %2").arg(result.name).arg(newDir));
-    }
-}
-#endif
 
 void MainWindow::cacheLayoutOutputFromPayload(const QJsonObject& payload) {
     QJsonObject layoutInfo = payload["layout"].toObject();
@@ -282,14 +211,14 @@ void MainWindow::loadAutosavedProject() {
     if (sourceMode == "list" && !framePaths.isEmpty()) {
         m_session->activeFramePaths = framePaths;
         if (!ensureFrameListInput()) {
-            QMessageBox::warning(this, tr("Load Failed"), tr("Could not restore autosaved frame list; falling back to folder source."));
+            MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore autosaved frame list; falling back to folder source."));
             m_session->layoutSourcePath = QDir(folder).absolutePath();
             m_session->layoutSourceIsList = false;
             if (!m_session->frameListPath.isEmpty()) {
                 QFile::remove(m_session->frameListPath);
                 m_session->frameListPath.clear();
             }
-            m_folderLabel->setText(tr("Folder: ") + folder);
+            updateFolderLabel(folder);
         }
     } else {
         m_session->layoutSourcePath = QDir(folder).absolutePath();
@@ -298,7 +227,7 @@ void MainWindow::loadAutosavedProject() {
             QFile::remove(m_session->frameListPath);
             m_session->frameListPath.clear();
         }
-        m_folderLabel->setText(tr("Folder: ") + folder);
+        updateFolderLabel(folder);
     }
     scheduleLayoutRebuild(true);
 }
@@ -342,7 +271,7 @@ void MainWindow::onLoadFromUrl() {
 
     const QUrl url = QUrl::fromUserInput(trimmed);
     if (!url.isValid()) {
-        QMessageBox::warning(this, tr("Invalid URL"), tr("The provided URL is not valid."));
+        MessageDialog::warning(this, tr("Invalid URL"), tr("The provided URL is not valid."));
         return;
     }
 
@@ -364,7 +293,7 @@ void MainWindow::onPasteImport() {
     }
 
     if (!tryImportClipboard(mimeData, DropAction::Cancel)) {
-        QMessageBox::information(
+        MessageDialog::information(
             this,
             tr("Clipboard Not Supported"),
             tr("Clipboard data must be an image, file, or supported URL."));
@@ -428,7 +357,7 @@ void MainWindow::finishImportedPath(const QString& path, DropAction action) {
         return;
     }
     if (!isSupportedDropPath(path)) {
-        QMessageBox::warning(
+        MessageDialog::warning(
             this,
             tr("Unsupported Import"),
             tr("The imported data is not a supported image, project, or archive."));
@@ -468,7 +397,7 @@ bool MainWindow::tryImportClipboard(const QMimeData* mimeData, DropAction action
         QString error;
         const QString path = createManagedImportImageFile(image, error);
         if (path.isEmpty()) {
-            QMessageBox::warning(this, tr("Import Failed"), error);
+            MessageDialog::warning(this, tr("Import Failed"), error);
             return true;
         }
         finishImportedPath(path, action);
@@ -487,7 +416,7 @@ bool MainWindow::tryImportClipboard(const QMimeData* mimeData, DropAction action
             QString error;
             const QString path = createManagedImportFile("clipboard.zip", mimeData->data(mimeType), error);
             if (path.isEmpty()) {
-                QMessageBox::warning(this, tr("Import Failed"), error);
+                MessageDialog::warning(this, tr("Import Failed"), error);
             } else {
                 finishImportedPath(path, action);
             }
@@ -606,7 +535,7 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
                 });
                 msgBox->open();
 #else
-                QMessageBox::warning(this, tr("Download Failed"), errorText);
+                MessageDialog::warning(this, tr("Download Failed"), errorText);
 #endif
             }
             return;
@@ -615,10 +544,11 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
         QString error;
         const QString path = createManagedImportFile(fileName, data, error);
         if (path.isEmpty()) {
-            QMessageBox::warning(this, tr("Import Failed"), error);
+            MessageDialog::warning(this, tr("Import Failed"), error);
             return;
         }
 
+        m_pendingImportUrl = url.toString();
         finishImportedPath(path, action);
     });
 
@@ -627,53 +557,67 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
 
 void MainWindow::onSaveClicked() {
 #ifdef Q_OS_WASM
-    return; // Save is disabled on WASM (no persistent project folder)
+    return;
 #else
     if (m_projectFilePath.isEmpty()) {
-        // Ensure a default projects folder exists before showing the name dialog.
-        if (m_settings.defaultProjectsFolder.isEmpty()
-                || !QDir(m_settings.defaultProjectsFolder).exists()) {
-            const QString fallback = QDir(QStandardPaths::writableLocation(
-                QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
-            QString dir = QFileDialog::getExistingDirectory(
-                this, tr("Choose Projects Folder"), fallback);
-            if (dir.isEmpty()) return;
-            m_settings.defaultProjectsFolder = dir;
-            CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
-        }
-
-        NewProjectDialog dlg(m_settings.defaultProjectsFolder, this);
-        if (dlg.exec() != QDialog::Accepted) return;
-        const NewProjectDialog::Result result = dlg.getResult();
-
-        QString projectDir = result.location;
-        if (result.createSubfolder) {
-            projectDir = QDir(projectDir).filePath(result.name);
-        }
-        QDir().mkpath(projectDir);
-        m_projectFilePath = QDir(projectDir).filePath("project.spart.json");
-        m_lastSaveConfig.destination = projectDir;
-
-        if (m_session->sourceFolder.isEmpty()) {
-            m_session->sourceFolder = QDir(projectDir).filePath("sprites");
-            QDir().mkpath(m_session->sourceFolder);
-            m_sourceFolderIsTemp = false;
-        }
-
-        setWindowTitle(tr("%1 — %2").arg(result.name).arg(projectDir));
+        onSaveAsClicked();
+        return;
     }
-
     const QString projectDir = QFileInfo(m_projectFilePath).absolutePath();
     QString error;
     if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
         m_statusLabel->setText(tr("Save failed: ") + error);
-        QMessageBox::critical(this, tr("Save Failed"), error);
+        MessageDialog::critical(this, tr("Save Failed"), error);
         return;
     }
-    m_statusLabel->setText(tr("Saved"));
+    m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
+    if (m_undoStack) m_undoStack->setClean();
     updateUiState();
 #endif
 }
+
+#ifndef Q_OS_WASM
+void MainWindow::onSaveAsClicked() {
+    // Start browser in the parent of the current project folder, or the last
+    // used parent, so the user naturally creates sibling project folders.
+    QString startDir;
+    if (!m_projectFilePath.isEmpty()) {
+        startDir = QFileInfo(QFileInfo(m_projectFilePath).absolutePath()).absolutePath();
+    } else if (!m_settings.defaultProjectsFolder.isEmpty()
+               && QDir(m_settings.defaultProjectsFolder).exists()) {
+        startDir = m_settings.defaultProjectsFolder;
+    } else {
+        startDir = QDir(QStandardPaths::writableLocation(
+            QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
+    }
+
+    const QString projectDir = QFileDialog::getExistingDirectory(
+        this, tr("Choose Save Folder"), startDir);
+    if (projectDir.isEmpty()) return;
+
+    // Remember the parent so next Save As opens there.
+    m_settings.defaultProjectsFolder = QFileInfo(projectDir).absolutePath();
+    CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+
+    QDir().mkpath(projectDir);
+    m_projectFilePath = QDir(projectDir).filePath("project.spart.json");
+    m_lastSaveConfig.destination = projectDir;
+
+    const QString folderName = QFileInfo(projectDir).fileName();
+    setWindowTitle(tr("%1 — %2[*]").arg(folderName, projectDir));
+
+    QString error;
+    if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
+        m_statusLabel->setText(tr("Save failed: ") + error);
+        MessageDialog::critical(this, tr("Save Failed"), error);
+        return;
+    }
+    m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
+    if (m_undoStack) m_undoStack->setClean();
+    addToRecentProjects(m_projectFilePath);
+    updateUiState();
+}
+#endif
 
 void MainWindow::onExportClicked() {
     if (m_lastSaveConfig.destination.isEmpty()) {
@@ -720,7 +664,7 @@ void MainWindow::onExportAsClicked() {
     if (!isZip) {
         const QDir dest(config.destination);
         if (QDir(dest.filePath("output")).exists()) {
-            const int answer = QMessageBox::warning(
+            const int answer = MessageDialog::confirmWarning(
                 this, tr("Overwrite Export?"),
                 tr("The folder \"%1\" already contains an export.\n"
                    "The output folder will be cleared and replaced.\n\n"
@@ -737,14 +681,15 @@ void MainWindow::onExportAsClicked() {
 
 bool MainWindow::runExport(SaveConfig config) {
     if (m_spratLayoutBin.isEmpty() || m_spratPackBin.isEmpty()) {
-        QMessageBox::critical(this, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
-        return false;
+        if (!m_cliReady) {
+            MessageDialog::critical(this, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
+            return false;
+        }
+        if (m_session->layoutSourcePath.isEmpty()) {
+            MessageDialog::critical(this, tr("Error"), tr("No layout source selected."));
+            return false;
+        }
     }
-    if (m_session->layoutSourcePath.isEmpty()) {
-        QMessageBox::critical(this, tr("Error"), tr("No layout source selected."));
-        return false;
-    }
-
     if (m_exportWatcher.isRunning()) {
         return false;
     }
@@ -879,13 +824,13 @@ void MainWindow::handleExportResult(const ExportResult& result) {
         m_statusLabel->setText(tr("Download started"));
 #endif
 #ifdef Q_OS_WASM
-        QMessageBox::information(this, tr("Saved"), tr("Download started."));
+        MessageDialog::information(this, tr("Saved"), tr("Download started."));
 #else
-        QMessageBox::information(this, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+        MessageDialog::information(this, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
 #endif
     } else {
         m_statusLabel->setText(tr("Save failed"));
-        QMessageBox::critical(this, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);
+        MessageDialog::critical(this, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);
     }
 }
 
@@ -893,6 +838,12 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     ProjectPayloadBuildInput input;
     input.currentFolder = session->currentFolder;
     input.sourceFolder = session->sourceFolder;
+    input.smartFolders = session->smartFolders;
+    input.sources = session->sources;
+    input.orphanedSpritePaths = session->orphanedSpritePaths;
+    input.projectDir = m_projectFilePath.isEmpty()
+        ? QString()
+        : QFileInfo(m_projectFilePath).absolutePath();
     input.activeFramePaths = session->activeFramePaths;
     input.layoutSourceIsList = session->layoutSourceIsList;
     input.timelines = session->timelines;
@@ -1024,14 +975,13 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
             // checks m_isLoading and would reject the call otherwise.
             setLoading(false);
             if (!loadImagesFromZip(path, action)) {
-                QMessageBox::warning(this, tr("Load Failed"), tr("Could not load ZIP as a project or as an image archive."));
+                MessageDialog::warning(this, tr("Load Failed"), tr("Could not load ZIP as a project or as an image archive."));
             }
             return;
-        }
-        setLoading(false);
-        QMessageBox::warning(this, tr("Load Failed"), result.error);
-        return;
-    }
+            }
+            setLoading(false);
+            MessageDialog::warning(this, tr("Load Failed"), result.error);
+            return;    }
 
     // Add to recent projects
     addToRecentProjects(path);
@@ -1051,14 +1001,14 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
         auto tempDir = std::make_unique<QTemporaryDir>();
         if (!tempDir->isValid()) {
             setLoading(false);
-            QMessageBox::warning(this, tr("Load Failed"), tr("Could not create temporary directory for ZIP extraction."));
+            MessageDialog::warning(this, tr("Load Failed"), tr("Could not create temporary directory for ZIP extraction."));
             return;
         }
         const QString tempPath = tempDir->path();
         QString extractError;
         if (!ArchiveExtractor::extractToDirectory(path, tempPath, extractError)) {
             setLoading(false);
-            QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(extractError));
+            MessageDialog::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(extractError));
             return;
         }
         projectDir = tempPath;
@@ -1080,9 +1030,13 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
     QJsonObject layoutInfo = root["layout"].toObject();
     QString folder = layoutInfo["folder"].toString();
 
-    // Resolve relative folder paths (version 2+) against the project directory
+    // Resolve relative folder paths (version 2+) against the project directory.
+    // If the resolved subfolder doesn't exist (e.g. older saves that stored
+    // "sprites" but never copied files there), fall back to the project root so
+    // frame paths are at least resolved against a real directory.
     if (projectVersion >= 2 || QDir::isRelativePath(folder)) {
-        folder = QDir(projectDir).filePath(folder);
+        const QString resolved = QDir(projectDir).filePath(folder);
+        folder = QDir(resolved).exists() ? resolved : projectDir;
     }
 
     QStringList framePaths;
@@ -1157,14 +1111,14 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
             if (sourceMode == "list" && !framePaths.isEmpty()) {
                 m_session->activeFramePaths = framePaths;
                 if (!ensureFrameListInput()) {
-                    QMessageBox::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
+                    MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
                     m_session->layoutSourcePath = QDir(folder).absolutePath();
                     m_session->layoutSourceIsList = false;
                     if (!m_session->frameListPath.isEmpty()) {
                         QFile::remove(m_session->frameListPath);
                         m_session->frameListPath.clear();
                     }
-                    m_folderLabel->setText(tr("Folder: ") + folder);
+                    updateFolderLabel(folder);
                 }
             } else {
                 m_session->layoutSourcePath = QDir(folder).absolutePath();
@@ -1173,7 +1127,7 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
                     QFile::remove(m_session->frameListPath);
                     m_session->frameListPath.clear();
                 }
-                m_folderLabel->setText(tr("Folder: ") + folder);
+                updateFolderLabel(folder);
             }
             scheduleLayoutRebuild(true);
         }
@@ -1194,6 +1148,16 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         return false;
     }
 
+    // For Merge, skip extraction entirely if this ZIP is already a loaded source.
+    if (action == DropAction::Merge && m_session) {
+        for (const ProjectSource& s : m_session->sources) {
+            if (s.originalPath == zipPath) {
+                onRunLayout(true);
+                return true;
+            }
+        }
+    }
+
     m_loadingUiMessage = tr("Extracting ZIP...");
     m_isCanceled = false;
     setLoading(true);
@@ -1204,7 +1168,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     auto tempDir = std::make_unique<QTemporaryDir>();
     if (!tempDir->isValid()) {
         setLoading(false);
-        QMessageBox::warning(this, tr("Load Failed"), tr("Unable to create temporary directory for ZIP extraction."));
+        MessageDialog::warning(this, tr("Load Failed"), tr("Unable to create temporary directory for ZIP extraction."));
         return false;
     }
     QString tempPath = tempDir->path();
@@ -1262,9 +1226,9 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     if (imageDirectories.isEmpty()) {
         setLoading(false);
         if (!result.error.isEmpty()) {
-            QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(result.error));
+            MessageDialog::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(result.error));
         } else {
-            QMessageBox::warning(this, tr("Load Failed"), tr("Could not extract ZIP or no image folders found."));
+            MessageDialog::warning(this, tr("Load Failed"), tr("Could not extract ZIP or no image folders found."));
         }
         return;
     }
@@ -1352,7 +1316,7 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
             selectedFolders << tempPath;
         } else {
             setLoading(false);
-            QMessageBox::warning(this, tr("Load Failed"), tr("No folders selected."));
+            MessageDialog::warning(this, tr("Load Failed"), tr("No folders selected."));
             return;
         }
     }
@@ -1360,7 +1324,7 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     const QStringList absolutePaths = ImageDiscoveryService::collectImagesRecursive(selectedFolders);
     if (absolutePaths.isEmpty()) {
         setLoading(false);
-        QMessageBox::warning(this, tr("Load Failed"), tr("No images found in selected folders."));
+        MessageDialog::warning(this, tr("Load Failed"), tr("No images found in selected folders."));
         return;
     }
 
@@ -1374,20 +1338,14 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         : tempPath;
 
     if (action == DropAction::Merge) {
-        // Ask if files with same names should be replaced
-        QMessageBox msg(this);
-        msg.setWindowTitle(tr("Merge with duplicates"));
-        msg.setText(tr("When merging, what should happen to files with the same name?"));
-        QAbstractButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-        msg.addButton(tr("Rename"), QMessageBox::AcceptRole);
-        msg.exec();
-        m_mergeReplaceAllDuplicates = (msg.clickedButton() == replaceBtn);
-
-        m_session->activeFramePaths.append(absolutePaths);
-        // Set currentFolder so copyActiveFramesToSourceFolder preserves subfolder hierarchy
+        // Set currentFolder before copying so relative structure is preserved
         m_session->currentFolder = extractionRoot;
-        // Copy extracted images to source folder so they persist after temp dir cleanup
-        copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        const QString subName = computeSourceSubfolderName(zipPath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        const QStringList copied = copyFramesToSourceSubfolder(
+            absolutePaths, subfolderPath, m_mergeReplaceAllDuplicates);
+        m_session->activeFramePaths.append(copied);
+        registerLoadedSource(zipPath, action, subfolderPath);
     } else {
         // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
@@ -1407,7 +1365,6 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         m_session->sourceFolder.clear();
         m_session->clearSourceFolderTempDir();
         ensureSourceFolder();
-        m_session->activeFramePaths = absolutePaths;
         m_session->timelines.clear();
         m_session->selectedTimelineIndex = -1;
         // Clear selection state when loading new images to avoid stale pointers
@@ -1418,19 +1375,23 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
         onSpriteSelected(SpritePtr());
         refreshTimelineList();
         refreshAnimationTest();
-        // Set currentFolder so copyActiveFramesToSourceFolder preserves subfolder hierarchy
+        // Set currentFolder so relative subfolder structure is preserved
         m_session->currentFolder = extractionRoot;
-        // Copy extracted images to source folder on Replace
-        copyActiveFramesToSourceFolder();
+        // Copy extracted images into a dedicated subfolder on Replace
+        const QString subName = computeSourceSubfolderName(zipPath);
+        const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
+        m_session->activeFramePaths = copyFramesToSourceSubfolder(absolutePaths, subfolderPath);
+        registerLoadedSource(zipPath, action, subfolderPath);
     }
 
     if (!ensureFrameListInput()) {
         setLoading(false);
-        QMessageBox::warning(this, tr("Load Failed"), tr("Could not create temporary frame list from ZIP selection."));
+        MessageDialog::warning(this, tr("Load Failed"), tr("Could not create temporary frame list from ZIP selection."));
         return;
     }
     updateManualFrameLabel();
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
+    refreshSourcesDialogIfVisible();
     scheduleLayoutRebuild(true);
 }
 
@@ -1528,11 +1489,35 @@ void MainWindow::applyProjectPayload() {
     m_lastSaveConfig = applied.saveConfig;
     applySettings();
 
+    // Restore smart folders from project payload
+    if (!applied.smartFolders.isEmpty()) {
+        m_session->smartFolders = applied.smartFolders;
+        // Keep sourceFolder in sync with the first smart folder path
+        if (m_session->sourceFolder.isEmpty()) {
+            m_session->sourceFolder = applied.smartFolders.first().path;
+        }
+    }
+
+    // Restore sources (new model)
+    if (!applied.sources.isEmpty()) {
+        m_session->sources = applied.sources;
+    }
+    m_session->orphanedSpritePaths = applied.orphanedSpritePaths;
+    refreshSourcesDialogIfVisible();
+
     // Initialize source folder for sync if layoutSourcePath points to a folder
     if (!m_session->layoutSourcePath.isEmpty()) {
         QFileInfo fi(m_session->layoutSourcePath);
         if (fi.isDir()) {
             m_session->sourceFolder = fi.absoluteFilePath();
+            // Ensure the first smart folder mirrors the source folder
+            if (m_session->smartFolders.isEmpty()) {
+                SmartFolder sf;
+                sf.path = m_session->sourceFolder;
+                m_session->smartFolders.append(sf);
+            } else {
+                m_session->smartFolders.first().path = m_session->sourceFolder;
+            }
             initializeSourceFolderWatcher();
         }
     }
@@ -1547,12 +1532,14 @@ void MainWindow::applyProjectPayload() {
     updateUiState();
 
     m_session->timelines = applied.timelines;
+    m_session->selectedTimelineIndex = (applied.selectedTimelineIndex >= 0
+        && applied.selectedTimelineIndex < m_session->timelines.size())
+        ? applied.selectedTimelineIndex
+        : (m_session->timelines.isEmpty() ? -1 : 0);
 
     refreshTimelineList();
-    if (applied.selectedTimelineIndex >= 0 && applied.selectedTimelineIndex < m_session->timelines.size()) {
-        m_timelineList->setCurrentRow(applied.selectedTimelineIndex);
-    } else if (!m_session->timelines.isEmpty()) {
-        m_timelineList->setCurrentRow(0);
+    if (m_session->selectedTimelineIndex >= 0) {
+        m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
     }
 
     if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size() && !applied.selectedTimelineFrameRows.isEmpty()) {

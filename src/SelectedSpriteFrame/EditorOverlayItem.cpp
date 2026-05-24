@@ -111,7 +111,9 @@ void EditorOverlayItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*
     // 2. Pivot (if not selected)
     if (!pivotSelected) {
         for (const auto& sprite : m_sprites) {
-            drawPivot(painter, sprite->pivotX, sprite->pivotY);
+            double px = m_draggingPivot ? m_pivotDragFloat.x() : (double)sprite->pivotX;
+            double py = m_draggingPivot ? m_pivotDragFloat.y() : (double)sprite->pivotY;
+            drawPivot(painter, px, py);
         }
     }
 
@@ -123,12 +125,14 @@ void EditorOverlayItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*
     // 4. Pivot (if selected)
     if (pivotSelected) {
         for (const auto& sprite : m_sprites) {
-            drawPivot(painter, sprite->pivotX, sprite->pivotY);
+            double px = m_draggingPivot ? m_pivotDragFloat.x() : (double)sprite->pivotX;
+            double py = m_draggingPivot ? m_pivotDragFloat.y() : (double)sprite->pivotY;
+            drawPivot(painter, px, py);
         }
     }
 }
 
-void EditorOverlayItem::drawPivot(QPainter* painter, int x, int y) {
+void EditorOverlayItem::drawPivot(QPainter* painter, double x, double y) {
     static const QPen kPivotOutlinePen = []() {
         QPen p(Qt::black, 5);
         p.setCosmetic(true);
@@ -228,18 +232,45 @@ void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
 
             markerPath.clear();
 
+            // Compute effective float coordinates for smooth drag rendering.
+            // During drag the float members track sub-pixel position; we draw
+            // from them so the visual stays smooth and only snaps on release.
+            bool useFloat = selected && m_dragMode != None && m_dragTargetName == p.name;
+            double ex = p.x, ey = p.y;
+            double eRadius = p.radius;
+            double ew = p.w, eh = p.h;
+            bool useFloatPoly = false;
+
+            if (useFloat) {
+                if (m_dragMode == Point || m_dragMode == RectMove) {
+                    ex = m_markerDragFloatDelta.x(); ey = m_markerDragFloatDelta.y();
+                } else if (m_dragMode == CircleRadius) {
+                    eRadius = m_markerDragFloatRadius;
+                } else if (m_dragMode == RectResize) {
+                    ex = m_markerDragFloatRect.x(); ey = m_markerDragFloatRect.y();
+                    ew = m_markerDragFloatRect.width(); eh = m_markerDragFloatRect.height();
+                } else if ((m_dragMode == PolyVertex || m_dragMode == PolyMove)
+                           && !m_markerDragFloatPoly.isEmpty()) {
+                    useFloatPoly = true;
+                }
+            }
+
             if (p.kind == MarkerKind::Point) {
                 double len = 6 * scale;
-                markerPath.moveTo(p.x - len, p.y - len); markerPath.lineTo(p.x + len, p.y + len);
-                markerPath.moveTo(p.x + len, p.y - len); markerPath.lineTo(p.x - len, p.y + len);
+                markerPath.moveTo(ex - len, ey - len); markerPath.lineTo(ex + len, ey + len);
+                markerPath.moveTo(ex + len, ey - len); markerPath.lineTo(ex - len, ey + len);
             } else if (p.kind == MarkerKind::Circle) {
-                markerPath.addEllipse(QPointF(p.x, p.y), p.radius, p.radius);
+                markerPath.addEllipse(QPointF(ex, ey), eRadius, eRadius);
             } else if (p.kind == MarkerKind::Rectangle) {
-                markerPath.addRect(p.x, p.y, p.w, p.h);
+                markerPath.addRect(ex, ey, ew, eh);
             } else if (p.kind == MarkerKind::Polygon) {
                 if (p.polygonPoints.size() > 1) {
                     QPolygonF poly;
-                    for(const auto& pt : p.polygonPoints) poly << pt;
+                    if (useFloatPoly) {
+                        for (const auto& pt : m_markerDragFloatPoly) poly << pt;
+                    } else {
+                        for (const auto& pt : p.polygonPoints) poly << pt;
+                    }
                     markerPath.addPolygon(poly);
                     markerPath.closeSubpath();
                 }
@@ -259,12 +290,13 @@ void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
                 painter->setBrush(Qt::white);
 
                 if (p.kind == MarkerKind::Circle) {
-                    painter->drawEllipse(QPointF(p.x + p.radius, p.y), 4 * scale, 4 * scale);
+                    painter->drawEllipse(QPointF(ex + eRadius, ey), 4 * scale, 4 * scale);
                 } else if (p.kind == MarkerKind::Rectangle) {
                     // Cleaner look like frame detection: no handle boxes, just cursor change.
                 } else if (p.kind == MarkerKind::Polygon) {
-                    for (int j = 0; j < p.polygonPoints.size(); ++j) {
-                        const auto& pt = p.polygonPoints[j];
+                    int polySize = useFloatPoly ? m_markerDragFloatPoly.size() : p.polygonPoints.size();
+                    for (int j = 0; j < polySize; ++j) {
+                        QPointF pt = useFloatPoly ? m_markerDragFloatPoly[j] : QPointF(p.polygonPoints[j]);
                         if (j == m_selectedVertexIndex) {
                             painter->setBrush(kVertexHighlight);
                             painter->drawRect(QRectF(pt.x() - 4*scale, pt.y() - 4*scale, 8*scale, 8*scale));
@@ -275,15 +307,15 @@ void EditorOverlayItem::drawMarkers(QPainter* painter, bool drawSelected) {
                     }
                 }
 
-                // Draw Label with dark chip background
+                // Draw label with dark chip background
                 painter->setFont(kLabelFont);
 
                 int padding = 4;
                 int textWidth = kLabelFm.horizontalAdvance(p.name);
                 int textHeight = kLabelFm.height();
 
-                // Position label relative to marker
-                QPointF textBasePos(p.x + 10*scale, p.y - 10*scale);
+                // Position label relative to effective marker position
+                QPointF textBasePos(ex + 10*scale, ey - 10*scale);
 
                 // Correct for scale to keep chip at constant screen size
                 painter->save();
@@ -417,6 +449,7 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                     m_dragTargetName = p->name;
                     m_dragStartPos = pos;
                     m_dragOriginalRect = QRect(p->x, p->y, p->w, p->h);
+                    m_markerDragFloatRect = QRectF(p->x, p->y, p->w, p->h);
                     updateResizeCursor(handle);
                     event->accept();
                     return;
@@ -427,6 +460,7 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                     m_dragTargetName = p->name;
                     m_dragStartPos = pos;
                     m_dragOriginalRadius = p->radius;
+                    m_markerDragFloatRadius = (double)p->radius;
                     setCursor(Qt::SizeHorCursor);
                     event->accept();
                     return;
@@ -438,6 +472,8 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                         m_dragTargetName = p->name;
                         m_dragVertexIndex = i;
                         m_selectedVertexIndex = i;
+                        m_markerDragFloatPoly.resize(p->polygonPoints.size());
+                        for (int j = 0; j < p->polygonPoints.size(); ++j) m_markerDragFloatPoly[j] = p->polygonPoints[j];
                         setCursor(Qt::SizeAllCursor);
                         event->accept();
                         update();
@@ -447,6 +483,9 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                 int edgeIdx = getPolygonHitEdge(p, pos);
                 if (edgeIdx != -1) {
                     p->polygonPoints.insert(edgeIdx + 1, pos.toPoint());
+                    m_markerDragFloatPoly.resize(p->polygonPoints.size());
+                    for (int j = 0; j < p->polygonPoints.size(); ++j) m_markerDragFloatPoly[j] = p->polygonPoints[j];
+                    m_markerDragFloatPoly[edgeIdx + 1] = pos;
                     m_dragMode = PolyVertex;
                     m_dragTargetName = p->name;
                     m_dragVertexIndex = edgeIdx + 1;
@@ -470,8 +509,18 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
 
             if (hit) {
                 m_dragMode = (p->kind == MarkerKind::Polygon) ? PolyMove : ((p->kind == MarkerKind::Rectangle) ? RectMove : Point);
-                if (m_dragMode == PolyMove) m_dragOriginalPoly = p->polygonPoints;
-                else m_dragOriginalPos = QPoint(p->x, p->y);
+                if (m_dragMode == PolyMove) {
+                    m_dragOriginalPoly = p->polygonPoints;
+                    m_markerDragFloatPoly.resize(p->polygonPoints.size());
+                    for (int j = 0; j < p->polygonPoints.size(); ++j) m_markerDragFloatPoly[j] = p->polygonPoints[j];
+                } else if (m_dragMode == RectMove) {
+                    m_dragOriginalPos = QPoint(p->x, p->y);
+                    m_markerDragFloatRect = QRectF(p->x, p->y, p->w, p->h);
+                    m_markerDragFloatDelta = QPointF(p->x, p->y);
+                } else {
+                    m_dragOriginalPos = QPoint(p->x, p->y);
+                    m_markerDragFloatDelta = QPointF(p->x, p->y);
+                }
                 m_dragTargetName = p->name;
                 m_dragStartPos = pos;
                 setCursor(Qt::SizeAllCursor);
@@ -496,8 +545,18 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
             m_selectedMarkerName = p.name;
             emit markerSelected(p.name);
             m_dragMode = (p.kind == MarkerKind::Polygon) ? PolyMove : ((p.kind == MarkerKind::Rectangle) ? RectMove : Point);
-            if (m_dragMode == PolyMove) m_dragOriginalPoly = p.polygonPoints;
-            else m_dragOriginalPos = QPoint(p.x, p.y);
+            if (m_dragMode == PolyMove) {
+                m_dragOriginalPoly = p.polygonPoints;
+                m_markerDragFloatPoly.resize(p.polygonPoints.size());
+                for (int j = 0; j < p.polygonPoints.size(); ++j) m_markerDragFloatPoly[j] = p.polygonPoints[j];
+            } else if (m_dragMode == RectMove) {
+                m_dragOriginalPos = QPoint(p.x, p.y);
+                m_markerDragFloatRect = QRectF(p.x, p.y, p.w, p.h);
+                m_markerDragFloatDelta = QPointF(p.x, p.y);
+            } else {
+                m_dragOriginalPos = QPoint(p.x, p.y);
+                m_markerDragFloatDelta = QPointF(p.x, p.y);
+            }
             m_dragTargetName = p.name;
             m_dragStartPos = pos;
             setCursor(Qt::SizeAllCursor);
@@ -509,9 +568,10 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
 
     if (!m_sprites.isEmpty())
         m_pivotBeforeDrag = QPoint(m_sprites.last()->pivotX, m_sprites.last()->pivotY);
+    m_pivotDragFloat = pos;
     m_draggingPivot = true;
     setCursor(Qt::SizeAllCursor);
-    for (auto& sprite : m_sprites) { sprite->pivotX = qRound(pos.x()); sprite->pivotY = qRound(pos.y()); }
+    for (auto& sprite : m_sprites) { sprite->pivotX = (int)pos.x(); sprite->pivotY = (int)pos.y(); }
     m_selectedMarkerName.clear(); emit markerSelected(""); m_selectedVertexIndex = -1;
     emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY); update(); event->accept();
 }
@@ -519,7 +579,10 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
 void EditorOverlayItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
     QPointF pos = event->pos();
     if (m_draggingPivot && !m_sprites.isEmpty()) {
-        for (auto& sprite : m_sprites) { sprite->pivotX = qRound(pos.x()); sprite->pivotY = qRound(pos.y()); }
+        // Track sub-pixel position; write truncated int to model for dialog feedback only.
+        // The actual rounded commit happens in mouseReleaseEvent.
+        m_pivotDragFloat = pos;
+        for (auto& sprite : m_sprites) { sprite->pivotX = (int)pos.x(); sprite->pivotY = (int)pos.y(); }
         emit pivotChanged(m_sprites.last()->pivotX, m_sprites.last()->pivotY); update(); return;
     }
     if (m_dragMode != None) {
@@ -527,30 +590,40 @@ void EditorOverlayItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
         prepareGeometryChange();
         QPointF delta = pos - m_dragStartPos;
         if (m_dragMode == Point || m_dragMode == RectMove) {
-            p->x = m_dragOriginalPos.x() + qRound(delta.x()); p->y = m_dragOriginalPos.y() + qRound(delta.y());
+            // Update float position; write truncated int for dialog feedback.
+            m_markerDragFloatDelta = QPointF(m_dragOriginalPos) + delta;
+            p->x = (int)m_markerDragFloatDelta.x(); p->y = (int)m_markerDragFloatDelta.y();
         } else if (m_dragMode == CircleRadius) {
-            p->radius = qMax(1, qRound(dist(QPointF(p->x, p->y), pos)));
+            m_markerDragFloatRadius = qMax(1.0, dist(QPointF(p->x, p->y), pos));
+            p->radius = qMax(1, (int)m_markerDragFloatRadius);
         } else if (m_dragMode == RectResize) {
-            QRect r = m_dragOriginalRect;
+            QRectF r(m_dragOriginalRect);
             switch (m_resizeHandle) {
-                case TopLeft: r.setTopLeft(pos.toPoint()); break;
-                case Top: r.setTop(pos.y()); break;
-                case TopRight: r.setTopRight(pos.toPoint()); break;
-                case Right: r.setRight(pos.x()); break;
-                case BottomRight: r.setBottomRight(pos.toPoint()); break;
-                case Bottom: r.setBottom(pos.y()); break;
-                case BottomLeft: r.setBottomLeft(pos.toPoint()); break;
-                case Left: r.setLeft(pos.x()); break;
+                case TopLeft:     r.setTopLeft(pos); break;
+                case Top:         r.setTop(pos.y()); break;
+                case TopRight:    r.setTopRight(pos); break;
+                case Right:       r.setRight(pos.x()); break;
+                case BottomRight: r.setBottomRight(pos); break;
+                case Bottom:      r.setBottom(pos.y()); break;
+                case BottomLeft:  r.setBottomLeft(pos); break;
+                case Left:        r.setLeft(pos.x()); break;
                 default: break;
             }
-            r = r.normalized(); p->x = r.x(); p->y = r.y(); p->w = r.width(); p->h = r.height();
+            r = r.normalized();
+            m_markerDragFloatRect = r;
+            p->x = (int)r.x(); p->y = (int)r.y(); p->w = (int)r.width(); p->h = (int)r.height();
         } else if (m_dragMode == PolyVertex) {
-            if (m_dragVertexIndex >= 0 && m_dragVertexIndex < p->polygonPoints.size()) {
-                p->polygonPoints[m_dragVertexIndex] = pos.toPoint();
+            if (m_dragVertexIndex >= 0 && m_dragVertexIndex < p->polygonPoints.size()
+                    && m_dragVertexIndex < m_markerDragFloatPoly.size()) {
+                m_markerDragFloatPoly[m_dragVertexIndex] = pos;
+                p->polygonPoints[m_dragVertexIndex] = QPoint((int)pos.x(), (int)pos.y());
                 if (m_dragVertexIndex == 0) { p->x = p->polygonPoints[0].x(); p->y = p->polygonPoints[0].y(); }
             }
         } else if (m_dragMode == PolyMove) {
-            for (int i = 0; i < p->polygonPoints.size(); ++i) p->polygonPoints[i] = m_dragOriginalPoly[i] + delta.toPoint();
+            for (int i = 0; i < p->polygonPoints.size() && i < m_markerDragFloatPoly.size(); ++i) {
+                m_markerDragFloatPoly[i] = QPointF(m_dragOriginalPoly[i]) + delta;
+                p->polygonPoints[i] = QPoint((int)m_markerDragFloatPoly[i].x(), (int)m_markerDragFloatPoly[i].y());
+            }
             if (!p->polygonPoints.isEmpty()) { p->x = p->polygonPoints[0].x(); p->y = p->polygonPoints[0].y(); }
         }
         emit markerChanged(); update();
@@ -558,6 +631,57 @@ void EditorOverlayItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void EditorOverlayItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
+    Q_UNUSED(event);
+
+    // Commit rounded (pixel-snapped) final positions before capturing pointsAfterDrag.
+    // During drag we tracked sub-pixel floats and wrote only truncated ints for dialog
+    // feedback; here we apply qRound() once, so the snap occurs only on release.
+    if (m_draggingPivot && !m_sprites.isEmpty()) {
+        for (auto& sprite : m_sprites) {
+            sprite->pivotX = qRound(m_pivotDragFloat.x());
+            sprite->pivotY = qRound(m_pivotDragFloat.y());
+        }
+        emit pivotChanged(m_sprites.last()->pivotX, m_sprites.last()->pivotY);
+    }
+    if (m_dragMode != None) {
+        NamedPoint* p = getNamedPoint(m_dragTargetName);
+        if (p) {
+            if (m_dragMode == Point || m_dragMode == RectMove) {
+                p->x = qRound(m_markerDragFloatDelta.x());
+                p->y = qRound(m_markerDragFloatDelta.y());
+            } else if (m_dragMode == CircleRadius) {
+                p->radius = qMax(1, qRound(m_markerDragFloatRadius));
+            } else if (m_dragMode == RectResize) {
+                p->x = qRound(m_markerDragFloatRect.x());
+                p->y = qRound(m_markerDragFloatRect.y());
+                p->w = qRound(m_markerDragFloatRect.width());
+                p->h = qRound(m_markerDragFloatRect.height());
+            } else if (m_dragMode == PolyVertex) {
+                if (m_dragVertexIndex >= 0 && m_dragVertexIndex < p->polygonPoints.size()
+                        && m_dragVertexIndex < m_markerDragFloatPoly.size()) {
+                    p->polygonPoints[m_dragVertexIndex] = QPoint(
+                        qRound(m_markerDragFloatPoly[m_dragVertexIndex].x()),
+                        qRound(m_markerDragFloatPoly[m_dragVertexIndex].y()));
+                    if (m_dragVertexIndex == 0) {
+                        p->x = p->polygonPoints[0].x();
+                        p->y = p->polygonPoints[0].y();
+                    }
+                }
+            } else if (m_dragMode == PolyMove) {
+                for (int i = 0; i < p->polygonPoints.size() && i < m_markerDragFloatPoly.size(); ++i) {
+                    p->polygonPoints[i] = QPoint(
+                        qRound(m_markerDragFloatPoly[i].x()),
+                        qRound(m_markerDragFloatPoly[i].y()));
+                }
+                if (!p->polygonPoints.isEmpty()) {
+                    p->x = p->polygonPoints[0].x();
+                    p->y = p->polygonPoints[0].y();
+                }
+            }
+            emit markerChanged();
+        }
+    }
+
     const bool wasDraggingPivot = m_draggingPivot;
     const bool wasDraggingMarker = (m_dragMode != None);
     QVector<NamedPoint> pointsAfterDrag;
@@ -566,8 +690,8 @@ void EditorOverlayItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
 
     m_draggingPivot = false;
     m_dragMode = None;
-    Q_UNUSED(event);
     unsetCursor();
+    update(); // Repaint to show the snapped (rounded) final position
 
     if (wasDraggingPivot && !m_sprites.isEmpty()) {
         auto s = m_sprites.last();

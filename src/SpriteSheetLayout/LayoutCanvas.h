@@ -181,6 +181,11 @@ signals:
     void splitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos);
 
     /**
+     * @brief Emitted when split mode is toggled on or off.
+     */
+    void splitModeChanged(bool enabled);
+
+    /**
      * @brief Emitted when the user starts interacting with the canvas (mouse enters).
      */
     void userInteractionStarted();

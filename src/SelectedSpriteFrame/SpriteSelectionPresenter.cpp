@@ -20,9 +20,13 @@ void SpriteSelectionPresenter::applySpriteSelection(
         spriteNameEdit->setText(sprite->name);
         spriteNameEdit->blockSignals(false);
         spriteNameEdit->setEnabled(true);
+        pivotXSpin->blockSignals(true);
         pivotXSpin->setValue(sprite->pivotX);
+        pivotXSpin->blockSignals(false);
         pivotXSpin->setEnabled(true);
+        pivotYSpin->blockSignals(true);
         pivotYSpin->setValue(sprite->pivotY);
+        pivotYSpin->blockSignals(false);
         pivotYSpin->setEnabled(true);
         previewView->setSprites({sprite});
         if (useCurrentZoom) {

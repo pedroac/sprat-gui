@@ -1,6 +1,7 @@
 #include "SettingsDialog.h"
 #include <QVBoxLayout>
 #include <QFormLayout>
+#include <QLabel>
 #include <QPushButton>
 #include <QColorDialog>
 #include <QComboBox>
@@ -92,6 +93,12 @@ void SettingsDialog::setupUi() {
     // Spritesheet Group
     m_spritesheetGroup = new QGroupBox(tr("Spritesheet"), content);
     QFormLayout* spritesheetForm = new QFormLayout(m_spritesheetGroup);
+
+    auto* dedupDesc = new QLabel(tr("Deduplication creates aliases for identical or similar sprites, "
+                                    "allowing them to share the same space in the atlas."), this);
+    dedupDesc->setWordWrap(true);
+    dedupDesc->setStyleSheet("color: #666; margin-bottom: 4px;");
+    spritesheetForm->addRow(dedupDesc);
 
     m_deduplicateModeCombo = new QComboBox(this);
     m_deduplicateModeCombo->addItem(tr("None (no deduplication)"), "none");

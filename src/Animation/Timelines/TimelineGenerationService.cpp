@@ -10,17 +10,13 @@ QString trTimelineGeneration(const char* text) {
 }
 }
 
-bool TimelineGenerationService::generateFromLayout(
-    const QVector<LayoutModel>& layoutModels,
+bool TimelineGenerationService::generateFromSprites(
+    const QVector<SpritePtr>& sprites,
     QVector<AnimationTimeline>& timelines,
     int& focusIndex,
     const ConflictResolver& resolveConflict,
     QString& statusMessage) {
-    QVector<SpritePtr> allSprites;
-    for (const auto& model : layoutModels) {
-        allSprites.append(model.sprites);
-    }
-    QVector<TimelineSeed> generated = TimelineBuilder::buildFromSprites(allSprites);
+    QVector<TimelineSeed> generated = TimelineBuilder::buildFromSprites(sprites);
     if (generated.isEmpty()) {
         statusMessage = trTimelineGeneration("No frame names match the supported timeline patterns.");
         return false;
@@ -75,4 +71,16 @@ bool TimelineGenerationService::generateFromLayout(
     statusMessage = changed ? trTimelineGeneration("Timelines generated from layout.")
                             : trTimelineGeneration("No timelines were created.");
     return changed;
+}
+
+bool TimelineGenerationService::generateFromLayout(
+    const QVector<LayoutModel>& layoutModels,
+    QVector<AnimationTimeline>& timelines,
+    int& focusIndex,
+    const ConflictResolver& resolveConflict,
+    QString& statusMessage) {
+    QVector<SpritePtr> allSprites;
+    for (const auto& model : layoutModels)
+        allSprites.append(model.sprites);
+    return generateFromSprites(allSprites, timelines, focusIndex, resolveConflict, statusMessage);
 }

@@ -14,6 +14,7 @@
 #include "SpriteNameUtils.h"
 #include "AppConstants.h"
 #include "AnimationPreviewService.h"
+#include "MessageDialog.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -47,6 +48,43 @@ int legacyDefaultPivotY(const SpritePtr& sprite) {
 }
 }
 
+LayoutRunConfig MainWindow::buildLayoutInput() const {
+    LayoutRunConfig cfg;
+
+    // New model: use sources if populated.
+    if (!m_session->sources.isEmpty()) {
+        const bool singleFolderOptimised =
+            m_session->sources.size() == 1
+            && m_session->sources.first().type == SourceType::Folder
+            && m_settings.syncMode != SyncMode::None
+            && !m_session->sourceFolder.isEmpty()
+            && sourceFolderMatchesActiveFrames();
+        if (singleFolderOptimised) {
+            // Use the working temp copy rather than originalPath; keeps activeFramePaths
+            // consistent with sourceFolder and avoids "Invalid image path" on subsequent runs.
+            cfg.sourceFolderPath = m_session->sourceFolder;
+        } else if (!m_session->activeFramePaths.isEmpty()) {
+            cfg.imagePathList = m_session->activeFramePaths;
+        } else if (!m_session->layoutSourcePath.isEmpty()) {
+            // Fallback for initial load: activeFramePaths not yet populated; use the
+            // copied source folder that loadFolder() / processExtractedFrames() set.
+            cfg.sourceFolderPath = m_session->layoutSourcePath;
+        }
+        return cfg;
+    }
+
+    // Backward-compat path: old sourceFolder / layoutSourcePath / layoutSourceIsList approach.
+    if (m_settings.syncMode != SyncMode::None && sourceFolderMatchesActiveFrames()) {
+        cfg.sourceFolderPath = m_session->sourceFolder;
+    } else if (m_session->layoutSourceIsList && !m_session->activeFramePaths.isEmpty()) {
+        // Use stdin-list instead of the temp file — avoids temp file I/O.
+        cfg.imagePathList = m_session->activeFramePaths;
+    } else if (!m_session->layoutSourcePath.isEmpty()) {
+        cfg.sourceFolderPath = m_session->layoutSourcePath;
+    }
+    return cfg;
+}
+
 void MainWindow::onRunLayout(bool quiet) {
     QElapsedTimer totalTimer;
     totalTimer.start();
@@ -57,17 +95,15 @@ void MainWindow::onRunLayout(bool quiet) {
         && !m_session->sourceFolder.isEmpty()
         && !m_session->activeFramePaths.isEmpty()
         && !activeFramesAreInSourceFolder()) {
-        
+
         QElapsedTimer syncTimer;
         syncTimer.start();
         copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
-        if (m_session->layoutSourceIsList) {
-            ensureFrameListInput();
-        }
         qInfo() << "[Performance] onRunLayout sync/copy took" << syncTimer.elapsed() << "ms";
     }
 
-    if (m_session->layoutSourcePath.isEmpty()) {
+    const LayoutRunConfig inputCfg = buildLayoutInput();
+    if (inputCfg.sourceFolderPath.isEmpty() && inputCfg.imagePathList.isEmpty()) {
         return;
     }
     if (!m_cliReady) {
@@ -85,13 +121,8 @@ void MainWindow::onRunLayout(bool quiet) {
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
 
     LayoutRunConfig config;
-    // Optimization: if all active frames are in the source folder, use the folder directly
-    // instead of the .txt list file. This is faster for spratlayout and avoids file scanning overhead.
-    if (m_settings.syncMode != SyncMode::None && sourceFolderMatchesActiveFrames()) {
-        config.sourcePath = m_session->sourceFolder;
-    } else {
-        config.sourcePath = m_session->layoutSourcePath;
-    }
+    config.sourceFolderPath = inputCfg.sourceFolderPath;
+    config.imagePathList    = inputCfg.imagePathList;
     config.layoutBinary = m_spratLayoutBin;
 
     if (hasSelectedProfile) {
@@ -117,9 +148,14 @@ void MainWindow::onRunLayout(bool quiet) {
     m_statusLabel->setText(tr("Rebuilding layout..."));
     m_layoutFailureDialogShown = false;
 
-    qInfo() << "[Layout] Dispatching run, sourcePath=" << config.sourcePath
-            << "exists=" << (QFileInfo(config.sourcePath).exists())
-            << "isList=" << !QFileInfo(config.sourcePath).isDir();
+    if (!config.imagePathList.isEmpty()) {
+        qInfo() << "[Layout] Dispatching run via --stdin-list,"
+                << "paths=" << config.imagePathList.size();
+    } else {
+        qInfo() << "[Layout] Dispatching run, sourceFolderPath=" << config.sourceFolderPath
+                << "exists=" << QFileInfo(config.sourceFolderPath).exists()
+                << "isDir=" << QFileInfo(config.sourceFolderPath).isDir();
+    }
     
     qInfo() << "[Performance] onRunLayout preparation took" << totalTimer.elapsed() << "ms";
     m_layoutRunner->run(config);
@@ -127,7 +163,10 @@ void MainWindow::onRunLayout(bool quiet) {
 
 void MainWindow::onLayoutFinished(const LayoutResult& result) {
     if (!result.success) {
+        const QString failedProfile = m_runningLayoutProfile;
+
         if (result.wasKilledIntentionally) {
+            m_runningLayoutProfile.clear();
             if (m_layoutRunPending) {
                 const bool q = m_layoutRunPendingQuiet;
                 m_layoutRunPending = false;
@@ -140,7 +179,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         const QString combined = (result.error + "\n" + result.output).toLower();
 
         if (combined.contains("sprite dimensions exceed")) {
-            handleDimensionsError(m_runningLayoutProfile);
+            handleDimensionsError(failedProfile);
             m_runningLayoutProfile.clear();
             return;
         }
@@ -156,6 +195,37 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
             return;
         }
 
+        // Profile fallback: try every other enabled profile before showing an error dialog.
+        if (!failedProfile.isEmpty() && !m_profilesTriedForCurrentLoad.contains(failedProfile))
+            m_profilesTriedForCurrentLoad.append(failedProfile);
+
+        QString nextProfile;
+        for (int i = 0; i < m_profileCombo->count(); ++i) {
+            const QString candidate = m_profileCombo->itemData(i).toString();
+            if (!m_profilesTriedForCurrentLoad.contains(candidate) && isProfileEnabled(candidate)) {
+                nextProfile = candidate;
+                break;
+            }
+        }
+
+        if (!nextProfile.isEmpty()) {
+            m_statusLabel->setText(tr("Profile '%1' failed, trying '%2'...")
+                .arg(failedProfile, nextProfile));
+            {
+                const QSignalBlocker blocker(m_profileCombo);
+                m_profileCombo->setCurrentIndex(m_profileCombo->findData(nextProfile));
+                m_currentProfile = nextProfile;
+            }
+            m_retryWithoutTrimOnFailure = false;
+            m_layoutRunPending = false;
+            m_layoutRunPendingQuiet = false;
+            onRunLayout(true);
+            return;
+        }
+
+        // All profiles exhausted — reset tracking and show error dialog.
+        m_profilesTriedForCurrentLoad.clear();
+
         QString details = result.error;
         if (details.isEmpty()) details = result.output;
         if (details.isEmpty()) details = tr("spratlayout exited with code %1.").arg(result.exitCode);
@@ -168,7 +238,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         if (!m_layoutFailureDialogShown && !result.error.contains("stopped", Qt::CaseInsensitive)) {
             // Check if it was killed by us (no output and no error usually means killed)
             if (!result.output.isEmpty() || !result.error.isEmpty()) {
-                QMessageBox::critical(this, tr("Error"), tr("spratlayout failed:\n") + details);
+                MessageDialog::critical(this, tr("Error"), tr("spratlayout failed:\n") + details);
                 m_layoutFailureDialogShown = true;
             }
         }
@@ -183,6 +253,7 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
         return;
     }
 
+    m_profilesTriedForCurrentLoad.clear();
     m_runningLayoutProfile.clear();
     m_retryWithoutTrimOnFailure = false;
 
@@ -201,6 +272,10 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
     m_session->cachedLayoutOutput = layoutText;
     m_session->cachedLayoutScale = newModels.first().scale;
 
+    // Consume the flag before the merge loop so it can gate pivot preservation below.
+    const bool forceCenter = m_centerPivotsOnNextLayout;
+    m_centerPivotsOnNextLayout = false;
+
     if (m_session->pendingProjectPayload.isEmpty()) {
         QMap<QString, SpritePtr> oldSprites;
         for (const auto& model : m_session->layoutModels) {
@@ -216,15 +291,41 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                 auto oldS = oldSprites[s->path];
                 s->name    = oldS->name;
                 s->aliases = oldS->aliases;
-                const bool oldPivotIsLegacyDefault =
-                    oldS->pivotX == legacyDefaultPivotX(oldS) &&
-                    oldS->pivotY == legacyDefaultPivotY(oldS);
-                // Preserve user-edited pivots; let legacy auto pivots upgrade to the new default.
-                if (!oldPivotIsLegacyDefault) {
-                    s->pivotX = oldS->pivotX;
-                    s->pivotY = oldS->pivotY;
+                // When force-centering (fresh content load), skip pivot preservation so that
+                // LayoutParser's rotation-aware, QImageReader-based pivot is kept intact.
+                // On incremental re-layouts, preserve user-edited pivots as before.
+                if (!forceCenter) {
+                    const bool oldPivotIsLegacyDefault =
+                        oldS->pivotX == legacyDefaultPivotX(oldS) &&
+                        oldS->pivotY == legacyDefaultPivotY(oldS);
+                    // Preserve user-edited pivots; let legacy auto pivots upgrade to the new default.
+                    if (!oldPivotIsLegacyDefault) {
+                        s->pivotX = oldS->pivotX;
+                        s->pivotY = oldS->pivotY;
+                    }
                 }
                 s->points = oldS->points;
+            }
+        }
+    }
+
+    // Safety-net centering pass: if LayoutParser somehow left a pivot at (0, 0) for a
+    // non-empty sprite (shouldn't happen on non-WASM, can occur on WASM for non-trimmed
+    // sprites whose image read fails), nudge it to the source-image centre.
+    // For rotated sprites the atlas rect has width and height swapped relative to the
+    // source image, so content dimensions must be derived in source-image space.
+    for (auto& model : newModels) {
+        for (auto& s : model.sprites) {
+            if (s->pivotX == 0 && s->pivotY == 0 && s->rect.width() > 0) {
+                const int contentW = s->rotated ? s->rect.height() : s->rect.width();
+                const int contentH = s->rotated ? s->rect.width()  : s->rect.height();
+                if (s->trimmed) {
+                    s->pivotX = (s->trimRect.x() + contentW + s->trimRect.width())  / 2;
+                    s->pivotY = (s->trimRect.y() + contentH + s->trimRect.height()) / 2;
+                } else {
+                    s->pivotX = contentW / 2;
+                    s->pivotY = contentH / 2;
+                }
             }
         }
     }
@@ -353,7 +454,7 @@ void MainWindow::onLayoutError(const QString& details) {
     qCritical() << "spratlayout process error:" << details;
     
     if (!m_layoutFailureDialogShown) {
-        QMessageBox::critical(this, tr("Error"), tr("spratlayout process failed:\n") + details);
+        MessageDialog::critical(this, tr("Error"), tr("spratlayout process failed:\n") + details);
         m_layoutFailureDialogShown = true;
     }
     
@@ -411,7 +512,7 @@ void MainWindow::handleProfileFailure(const QString& failedProfile) {
     }
 
     if (fallbackProfile.isEmpty()) {
-        QMessageBox::warning(this, tr("Profile disabled"), tr("The selected profile failed and was disabled. No fallback profile is available."));
+        MessageDialog::warning(this, tr("Profile disabled"), tr("The selected profile failed and was disabled. No fallback profile is available."));
         return;
     }
     if (m_profileCombo->currentData().toString() == fallbackProfile) {
@@ -578,6 +679,12 @@ void MainWindow::onEditAliases() {
     dlg.setWindowTitle(tr("Aliases for \"%1\"").arg(canonicalName));
     auto* layout = new QVBoxLayout(&dlg);
 
+    auto* descLabel = new QLabel(tr("Aliases are alternative names for this sprite. "
+                                    "They point to the same image and share all markers and pivots."), &dlg);
+    descLabel->setWordWrap(true);
+    descLabel->setStyleSheet("color: #666; margin-bottom: 4px;");
+    layout->addWidget(descLabel);
+
     auto* list = new QListWidget(&dlg);
     list->setMinimumWidth(240);
     list->setMinimumHeight(120);
@@ -659,6 +766,8 @@ void MainWindow::onEditAliases() {
 void MainWindow::onProfileChanged() {
     const QString requestedProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
     if (requestedProfile == m_currentProfile) return;
+
+    m_profilesTriedForCurrentLoad.clear();
 
     QString oldProfile = m_currentProfile;
     m_currentProfile = requestedProfile;
@@ -1038,10 +1147,10 @@ void MainWindow::handleDimensionsError(const QString& failedProfile) {
 
     if (fallback.isEmpty()) {
         m_statusLabel->setText(tr("Error running layout"));
-        QMessageBox::critical(this, tr("Error"),
+        MessageDialog::critical(this, tr("Error"),
             tr("Sprite dimensions exceed atlas limits and no suitable fallback profile is available."));
         m_layoutFailureDialogShown = true;
-        return;
+    } else {
     }
 
     m_statusLabel->setText(

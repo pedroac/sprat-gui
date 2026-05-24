@@ -40,6 +40,7 @@ class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class NavigatorTreeWidget;
+#include "TimelineTreeWidget.h"
 class QListWidget;
 class QLineEdit;
 class QActionGroup;
@@ -73,6 +74,7 @@ class QUrl;
 class FrameDetectionDialog;
 class AnimationCanvas;
 class SourceFolderWatcher;
+class SourcesDialog;
 #ifdef Q_OS_WASM
 class WasmFolderBrowserDialog;
 #endif
@@ -112,13 +114,6 @@ public:
 #endif
 
 private slots:
-#ifndef Q_OS_WASM
-    /**
-     * @brief Handles request to create a new project.
-     */
-    void onNewProjectRequested();
-#endif
-
     /**
      * @brief Handles request to open a recent project.
      */
@@ -126,9 +121,9 @@ private slots:
 
 #ifndef Q_OS_WASM
     /**
-     * @brief Handles request to edit project settings.
+     * @brief Saves project state to a new folder chosen by the user.
      */
-    void onProjectSettingsRequested();
+    void onSaveAsClicked();
 #endif
 
     // === Layout Canvas Events ===
@@ -504,6 +499,10 @@ private slots:
     // === CLI Installation Logging ===
     void onCliInstallLog(const QString& message);
 
+    // === Sources Dialog ===
+    void onShowSources();
+    void removeSource(int index);
+
     // === Source Folder Sync ===
     void onSpriteTreeContextMenu(const QPoint& pos);
     void filterSpriteTree(const QString& text);
@@ -580,6 +579,53 @@ private:
      * @brief Gets the layout parser folder path.
      */
     QString layoutParserFolder() const;
+
+    /**
+     * @brief Builds the layout input (either sourceFolderPath or imagePathList) for the next run.
+     *
+     * Uses m_session->sources when populated; falls back to the legacy
+     * sourceFolder / layoutSourcePath / layoutSourceIsList approach.
+     */
+    LayoutRunConfig buildLayoutInput() const;
+
+    /** Refreshes the Sources dialog content if it is currently visible. */
+    void refreshSourcesDialogIfVisible();
+
+    /**
+     * @brief Returns a sanitized subfolder name for a source being merged.
+     *
+     * Derived from m_pendingImportUrl (if set) or the basename of sourcePath.
+     * The returned name is guaranteed unique among existing source subfolders.
+     */
+    QString computeSourceSubfolderName(const QString& sourcePath) const;
+
+    /**
+     * @brief Returns baseName made unique among the existing source names.
+     *
+     * If a source named baseName already exists, suffixes _2, _3, … are tried
+     * until a free slot is found.
+     */
+    QString makeUniqueSourceName(const QString& baseName) const;
+
+    /**
+     * @brief Copies frames into sourceFolder/<subfolderPath>, returns the new destination paths.
+     *
+     * Preserves relative structure relative to m_session->currentFolder.
+     */
+    QStringList copyFramesToSourceSubfolder(const QStringList& frames,
+                                            const QString& subfolderPath,
+                                            bool overwriteDuplicates = true);
+
+    /**
+     * @brief Registers a newly loaded archive, image, or URL as a ProjectSource.
+     *
+     * If m_pendingImportUrl is set, it takes precedence over sourcePath (URL case).
+     * For Replace, existing sources are cleared first. For Merge, the new source is appended.
+     * cachedFolderPath, when provided, overrides the default (sourceFolder for Replace,
+     * empty for Merge).
+     */
+    void registerLoadedSource(const QString& sourcePath, DropAction action,
+                              const QString& cachedFolderPath = QString());
 
     /**
      * @brief Ensures frame list input is valid.
@@ -974,6 +1020,8 @@ private:
     QStringList collectDescendantSpritePaths(QTreeWidgetItem* item) const;
     QString folderPathForTreeItem(QTreeWidgetItem* item) const;
     void onNavigatorDeleteFrames(const QStringList& paths);
+    void onNavigatorExcludeFromSmartFolder(const QString& absolutePath, int smartFolderIndex);
+    void onNavigatorAddSmartFolder();
     void onNavigatorAddFrames(const QString& subfolder);
     void onNavigatorSyncGroup(const QMap<QString, SpritePtr>& byPath,
                               SpritePtr refSprite,
@@ -986,12 +1034,31 @@ private:
     void onNavigatorDeleteGroup(QTreeWidgetItem* groupItem);
     void onNavigatorUngroup(QTreeWidgetItem* groupItem);
     void onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup);
+    void onNavigatorAutoCreateTimelinesForSource(int sourceIndex);
+
+    // Timeline tree context menu / key / drop
+    void onTimelineContextMenu(const QPoint& pos);
+    void onTimelineDeleteKey();
+    void onTimelineTreeDropCompleted(int draggedIndex,
+                                     const QString& draggedFolder,
+                                     const QString& targetFolder);
+    void onTimelineItemChanged(QTreeWidgetItem* item, int column);
+
+    // Updates m_folderLabel text; appends "(watching)" when sync mode is Watch
+    void updateFolderLabel(const QString& folder);
 
     // Helper: Check for duplicate timeline names
     bool hasDuplicateTimelineName(const QString& timelineName) const;
 
     // Helper: Get unique timeline name (with path)
     QString getUniqueTimelineName(const QString& baseName, const QString& folderPath = QString());
+
+    // Timeline tree helpers
+    QString timelineItemFolderPath(QTreeWidgetItem* item) const;
+    QVector<int> collectCheckedTimelineIndices() const;
+
+    // Helper: Returns the tree item for a given m_session->timelines index, or nullptr if not found.
+    QTreeWidgetItem* timelineItemForIndex(int timelineIndex) const;
 
     /**
      * @brief Applies project payload to the UI.
@@ -1158,9 +1225,6 @@ private:
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
     QLabel* m_welcomeLabel;
-#ifndef Q_OS_WASM
-    QPushButton* m_newProjectBtn = nullptr;
-#endif
     QPushButton* m_recentProjectBtn;
     QLabel* m_folderLabel;
 
@@ -1176,6 +1240,7 @@ private:
     QStackedWidget* m_atlasViewStack      = nullptr;
     NavigatorTreeWidget* m_spriteTree      = nullptr;
     QLineEdit*      m_spriteFilterEdit    = nullptr;
+    QLabel*         m_spriteFilterResultLabel = nullptr;
     QAction*        m_showLayoutAction      = nullptr;
     QAction*        m_showNavigatorAction  = nullptr;
     QAction*        m_animationToggleAction = nullptr;
@@ -1192,7 +1257,7 @@ private:
     // Timelines Area
     QLineEdit* m_timelineCreateEdit;
     QLineEdit* m_timelineNameEdit;
-    QListWidget* m_timelineList;
+    TimelineTreeWidget* m_timelineList;
     QWidget* m_timelineEditorContainer;
     QGroupBox* m_selectedTimelineGroup;
     QWidget* m_timelineDropArea;
@@ -1209,7 +1274,7 @@ private:
     // Selected Frame Editor Area
     QLineEdit*   m_spriteNameEdit   = nullptr;
     QPushButton* m_editAliasesBtn   = nullptr;
-    QLabel* m_multiSelectionLabel;
+    QLabel* m_multiSelectionLabel = nullptr;
     QComboBox* m_handleCombo;
     QPushButton* m_configPointsBtn;
     QSpinBox* m_pivotXSpin;
@@ -1228,6 +1293,7 @@ private:
 
     QAction* m_loadAction;
     QAction* m_saveAction;
+    QAction* m_saveAsAction = nullptr;
     QAction* m_exportAction = nullptr;
     QAction* m_exportAsAction = nullptr;
     QLabel* m_statusLabel;
@@ -1246,6 +1312,7 @@ private:
     QString m_spratUnpackBin;
     LayoutRunner* m_layoutRunner;
     SourceFolderWatcher* m_folderWatcher = nullptr;
+    SourcesDialog* m_sourcesDialog = nullptr;
     QAction* m_openSourceFolderAction = nullptr;
     QString  m_projectFilePath;            // path of the last loaded project file
     bool     m_sourceFolderIsTemp = false; // true when sourceFolder is a QTemporaryDir
@@ -1322,6 +1389,7 @@ public:
         QString layoutSourcePath;
         bool layoutSourceIsList = false;
         QString sourceFolder;
+        QVector<ProjectSource> sources;
         QStringList activeFramePaths;
         QString frameListPath;
         QVector<LayoutModel> layoutModels;
@@ -1388,6 +1456,7 @@ private:
     QNetworkAccessManager* m_importNetworkManager = nullptr;
     QPointer<QNetworkReply> m_activeImportReply;
     std::vector<std::unique_ptr<QTemporaryDir>> m_importTempDirs;
+    QString m_pendingImportUrl; // Set before finishImportedPath(); consumed by registerLoadedSource()
 
     QMutex m_toolMutex;
     QString m_runningLayoutProfile;
@@ -1410,6 +1479,8 @@ private:
     QTimer* m_layoutDebounceTimer = nullptr;
     bool m_layoutFailureDialogShown = false;
     bool m_retryWithoutTrimOnFailure = false;
+    QStringList m_profilesTriedForCurrentLoad; // profiles already tried for the current load/run attempt
+    bool m_centerPivotsOnNextLayout = false;   // true when a fresh content load should force-center all pivots
     QTimer* m_autosaveTimer = nullptr;
     QTimer* m_resizeDebounceTimer = nullptr;
     QSize m_pendingResizeSize;

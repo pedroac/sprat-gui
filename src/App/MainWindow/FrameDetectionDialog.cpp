@@ -77,6 +77,9 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     buttonLayout->addWidget(m_acceptBtn);
     
     QVBoxLayout* mainLayout = new QVBoxLayout();
+    auto* descLabel = new QLabel(tr("Review the automatically detected frames. Accept to add them to the layout, or import the image as a single frame."), this);
+    descLabel->setWordWrap(true);
+    mainLayout->addWidget(descLabel);
     mainLayout->addLayout(topBarLayout);
     mainLayout->addWidget(m_canvas);
     mainLayout->addLayout(buttonLayout);

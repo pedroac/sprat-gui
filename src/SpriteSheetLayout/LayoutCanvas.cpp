@@ -504,6 +504,7 @@ void LayoutCanvas::setSplitMode(bool enabled) {
     ensureSplitLineItem();
 
     m_splitMode = enabled;
+    emit splitModeChanged(m_splitMode);
     if (!m_splitMode) {
         if (m_splitLineItem) {
             m_splitLineItem->hide();
@@ -712,16 +713,19 @@ void LayoutCanvas::mouseMoveEvent(QMouseEvent* event) {
                 QRectF itemRect(item->pos(), item->pixmap().size());
                 if (itemRect.contains(scenePos)) {
                     m_splitItemIndex = i;
+                    QPointF local = scenePos - itemRect.topLeft();
                     m_splitOrientation = SplitModeUtils::splitOrientation(
-                        scenePos - itemRect.topLeft(), itemRect.size());
+                        local, itemRect.size());
                     if (m_splitOrientation == Qt::Horizontal) {
+                        double snappedY = itemRect.top() + qRound(local.y());
                         m_splitLineItem->setLine(
-                            itemRect.left(), scenePos.y(),
-                            itemRect.right(), scenePos.y());
+                            itemRect.left(), snappedY,
+                            itemRect.right(), snappedY);
                     } else {
+                        double snappedX = itemRect.left() + qRound(local.x());
                         m_splitLineItem->setLine(
-                            scenePos.x(), itemRect.top(),
-                            scenePos.x(), itemRect.bottom());
+                            snappedX, itemRect.top(),
+                            snappedX, itemRect.bottom());
                     }
                     m_splitLineItem->show();
                     break;

@@ -13,5 +13,6 @@ public:
         QComboBox* profileCombo,
         QAction* saveAction,
         QAction* exportAction = nullptr,
-        QAction* exportAsAction = nullptr);
+        QAction* exportAsAction = nullptr,
+        QAction* saveAsAction = nullptr);
 };

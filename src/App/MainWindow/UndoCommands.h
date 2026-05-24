@@ -11,6 +11,8 @@
 #include <QSet>
 #include <QVector>
 #include <QStringList>
+#include <QStandardPaths>
+#include <QDateTime>
 #include <algorithm>
 #include <functional>
 #include <optional>
@@ -68,6 +70,34 @@ public:
     static void purge(const QString& sourceFolder) {
         if (sourceFolder.isEmpty()) return;
         QDir(trashRoot(sourceFolder)).removeRecursively();
+    }
+
+    // Move an entire folder to a system temp location for undo support.
+    // Returns the new trash path on success, or an empty string on failure.
+    static QString sendFolder(const QString& folderPath) {
+        if (folderPath.isEmpty() || !QDir(folderPath).exists())
+            return {};
+        const QString tmpBase = QDir(
+            QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+                .filePath(QStringLiteral("sprat-source-trash"));
+        if (!QDir().mkpath(tmpBase))
+            return {};
+        const QString folderName = QFileInfo(folderPath).fileName();
+        const QString trashPath = QDir(tmpBase).filePath(
+            folderName + QLatin1Char('_') +
+            QString::number(QDateTime::currentMSecsSinceEpoch()));
+        if (QFile::rename(folderPath, trashPath))
+            return trashPath;
+        return {};
+    }
+
+    // Move a folder from its trash path back to its original location.
+    static bool restoreFolder(const QString& trashPath, const QString& originalPath) {
+        if (trashPath.isEmpty() || !QDir(trashPath).exists())
+            return false;
+        QFileInfo origInfo(originalPath);
+        QDir().mkpath(origInfo.absolutePath());
+        return QFile::rename(trashPath, originalPath);
     }
 };
 
@@ -763,7 +793,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// (1013) RemoveSpritesCommand — move sprites to trash (reversible deletion)
+// (1013) RemoveSpritesCommand — remove sprites from layout (file stays on disk)
 // ---------------------------------------------------------------------------
 class RemoveSpritesCommand : public QUndoCommand {
 public:
@@ -771,7 +801,6 @@ public:
                           QVector<AnimationTimeline>* timelines,
                           int* selectedTimelineIndex,
                           QVector<LayoutModel>* layoutModels,
-                          const QString& sourceFolder,
                           const QStringList& targets,
                           const QStringList& savedActivePaths,
                           const QVector<AnimationTimeline>& savedTimelines,
@@ -781,12 +810,11 @@ public:
                           std::function<void()> postExecuteRedo,
                           std::function<void()> postExecuteUndo,
                           QUndoCommand* parent = nullptr)
-        : QUndoCommand(QObject::tr("Remove Sprite(s)"), parent)
+        : QUndoCommand(QObject::tr("Remove from Layout"), parent)
         , m_activeFramePaths(activeFramePaths)
         , m_timelines(timelines)
         , m_selectedTimelineIndex(selectedTimelineIndex)
         , m_layoutModels(layoutModels)
-        , m_sourceFolder(sourceFolder)
         , m_targets(targets)
         , m_savedActivePaths(savedActivePaths)
         , m_savedTimelines(savedTimelines)
@@ -798,32 +826,12 @@ public:
     {}
 
     void redo() override {
-        m_trashMap.clear();
-        QStringList removedTargets;
-        removedTargets.reserve(m_targets.size());
-
-        // Move files to trash
+        // Remove from activeFramePaths (no file I/O — file stays on disk)
         for (const QString& path : m_targets) {
-            QString trashPath = TrashBin::send(path, m_sourceFolder);
-            if (!trashPath.isEmpty()) {
-                m_trashMap[path] = trashPath;
-                removedTargets.append(path);
-            } else if (!QFileInfo::exists(path)) {
-                removedTargets.append(path);
-            } else {
-                qWarning() << "RemoveSpritesCommand: failed to remove source file, keeping sprite in layout:" << path;
-            }
-        }
-        if (removedTargets.isEmpty()) {
-            return;
-        }
-
-        // Remove from activeFramePaths
-        for (const QString& path : removedTargets) {
             m_activeFramePaths->removeAll(path);
         }
         // Remove from timelines
-        const QSet<QString> targetSet(removedTargets.begin(), removedTargets.end());
+        const QSet<QString> targetSet(m_targets.begin(), m_targets.end());
         for (auto& timeline : *m_timelines) {
             for (int i = timeline.frames.size() - 1; i >= 0; --i) {
                 if (targetSet.contains(timeline.frames[i])) {
@@ -856,11 +864,7 @@ public:
     }
 
     void undo() override {
-        // Restore files from trash
-        for (auto it = m_trashMap.constBegin(); it != m_trashMap.constEnd(); ++it) {
-            TrashBin::restore(it.value(), it.key());
-        }
-        // Restore session data
+        // Restore session data (no file I/O)
         *m_activeFramePaths = m_savedActivePaths;
         *m_timelines = m_savedTimelines;
         *m_selectedTimelineIndex = m_savedTimelineIdx;
@@ -876,7 +880,6 @@ private:
     QVector<AnimationTimeline>* m_timelines;
     int* m_selectedTimelineIndex;
     QVector<LayoutModel>* m_layoutModels;
-    QString m_sourceFolder;
     QStringList m_targets;
     QStringList m_savedActivePaths;
     QVector<AnimationTimeline> m_savedTimelines;
@@ -885,7 +888,6 @@ private:
     std::function<bool()> m_ensureFrameList;
     std::function<void()> m_postExecuteRedo;
     std::function<void()> m_postExecuteUndo;
-    QMap<QString, QString> m_trashMap; // originalPath → trashPath
 };
 
 // ---------------------------------------------------------------------------
@@ -1324,6 +1326,116 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// (1021) ExcludeSpriteCommand — add a smart-folder sprite to the exclusion list
+//
+// The sprite's file stays on disk; only the layout reference is removed and the
+// relative path is added to SmartFolder::excludedFiles so future syncs won't
+// re-add it.  Undo reverses both steps.
+// ---------------------------------------------------------------------------
+class ExcludeSpriteCommand : public QUndoCommand {
+public:
+    ExcludeSpriteCommand(QVector<SmartFolder>* smartFolders,
+                          int folderIndex,
+                          const QString& relPath,
+                          QStringList* activeFramePaths,
+                          QVector<AnimationTimeline>* timelines,
+                          int* selectedTimelineIndex,
+                          QVector<LayoutModel>* layoutModels,
+                          const QString& absolutePath,
+                          const QStringList& savedActivePaths,
+                          const QVector<AnimationTimeline>& savedTimelines,
+                          int savedTimelineIdx,
+                          const QVector<LayoutModel>& savedLayoutModels,
+                          std::function<bool()> ensureFrameList,
+                          std::function<void()> postExecuteRedo,
+                          std::function<void()> postExecuteUndo,
+                          QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Exclude from Layout"), parent)
+        , m_smartFolders(smartFolders)
+        , m_folderIndex(folderIndex)
+        , m_relPath(relPath)
+        , m_activeFramePaths(activeFramePaths)
+        , m_timelines(timelines)
+        , m_selectedTimelineIndex(selectedTimelineIndex)
+        , m_layoutModels(layoutModels)
+        , m_absolutePath(absolutePath)
+        , m_savedActivePaths(savedActivePaths)
+        , m_savedTimelines(savedTimelines)
+        , m_savedTimelineIdx(savedTimelineIdx)
+        , m_savedLayoutModels(savedLayoutModels)
+        , m_ensureFrameList(std::move(ensureFrameList))
+        , m_postExecuteRedo(std::move(postExecuteRedo))
+        , m_postExecuteUndo(std::move(postExecuteUndo))
+    {}
+
+    void redo() override {
+        // 1. Add to exclusion list
+        if (m_folderIndex >= 0 && m_folderIndex < m_smartFolders->size()) {
+            auto& sf = (*m_smartFolders)[m_folderIndex];
+            if (!sf.excludedFiles.contains(m_relPath)) {
+                sf.excludedFiles.append(m_relPath);
+            }
+        }
+        // 2. Remove from layout (no file I/O — file stays on disk)
+        m_activeFramePaths->removeAll(m_absolutePath);
+        const QSet<QString> targetSet = {m_absolutePath};
+        for (auto& timeline : *m_timelines) {
+            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+                if (targetSet.contains(timeline.frames[i])) timeline.frames.removeAt(i);
+            }
+        }
+        for (int i = m_timelines->size() - 1; i >= 0; --i) {
+            if ((*m_timelines)[i].frames.isEmpty()) {
+                m_timelines->removeAt(i);
+                if (*m_selectedTimelineIndex > i) --(*m_selectedTimelineIndex);
+                else if (*m_selectedTimelineIndex == i) *m_selectedTimelineIndex = -1;
+            }
+        }
+        for (auto& model : *m_layoutModels) {
+            model.sprites.erase(
+                std::remove_if(model.sprites.begin(), model.sprites.end(),
+                    [&targetSet](const SpritePtr& s) { return s && targetSet.contains(s->path); }),
+                model.sprites.end());
+        }
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecuteRedo) m_postExecuteRedo();
+    }
+
+    void undo() override {
+        // Remove from exclusion list
+        if (m_folderIndex >= 0 && m_folderIndex < m_smartFolders->size()) {
+            (*m_smartFolders)[m_folderIndex].excludedFiles.removeAll(m_relPath);
+        }
+        // Restore session data
+        *m_activeFramePaths = m_savedActivePaths;
+        *m_timelines = m_savedTimelines;
+        *m_selectedTimelineIndex = m_savedTimelineIdx;
+        *m_layoutModels = m_savedLayoutModels;
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecuteUndo) m_postExecuteUndo();
+    }
+
+    int id() const override { return 1021; }
+
+private:
+    QVector<SmartFolder>* m_smartFolders;
+    int m_folderIndex;
+    QString m_relPath;     // Relative to smart folder root
+    QStringList* m_activeFramePaths;
+    QVector<AnimationTimeline>* m_timelines;
+    int* m_selectedTimelineIndex;
+    QVector<LayoutModel>* m_layoutModels;
+    QString m_absolutePath;
+    QStringList m_savedActivePaths;
+    QVector<AnimationTimeline> m_savedTimelines;
+    int m_savedTimelineIdx;
+    QVector<LayoutModel> m_savedLayoutModels;
+    std::function<bool()> m_ensureFrameList;
+    std::function<void()> m_postExecuteRedo;
+    std::function<void()> m_postExecuteUndo;
+};
+
+// ---------------------------------------------------------------------------
 // (1020) RemoveFramesCommand — remove frames from session only (no file delete)
 // ---------------------------------------------------------------------------
 class RemoveFramesCommand : public QUndoCommand {
@@ -1418,4 +1530,158 @@ private:
     std::function<bool()> m_ensureFrameList;
     std::function<void()> m_postExecuteRedo;
     std::function<void()> m_postExecuteUndo;
+};
+
+// ---------------------------------------------------------------------------
+// (1024) RemoveSourceCommand — remove a project source with undo support
+//
+// Sprites belonging to the source are removed from the layout.  The source's
+// cached folder (if any) is moved to a system-temp trash instead of being
+// permanently deleted so it can be restored on undo.
+// ---------------------------------------------------------------------------
+class RemoveSourceCommand : public QUndoCommand {
+public:
+    RemoveSourceCommand(
+        QVector<ProjectSource>* sources,
+        QVector<SmartFolder>* smartFolders,
+        QStringList* activeFramePaths,
+        QVector<AnimationTimeline>* timelines,
+        int* selectedTimelineIndex,
+        QVector<LayoutModel>* layoutModels,
+        int sourceIndex,
+        const ProjectSource& removedSource,
+        const SmartFolder& removedSmartFolder,
+        bool hasSmartFolder,
+        const QStringList& spritesToRemove,
+        const QString& trashPath,
+        const QVector<ProjectSource>& savedSources,
+        const QVector<SmartFolder>& savedSmartFolders,
+        const QStringList& savedActivePaths,
+        const QVector<AnimationTimeline>& savedTimelines,
+        int savedTimelineIdx,
+        const QVector<LayoutModel>& savedLayoutModels,
+        std::function<bool()> ensureFrameList,
+        std::function<void()> postExecuteRedo,
+        std::function<void()> postExecuteUndo,
+        QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Remove Source"), parent)
+        , m_sources(sources)
+        , m_smartFolders(smartFolders)
+        , m_activeFramePaths(activeFramePaths)
+        , m_timelines(timelines)
+        , m_selectedTimelineIndex(selectedTimelineIndex)
+        , m_layoutModels(layoutModels)
+        , m_sourceIndex(sourceIndex)
+        , m_removedSource(removedSource)
+        , m_removedSmartFolder(removedSmartFolder)
+        , m_hasSmartFolder(hasSmartFolder)
+        , m_spritesToRemove(spritesToRemove)
+        , m_trashPath(trashPath)
+        , m_savedSources(savedSources)
+        , m_savedSmartFolders(savedSmartFolders)
+        , m_savedActivePaths(savedActivePaths)
+        , m_savedTimelines(savedTimelines)
+        , m_savedTimelineIdx(savedTimelineIdx)
+        , m_savedLayoutModels(savedLayoutModels)
+        , m_ensureFrameList(std::move(ensureFrameList))
+        , m_postExecuteRedo(std::move(postExecuteRedo))
+        , m_postExecuteUndo(std::move(postExecuteUndo))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+
+        // Re-remove the source from session lists.
+        if (m_sourceIndex >= 0 && m_sourceIndex < m_sources->size())
+            m_sources->removeAt(m_sourceIndex);
+        if (m_hasSmartFolder && m_sourceIndex >= 0 && m_sourceIndex < m_smartFolders->size())
+            m_smartFolders->removeAt(m_sourceIndex);
+
+        // Re-remove sprites from activeFramePaths.
+        const QSet<QString> targetSet(m_spritesToRemove.begin(), m_spritesToRemove.end());
+        for (const QString& p : m_spritesToRemove)
+            m_activeFramePaths->removeAll(p);
+
+        // Remove from timelines.
+        for (auto& timeline : *m_timelines) {
+            for (int i = timeline.frames.size() - 1; i >= 0; --i) {
+                if (targetSet.contains(timeline.frames[i]))
+                    timeline.frames.removeAt(i);
+            }
+        }
+        for (int i = m_timelines->size() - 1; i >= 0; --i) {
+            if ((*m_timelines)[i].frames.isEmpty()) {
+                m_timelines->removeAt(i);
+                if (*m_selectedTimelineIndex > i) --(*m_selectedTimelineIndex);
+                else if (*m_selectedTimelineIndex == i) *m_selectedTimelineIndex = -1;
+            }
+        }
+
+        // Remove from layout models.
+        for (auto& model : *m_layoutModels) {
+            model.sprites.erase(
+                std::remove_if(model.sprites.begin(), model.sprites.end(),
+                    [&targetSet](const SpritePtr& s) {
+                        return s && targetSet.contains(s->path);
+                    }),
+                model.sprites.end());
+        }
+
+        // Move cached folder back to trash (it was restored by undo).
+        if (!m_removedSource.cachedFolderPath.isEmpty()
+                && QDir(m_removedSource.cachedFolderPath).exists()) {
+            if (!m_trashPath.isEmpty() && !QDir(m_trashPath).exists()) {
+                QFile::rename(m_removedSource.cachedFolderPath, m_trashPath);
+            } else {
+                m_trashPath = TrashBin::sendFolder(m_removedSource.cachedFolderPath);
+            }
+        }
+
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecuteRedo) m_postExecuteRedo();
+    }
+
+    void undo() override {
+        // Restore the cached folder from trash.
+        if (!m_trashPath.isEmpty() && !m_removedSource.cachedFolderPath.isEmpty())
+            TrashBin::restoreFolder(m_trashPath, m_removedSource.cachedFolderPath);
+
+        // Restore full session state.
+        *m_sources = m_savedSources;
+        *m_smartFolders = m_savedSmartFolders;
+        *m_activeFramePaths = m_savedActivePaths;
+        *m_timelines = m_savedTimelines;
+        *m_selectedTimelineIndex = m_savedTimelineIdx;
+        *m_layoutModels = m_savedLayoutModels;
+
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecuteUndo) m_postExecuteUndo();
+    }
+
+    int id() const override { return 1024; }
+
+private:
+    QVector<ProjectSource>* m_sources;
+    QVector<SmartFolder>* m_smartFolders;
+    QStringList* m_activeFramePaths;
+    QVector<AnimationTimeline>* m_timelines;
+    int* m_selectedTimelineIndex;
+    QVector<LayoutModel>* m_layoutModels;
+    int m_sourceIndex;
+    ProjectSource m_removedSource;
+    SmartFolder m_removedSmartFolder;
+    bool m_hasSmartFolder;
+    QStringList m_spritesToRemove;
+    mutable QString m_trashPath;
+    QVector<ProjectSource> m_savedSources;
+    QVector<SmartFolder> m_savedSmartFolders;
+    QStringList m_savedActivePaths;
+    QVector<AnimationTimeline> m_savedTimelines;
+    int m_savedTimelineIdx;
+    QVector<LayoutModel> m_savedLayoutModels;
+    std::function<bool()> m_ensureFrameList;
+    std::function<void()> m_postExecuteRedo;
+    std::function<void()> m_postExecuteUndo;
+    mutable bool m_skipFirstRedo;
 };

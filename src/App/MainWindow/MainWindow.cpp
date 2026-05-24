@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "SourcesDialog.h"
 #include "UndoCommands.h"
 #include "AnimationCanvas.h"
 #include "MarkersDialog.h"
@@ -20,6 +21,7 @@
 #include "ProjectSaveService.h"
 #include "TimelineUi.h"
 #include "ProfilesDialog.h"
+#include "MessageDialog.h"
 #include "SpratProfilesConfig.h"
 #include "FolderSyncService.h"
 #include "SpriteNameUtils.h"
@@ -88,6 +90,422 @@ bool isUnderSpratTrash(const QString& sourceFolder, const QString& path) {
     return absolutePath == absoluteTrashRoot
         || absolutePath.startsWith(absoluteTrashRoot + '/');
 }
+
+QString sanitizeSubfolderName(const QString& name) {
+    QString result;
+    result.reserve(name.size());
+    for (const QChar& c : name) {
+        if (c == QLatin1Char('/') || c == QLatin1Char('\\') || c == QLatin1Char(':')
+                || c == QLatin1Char('*') || c == QLatin1Char('?') || c == QLatin1Char('"')
+                || c == QLatin1Char('<') || c == QLatin1Char('>') || c == QLatin1Char('|')) {
+            result += QLatin1Char('_');
+        } else {
+            result += c;
+        }
+    }
+    return result.isEmpty() ? QStringLiteral("source") : result;
+}
+}
+
+void MainWindow::onShowSources() {
+    if (!m_sourcesDialog) {
+        m_sourcesDialog = new SourcesDialog(this);
+
+        connect(m_sourcesDialog, &SourcesDialog::syncSourceRequested, this,
+                [this](int index) {
+            if (!m_session || index < 0 || index >= m_session->sources.size()) return;
+            // Re-run layout to pick up any changes from this source
+            onRunLayout(true);
+        });
+
+        connect(m_sourcesDialog, &SourcesDialog::removeSourceRequested,
+                this, [this](int index) { removeSource(index); });
+
+        connect(m_sourcesDialog, &SourcesDialog::sourceRenamed, this,
+                [this](int index, const QString& newName) {
+            if (!m_session || index < 0 || index >= m_session->sources.size()) return;
+            m_session->sources[index].name = newName;
+        });
+
+        connect(m_sourcesDialog, &SourcesDialog::addFolderRequested,
+                this, &MainWindow::onLoadFolder);
+
+        connect(m_sourcesDialog, &SourcesDialog::addFileRequested, this, [this]() {
+            const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+            const QString path = QFileDialog::getOpenFileName(
+                this, tr("Add Image File"), m_session ? m_session->currentFolder : QString(), filter);
+            if (!path.isEmpty()) {
+                const DropAction action = confirmDropAction(path);
+                if (action != DropAction::Cancel)
+                    loadImageWithFrameDetection(path, action);
+            }
+        });
+
+        connect(m_sourcesDialog, &SourcesDialog::addArchiveRequested, this, [this]() {
+            const QString filter = tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)");
+            const QString path = QFileDialog::getOpenFileName(
+                this, tr("Add Archive"), m_session ? m_session->currentFolder : QString(), filter);
+            if (!path.isEmpty()) {
+                const DropAction action = confirmDropAction(path);
+                if (action != DropAction::Cancel)
+                    loadProject(path, action);
+            }
+        });
+
+        connect(m_sourcesDialog, &SourcesDialog::addUrlRequested,
+                this, &MainWindow::onLoadFromUrl);
+
+        connect(m_sourcesDialog, &SourcesDialog::restoreOrphanRequested, this,
+                [this](const QString& path) {
+            if (!m_session) return;
+            m_session->orphanedSpritePaths.removeAll(path);
+            if (!m_session->activeFramePaths.contains(path)) {
+                m_session->activeFramePaths.append(path);
+            }
+            m_sourcesDialog->refresh(m_session->sources, m_session->orphanedSpritePaths);
+            scheduleLayoutRebuild(true);
+        });
+
+        connect(m_sourcesDialog, &SourcesDialog::discardOrphanRequested, this,
+                [this](const QString& path) {
+            if (!m_session) return;
+            m_session->orphanedSpritePaths.removeAll(path);
+            m_sourcesDialog->refresh(m_session->sources, m_session->orphanedSpritePaths);
+        });
+    }
+
+    m_sourcesDialog->refresh(
+        m_session ? m_session->sources : QVector<ProjectSource>(),
+        m_session ? m_session->orphanedSpritePaths : QStringList());
+    m_sourcesDialog->show();
+    m_sourcesDialog->raise();
+    m_sourcesDialog->activateWindow();
+}
+
+void MainWindow::refreshSourcesDialogIfVisible() {
+    if (m_sourcesDialog && m_sourcesDialog->isVisible() && m_session) {
+        m_sourcesDialog->refresh(m_session->sources, m_session->orphanedSpritePaths);
+    }
+}
+
+void MainWindow::removeSource(int index) {
+    if (!m_session || index < 0 || index >= m_session->sources.size()) return;
+
+    // Save full state before any changes (needed for undo).
+    const QVector<ProjectSource> savedSources       = m_session->sources;
+    const QVector<SmartFolder>   savedSmartFolders  = m_session->smartFolders;
+    const QStringList            savedActivePaths   = m_session->activeFramePaths;
+    const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+    const int savedTimelineIdx = m_session->selectedTimelineIndex;
+    const QVector<LayoutModel>   savedLayoutModels  = m_session->layoutModels;
+
+    const ProjectSource removed = m_session->sources.at(index);
+    const bool hasSmartFolder   = (index < m_session->smartFolders.size());
+    const SmartFolder removedSF = hasSmartFolder
+                                  ? m_session->smartFolders.at(index) : SmartFolder{};
+
+    m_session->sources.removeAt(index);
+    if (hasSmartFolder)
+        m_session->smartFolders.removeAt(index);
+
+    // Identify sprites that belong to the removed source.
+    // Normalise paths with QDir::cleanPath so that paths containing
+    // redundant "../.." components match the canonical cachedFolderPath.
+    QStringList toRemove;
+    const QString& srcFolder = m_session->sourceFolder;
+    const QString cleanedCache = removed.cachedFolderPath.isEmpty()
+        ? QString() : QDir::cleanPath(removed.cachedFolderPath);
+
+    for (const QString& p : m_session->activeFramePaths) {
+        bool belongs = false;
+        if (!cleanedCache.isEmpty()) {
+            const QString cp = QDir::cleanPath(p);
+            belongs = cp.startsWith(cleanedCache + QLatin1Char('/'))
+                      || cp == cleanedCache;
+        } else if (!srcFolder.isEmpty() && !removed.originalPath.isEmpty()) {
+            // Folder source loaded via Replace: reverse-map relative path.
+            const QString rel = QDir(srcFolder).relativeFilePath(p);
+            belongs = QFileInfo::exists(QDir(removed.originalPath).filePath(rel));
+        }
+        if (belongs)
+            toRemove.append(p);
+    }
+
+    // Remove sprites from activeFramePaths and layoutModels.
+    const QSet<QString> targetSet(toRemove.begin(), toRemove.end());
+    for (const QString& p : toRemove)
+        m_session->activeFramePaths.removeAll(p);
+    for (auto& model : m_session->layoutModels) {
+        model.sprites.erase(
+            std::remove_if(model.sprites.begin(), model.sprites.end(),
+                [&targetSet](const SpritePtr& s) {
+                    return s && targetSet.contains(s->path);
+                }),
+            model.sprites.end());
+    }
+
+    // Remove sprites from timelines; drop timelines that become empty.
+    for (auto& tl : m_session->timelines) {
+        for (int i = tl.frames.size() - 1; i >= 0; --i) {
+            if (targetSet.contains(tl.frames[i]))
+                tl.frames.removeAt(i);
+        }
+    }
+    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
+        if (m_session->timelines[i].frames.isEmpty()) {
+            m_session->timelines.removeAt(i);
+            if (m_session->selectedTimelineIndex > i)
+                --m_session->selectedTimelineIndex;
+            else if (m_session->selectedTimelineIndex == i)
+                m_session->selectedTimelineIndex = -1;
+        }
+    }
+
+    // Move the cached folder to a system-temp trash instead of deleting
+    // it permanently, so it can be restored on undo.
+    QString trashPath;
+    if (!removed.cachedFolderPath.isEmpty()
+            && removed.cachedFolderPath != srcFolder) {
+        trashPath = TrashBin::sendFolder(removed.cachedFolderPath);
+        if (trashPath.isEmpty())
+            QDir(removed.cachedFolderPath).removeRecursively(); // fallback
+    }
+
+    // Callbacks for the undo command.
+    auto postExecuteRedo = [this]() {
+        if (m_session->sources.isEmpty() || m_session->activeFramePaths.isEmpty()) {
+            m_session->layoutModels.clear();
+            m_session->activeFramePaths.clear();
+            m_session->layoutSourcePath.clear();
+            m_session->layoutSourceIsList = false;
+            m_session->sourceFolder.clear();
+            refreshSpriteTree();
+            updateMainContentView();
+            updateUiState();
+        } else {
+            scheduleLayoutRebuild(true);
+        }
+        if (m_sourcesDialog)
+            m_sourcesDialog->refresh(m_session->sources,
+                                     m_session->orphanedSpritePaths);
+    };
+
+    auto postExecuteUndo = [this]() {
+        scheduleLayoutRebuild(true);
+        if (m_sourcesDialog)
+            m_sourcesDialog->refresh(m_session->sources,
+                                     m_session->orphanedSpritePaths);
+    };
+
+    if (m_undoStack) {
+        m_undoStack->push(new RemoveSourceCommand(
+            &m_session->sources,
+            &m_session->smartFolders,
+            &m_session->activeFramePaths,
+            &m_session->timelines,
+            &m_session->selectedTimelineIndex,
+            &m_session->layoutModels,
+            index,
+            removed,
+            removedSF,
+            hasSmartFolder,
+            toRemove,
+            trashPath,
+            savedSources,
+            savedSmartFolders,
+            savedActivePaths,
+            savedTimelines,
+            savedTimelineIdx,
+            savedLayoutModels,
+            [this]() { return ensureFrameListInput(); },
+            postExecuteRedo,
+            std::move(postExecuteUndo)
+        ));
+    }
+
+    postExecuteRedo();
+}
+
+void MainWindow::registerLoadedSource(const QString& sourcePath, DropAction action,
+                                      const QString& cachedFolderPath) {
+    if (!m_session) return;
+
+    ProjectSource src;
+    if (!m_pendingImportUrl.isEmpty()) {
+        const QUrl url(m_pendingImportUrl);
+        QString baseName = QFileInfo(url.path()).fileName();
+        if (baseName.isEmpty()) baseName = url.host();
+        if (baseName.isEmpty()) baseName = m_pendingImportUrl;
+        src.name = makeUniqueSourceName(baseName);
+        src.type = SourceType::Url;
+        src.originalPath = m_pendingImportUrl;
+        m_pendingImportUrl.clear();
+    } else {
+        src.name = makeUniqueSourceName(QFileInfo(sourcePath).fileName());
+        const QString lower = sourcePath.toLower();
+        src.type = (lower.endsWith(".zip") || lower.endsWith(".tar")
+                    || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
+                    || lower.endsWith(".tar.bz2") || lower.endsWith(".tar.xz"))
+                   ? SourceType::Archive : SourceType::SingleImage;
+        src.originalPath = sourcePath;
+    }
+
+    if (!cachedFolderPath.isEmpty()) {
+        src.cachedFolderPath = cachedFolderPath;
+    } else {
+        src.cachedFolderPath = (action == DropAction::Replace) ? m_session->sourceFolder : QString();
+    }
+
+    if (action == DropAction::Replace) {
+        m_session->sources.clear();
+    } else {
+        // For Merge, sync if a source with the same path/URL already exists.
+        for (const ProjectSource& existing : m_session->sources) {
+            if (existing.originalPath == src.originalPath) {
+                // Strip any paths that were just copied into the duplicate subfolder
+                // and delete that subfolder so no orphan files linger.
+                if (!src.cachedFolderPath.isEmpty()) {
+                    const QString cleanedCache = QDir::cleanPath(src.cachedFolderPath);
+                    m_session->activeFramePaths.erase(
+                        std::remove_if(m_session->activeFramePaths.begin(),
+                                       m_session->activeFramePaths.end(),
+                                       [&cleanedCache](const QString& p) {
+                                           const QString cp = QDir::cleanPath(p);
+                                           return cp.startsWith(cleanedCache + QLatin1Char('/'))
+                                                  || cp == cleanedCache;
+                                       }),
+                        m_session->activeFramePaths.end());
+                    QDir(src.cachedFolderPath).removeRecursively();
+                }
+                onRunLayout(true);
+                return;
+            }
+        }
+    }
+    m_session->sources.append(src);
+}
+
+QString MainWindow::computeSourceSubfolderName(const QString& sourcePath) const {
+    QString name;
+    if (!m_pendingImportUrl.isEmpty()) {
+        const QUrl url(m_pendingImportUrl);
+        name = QFileInfo(url.path()).fileName();
+        if (name.isEmpty()) name = url.host();
+        if (name.isEmpty()) name = QStringLiteral("url-import");
+        // Strip query/fragment-derived junk after '.'
+        name = QFileInfo(name).baseName();
+    } else {
+        name = QFileInfo(sourcePath).baseName();
+    }
+    name = sanitizeSubfolderName(name);
+
+    // Ensure the subfolder name is unique so that different sources never share
+    // the same on-disk directory (each source is its own namespace).
+    if (m_session && !m_session->sourceFolder.isEmpty()) {
+        auto isUsed = [this](const QString& n) {
+            return QDir(QDir(m_session->sourceFolder).filePath(n)).exists();
+        };
+        if (isUsed(name)) {
+            int i = 2;
+            QString candidate;
+            do {
+                candidate = name + QLatin1Char('_') + QString::number(i++);
+            } while (isUsed(candidate) && i < 100);
+            name = candidate;
+        }
+    }
+    return name;
+}
+
+QString MainWindow::makeUniqueSourceName(const QString& baseName) const {
+    if (!m_session) return baseName;
+    auto isUsed = [this](const QString& n) {
+        for (const ProjectSource& s : m_session->sources)
+            if (s.name == n) return true;
+        return false;
+    };
+    if (!isUsed(baseName)) return baseName;
+    int i = 2;
+    QString candidate;
+    do {
+        candidate = baseName + QLatin1Char('_') + QString::number(i++);
+    } while (isUsed(candidate) && i < 100);
+    return candidate;
+}
+
+QStringList MainWindow::copyFramesToSourceSubfolder(const QStringList& frames,
+                                                    const QString& subfolderPath,
+                                                    bool overwriteDuplicates) {
+    QDir dstDir(subfolderPath);
+    dstDir.mkpath(QStringLiteral("."));
+
+    const QString originalRootPath = m_session->currentFolder;
+    QDir originalRootDir(originalRootPath);
+
+    QStringList result;
+    result.reserve(frames.size());
+
+    for (const QString& path : frames) {
+        const QFileInfo srcInfo(path);
+        const QString absPath = srcInfo.absoluteFilePath();
+
+        // Already inside the destination subfolder — keep as-is
+        const QString canonicalDst = QDir(subfolderPath).canonicalPath();
+        if (!canonicalDst.isEmpty() && absPath.startsWith(canonicalDst + QLatin1Char('/'))) {
+            result.append(absPath);
+            continue;
+        }
+
+        // Compute relative path to preserve subfolder structure
+        QString relPath;
+        if (!originalRootPath.isEmpty() && absPath.startsWith(originalRootPath)) {
+            relPath = originalRootDir.relativeFilePath(absPath);
+        } else {
+            relPath = srcInfo.fileName();
+        }
+
+        QString dst = dstDir.filePath(relPath);
+        const QFileInfo dstInfo(dst);
+
+        // Create intermediate subdirectories
+        const QString dstDirPath = dstInfo.absolutePath();
+        if (!QDir(dstDirPath).exists()) {
+            QDir().mkpath(dstDirPath);
+        }
+
+        // Handle existing files
+        if (dstInfo.exists()) {
+            if (overwriteDuplicates) {
+                QFile::remove(dst);
+            } else {
+                const QString baseName = dstInfo.completeBaseName();
+                const QString suffix   = dstInfo.suffix();
+                bool resolved = false;
+                for (int i = 1; i <= 99; ++i) {
+                    const QString candidate = QDir(dstDirPath).filePath(
+                        QStringLiteral("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
+                    if (!QFileInfo::exists(candidate)) {
+                        dst = candidate;
+                        resolved = true;
+                        break;
+                    }
+                }
+                if (!resolved) {
+                    qWarning() << "copyFramesToSourceSubfolder: unresolvable conflict for" << relPath;
+                    result.append(absPath);
+                    continue;
+                }
+            }
+        }
+
+        if (QFile::copy(absPath, dst)) {
+            result.append(dst);
+        } else {
+            qWarning() << "copyFramesToSourceSubfolder: copy failed" << absPath << "->" << dst;
+            result.append(absPath);
+        }
+    }
+    return result;
 }
 
 void MainWindow::openSettingsDialogForSection(SettingsDialog::Section section) {
@@ -118,12 +536,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_session = new ProjectSession(this);
     m_settings = CliToolsConfig::loadAppSettings();
     m_cliPaths = CliToolsConfig::loadCliPaths();
-    setupUi();
-    setupKeyboardShortcuts();
 
-    // Initialize undo stack and connect pivot drag signal
+    // Initialize undo stack before setupUi so actions can reference it
     m_undoStack = new QUndoStack(this);
     m_undoStack->setUndoLimit(AppConstants::kUndoStackLimit);
+    connect(m_undoStack, &QUndoStack::cleanChanged,
+            this, [this](bool clean) { setWindowModified(!clean); });
+    connect(m_undoStack, &QUndoStack::indexChanged,
+            this, [this](int) { syncPivotSpinsFromSprite(); });
+
+    setupUi();
+    setupKeyboardShortcuts();
     if (m_previewView && m_previewView->overlay()) {
         connect(m_previewView->overlay(), &EditorOverlayItem::pivotDragFinished,
                 this, [this](int oldX, int oldY, int newX, int newY) {
@@ -206,7 +629,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     if (!settings.contains("settings/default_projects_folder")) {
         QTimer::singleShot(1000, this, [this]() {
             QString defaultPath = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
-            QMessageBox::information(this, tr("Welcome to Sprat"),
+            MessageDialog::information(this, tr("Welcome to Sprat"),
                 tr("Please choose a default folder for your projects.\n\n"
                    "Sprat works best when projects have a permanent home on your disk."));
 
@@ -267,19 +690,12 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
             return;
         }
         if (!isSupportedDropPath(path)) {
-            QMessageBox::information(this, tr("Unsupported File"),
-                                     tr("This file type is not supported."));
+            MessageDialog::information(this, tr("Unsupported File"),
+                                      tr("This file type is not supported."));
             return;
         }
-#ifdef Q_OS_WASM
-        // Avoid modal dialogs in WASM; treat drops as Replace.
-        tryHandleDroppedPath(path, DropAction::Replace);
-#else
         DropAction action = confirmDropAction(path);
-        if (action != DropAction::Cancel) {
-            tryHandleDroppedPath(path, action);
-        }
-#endif
+        tryHandleDroppedPath(path, action);
     }
 }
 #endif
@@ -289,6 +705,25 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
  * 
  */
 void MainWindow::closeEvent(QCloseEvent* event) {
+    if (isWindowModified() && m_undoStack && !m_undoStack->isClean()) {
+        const auto choice = MessageDialog::customQuestion(
+            this, tr("Unsaved Changes"),
+            tr("You have unsaved changes. Save before closing?"),
+            {tr("Save"), tr("Don't Save"), tr("Cancel")},
+            0,
+            tr("Unsaved Changes"),
+            {QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton),
+             QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
+             QApplication::style()->standardIcon(QStyle::SP_DialogCancelButton)});
+        if (choice == 2) {          // Cancel
+            event->ignore();
+            return;
+        }
+        if (choice == 0) {          // Save
+            onSaveClicked();
+        }
+    }
+
     // Clean up temporary folders before closing
     if (m_session) {
         m_session->clearTempDirs();
@@ -296,6 +731,18 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
     // Allow the close event to proceed
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::updateFolderLabel(const QString& folder) {
+    if (!m_folderLabel) return;
+    if (folder.isEmpty()) {
+        m_folderLabel->setText(tr("Folder: none"));
+        return;
+    }
+    QString text = tr("Folder: ") + folder;
+    if (m_settings.syncMode == SyncMode::Watch)
+        text += tr(" (watching)");
+    m_folderLabel->setText(text);
 }
 
 MainWindow::~MainWindow() {
@@ -496,7 +943,7 @@ QVector<SpratProfile> MainWindow::configuredProfiles() {
     const QVector<SpratProfile> profiles = SpratProfilesConfig::loadProfileDefinitions(&error);
     if (!error.isEmpty()) {
         m_statusLabel->setText(tr("Invalid profiles configuration"));
-        QMessageBox::warning(this, tr("Profiles"), tr("Could not load profiles configuration:\n%1").arg(error));
+        MessageDialog::warning(this, tr("Profiles"), tr("Could not load profiles configuration:\n%1").arg(error));
     }
     return profiles;
 }
@@ -592,7 +1039,7 @@ void MainWindow::onCanvasAddFramesRequested() {
         added.append(absPath);
     }
     if (added.isEmpty()) {
-        QMessageBox::information(this, tr("Add Frames"), tr("All selected frames are already loaded."));
+        MessageDialog::information(this, tr("Add Frames"), tr("All selected frames are already loaded."));
         return;
     }
 
@@ -602,16 +1049,16 @@ void MainWindow::onCanvasAddFramesRequested() {
         added,
         oldFramePaths,
         [this]() { return ensureFrameListInput(); },
-        [this]() { 
+        [this]() {
             updateManualFrameLabel();
-            scheduleLayoutRebuild(true); 
+            scheduleLayoutRebuild(true);
         }
     ));
 
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
         m_session->activeFramePaths = oldFramePaths;
-        QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
     // Canvas action - rebuild immediately with loading UI
@@ -645,7 +1092,7 @@ void MainWindow::onAddFramesRequested() {
         added.append(absPath);
     }
     if (added.isEmpty()) {
-        QMessageBox::information(this, tr("Add Frames"), tr("All selected frames are already loaded."));
+        MessageDialog::information(this, tr("Add Frames"), tr("All selected frames are already loaded."));
         return;
     }
 
@@ -655,16 +1102,16 @@ void MainWindow::onAddFramesRequested() {
         added,
         oldFramePaths,
         [this]() { return ensureFrameListInput(); },
-        [this]() { 
+        [this]() {
             updateManualFrameLabel();
-            scheduleLayoutRebuild(); 
+            scheduleLayoutRebuild();
         }
     ));
 
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
         m_session->activeFramePaths = oldFramePaths;
-        QMessageBox::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
         return;
     }
     updateManualFrameLabel();
@@ -700,7 +1147,7 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     if (!timelineNames.isEmpty()) {
         QString warning = QString(tr("The selected frame(s) are referenced by the following timelines:\n%1\nRemoving them will drop those entries from the timelines. Continue?"))
                           .arg(QStringList(timelineNames.values()).join(", "));
-        if (QMessageBox::warning(this, tr("Remove Frames"), warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        if (MessageDialog::confirmWarning(this, tr("Remove Frames"), warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
             return;
         }
     }
@@ -761,12 +1208,14 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         scheduleLayoutRebuild(true);
     };
 
-    // In Manual/Watch mode, removal also deletes the backing source files with undo support.
+    // Both smart-folder and manually imported sprites are removed from the layout only
+    // (files are never deleted from disk). RemoveSpritesCommand is kept distinct for
+    // potential future divergence (e.g. adding to the exclusion list for smart folders).
     if (shouldDeleteRemovedSpritesFromSource()) {
         m_undoStack->push(new RemoveSpritesCommand(
             &m_session->activeFramePaths, &m_session->timelines,
             &m_session->selectedTimelineIndex, &m_session->layoutModels,
-            m_session->sourceFolder, targets,
+            targets,
             savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
             [this]() { return ensureFrameListInput(); },
             postExecuteRedo,
@@ -931,7 +1380,7 @@ void MainWindow::onManageProfiles() {
 
     const QVector<SpratProfile> profiles = dialog.profiles();
     if (!SpratProfilesConfig::saveProfileDefinitions(profiles)) {
-        QMessageBox::warning(this, tr("Profiles"), tr("Could not save profiles configuration."));
+        MessageDialog::warning(this, tr("Profiles"), tr("Could not save profiles configuration."));
         return;
     }
 
@@ -977,6 +1426,10 @@ void MainWindow::applySettings() {
         scheduleLayoutRebuild(true);
     }
     m_appliedSyncMode = m_settings.syncMode;
+
+    // Refresh folder label to add/remove the "(watching)" suffix
+    if (m_session && !m_session->currentFolder.isEmpty())
+        updateFolderLabel(m_session->currentFolder);
 
     updateOpenSourceFolderAction();
 }
@@ -1153,7 +1606,7 @@ void MainWindow::onSyncNowRequested() {
 
     if (m_session->sourceFolder.isEmpty()) {
         qWarning() << "[SyncNow] Source folder is empty!";
-        QMessageBox::information(this, tr("Sync"), tr("No source folder configured."));
+        MessageDialog::information(this, tr("Sync"), tr("No source folder configured."));
         return;
     }
 
@@ -1167,13 +1620,20 @@ void MainWindow::performFolderSync() {
         return;
     }
 
-    // Detect changes
-    auto syncResult = FolderSyncService::detectChanges(
-        m_session->sourceFolder,
-        m_session->layoutModels.first().sprites);
+    // Detect changes — use smart-folder-aware detection when smart folders are configured
+    FolderSyncService::SyncResult syncResult;
+    if (!m_session->smartFolders.isEmpty()) {
+        syncResult = FolderSyncService::detectChangesFromSmartFolders(
+            m_session->smartFolders,
+            m_session->layoutModels.first().sprites);
+    } else {
+        syncResult = FolderSyncService::detectChanges(
+            m_session->sourceFolder,
+            m_session->layoutModels.first().sprites);
+    }
 
     if (!syncResult.error.isEmpty()) {
-        QMessageBox::warning(this, tr("Sync Error"), syncResult.error);
+        MessageDialog::warning(this, tr("Sync Error"), syncResult.error);
         return;
     }
 
@@ -1189,7 +1649,7 @@ void MainWindow::performFolderSync() {
     // Merge changes into layout
     if (!FolderSyncService::mergeSyncResults(
             m_session->layoutModels.first(), syncResult, m_session->sourceFolder)) {
-        QMessageBox::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
+        MessageDialog::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
         return;
     }
     ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
@@ -1249,26 +1709,26 @@ void MainWindow::performManualSync() {
 
     if (!m_session) {
         qWarning() << "[Sync] Session is null";
-        QMessageBox::warning(this, tr("Sync Error"), tr("No session."));
+        MessageDialog::warning(this, tr("Sync Error"), tr("No session."));
         return;
     }
 
     if (m_session->layoutModels.isEmpty()) {
         qWarning() << "[Sync] No layout models loaded";
-        QMessageBox::information(this, tr("Sync"), tr("No layout loaded."));
+        MessageDialog::information(this, tr("Sync"), tr("No layout loaded."));
         return;
     }
 
     if (m_session->sourceFolder.isEmpty()) {
         qWarning() << "[Sync] Source folder is empty";
-        QMessageBox::information(this, tr("Sync"), tr("No sprites folder configured."));
+        MessageDialog::information(this, tr("Sync"), tr("No sprites folder configured."));
         return;
     }
 
     QDir folderDir(m_session->sourceFolder);
     if (!folderDir.exists()) {
         qWarning() << "[Sync] Folder does not exist:" << m_session->sourceFolder;
-        QMessageBox::warning(this, tr("Sync Error"), tr("Sprites folder does not exist."));
+        MessageDialog::warning(this, tr("Sync Error"), tr("Sprites folder does not exist."));
         return;
     }
 
@@ -1455,9 +1915,25 @@ void MainWindow::initializeSourceFolderWatcher() {
     qInfo() << "[Watcher] Source folder:" << m_session->sourceFolder;
 
     if (m_settings.syncMode == SyncMode::Watch) {
-        // Only restart if not already watching this exact folder
-        if (m_folderWatcher->watchedPath() != m_session->sourceFolder) {
-            m_folderWatcher->watchFolder(m_session->sourceFolder);
+        // Build the list of all smart folder paths (fall back to sourceFolder for legacy sessions)
+        QStringList pathsToWatch;
+        for (const auto& sf : m_session->smartFolders) {
+            if (!sf.path.isEmpty()) pathsToWatch.append(sf.path);
+        }
+        if (pathsToWatch.isEmpty() && !m_session->sourceFolder.isEmpty()) {
+            pathsToWatch.append(m_session->sourceFolder);
+        }
+
+        // Only restart if the watched paths changed
+        const QString currentWatched = m_folderWatcher->watchedPath();
+        const bool alreadyWatchingCorrect = (pathsToWatch.size() == 1 && currentWatched == pathsToWatch.first())
+                                         || (pathsToWatch.isEmpty() && !m_folderWatcher->isWatching());
+        if (!alreadyWatchingCorrect) {
+            if (pathsToWatch.size() == 1) {
+                m_folderWatcher->watchFolder(pathsToWatch.first());
+            } else {
+                m_folderWatcher->watchFolders(pathsToWatch);
+            }
         }
     } else {
         if (m_folderWatcher->isWatching()) {
@@ -2019,6 +2495,7 @@ MainWindow::SessionUndoState MainWindow::captureSessionUndoState() const {
     state.layoutSourcePath = m_session->layoutSourcePath;
     state.layoutSourceIsList = m_session->layoutSourceIsList;
     state.sourceFolder = m_session->sourceFolder;
+    state.sources = m_session->sources;
     state.activeFramePaths = m_session->activeFramePaths;
     state.frameListPath = m_session->frameListPath;
     state.layoutModels = m_session->layoutModels;
@@ -2053,6 +2530,7 @@ void MainWindow::applySessionUndoState(const SessionUndoState& state) {
     m_session->layoutSourcePath = state.layoutSourcePath;
     m_session->layoutSourceIsList = state.layoutSourceIsList;
     m_session->sourceFolder = state.sourceFolder;
+    m_session->sources = state.sources;
     m_session->activeFramePaths = state.activeFramePaths;
     m_session->frameListPath = state.frameListPath;
     m_session->layoutModels = state.layoutModels;

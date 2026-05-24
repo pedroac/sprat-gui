@@ -1,5 +1,6 @@
 #include "MarkersDialog.h"
 #include "MarkerUtils.h"
+#include "MessageDialog.h"
 #include <QApplication>
 #include <QCoreApplication>
 #include <QStyle>
@@ -55,6 +56,10 @@ MarkersDialog::MarkersDialog(SpritePtr sprite, const SuggestedMarkerPosition& su
  */
 void MarkersDialog::setupUi() {
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
+
+    auto* descLabel = new QLabel(tr("Add named points and areas to this sprite, such as the pivot, hitboxes, or spawn positions."), this);
+    descLabel->setWordWrap(true);
+    mainLayout->addWidget(descLabel);
 
     // Add Section
     QHBoxLayout* addLayout = new QHBoxLayout();
@@ -192,14 +197,14 @@ void MarkersDialog::onAddClicked() {
 
     // Check if reserved name
     if (name.toLower() == "pivot") {
-        QMessageBox::warning(this, tr("Error"), tr("'pivot' is a reserved name and cannot be used for markers."));
+        MessageDialog::warning(this, tr("Reserved Name"), tr("'pivot' is a reserved name and cannot be used for markers."));
         return;
     }
 
     // Check duplicate
     for (const auto& p : m_sprite->points) {
         if (p.name == name) {
-            QMessageBox::warning(this, tr("Error"), tr("Marker name already exists."));
+            MessageDialog::warning(this, tr("Duplicate Marker"), tr("A marker named '%1' already exists.").arg(name));
             return;
         }
     }
@@ -306,7 +311,7 @@ void MarkersDialog::onFieldChanged() {
 
     // Check if reserved name
     if (newName.toLower() == "pivot") {
-        QMessageBox::warning(this, tr("Error"), tr("'pivot' is a reserved name and cannot be used for markers."));
+        MessageDialog::warning(this, tr("Reserved Name"), tr("'pivot' is a reserved name and cannot be used for markers."));
         m_updating = true;
         m_nameEdit->setText(p.name);
         m_updating = false;
@@ -316,7 +321,7 @@ void MarkersDialog::onFieldChanged() {
     // Check for duplicates (but allow same name for the current marker)
     for (int i = 0; i < m_sprite->points.size(); ++i) {
         if (i != row && m_sprite->points[i].name == newName) {
-            QMessageBox::warning(this, tr("Error"), tr("Marker name already exists."));
+            MessageDialog::warning(this, tr("Duplicate Marker"), tr("A marker named '%1' already exists.").arg(newName));
             m_updating = true;
             m_nameEdit->setText(p.name);
             m_updating = false;

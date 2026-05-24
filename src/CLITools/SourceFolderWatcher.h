@@ -24,25 +24,33 @@ public:
     ~SourceFolderWatcher() override;
 
     /**
-     * Start watching a folder (and all its subdirectories) for changes.
+     * Start watching a single folder (and all its subdirectories) for changes.
+     * Replaces any currently watched folder(s).
      * @param folderPath Absolute path to folder to watch
      */
     void watchFolder(const QString& folderPath);
 
     /**
-     * Stop watching the current folder.
+     * Start watching multiple folders (and their subdirectories) for changes.
+     * Replaces any currently watched folder(s).
+     * @param folderPaths List of absolute paths to watch
+     */
+    void watchFolders(const QStringList& folderPaths);
+
+    /**
+     * Stop watching all folders.
      */
     void stopWatching();
 
     /**
-     * Check if currently watching a folder.
+     * Check if currently watching at least one folder.
      */
-    bool isWatching() const { return !m_watchedPath.isEmpty(); }
+    bool isWatching() const { return !m_watchedPath.isEmpty() || !m_watchedPaths.isEmpty(); }
 
     /**
-     * Get the path of the currently watched folder.
+     * Get the path of the primary watched folder (first in multi-folder mode, or the single path).
      */
-    QString watchedPath() const { return m_watchedPath; }
+    QString watchedPath() const { return m_watchedPaths.isEmpty() ? m_watchedPath : m_watchedPaths.first(); }
 
     /**
      * Set debounce interval in milliseconds (default 500ms).
@@ -64,7 +72,8 @@ private slots:
 
 private:
     QFileSystemWatcher* m_watcher;
-    QString m_watchedPath;
+    QString m_watchedPath;     // Single-folder mode (legacy, used by watchFolder())
+    QStringList m_watchedPaths; // Multi-folder mode (used by watchFolders())
     class QTimer* m_debounceTimer;
     int m_debounceInterval;
 
@@ -78,6 +87,6 @@ private:
     void updatePreviousFilesList();
     // Returns the set of all image files under m_watchedPath (recursive).
     QSet<QString> getCurrentFiles() const;
-    // Adds all subdirectories under m_watchedPath to the watcher.
+    // Adds all subdirectories under m_watchedPath (and m_watchedPaths) to the watcher.
     void watchSubdirectories();
 };

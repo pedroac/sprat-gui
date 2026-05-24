@@ -1,5 +1,6 @@
 #include "SaveDialog.h"
 #include "CliToolsConfig.h"
+#include "MessageDialog.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -128,7 +129,11 @@ void SaveDialog::setupUi() {
     resize(600, 400);
     
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    
+
+    auto* descLabel = new QLabel(tr("Choose the output destination and which profiles to include."), this);
+    descLabel->setWordWrap(true);
+    mainLayout->addWidget(descLabel);
+
     // Destination
     QGroupBox* destGroup = new QGroupBox(tr("Destination"), this);
     QVBoxLayout* destLayout = new QVBoxLayout(destGroup);
@@ -188,7 +193,7 @@ void SaveDialog::setupUi() {
             }
         }
         if (selectedCount == 0) {
-            QMessageBox::warning(this, tr("Missing profile"), tr("Select at least one profile to save."));
+            MessageDialog::warning(this, tr("Missing profile"), tr("Select at least one profile to save."));
             return;
         }
         accept();

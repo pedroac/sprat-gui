@@ -91,9 +91,16 @@ private:
     int m_dragOriginalRadius = 0;
     QVector<QPoint> m_dragOriginalPoly;
     bool m_suppressNextViewContextMenu = false;
-    
+
+    // Float drag state — tracks sub-pixel position during drag; rounded and committed on release
+    QPointF m_pivotDragFloat;
+    QPointF m_markerDragFloatDelta;
+    double  m_markerDragFloatRadius = 0.0;
+    QRectF  m_markerDragFloatRect;
+    QVector<QPointF> m_markerDragFloatPoly;
+
     // Helpers
-    void drawPivot(QPainter* painter, int x, int y);
+    void drawPivot(QPainter* painter, double x, double y);
     void drawMarkers(QPainter* painter, bool drawSelected);
     double getScale() const;
     NamedPoint* getNamedPoint(const QString& name);

@@ -33,18 +33,45 @@ void MainWindow::onPreviewZoomChanged(double value) {
 }
 
 void MainWindow::onPivotSpinChanged() {
-    if (!m_session->selectedSprite) {
-        return;
-    }
-    const int oldX = m_session->selectedSprite->pivotX;
-    const int oldY = m_session->selectedSprite->pivotY;
+    if (!m_session->selectedSprite) return;
+
     const int newX = m_pivotXSpin->value();
     const int newY = m_pivotYSpin->value();
-    if (oldX == newX && oldY == newY) return;
 
-    m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
-                                          oldX, oldY, newX, newY));
-    m_previewView->overlay()->updateLayout();
+    if (m_session->selectedPointName.isEmpty()) {
+        // Pivot
+        const int oldX = m_session->selectedSprite->pivotX;
+        const int oldY = m_session->selectedSprite->pivotY;
+        if (oldX == newX && oldY == newY) return;
+        m_undoStack->push(new SetPivotCommand(m_session->selectedSprite, oldX, oldY, newX, newY));
+        m_previewView->overlay()->updateLayout();
+    } else {
+        // Named marker — translate its position to (newX, newY)
+        auto& sprite = m_session->selectedSprite;
+        const QVector<NamedPoint> oldPoints = sprite->points;
+        bool found = false;
+        for (auto& p : sprite->points) {
+            if (p.name != m_session->selectedPointName) continue;
+            if (p.x == newX && p.y == newY) return;
+            if (p.kind == MarkerKind::Polygon && !p.polygonPoints.isEmpty()) {
+                const QPoint delta(newX - p.polygonPoints[0].x(), newY - p.polygonPoints[0].y());
+                for (auto& pt : p.polygonPoints) pt += delta;
+            }
+            p.x = newX;
+            p.y = newY;
+            found = true;
+            break;
+        }
+        if (!found) return;
+        m_undoStack->push(new SetMarkersCommand(
+            sprite, oldPoints, sprite->points,
+            [this]() {
+                m_previewView->overlay()->updateLayout();
+                refreshHandleCombo();
+            }
+        ));
+        m_previewView->overlay()->updateLayout();
+    }
 }
 
 void MainWindow::onCanvasPivotChanged(int x, int y) {
@@ -59,13 +86,28 @@ void MainWindow::onCanvasPivotChanged(int x, int y) {
 void MainWindow::onHandleComboChanged(int index) {
     if (index <= 0) {
         m_session->selectedPointName.clear();
-        if (m_previewView && m_previewView->overlay()) {
+        if (m_previewView && m_previewView->overlay())
             m_previewView->overlay()->setSelectedMarker("");
-        }
+        // Show pivot coordinates in spin boxes
+        if (m_session->selectedSprite)
+            onCanvasPivotChanged(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY);
     } else {
         m_session->selectedPointName = m_handleCombo->itemText(index);
-        if (m_previewView && m_previewView->overlay()) {
+        if (m_previewView && m_previewView->overlay())
             m_previewView->overlay()->setSelectedMarker(m_session->selectedPointName);
+        // Show selected marker coordinates in spin boxes
+        if (m_session->selectedSprite) {
+            for (const auto& p : m_session->selectedSprite->points) {
+                if (p.name == m_session->selectedPointName) {
+                    m_pivotXSpin->blockSignals(true);
+                    m_pivotYSpin->blockSignals(true);
+                    m_pivotXSpin->setValue(p.x);
+                    m_pivotYSpin->setValue(p.y);
+                    m_pivotXSpin->blockSignals(false);
+                    m_pivotYSpin->blockSignals(false);
+                    break;
+                }
+            }
         }
     }
 
@@ -150,18 +192,48 @@ void MainWindow::onMarkerSelectedFromCanvas(const QString& name) {
             m_handleCombo->setCurrentIndex(idx);
             m_handleCombo->blockSignals(false);
         }
+        // Update spin boxes to show this marker's position
+        if (m_session->selectedSprite) {
+            for (const auto& p : m_session->selectedSprite->points) {
+                if (p.name == name) {
+                    m_pivotXSpin->blockSignals(true);
+                    m_pivotYSpin->blockSignals(true);
+                    m_pivotXSpin->setValue(p.x);
+                    m_pivotYSpin->setValue(p.y);
+                    m_pivotXSpin->blockSignals(false);
+                    m_pivotYSpin->blockSignals(false);
+                    break;
+                }
+            }
+        }
         return;
     }
     m_statusLabel->setText(tr("Selected: ") + m_session->selectedSprite->name);
     m_handleCombo->blockSignals(true);
     m_handleCombo->setCurrentIndex(0);
     m_handleCombo->blockSignals(false);
+    // Update spin boxes to show pivot
+    if (m_session->selectedSprite)
+        onCanvasPivotChanged(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY);
 }
 
 void MainWindow::onMarkerChangedFromCanvas() {
     m_previewView->overlay()->update();
-    if (m_session->selectedPointName.isEmpty() && m_session->selectedSprite) {
+    if (!m_session->selectedSprite) return;
+    if (m_session->selectedPointName.isEmpty()) {
         onCanvasPivotChanged(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY);
+    } else {
+        for (const auto& p : m_session->selectedSprite->points) {
+            if (p.name == m_session->selectedPointName) {
+                m_pivotXSpin->blockSignals(true);
+                m_pivotYSpin->blockSignals(true);
+                m_pivotXSpin->setValue(p.x);
+                m_pivotYSpin->setValue(p.y);
+                m_pivotXSpin->blockSignals(false);
+                m_pivotYSpin->blockSignals(false);
+                break;
+            }
+        }
     }
 }
 

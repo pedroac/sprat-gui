@@ -21,6 +21,10 @@ void NewProjectDialog::setupUi() {
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setSpacing(15);
 
+    auto* descLabel = new QLabel(tr("Enter a name and choose where to save the project."), this);
+    descLabel->setWordWrap(true);
+    mainLayout->addWidget(descLabel);
+
     // Project Name
     QVBoxLayout* nameLayout = new QVBoxLayout();
     nameLayout->setSpacing(5);

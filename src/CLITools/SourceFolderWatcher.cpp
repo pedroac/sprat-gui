@@ -132,27 +132,61 @@ void SourceFolderWatcher::watchFolder(const QString& folderPath) {
     qInfo() << "SourceFolderWatcher: Watch scheduled for:" << m_watchedPath;
 }
 
-void SourceFolderWatcher::stopWatching() {
-    if (!m_watchedPath.isEmpty()) {
-        if (m_watcher) {
-            // Remove the root and every subdirectory that was added.
-            const QStringList watchedDirs = m_watcher->directories();
-            for (const QString& dir : watchedDirs) {
-                m_watcher->removePath(dir);
-            }
-        }
-        if (m_debounceTimer) {
-            m_debounceTimer->stop();
-        }
-        m_pendingAdds.clear();
-        m_pendingRemoves.clear();
-        m_pendingModifies.clear();
-        m_previousFiles.clear();
-        m_watchedPath.clear();
+void SourceFolderWatcher::watchFolders(const QStringList& folderPaths) {
+    stopWatching();
+    if (folderPaths.isEmpty()) return;
 
-        emit watchingStopped();
-        qInfo() << "SourceFolderWatcher: Stopped watching";
+    QStringList validPaths;
+    for (const QString& folderPath : folderPaths) {
+        QDir dir(folderPath);
+        if (!dir.exists()) {
+            qWarning() << "SourceFolderWatcher: Folder does not exist:" << folderPath;
+            continue;
+        }
+        validPaths.append(dir.absolutePath());
     }
+    if (validPaths.isEmpty()) return;
+
+    m_watchedPaths = validPaths;
+
+    // Defer the actual addPath calls to avoid synchronous issues during startup.
+    QTimer::singleShot(100, this, [this]() {
+        if (m_watchedPaths.isEmpty() || !m_watcher) return;
+        for (const QString& path : m_watchedPaths) {
+            m_watcher->addPath(path);
+        }
+        watchSubdirectories();
+        updatePreviousFilesList();
+        emit watchingStarted();
+        qInfo() << "SourceFolderWatcher: Started watching" << m_watchedPaths.size() << "folder(s)";
+    });
+
+    qInfo() << "SourceFolderWatcher: Watch scheduled for" << m_watchedPaths.size() << "folder(s)";
+}
+
+void SourceFolderWatcher::stopWatching() {
+    const bool wasWatching = !m_watchedPath.isEmpty() || !m_watchedPaths.isEmpty();
+    if (!wasWatching) return;
+
+    if (m_watcher) {
+        // Remove the root and every subdirectory that was added.
+        const QStringList watchedDirs = m_watcher->directories();
+        for (const QString& dir : watchedDirs) {
+            m_watcher->removePath(dir);
+        }
+    }
+    if (m_debounceTimer) {
+        m_debounceTimer->stop();
+    }
+    m_pendingAdds.clear();
+    m_pendingRemoves.clear();
+    m_pendingModifies.clear();
+    m_previousFiles.clear();
+    m_watchedPath.clear();
+    m_watchedPaths.clear();
+
+    emit watchingStopped();
+    qInfo() << "SourceFolderWatcher: Stopped watching";
 }
 
 void SourceFolderWatcher::setDebounceInterval(int ms) {
@@ -160,20 +194,37 @@ void SourceFolderWatcher::setDebounceInterval(int ms) {
 }
 
 void SourceFolderWatcher::watchSubdirectories() {
-    if (!m_watcher || m_watchedPath.isEmpty()) return;
-    
-    // Use optimized directory discovery to skip .git, node_modules, etc.
-    const QStringList dirs = ImageDiscoveryService::imageDirectoriesRecursive(m_watchedPath);
-    for (const QString& dir : dirs) {
-        m_watcher->addPath(dir);
+    if (!m_watcher) return;
+
+    // Single-folder mode
+    if (!m_watchedPath.isEmpty()) {
+        const QStringList dirs = ImageDiscoveryService::imageDirectoriesRecursive(m_watchedPath);
+        for (const QString& dir : dirs) {
+            m_watcher->addPath(dir);
+        }
+    }
+
+    // Multi-folder mode
+    for (const QString& rootPath : m_watchedPaths) {
+        const QStringList dirs = ImageDiscoveryService::imageDirectoriesRecursive(rootPath);
+        for (const QString& dir : dirs) {
+            m_watcher->addPath(dir);
+        }
     }
 }
 
 void SourceFolderWatcher::onDirectoryChanged(const QString& path) {
-    // Accept the root directory or any watched subdirectory.
-    if (!path.startsWith(m_watchedPath)) {
-        return;
+    // Accept the root directory or any watched subdirectory (single or multi-folder mode).
+    bool accepted = !m_watchedPath.isEmpty() && path.startsWith(m_watchedPath);
+    if (!accepted) {
+        for (const QString& root : m_watchedPaths) {
+            if (path.startsWith(root)) {
+                accepted = true;
+                break;
+            }
+        }
     }
+    if (!accepted) return;
 
     // If a new subdirectory was created, register it with the watcher so future
     // changes inside it are also detected.
@@ -232,10 +283,11 @@ void SourceFolderWatcher::updatePreviousFilesList() {
 }
 
 QSet<QString> SourceFolderWatcher::getCurrentFiles() const {
-    if (m_watchedPath.isEmpty()) {
-        return QSet<QString>();
-    }
+    QStringList roots;
+    if (!m_watchedPath.isEmpty()) roots.append(m_watchedPath);
+    roots.append(m_watchedPaths);
+    if (roots.isEmpty()) return QSet<QString>();
     // Use the optimized recursive collector which skips .git, node_modules, etc.
-    const QStringList files = ImageDiscoveryService::collectImagesRecursive({m_watchedPath});
+    const QStringList files = ImageDiscoveryService::collectImagesRecursive(roots);
     return QSet<QString>(files.begin(), files.end());
 }

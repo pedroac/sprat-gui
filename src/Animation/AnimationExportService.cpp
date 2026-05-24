@@ -1,4 +1,5 @@
 #include "AnimationExportService.h"
+#include "MessageDialog.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -25,10 +26,10 @@ QString AnimationExportService::chooseOutputPath(QWidget* parent) {
     }
 
     if (ffmpegExe.isEmpty() && magickExe.isEmpty()) {
-        QMessageBox::warning(parent,
+        MessageDialog::warning(parent,
                              trAnimationExport("Missing Tools"),
                              trAnimationExport("To export animations, you need ImageMagick or FFmpeg installed."));
-        return QString();
+        return {};
     }
 
     QStringList filters;
@@ -73,12 +74,12 @@ bool AnimationExportService::exportAnimation(
     bool useMagick = isGif && !converterExe.isEmpty();
     if (!useMagick && ffmpegExe.isEmpty()) {
         if (!isGif) {
-            QMessageBox::warning(parent, trAnimationExport("Error"), trAnimationExport("FFmpeg is required for video export."));
+            MessageDialog::warning(parent, trAnimationExport("FFmpeg Required"), trAnimationExport("FFmpeg is required for video export."));
             return false;
         }
         if (converterExe.isEmpty()) {
-            QMessageBox::warning(parent,
-                                 trAnimationExport("Error"),
+            MessageDialog::warning(parent,
+                                 trAnimationExport("No Export Tool Found"),
                                  trAnimationExport("No suitable export tool found (FFmpeg or ImageMagick)."));
             return false;
         }
@@ -200,14 +201,14 @@ bool AnimationExportService::exportAnimation(
     Q_UNUSED(useMagick);
     Q_UNUSED(converterExe);
     Q_UNUSED(ffmpegExe);
-    Q_UNUSED(outPath);
-    Q_UNUSED(parent);
     bool ok = false;
-    QMessageBox::information(parent, trAnimationExport("Not Supported"), trAnimationExport("Exporting to GIF/Video is not supported in the web version."));
+    #ifdef Q_OS_WASM
+        MessageDialog::information(parent, trAnimationExport("Not Supported"), trAnimationExport("Exporting to GIF/Video is not supported in the web version."));
+    #endif
 #endif
     if (!ok) {
         setStatus(trAnimationExport("Failed to generate animation"));
-        QMessageBox::critical(parent, trAnimationExport("Error"), trAnimationExport("Exporting animation failed. Check console output."));
+        MessageDialog::critical(parent, trAnimationExport("Export Failed"), trAnimationExport("Exporting animation failed. Check console output for details."));
     }
     setLoading(false);
     return ok;

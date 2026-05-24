@@ -89,16 +89,20 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
                 s->rotated = true;
             }
             // Use the original image dimensions so the pivot aligns with the visual frame center.
+            // For rotated sprites the atlas rect has width and height swapped relative to the
+            // source image, so derive content dimensions in source-image space before centering.
 #ifdef Q_OS_WASM
             // Avoid QImageReader size calls in WASM (slow/async). Use trim/rect fallback.
-            if (s->trimmed) {
-                const int sourceWidth = s->trimRect.x() + s->rect.width() + s->trimRect.width();
-                const int sourceHeight = s->trimRect.y() + s->rect.height() + s->trimRect.height();
-                s->pivotX = sourceWidth / 2;
-                s->pivotY = sourceHeight / 2;
-            } else {
-                s->pivotX = s->rect.width() / 2;
-                s->pivotY = s->rect.height() / 2;
+            {
+                const int contentW = s->rotated ? s->rect.height() : s->rect.width();
+                const int contentH = s->rotated ? s->rect.width()  : s->rect.height();
+                if (s->trimmed) {
+                    s->pivotX = (s->trimRect.x() + contentW + s->trimRect.width())  / 2;
+                    s->pivotY = (s->trimRect.y() + contentH + s->trimRect.height()) / 2;
+                } else {
+                    s->pivotX = contentW / 2;
+                    s->pivotY = contentH / 2;
+                }
             }
 #else
             QSize sourceSize = sourceSizeCache.value(s->path);
@@ -111,14 +115,16 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0) {
                 s->pivotX = sourceSize.width() / 2;
                 s->pivotY = sourceSize.height() / 2;
-            } else if (s->trimmed) {
-                const int sourceWidth = s->trimRect.x() + s->rect.width() + s->trimRect.width();
-                const int sourceHeight = s->trimRect.y() + s->rect.height() + s->trimRect.height();
-                s->pivotX = sourceWidth / 2;
-                s->pivotY = sourceHeight / 2;
             } else {
-                s->pivotX = s->rect.width() / 2;
-                s->pivotY = s->rect.height() / 2;
+                const int contentW = s->rotated ? s->rect.height() : s->rect.width();
+                const int contentH = s->rotated ? s->rect.width()  : s->rect.height();
+                if (s->trimmed) {
+                    s->pivotX = (s->trimRect.x() + contentW + s->trimRect.width())  / 2;
+                    s->pivotY = (s->trimRect.y() + contentH + s->trimRect.height()) / 2;
+                } else {
+                    s->pivotX = contentW / 2;
+                    s->pivotY = contentH / 2;
+                }
             }
 #endif
             model.sprites.append(s);

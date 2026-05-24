@@ -117,6 +117,64 @@ inline MarkerKind markerKindFromString(QStringView kind) {
 }
 
 /**
+ * @enum SourceType
+ * @brief Type of a project source.
+ */
+enum class SourceType {
+    Folder,
+    SingleImage,
+    Archive,
+    Url
+};
+
+/**
+ * @struct ProjectSource
+ * @brief A named image source for the project.
+ *
+ * Each source has a unique name (defaults to the folder/file basename),
+ * a type, an original path (absolute or URL), an optional cached folder
+ * for non-Folder types, and a per-source exclusion list.
+ */
+struct ProjectSource {
+    /** Unique name within the project (defaults to folder/file basename). */
+    QString name;
+
+    /** Source type. */
+    SourceType type = SourceType::Folder;
+
+    /** Absolute path or URL as originally provided. */
+    QString originalPath;
+
+    /** For non-Folder types: project-local cache directory. */
+    QString cachedFolderPath;
+
+    /** Relative paths excluded from layout. */
+    QStringList excludedFiles;
+};
+
+/**
+ * @struct SmartFolder
+ * @brief A source folder whose images are read into the layout automatically.
+ *
+ * The tool never writes to or deletes files from a smart folder.
+ * Sprites whose paths are inside the folder but listed in excludedFiles
+ * are omitted from the layout without touching the file on disk.
+ */
+struct SmartFolder {
+    /**
+     * @brief Absolute path to the folder (resolved at load time from relative path).
+     */
+    QString path;
+
+    /**
+     * @brief Relative paths (relative to this folder) that are excluded from the layout.
+     *
+     * Example: "walk/walk1.png"
+     */
+    QStringList excludedFiles;
+};
+
+/**
  * @struct NamedPoint
  * @brief Represents a named point or shape on a sprite.
  * 

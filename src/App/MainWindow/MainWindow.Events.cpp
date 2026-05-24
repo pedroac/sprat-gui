@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AnimationCanvas.h"
 #include "ImportPathSupport.h"
+#include "MessageDialog.h"
 
 #include <QAction>
 #include <QApplication>
@@ -99,65 +100,18 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
     return ImportPathSupport::isSupportedLocalImportPath(info.filePath());
 }
 
-MainWindow::DropAction MainWindow::confirmDropAction(const QString& path) {
-    if (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty()) {
-        return DropAction::Replace;
-    }
-
-    QMessageBox msg(this);
-    msg.setWindowTitle(tr("Layout Already Loaded"));
-    msg.setText(QString(tr("A layout is already loaded. What would you like to do with '%1'?")).arg(QFileInfo(path).fileName()));
-
-    auto* style_ = QApplication::style();
-    QPushButton* replaceBtn = msg.addButton(tr("Replace"), QMessageBox::AcceptRole);
-    replaceBtn->setIcon(style_->standardIcon(QStyle::SP_DialogSaveButton));
-    QPushButton* mergeBtn = msg.addButton(tr("Merge"), QMessageBox::AcceptRole);
-    mergeBtn->setIcon(style_->standardIcon(QStyle::SP_DialogApplyButton));
-    QPushButton* cancelBtn = msg.addButton(tr("Cancel"), QMessageBox::RejectRole);
-    cancelBtn->setIcon(style_->standardIcon(QStyle::SP_DialogCancelButton));
-    
-    msg.exec();
-    
-    if (msg.clickedButton() == replaceBtn) return DropAction::Replace;
-    if (msg.clickedButton() == mergeBtn) return DropAction::Merge;
-    return DropAction::Cancel;
+MainWindow::DropAction MainWindow::confirmDropAction(const QString& /*path*/) {
+    // With the multi-source model the layout is always the union of all sources.
+    // New files are always added as an additional source (Merge).
+    // Replace is only used for the very first load when there is no content yet.
+    const bool hasContent = m_session
+        && !m_session->layoutModels.isEmpty()
+        && !m_session->layoutModels.first().sprites.isEmpty();
+    return hasContent ? DropAction::Merge : DropAction::Replace;
 }
-
 bool MainWindow::tryHandleDroppedPath(const QString& path, DropAction action) {
     if (!isSupportedDropPath(path) || action == DropAction::Cancel) {
         return false;
-    }
-
-    // Auto-create project if none active and we are replacing (starting fresh)
-    if (action == DropAction::Replace && (m_projectFilePath.isEmpty() || m_sourceFolderIsTemp)) {
-        QString defaultDir = m_settings.defaultProjectsFolder;
-        if (defaultDir.isEmpty()) {
-            defaultDir = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
-        }
-        
-        // Find a unique name like DragDrop-01
-        QDir base(defaultDir);
-        base.mkpath(".");
-        int counter = 1;
-        QString name;
-        do {
-            name = QString("DragDrop-%1").arg(counter++, 2, 10, QChar('0'));
-        } while (base.exists(name));
-        
-        QString projectDir = base.filePath(name);
-        QDir().mkpath(projectDir);
-        m_projectFilePath = QDir(projectDir).filePath("project.spart.json");
-        
-        m_session->clear();
-        m_session->currentFolder = projectDir;
-        m_session->sourceFolder = QDir(projectDir).filePath("sprites");
-        QDir().mkpath(m_session->sourceFolder);
-        m_sourceFolderIsTemp = false;
-        m_session->layoutSourcePath = m_session->sourceFolder;
-        m_session->layoutSourceIsList = false;
-        m_lastSaveConfig.destination = projectDir;
-        
-        m_statusLabel->setText(tr("New project created as '%1'. <a href='rename' style='color: #3498db;'>Click here to rename or change location.</a>").arg(name));
     }
 
     QFileInfo info(path);

@@ -51,7 +51,16 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
 
     QJsonObject layoutInfo;
     if (input.portablePaths) {
-        layoutInfo["folder"] = QStringLiteral("sprites");
+        // Store the source images folder as a path relative to the project directory
+        // so the project can be relocated without breaking image references.
+        // Fall back to an absolute path when the source folder is outside the project tree.
+        const QString srcBase = input.sourceFolder.isEmpty() ? input.currentFolder : input.sourceFolder;
+        if (!input.projectDir.isEmpty() && !srcBase.isEmpty()) {
+            const QString rel = QDir(input.projectDir).relativeFilePath(srcBase);
+            layoutInfo["folder"] = rel.startsWith("..") ? srcBase : rel;
+        } else {
+            layoutInfo["folder"] = srcBase;
+        }
     } else {
         layoutInfo["folder"] = input.currentFolder;
     }
@@ -78,7 +87,72 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         }
         layoutInfo["frame_paths"] = framePaths;
     }
+
+    // Write smart_folders array (legacy; kept for backward compat)
+    if (!input.smartFolders.isEmpty()) {
+        QJsonArray smartFoldersArr;
+        for (const auto& sf : input.smartFolders) {
+            QJsonObject sfObj;
+            QString path = sf.path;
+            if (input.portablePaths && !input.projectDir.isEmpty() && !path.isEmpty()) {
+                const QString rel = QDir(input.projectDir).relativeFilePath(path);
+                path = rel.startsWith("..") ? path : rel;
+            }
+            sfObj["path"] = path;
+            if (!sf.excludedFiles.isEmpty()) {
+                QJsonArray excArr;
+                for (const auto& e : sf.excludedFiles) excArr.append(e);
+                sfObj["excluded"] = excArr;
+            }
+            smartFoldersArr.append(sfObj);
+        }
+        layoutInfo["smart_folders"] = smartFoldersArr;
+    }
+
+    // Write sources array (new model)
+    auto sourceTypeToString = [](SourceType t) -> QString {
+        switch (t) {
+        case SourceType::Folder:      return QStringLiteral("folder");
+        case SourceType::SingleImage: return QStringLiteral("single_image");
+        case SourceType::Archive:     return QStringLiteral("archive");
+        case SourceType::Url:         return QStringLiteral("url");
+        }
+        return QStringLiteral("folder");
+    };
+    if (!input.sources.isEmpty()) {
+        QJsonArray sourcesArr;
+        for (const auto& src : input.sources) {
+            QJsonObject sObj;
+            sObj["name"] = src.name;
+            sObj["type"] = sourceTypeToString(src.type);
+            QString origPath = src.originalPath;
+            if (input.portablePaths && !input.projectDir.isEmpty() && !origPath.isEmpty()
+                && src.type == SourceType::Folder) {
+                const QString rel = QDir(input.projectDir).relativeFilePath(origPath);
+                origPath = rel.startsWith("..") ? origPath : rel;
+            }
+            sObj["originalPath"] = origPath;
+            if (!src.cachedFolderPath.isEmpty()) {
+                sObj["cachedFolder"] = src.cachedFolderPath;
+            }
+            if (!src.excludedFiles.isEmpty()) {
+                QJsonArray excArr;
+                for (const auto& e : src.excludedFiles) excArr.append(e);
+                sObj["excluded"] = excArr;
+            }
+            sourcesArr.append(sObj);
+        }
+        layoutInfo["sources"] = sourcesArr;
+    }
+
     root["layout"] = layoutInfo;
+
+    // Write orphaned sprites (top-level key)
+    if (!input.orphanedSpritePaths.isEmpty()) {
+        QJsonArray orphanedArr;
+        for (const QString& p : input.orphanedSpritePaths) orphanedArr.append(p);
+        root["orphaned_sprites"] = orphanedArr;
+    }
 
     QJsonObject animInfo;
     animInfo["selected_timeline_index"] = input.selectedTimelineIndex;
@@ -115,6 +189,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         for (const auto& s : model.sprites) {
             QJsonObject sObj;
             sObj["name"] = s->name;
+            sObj["has_pivot"] = true;
             sObj["pivot_x"] = s->pivotX;
             sObj["pivot_y"] = s->pivotY;
             QJsonArray markersArr;
@@ -237,10 +312,11 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             sprite->aliases.clear();
             for (const auto& a : state["aliases"].toArray())
                 sprite->aliases.append(a.toString());
-            if (state.contains("pivot_x")) {
+            // Only apply stored pivot if the project was saved with the has_pivot flag.
+            // Older projects (no flag, or pivot_y=0 from partial centering) are ignored
+            // so LayoutParser's correctly-centered values are used instead.
+            if (state["has_pivot"].toBool() && state.contains("pivot_x") && state.contains("pivot_y")) {
                 sprite->pivotX = state["pivot_x"].toInt();
-            }
-            if (state.contains("pivot_y")) {
                 sprite->pivotY = state["pivot_y"].toInt();
             }
             if (!state.contains("markers")) {
@@ -381,6 +457,94 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.saveConfig.profiles.reserve(profilesArr.size());
     for (const auto& pVal : profilesArr) {
         out.saveConfig.profiles.append(pVal.toString());
+    }
+
+    auto sourceTypeFromString = [](const QString& s) -> SourceType {
+        if (s == QStringLiteral("single_image")) return SourceType::SingleImage;
+        if (s == QStringLiteral("archive"))      return SourceType::Archive;
+        if (s == QStringLiteral("url"))          return SourceType::Url;
+        return SourceType::Folder;
+    };
+
+    {
+        const QJsonObject layoutInfo = root["layout"].toObject();
+
+        // Read sources array (new model) — highest priority
+        const QJsonArray sourcesArr = layoutInfo["sources"].toArray();
+        if (!sourcesArr.isEmpty()) {
+            for (const auto& sVal : sourcesArr) {
+                const QJsonObject sObj = sVal.toObject();
+                ProjectSource src;
+                src.name = sObj["name"].toString();
+                src.type = sourceTypeFromString(sObj["type"].toString());
+                QString origPath = sObj["originalPath"].toString();
+                if (!origPath.isEmpty() && QDir::isRelativePath(origPath) && !currentFolder.isEmpty()) {
+                    origPath = QDir(currentFolder).absoluteFilePath(origPath);
+                }
+                src.originalPath = origPath;
+                src.cachedFolderPath = sObj["cachedFolder"].toString();
+                const QJsonArray excArr = sObj["excluded"].toArray();
+                src.excludedFiles.reserve(excArr.size());
+                for (const auto& e : excArr) src.excludedFiles.append(e.toString());
+                out.sources.append(src);
+            }
+            // Derive smart_folders from sources for backward-compat consumers
+            for (const auto& src : out.sources) {
+                if (src.type == SourceType::Folder) {
+                    SmartFolder sf;
+                    sf.path = src.originalPath;
+                    sf.excludedFiles = src.excludedFiles;
+                    out.smartFolders.append(sf);
+                }
+            }
+        } else {
+            // Read smart_folders (legacy format)
+            const QJsonArray sfArr = layoutInfo["smart_folders"].toArray();
+            if (!sfArr.isEmpty()) {
+                for (const auto& sfVal : sfArr) {
+                    const QJsonObject sfObj = sfVal.toObject();
+                    SmartFolder sf;
+                    QString path = sfObj["path"].toString();
+                    if (!path.isEmpty() && QDir::isRelativePath(path) && !currentFolder.isEmpty()) {
+                        path = QDir(currentFolder).absoluteFilePath(path);
+                    }
+                    sf.path = path;
+                    const QJsonArray excArr = sfObj["excluded"].toArray();
+                    sf.excludedFiles.reserve(excArr.size());
+                    for (const auto& e : excArr) sf.excludedFiles.append(e.toString());
+                    out.smartFolders.append(sf);
+                    // Convert to ProjectSource
+                    ProjectSource src;
+                    src.name = QFileInfo(path).fileName();
+                    src.type = SourceType::Folder;
+                    src.originalPath = path;
+                    src.excludedFiles = sf.excludedFiles;
+                    out.sources.append(src);
+                }
+            } else {
+                // Legacy: convert the "folder" key to a single SmartFolder with no exclusions
+                QString legacyFolder = layoutInfo["folder"].toString();
+                if (!legacyFolder.isEmpty()) {
+                    if (QDir::isRelativePath(legacyFolder) && !currentFolder.isEmpty()) {
+                        legacyFolder = QDir(currentFolder).absoluteFilePath(legacyFolder);
+                    }
+                    SmartFolder sf;
+                    sf.path = legacyFolder;
+                    out.smartFolders.append(sf);
+                    // Convert to ProjectSource
+                    ProjectSource src;
+                    src.name = QFileInfo(legacyFolder).fileName();
+                    src.type = SourceType::Folder;
+                    src.originalPath = legacyFolder;
+                    out.sources.append(src);
+                }
+            }
+        }
+
+        // Read orphaned sprites
+        const QJsonArray orphanedArr = root["orphaned_sprites"].toArray();
+        out.orphanedSpritePaths.reserve(orphanedArr.size());
+        for (const auto& v : orphanedArr) out.orphanedSpritePaths.append(v.toString());
     }
 
     return out;

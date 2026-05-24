@@ -1,6 +1,5 @@
 #include "AnimationPreviewService.h"
 
-#include <QFileInfo>
 #include <QImageReader>
 #include <QPainter>
 #include <QPixmapCache>
@@ -199,16 +198,11 @@ QPixmap AnimationPreviewService::refresh(
     const QHash<QString, SpritePtr>& spriteMap = g_cachedSpriteMap;
 
     const QString& path = frames[frameIndex];
-    QString spriteName  = QFileInfo(path).baseName();
     SpritePtr currentSprite = spriteMap.value(path);
-    if (currentSprite)
-        spriteName = currentSprite->name;
 
-    statusText = QString("%1 | frame %2/%3 | %4")
-                     .arg(timelines[selectedTimelineIndex].name)
+    statusText = QString("frame %1/%2")
                      .arg(frameIndex + 1)
-                     .arg(frames.size())
-                     .arg(spriteName);
+                     .arg(frames.size());
 
     QPixmap pix;
     if (!QPixmapCache::find(path, &pix)) {
