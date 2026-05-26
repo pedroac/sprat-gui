@@ -148,8 +148,11 @@ struct ProjectSource {
     /** For non-Folder types: project-local cache directory. */
     QString cachedFolderPath;
 
-    /** Relative paths excluded from layout. */
+    /** Relative paths excluded from layout (persisted; filtered during sync). */
     QStringList excludedFiles;
+
+    /** Relative folder paths hidden in the navigator view (no disk changes). */
+    QStringList hiddenFolders;
 };
 
 /**
@@ -447,10 +450,18 @@ struct SaveConfig {
 
     /**
      * @brief List of profiles to use during save.
-     * 
+     *
      * Profiles define layout and optimization settings.
      */
     QStringList profiles;
+
+    /**
+     * @brief Whether to copy sprites into the project folder on save.
+     *
+     * When true, Save As copies all sprites to <projectDir>/sprites/ and
+     * subsequent Ctrl+S saves sync any new sprites incrementally.
+     */
+    bool syncSprites = false;
 };
 
 /**
@@ -544,6 +555,20 @@ struct AppSettings {
      * @brief Application color theme. Options: "system" (default), "light", "dark"
      */
     QString theme = "system";
+
+    /**
+     * @brief Whether to show other checked frames as ghost overlays in the preview canvas.
+     *
+     * Default: true
+     */
+    bool onionSkinEnabled = true;
+
+    /**
+     * @brief Whether pivot/marker edits are propagated to all checked frames.
+     *
+     * Default: true
+     */
+    bool propagateEditsToChecked = true;
 
 };
 

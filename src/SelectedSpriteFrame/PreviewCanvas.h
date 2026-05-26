@@ -36,6 +36,14 @@ public:
      */
     void setSettings(const AppSettings& settings);
 
+    /**
+     * @brief Sets ghost (onion skin) sprites rendered as semi-transparent overlays.
+     *
+     * Each ghost is positioned so that its own pivot aligns with @p activePivot
+     * in scene coordinates (i.e. the active sprite's pivot position).
+     */
+    void setGhostSprites(const QList<SpritePtr>& ghosts, QPoint activePivot = QPoint());
+
     EditorOverlayItem* overlay() const { return m_overlay; }
     
 signals:
@@ -43,8 +51,6 @@ signals:
      * @brief Emitted when the pivot position changes.
      */
     void pivotChanged(int x, int y);
-    void applyPivotToSelectedFramesRequested();
-    void applyMarkerToSelectedFramesRequested(const QString& markerName);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -54,6 +60,7 @@ private:
     QGraphicsScene* m_scene;
     QList<QGraphicsPixmapItem*> m_imageItems;
     QList<QGraphicsRectItem*> m_borderItems;
+    QList<QGraphicsPixmapItem*> m_ghostItems;
     EditorOverlayItem* m_overlay;
     QList<SpritePtr> m_sprites;
     AppSettings m_settings;

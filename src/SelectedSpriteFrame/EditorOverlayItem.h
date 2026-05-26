@@ -51,8 +51,6 @@ signals:
      * @brief Emitted when a marker is selected.
      */
     void markerSelected(const QString& name);
-    void applyPivotToSelectedFramesRequested();
-    void applyMarkerToSelectedFramesRequested(const QString& markerName);
     /**
      * @brief Emitted when pivot drag finishes on canvas.
      */

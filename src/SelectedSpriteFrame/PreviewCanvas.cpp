@@ -21,11 +21,13 @@ PreviewCanvas::PreviewCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
 void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
     m_sprites = sprites;
     m_overlay->setSprites(sprites);
-    
+
     for (auto* item : m_imageItems) delete item;
     m_imageItems.clear();
     for (auto* item : m_borderItems) delete item;
     m_borderItems.clear();
+    for (auto* item : m_ghostItems) { m_scene->removeItem(item); delete item; }
+    m_ghostItems.clear();
 
     if (!sprites.isEmpty()) {
         QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
@@ -117,21 +119,26 @@ void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
     
     QMenu menu(this);
     QAction* copyAction = menu.addAction(tr("Copy Image"));
-    menu.addSeparator();
-    QAction* applyPivotAction = menu.addAction(tr("Apply Pivot to Selected Frames"));
-    const QString markerName = m_overlay ? m_overlay->selectedMarkerName().trimmed() : QString();
-    QAction* applyMarkerAction = menu.addAction(
-        markerName.isEmpty()
-            ? tr("Apply Marker to Selected Frames")
-            : tr("Apply Marker '%1' to Selected Frames").arg(markerName));
-    applyMarkerAction->setEnabled(!markerName.isEmpty());
     QAction* selected = menu.exec(event->globalPos());
     if (selected == copyAction) {
         QApplication::clipboard()->setImage(QImage(m_sprites.first()->path));
-    } else if (selected == applyPivotAction) {
-        emit applyPivotToSelectedFramesRequested();
-    } else if (selected == applyMarkerAction && !markerName.isEmpty()) {
-        emit applyMarkerToSelectedFramesRequested(markerName);
+    }
+}
+
+void PreviewCanvas::setGhostSprites(const QList<SpritePtr>& ghosts, QPoint activePivot) {
+    for (auto* item : m_ghostItems) { m_scene->removeItem(item); delete item; }
+    m_ghostItems.clear();
+    for (const auto& sprite : ghosts) {
+        QPixmap pix(sprite->path);
+        if (pix.isNull()) continue;
+        auto* item = new QGraphicsPixmapItem(pix);
+        item->setOpacity(0.30);
+        item->setZValue(-0.5);  // above checkerboard (z=-1), below main sprite (z=0)
+        // Offset so ghost's pivot aligns with the active sprite's pivot in scene space
+        item->setPos(activePivot.x() - sprite->pivotX,
+                     activePivot.y() - sprite->pivotY);
+        m_scene->addItem(item);
+        m_ghostItems.append(item);
     }
 }
 

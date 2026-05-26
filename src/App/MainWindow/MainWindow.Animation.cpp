@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "MessageDialog.h"
 #include "AnimationCanvas.h"
+#include "NavigatorTreeWidget.h"
 #include "UndoCommands.h"
 
 #include "AnimationExportService.h"
@@ -50,6 +51,29 @@ QTreeWidgetItem* MainWindow::timelineItemForIndex(int idx) const {
 
 void MainWindow::refreshTimelineList() {
     const int savedIndex = m_session->selectedTimelineIndex;
+
+    // ── Save tree state before the rebuild ──────────────────────────────────
+    const bool hadItems = m_timelineList->invisibleRootItem()->childCount() > 0;
+    QSet<QString> collapsedFolders;
+    QSet<int>     checkedIndices;
+    int           scrollPos = 0;
+    if (hadItems) {
+        QTreeWidgetItemIterator sit(m_timelineList);
+        while (*sit) {
+            const bool isFolder = !(*sit)->data(0, Qt::UserRole).isValid();
+            if (isFolder) {
+                if (!(*sit)->isExpanded())
+                    collapsedFolders.insert(timelineItemFolderPath(*sit));
+            } else {
+                if ((*sit)->checkState(0) == Qt::Checked)
+                    checkedIndices.insert((*sit)->data(0, Qt::UserRole).toInt());
+            }
+            ++sit;
+        }
+        scrollPos = m_timelineList->verticalScrollBar()->value();
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     m_timelineList->blockSignals(true);
     m_timelineList->clear();
 
@@ -145,10 +169,38 @@ void MainWindow::refreshTimelineList() {
         item->setCheckState(0, Qt::Unchecked);
     }
 
-    m_timelineList->expandAll();
+    // ── Restore expanded state (signals still blocked) ──────────────────────
+    {
+        QTreeWidgetItemIterator rit(m_timelineList);
+        while (*rit) {
+            if (!(*rit)->data(0, Qt::UserRole).isValid()) {
+                const QString fp = timelineItemFolderPath(*rit);
+                // New folders (not in collapsedFolders) expand by default
+                (*rit)->setExpanded(!collapsedFolders.contains(fp));
+            }
+            ++rit;
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     m_timelineList->setCurrentItem(timelineItemForIndex(savedIndex));
     m_timelineList->blockSignals(false);
     m_timelineList->setVisible(!m_session->timelines.isEmpty());
+
+    // ── Restore checked state (signals unblocked → tristate cascade fires) ──
+    if (!checkedIndices.isEmpty()) {
+        QTreeWidgetItemIterator rit(m_timelineList);
+        while (*rit) {
+            const QVariant v = (*rit)->data(0, Qt::UserRole);
+            if (v.isValid() && checkedIndices.contains(v.toInt()))
+                (*rit)->setCheckState(0, Qt::Checked);
+            ++rit;
+        }
+    }
+    if (hadItems)
+        m_timelineList->verticalScrollBar()->setValue(scrollPos);
+    // ────────────────────────────────────────────────────────────────────────
+
     // setCurrentItem() above was called with signals blocked, so
     // onTimelineSelectionChanged() never fired. Call it explicitly so the
     // editor container visibility is always in sync with the selection.
@@ -462,6 +514,7 @@ void MainWindow::onAnimPrevClicked() {
         return;
     }
     refreshAnimationTest();
+    syncSelectedSpriteToAnimFrame();
 }
 
 void MainWindow::onAnimPlayPauseClicked() {
@@ -473,8 +526,11 @@ void MainWindow::onAnimPlayPauseClicked() {
         m_animPlaying,
         m_animTimer,
         m_animPlayPauseBtn);
-    if (m_animPlaying && !wasPlaying)
+    if (m_animPlaying && !wasPlaying) {
         m_animElapsed.start();
+    } else if (wasPlaying && !m_animPlaying) {
+        syncSelectedSpriteToAnimFrame();
+    }
 }
 
 void MainWindow::onAnimNextClicked() {
@@ -488,6 +544,51 @@ void MainWindow::onAnimNextClicked() {
         return;
     }
     refreshAnimationTest();
+    syncSelectedSpriteToAnimFrame();
+}
+
+void MainWindow::syncSelectedSpriteToAnimFrame() {
+    if (m_session->selectedTimelineIndex < 0 ||
+        m_session->selectedTimelineIndex >= m_session->timelines.size()) return;
+
+    const auto& tl = m_session->timelines[m_session->selectedTimelineIndex];
+    const QStringList* frames = &tl.frames;
+    if (!tl.aliasOf.isEmpty()) {
+        for (const auto& src : m_session->timelines) {
+            if (src.name == tl.aliasOf && src.aliasOf.isEmpty()) {
+                frames = &src.frames;
+                break;
+            }
+        }
+    }
+
+    if (m_animFrameIndex < 0 || m_animFrameIndex >= frames->size()) return;
+    const QString& path = (*frames)[m_animFrameIndex];
+
+    for (const auto& model : m_session->layoutModels) {
+        for (const auto& sprite : model.sprites) {
+            if (!sprite || sprite->path != path) continue;
+            onSpriteSelected(sprite);
+            // Also sync the navigator tree highlight so both panels agree
+            if (m_spriteTree) {
+                QTreeWidgetItemIterator it(m_spriteTree);
+                while (*it) {
+                    if ((*it)->childCount() == 0) {
+                        auto treeSprite = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
+                        if (treeSprite == sprite) {
+                            m_spriteTree->blockSignals(true);
+                            m_spriteTree->setCurrentItem(*it);
+                            m_spriteTree->blockSignals(false);
+                            m_spriteTree->scrollToItem(*it, QAbstractItemView::EnsureVisible);
+                            break;
+                        }
+                    }
+                    ++it;
+                }
+            }
+            return;
+        }
+    }
 }
 
 void MainWindow::onAnimTimerTimeout() {

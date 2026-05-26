@@ -551,12 +551,34 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         connect(m_previewView->overlay(), &EditorOverlayItem::pivotDragFinished,
                 this, [this](int oldX, int oldY, int newX, int newY) {
             if (!m_session->selectedSprite) return;
+            QVector<QPair<SpritePtr, QPair<int,int>>> coTargets;
+            if (m_settings.propagateEditsToChecked) {
+                for (const auto& sprite : m_session->selectedSprites) {
+                    if (sprite && sprite != m_session->selectedSprite) {
+                        coTargets.append({sprite, {sprite->pivotX, sprite->pivotY}});
+                        sprite->pivotX = newX;
+                        sprite->pivotY = newY;
+                    }
+                }
+            }
+            AnimationPreviewService::invalidateBounds();
+            updateOnionSkinDisplay();
             m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
-                                                  oldX, oldY, newX, newY, true));
+                                                  oldX, oldY, newX, newY, true,
+                                                  std::move(coTargets)));
         });
         connect(m_previewView->overlay(), &EditorOverlayItem::markerDragFinished,
                 this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
             if (!m_session->selectedSprite) return;
+            QVector<QPair<SpritePtr, QVector<NamedPoint>>> coTargets;
+            if (m_settings.propagateEditsToChecked) {
+                for (const auto& sprite : m_session->selectedSprites) {
+                    if (sprite && sprite != m_session->selectedSprite) {
+                        coTargets.append({sprite, sprite->points});
+                        sprite->points = newPoints;
+                    }
+                }
+            }
             m_undoStack->push(new SetMarkersCommand(
                 m_session->selectedSprite,
                 oldPoints,
@@ -564,7 +586,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 [this]() {
                     m_previewView->overlay()->updateLayout();
                     refreshHandleCombo();
-                }
+                },
+                std::move(coTargets)
             ));
         });
     }
@@ -1366,6 +1389,10 @@ void MainWindow::onSettingsSpritesheetClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::Spritesheet);
 }
 
+void MainWindow::onSettingsFramesEditorClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::FramesEditor);
+}
+
 #ifndef Q_OS_WASM
 void MainWindow::onSettingsCliToolsClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::CliTools);
@@ -1392,6 +1419,18 @@ void MainWindow::onManageProfiles() {
     }
 }
 
+
+void MainWindow::updateOnionSkinDisplay() {
+    if (!m_previewView || !m_session) return;
+    if (!m_settings.onionSkinEnabled) { m_previewView->setGhostSprites({}); return; }
+    const QPoint activePivot = m_session->selectedSprite
+        ? QPoint(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY)
+        : QPoint();
+    QList<SpritePtr> ghosts;
+    for (const auto& s : m_session->selectedSprites)
+        if (s && s != m_session->selectedSprite) ghosts.append(s);
+    m_previewView->setGhostSprites(ghosts, activePivot);
+}
 
 /**
  * @brief Applies application settings.
@@ -1432,6 +1471,19 @@ void MainWindow::applySettings() {
         updateFolderLabel(m_session->currentFolder);
 
     updateOpenSourceFolderAction();
+    updateOnionSkinDisplay();
+
+    // Refresh multi-selection label: message only applies when propagation is on
+    if (m_multiSelectionLabel && m_session) {
+        const int n = m_session->selectedSprites.size();
+        if (n > 1 && m_settings.propagateEditsToChecked) {
+            m_multiSelectionLabel->setText(
+                tr("%1 sprites selected — pivot and marker changes apply to all").arg(n));
+            m_multiSelectionLabel->setVisible(true);
+        } else {
+            m_multiSelectionLabel->setVisible(false);
+        }
+    }
 }
 
 void MainWindow::appendCliLog(const QString& text) {

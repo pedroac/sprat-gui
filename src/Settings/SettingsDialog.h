@@ -15,6 +15,7 @@ public:
     enum class Section {
         Styles,
         Spritesheet,
+        FramesEditor,
 #ifndef Q_OS_WASM
         CliTools
 #endif
@@ -50,6 +51,7 @@ private:
     QScrollArea* m_scrollArea = nullptr;
     QGroupBox* m_stylesGroup = nullptr;
     QGroupBox* m_spritesheetGroup = nullptr;
+    QGroupBox* m_framesEditorGroup = nullptr;
 #ifndef Q_OS_WASM
     QGroupBox* m_cliGroup = nullptr;
 #endif
@@ -70,4 +72,8 @@ private:
     // Sync controls
     QComboBox* m_syncModeCombo;
     QPushButton* m_syncNowBtn;
+
+    // Frames Editor controls
+    QCheckBox* m_onionSkinCheck = nullptr;
+    QCheckBox* m_propagateEditsCheck = nullptr;
 };

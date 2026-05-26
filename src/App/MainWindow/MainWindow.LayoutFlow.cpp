@@ -618,6 +618,7 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
 
     if (m_editAliasesBtn) m_editAliasesBtn->setEnabled(sprite != nullptr);
     updateAliasesButton();
+    updateOnionSkinDisplay();
 }
 
 void MainWindow::updateAliasesButton() {

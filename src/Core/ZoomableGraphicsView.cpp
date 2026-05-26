@@ -39,14 +39,17 @@ void ZoomableGraphicsView::initialFit() {
         return;
     }
     const QRectF sceneRect = scene()->sceneRect();
-    const QRect viewportRect = viewport()->rect();
+    // Inset by 1 px on each side so the computed zoom never places the scene
+    // exactly at the viewport boundary — that exact-fit condition causes Qt to
+    // oscillate the scrollbar on/off indefinitely.
+    const QRect viewportRect = viewport()->rect().adjusted(1, 1, -1, -1);
     if (viewportRect.isEmpty()) {
         return;
     }
-    
+
     double newZoom = 1.0;
     const bool isLarger = sceneRect.width() > viewportRect.width() || sceneRect.height() > viewportRect.height();
-    
+
     if (isLarger) {
         if (sceneRect.height() > sceneRect.width()) {
             // Portrait: fit width to viewport, allow vertical scrolling
@@ -56,9 +59,13 @@ void ZoomableGraphicsView::initialFit() {
             newZoom = (double)viewportRect.height() / sceneRect.height();
         }
     } else {
-        // Scene fits in viewport: fit it as large as possible without scrolling
-        fitInView(sceneRect, Qt::KeepAspectRatio);
-        newZoom = zoom();
+        // Scene fits in the adjusted viewport: scale up as large as possible.
+        // Manual calculation uses the same adjusted rect so the 1-px breathing
+        // room applies here too — fitInView() uses the real viewport internally
+        // and would risk the same oscillation on exact-fit aspect ratios.
+        const double fw = (double)viewportRect.width()  / sceneRect.width();
+        const double fh = (double)viewportRect.height() / sceneRect.height();
+        newZoom = qMin(fw, fh);
     }
     
     newZoom = qBound(m_minZoom, newZoom, m_maxZoom);

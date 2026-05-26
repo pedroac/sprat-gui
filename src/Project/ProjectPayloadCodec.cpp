@@ -2,6 +2,7 @@
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -38,7 +39,9 @@ bool isValidCliPath(const QString& path) {
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
-    root["version"] = input.portablePaths ? 2 : 1;
+    root["schema_version"] = 3;
+    root["written_by"] = QStringLiteral("sprat-gui");
+    root["written_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
 
     QJsonObject layoutOpts;
     layoutOpts["profile"] = input.profile;
@@ -88,27 +91,6 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         layoutInfo["frame_paths"] = framePaths;
     }
 
-    // Write smart_folders array (legacy; kept for backward compat)
-    if (!input.smartFolders.isEmpty()) {
-        QJsonArray smartFoldersArr;
-        for (const auto& sf : input.smartFolders) {
-            QJsonObject sfObj;
-            QString path = sf.path;
-            if (input.portablePaths && !input.projectDir.isEmpty() && !path.isEmpty()) {
-                const QString rel = QDir(input.projectDir).relativeFilePath(path);
-                path = rel.startsWith("..") ? path : rel;
-            }
-            sfObj["path"] = path;
-            if (!sf.excludedFiles.isEmpty()) {
-                QJsonArray excArr;
-                for (const auto& e : sf.excludedFiles) excArr.append(e);
-                sfObj["excluded"] = excArr;
-            }
-            smartFoldersArr.append(sfObj);
-        }
-        layoutInfo["smart_folders"] = smartFoldersArr;
-    }
-
     // Write sources array (new model)
     auto sourceTypeToString = [](SourceType t) -> QString {
         switch (t) {
@@ -140,6 +122,11 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
                 for (const auto& e : src.excludedFiles) excArr.append(e);
                 sObj["excluded"] = excArr;
             }
+            if (!src.hiddenFolders.isEmpty()) {
+                QJsonArray hiddenArr;
+                for (const auto& h : src.hiddenFolders) hiddenArr.append(h);
+                sObj["hidden_folders"] = hiddenArr;
+            }
             sourcesArr.append(sObj);
         }
         layoutInfo["sources"] = sourcesArr;
@@ -150,7 +137,11 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     // Write orphaned sprites (top-level key)
     if (!input.orphanedSpritePaths.isEmpty()) {
         QJsonArray orphanedArr;
-        for (const QString& p : input.orphanedSpritePaths) orphanedArr.append(p);
+        for (const QString& p : input.orphanedSpritePaths) {
+            QJsonObject entry;
+            entry["path"] = p;
+            orphanedArr.append(entry);
+        }
         root["orphaned_sprites"] = orphanedArr;
     }
 
@@ -273,9 +264,11 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     settings["show_borders"] = input.appSettings.showBorders;
     settings["border_color"] = input.appSettings.borderColor.name(QColor::HexArgb);
     settings["border_style"] = static_cast<int>(input.appSettings.borderStyle);
-    settings["cli_spratlayout"] = input.cliPaths.layoutBinary;
-    settings["cli_spratpack"] = input.cliPaths.packBinary;
-    settings["cli_spratconvert"] = input.cliPaths.convertBinary;
+    if (!input.portablePaths) {
+        settings["cli_spratlayout"] = input.cliPaths.layoutBinary;
+        settings["cli_spratpack"] = input.cliPaths.packBinary;
+        settings["cli_spratconvert"] = input.cliPaths.convertBinary;
+    }
     root["settings"] = settings;
 
     QJsonObject saveOpts;
@@ -286,13 +279,18 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         profilesArr.append(profileName);
     }
     saveOpts["profiles"] = profilesArr;
+    saveOpts["sync_sprites"] = input.saveConfig.syncSprites;
     root["save_options"] = saveOpts;
 
+    root["complete"] = true;
     return root;
 }
 
 ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& root, const QString& currentFolder, QVector<LayoutModel>& layoutModels) {
     ProjectPayloadApplyResult out;
+    if (!root.value(QStringLiteral("complete")).toBool()) {
+        qWarning() << "ProjectPayloadCodec: project file may be incomplete or corrupted (missing 'complete' sentinel)";
+    }
 
     QJsonObject markersInfo = root["spritemarkers"].toObject();
     QJsonObject spritesState = markersInfo["sprites"].toObject();
@@ -458,6 +456,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     for (const auto& pVal : profilesArr) {
         out.saveConfig.profiles.append(pVal.toString());
     }
+    out.saveConfig.syncSprites = saveOpts["sync_sprites"].toBool(false);
 
     auto sourceTypeFromString = [](const QString& s) -> SourceType {
         if (s == QStringLiteral("single_image")) return SourceType::SingleImage;
@@ -486,6 +485,9 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 const QJsonArray excArr = sObj["excluded"].toArray();
                 src.excludedFiles.reserve(excArr.size());
                 for (const auto& e : excArr) src.excludedFiles.append(e.toString());
+                const QJsonArray hiddenArr = sObj["hidden_folders"].toArray();
+                src.hiddenFolders.reserve(hiddenArr.size());
+                for (const auto& h : hiddenArr) src.hiddenFolders.append(h.toString());
                 out.sources.append(src);
             }
             // Derive smart_folders from sources for backward-compat consumers
@@ -544,7 +546,14 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         // Read orphaned sprites
         const QJsonArray orphanedArr = root["orphaned_sprites"].toArray();
         out.orphanedSpritePaths.reserve(orphanedArr.size());
-        for (const auto& v : orphanedArr) out.orphanedSpritePaths.append(v.toString());
+        for (const auto& v : orphanedArr) {
+            if (v.isString()) {
+                out.orphanedSpritePaths.append(v.toString());
+            } else if (v.isObject()) {
+                const QString p = v.toObject()[QStringLiteral("path")].toString();
+                if (!p.isEmpty()) out.orphanedSpritePaths.append(p);
+            }
+        }
     }
 
     return out;

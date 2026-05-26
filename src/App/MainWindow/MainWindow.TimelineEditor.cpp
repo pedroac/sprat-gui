@@ -391,51 +391,64 @@ void MainWindow::onTimelineContextMenu(const QPoint& pos)
     if (item && !item->data(0, Qt::UserRole).isValid()) {
         // Folder node
         const QString folderPath = timelineItemFolderPath(item);
-        menu.addAction(tr("Ungroup"), this, [this, folderPath, refreshAndSelect]() {
-            const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
-            const int oldSel = m_session->selectedTimelineIndex;
+        const int lastSlash = folderPath.lastIndexOf('/');
+        const bool hasParent = lastSlash >= 0;
 
-            const QString oldPrefix = folderPath + "/";
-            const int lastSlash = folderPath.lastIndexOf('/');
-            const QString parentPath = (lastSlash < 0) ? QString() : folderPath.left(lastSlash);
-            const QString newPrefix = parentPath.isEmpty() ? QString() : parentPath + "/";
+        // ── Ungroup: move this folder to its grandparent ──────────────────
+        if (hasParent) {
+            menu.addAction(tr("Ungroup"), this, [this, folderPath, refreshAndSelect]() {
+                const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+                const int oldSel = m_session->selectedTimelineIndex;
 
-            // Collision check
-            for (const auto& tl : m_session->timelines) {
-                if (tl.name.startsWith(oldPrefix)) {
-                    const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
-                    for (const auto& other : m_session->timelines) {
-                        if (other.name == newName && !other.name.startsWith(oldPrefix)) {
-                            MessageDialog::warning(this, tr("Ungroup"),
-                                tr("Cannot ungroup: \"%1\" would conflict with an existing timeline.").arg(newName));
-                            return;
+                const int ls = folderPath.lastIndexOf('/');
+                const QString folderName     = folderPath.mid(ls + 1);
+                const QString parentPath     = folderPath.left(ls);
+                const int grandparentSlash   = parentPath.lastIndexOf('/');
+                const QString grandparentPath = (grandparentSlash < 0) ? QString()
+                                                : parentPath.left(grandparentSlash);
+                const QString oldPrefix = folderPath + "/";
+                const QString newPrefix = (grandparentPath.isEmpty() ? QString()
+                                                                      : grandparentPath + "/")
+                                          + folderName + "/";
+
+                // Collision check
+                for (const auto& tl : m_session->timelines) {
+                    if (tl.name.startsWith(oldPrefix)) {
+                        const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
+                        for (const auto& other : m_session->timelines) {
+                            if (other.name == newName && !other.name.startsWith(oldPrefix)) {
+                                MessageDialog::warning(this, tr("Ungroup"),
+                                    tr("Cannot ungroup: \"%1\" would conflict with an existing timeline.").arg(newName));
+                                return;
+                            }
                         }
                     }
                 }
-            }
 
-            for (auto& tl : m_session->timelines) {
-                if (tl.name.startsWith(oldPrefix)) {
-                    const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
-                    // Cascade aliasOf
-                    const QString oldName = tl.name;
-                    tl.name = newName;
-                    for (auto& other : m_session->timelines) {
-                        if (other.aliasOf == oldName)
-                            other.aliasOf = newName;
+                for (auto& tl : m_session->timelines) {
+                    if (tl.name.startsWith(oldPrefix)) {
+                        const QString oldName = tl.name;
+                        tl.name = newPrefix + tl.name.mid(oldPrefix.length());
+                        for (auto& other : m_session->timelines) {
+                            if (other.aliasOf == oldName)
+                                other.aliasOf = tl.name;
+                        }
                     }
                 }
-            }
 
-            m_undoStack->push(new TimelinesUpdateCommand(
-                &m_session->timelines, oldTimelines, m_session->timelines,
-                oldSel, m_session->selectedTimelineIndex,
-                &m_session->selectedTimelineIndex,
-                refreshAndSelect, tr("Ungroup")));
-            refreshAndSelect();
-        });
+                m_undoStack->push(new TimelinesUpdateCommand(
+                    &m_session->timelines, oldTimelines, m_session->timelines,
+                    oldSel, m_session->selectedTimelineIndex,
+                    &m_session->selectedTimelineIndex,
+                    refreshAndSelect, tr("Ungroup")));
+                refreshAndSelect();
+            });
+        }
 
-        menu.addAction(tr("Remove Group"), this, [this, folderPath, refreshAndSelect]() {
+        // ── Remove... submenu ─────────────────────────────────────────────
+        QMenu* removeMenu = menu.addMenu(tr("Remove..."));
+
+        removeMenu->addAction(tr("and descendants"), this, [this, folderPath, refreshAndSelect]() {
             const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
             const int oldSel = m_session->selectedTimelineIndex;
 
@@ -459,6 +472,48 @@ void MainWindow::onTimelineContextMenu(const QPoint& pos)
                 oldSel, m_session->selectedTimelineIndex,
                 &m_session->selectedTimelineIndex,
                 refreshAndSelect, tr("Remove Group")));
+            refreshAndSelect();
+        });
+
+        removeMenu->addAction(tr("keep descendants"), this, [this, folderPath, refreshAndSelect]() {
+            const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+            const int oldSel = m_session->selectedTimelineIndex;
+
+            const QString oldPrefix = folderPath + "/";
+            const int ls2 = folderPath.lastIndexOf('/');
+            const QString parentPath2 = (ls2 < 0) ? QString() : folderPath.left(ls2);
+            const QString newPrefix = parentPath2.isEmpty() ? QString() : parentPath2 + "/";
+
+            // Collision check
+            for (const auto& tl : m_session->timelines) {
+                if (tl.name.startsWith(oldPrefix)) {
+                    const QString newName = newPrefix + tl.name.mid(oldPrefix.length());
+                    for (const auto& other : m_session->timelines) {
+                        if (other.name == newName && !other.name.startsWith(oldPrefix)) {
+                            MessageDialog::warning(this, tr("Remove Group"),
+                                tr("Cannot dissolve: \"%1\" would conflict with an existing timeline.").arg(newName));
+                            return;
+                        }
+                    }
+                }
+            }
+
+            for (auto& tl : m_session->timelines) {
+                if (tl.name.startsWith(oldPrefix)) {
+                    const QString oldName = tl.name;
+                    tl.name = newPrefix + tl.name.mid(oldPrefix.length());
+                    for (auto& other : m_session->timelines) {
+                        if (other.aliasOf == oldName)
+                            other.aliasOf = tl.name;
+                    }
+                }
+            }
+
+            m_undoStack->push(new TimelinesUpdateCommand(
+                &m_session->timelines, oldTimelines, m_session->timelines,
+                oldSel, m_session->selectedTimelineIndex,
+                &m_session->selectedTimelineIndex,
+                refreshAndSelect, tr("Remove Group (keep descendants)")));
             refreshAndSelect();
         });
 

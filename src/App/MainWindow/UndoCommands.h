@@ -107,11 +107,14 @@ public:
 class SetPivotCommand : public QUndoCommand {
 public:
     SetPivotCommand(SpritePtr sprite, int oldX, int oldY, int newX, int newY,
-                    bool alreadyApplied = false, QUndoCommand* parent = nullptr)
+                    bool alreadyApplied = false,
+                    QVector<QPair<SpritePtr, QPair<int,int>>> coTargets = {},
+                    QUndoCommand* parent = nullptr)
         : QUndoCommand(QObject::tr("Set Pivot"), parent)
         , m_sprite(sprite)
         , m_oldX(oldX), m_oldY(oldY), m_newX(newX), m_newY(newY)
         , m_skipFirstRedo(alreadyApplied)
+        , m_coTargets(std::move(coTargets))
     {}
 
     void redo() override {
@@ -119,16 +122,28 @@ public:
         if (m_sprite) {
             m_sprite->pivotX = m_newX;
             m_sprite->pivotY = m_newY;
-            AnimationPreviewService::invalidateBounds();
         }
+        for (const auto& pair : m_coTargets) {
+            if (pair.first) {
+                pair.first->pivotX = m_newX;
+                pair.first->pivotY = m_newY;
+            }
+        }
+        AnimationPreviewService::invalidateBounds();
     }
 
     void undo() override {
         if (m_sprite) {
             m_sprite->pivotX = m_oldX;
             m_sprite->pivotY = m_oldY;
-            AnimationPreviewService::invalidateBounds();
         }
+        for (const auto& pair : m_coTargets) {
+            if (pair.first) {
+                pair.first->pivotX = pair.second.first;
+                pair.first->pivotY = pair.second.second;
+            }
+        }
+        AnimationPreviewService::invalidateBounds();
     }
 
     int id() const override { return 1001; }
@@ -136,6 +151,7 @@ public:
     bool mergeWith(const QUndoCommand* other) override {
         const auto* o = static_cast<const SetPivotCommand*>(other);
         if (o->m_sprite != m_sprite) return false;
+        if (o->m_coTargets.size() != m_coTargets.size()) return false;
         m_newX = o->m_newX;
         m_newY = o->m_newY;
         return true;
@@ -145,6 +161,7 @@ private:
     SpritePtr m_sprite;
     int m_oldX, m_oldY, m_newX, m_newY;
     mutable bool m_skipFirstRedo = false;
+    QVector<QPair<SpritePtr, QPair<int,int>>> m_coTargets;
 };
 
 // ---------------------------------------------------------------------------
@@ -513,6 +530,7 @@ public:
                        const QVector<NamedPoint>& oldPoints,
                        const QVector<NamedPoint>& newPoints,
                        std::function<void()> postExecute,
+                       QVector<QPair<SpritePtr, QVector<NamedPoint>>> coTargets = {},
                        QUndoCommand* parent = nullptr)
         : QUndoCommand(QObject::tr("Edit Markers"), parent)
         , m_sprite(sprite)
@@ -520,16 +538,23 @@ public:
         , m_newPoints(newPoints)
         , m_postExecute(std::move(postExecute))
         , m_skipFirstRedo(true)
+        , m_coTargets(std::move(coTargets))
     {}
 
     void redo() override {
         if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
         if (m_sprite) m_sprite->points = m_newPoints;
+        for (const auto& pair : m_coTargets) {
+            if (pair.first) pair.first->points = m_newPoints;
+        }
         if (m_postExecute) m_postExecute();
     }
 
     void undo() override {
         if (m_sprite) m_sprite->points = m_oldPoints;
+        for (const auto& pair : m_coTargets) {
+            if (pair.first) pair.first->points = pair.second;
+        }
         if (m_postExecute) m_postExecute();
     }
 
@@ -541,119 +566,7 @@ private:
     QVector<NamedPoint> m_newPoints;
     std::function<void()> m_postExecute;
     mutable bool m_skipFirstRedo;
-};
-
-// ---------------------------------------------------------------------------
-// (1009) ApplyPivotToFramesCommand — copy pivot from one sprite to many
-// ---------------------------------------------------------------------------
-class ApplyPivotToFramesCommand : public QUndoCommand {
-public:
-    // targets: (sprite, (oldX, oldY))
-    ApplyPivotToFramesCommand(const QVector<QPair<SpritePtr, QPair<int,int>>>& targets,
-                               int newX, int newY,
-                               std::function<void()> postExecute,
-                               QUndoCommand* parent = nullptr)
-        : QUndoCommand(QObject::tr("Apply Pivot to %1 Sprites").arg(targets.size()), parent)
-        , m_targets(targets)
-        , m_newX(newX)
-        , m_newY(newY)
-        , m_postExecute(std::move(postExecute))
-        , m_skipFirstRedo(true)
-    {}
-
-    void redo() override {
-        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
-        for (const auto& pair : m_targets) {
-            if (pair.first) {
-                pair.first->pivotX = m_newX;
-                pair.first->pivotY = m_newY;
-            }
-        }
-        if (m_postExecute) m_postExecute();
-    }
-
-    void undo() override {
-        for (const auto& pair : m_targets) {
-            if (pair.first) {
-                pair.first->pivotX = pair.second.first;
-                pair.first->pivotY = pair.second.second;
-            }
-        }
-        if (m_postExecute) m_postExecute();
-    }
-
-    int id() const override { return 1010; }
-
-private:
-    QVector<QPair<SpritePtr, QPair<int,int>>> m_targets;
-    int m_newX, m_newY;
-    std::function<void()> m_postExecute;
-    mutable bool m_skipFirstRedo;
-};
-
-// ---------------------------------------------------------------------------
-// (1010) ApplyMarkerToFramesCommand — copy a marker from one sprite to many
-// ---------------------------------------------------------------------------
-class ApplyMarkerToFramesCommand : public QUndoCommand {
-public:
-    // targets: (sprite, old marker at that name — nullopt if it didn't exist)
-    ApplyMarkerToFramesCommand(const QVector<QPair<SpritePtr, std::optional<NamedPoint>>>& targets,
-                                const NamedPoint& newMarker,
-                                std::function<void()> postExecute,
-                                QUndoCommand* parent = nullptr)
-        : QUndoCommand(QObject::tr("Apply Marker to %1 Sprites").arg(targets.size()), parent)
-        , m_targets(targets)
-        , m_newMarker(newMarker)
-        , m_postExecute(std::move(postExecute))
-        , m_skipFirstRedo(true)
-    {}
-
-    void redo() override {
-        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
-        for (const auto& pair : m_targets) {
-            SpritePtr sprite = pair.first;
-            if (!sprite) continue;
-            auto it = std::find_if(sprite->points.begin(), sprite->points.end(),
-                [this](const NamedPoint& p){ return p.name == m_newMarker.name; });
-            if (it == sprite->points.end()) {
-                sprite->points.append(m_newMarker);
-            } else {
-                *it = m_newMarker;
-            }
-        }
-        if (m_postExecute) m_postExecute();
-    }
-
-    void undo() override {
-        for (const auto& pair : m_targets) {
-            SpritePtr sprite = pair.first;
-            if (!sprite) continue;
-            auto it = std::find_if(sprite->points.begin(), sprite->points.end(),
-                [this](const NamedPoint& p){ return p.name == m_newMarker.name; });
-            if (pair.second.has_value()) {
-                // Restore old marker
-                if (it != sprite->points.end()) {
-                    *it = pair.second.value();
-                } else {
-                    sprite->points.append(pair.second.value());
-                }
-            } else {
-                // Was not present — remove it
-                if (it != sprite->points.end()) {
-                    sprite->points.erase(it);
-                }
-            }
-        }
-        if (m_postExecute) m_postExecute();
-    }
-
-    int id() const override { return 1011; }
-
-private:
-    QVector<QPair<SpritePtr, std::optional<NamedPoint>>> m_targets;
-    NamedPoint m_newMarker;
-    std::function<void()> m_postExecute;
-    mutable bool m_skipFirstRedo;
+    QVector<QPair<SpritePtr, QVector<NamedPoint>>> m_coTargets;
 };
 
 // ---------------------------------------------------------------------------
@@ -755,10 +668,12 @@ public:
             QFile::rename(pair.first, pair.second);
         }
         *m_activeFramePaths = m_newActivePaths;
-        // Remove now-empty directories
-        for (const QString& d : m_removedDirs) {
+        // Remove now-empty directories deepest-first
+        QStringList sortedDirs(m_removedDirs.begin(), m_removedDirs.end());
+        std::sort(sortedDirs.begin(), sortedDirs.end(),
+                  [](const QString& a, const QString& b){ return a.length() > b.length(); });
+        for (const QString& d : sortedDirs)
             QDir().rmdir(d);
-        }
         if (m_ensureFrameList) m_ensureFrameList();
         if (m_postExecute) m_postExecute();
     }
@@ -793,6 +708,57 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// (1025) MoveItemCommand — move a file or directory to a new path (Ungroup)
+// ---------------------------------------------------------------------------
+class MoveItemCommand : public QUndoCommand {
+public:
+    MoveItemCommand(QStringList* activeFramePaths,
+                    const QString& oldPath,
+                    const QString& newPath,
+                    const QStringList& savedActivePaths,
+                    const QStringList& newActivePaths,
+                    std::function<bool()> ensureFrameList,
+                    std::function<void()> postExecute,
+                    const QString& label,
+                    QUndoCommand* parent = nullptr)
+        : QUndoCommand(label, parent)
+        , m_activeFramePaths(activeFramePaths)
+        , m_oldPath(oldPath)
+        , m_newPath(newPath)
+        , m_savedActivePaths(savedActivePaths)
+        , m_newActivePaths(newActivePaths)
+        , m_ensureFrameList(std::move(ensureFrameList))
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        QFile::rename(m_oldPath, m_newPath);
+        *m_activeFramePaths = m_newActivePaths;
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecute) m_postExecute();
+    }
+
+    void undo() override {
+        QFile::rename(m_newPath, m_oldPath);
+        *m_activeFramePaths = m_savedActivePaths;
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecute) m_postExecute();
+    }
+
+    int id() const override { return 1025; }
+
+private:
+    QStringList* m_activeFramePaths;
+    QString m_oldPath, m_newPath;
+    QStringList m_savedActivePaths, m_newActivePaths;
+    std::function<bool()> m_ensureFrameList;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
 // (1013) RemoveSpritesCommand — remove sprites from layout (file stays on disk)
 // ---------------------------------------------------------------------------
 class RemoveSpritesCommand : public QUndoCommand {
@@ -810,7 +776,7 @@ public:
                           std::function<void()> postExecuteRedo,
                           std::function<void()> postExecuteUndo,
                           QUndoCommand* parent = nullptr)
-        : QUndoCommand(QObject::tr("Remove from Layout"), parent)
+        : QUndoCommand(QObject::tr("Exclude from Layout"), parent)
         , m_activeFramePaths(activeFramePaths)
         , m_timelines(timelines)
         , m_selectedTimelineIndex(selectedTimelineIndex)
@@ -1683,5 +1649,121 @@ private:
     std::function<bool()> m_ensureFrameList;
     std::function<void()> m_postExecuteRedo;
     std::function<void()> m_postExecuteUndo;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1026) NavigatorHideFolderCommand — hide a folder level from navigator view
+//
+// Adds the folder's absolute path to m_navigatorHiddenFolders so that
+// refreshSpriteTree strips that path segment and the folder's children appear
+// directly under the parent node.  No disk changes are made.  Undo reverses
+// the visibility change by removing the path from the set.
+// ---------------------------------------------------------------------------
+// Stored in ProjectSource::hiddenFolders (relative paths).
+// hide=true  → redo appends relPath (hide),   undo removes it (unhide)
+// hide=false → redo removes relPath (unhide),  undo appends it (re-hide)
+class NavigatorHideFolderCommand : public QUndoCommand {
+public:
+    NavigatorHideFolderCommand(QStringList* hiddenFolders,
+                               const QString& relPath,
+                               bool hide,
+                               std::function<void()> postExecute,
+                               QUndoCommand* parent = nullptr)
+        : QUndoCommand(hide ? QObject::tr("Hide Group") : QObject::tr("Unhide Group"), parent)
+        , m_hiddenFolders(hiddenFolders)
+        , m_relPath(relPath)
+        , m_hide(hide)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        if (m_hide) { if (!m_hiddenFolders->contains(m_relPath)) m_hiddenFolders->append(m_relPath); }
+        else        m_hiddenFolders->removeAll(m_relPath);
+        if (m_postExecute) m_postExecute();
+    }
+
+    void undo() override {
+        if (m_hide) m_hiddenFolders->removeAll(m_relPath);
+        else        { if (!m_hiddenFolders->contains(m_relPath)) m_hiddenFolders->append(m_relPath); }
+        if (m_postExecute) m_postExecute();
+    }
+
+    int id() const override { return 1026; }
+
+private:
+    QStringList* m_hiddenFolders;
+    QString m_relPath;
+    bool m_hide;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
+// (1027) ExcludeGroupFromSourceCommand — add/remove paths in a source's
+// excludedFiles list and mirror the change in activeFramePaths.
+//
+// exclude=true  → redo adds relPaths to excludedFiles, removes absPaths from layout
+// exclude=false → redo removes relPaths from excludedFiles, adds absPaths to layout
+// ---------------------------------------------------------------------------
+class ExcludeGroupFromSourceCommand : public QUndoCommand {
+public:
+    ExcludeGroupFromSourceCommand(QStringList* excludedFiles,
+                                  QStringList* activeFramePaths,
+                                  const QStringList& relPaths,
+                                  const QStringList& savedActivePaths,
+                                  const QStringList& newActivePaths,
+                                  bool exclude,
+                                  std::function<bool()> ensureFrameList,
+                                  std::function<void()> postExecute,
+                                  QUndoCommand* parent = nullptr)
+        : QUndoCommand(exclude ? QObject::tr("Hide with Descendants")
+                               : QObject::tr("Re-include"), parent)
+        , m_excludedFiles(excludedFiles)
+        , m_activeFramePaths(activeFramePaths)
+        , m_relPaths(relPaths)
+        , m_savedActivePaths(savedActivePaths)
+        , m_newActivePaths(newActivePaths)
+        , m_exclude(exclude)
+        , m_ensureFrameList(std::move(ensureFrameList))
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        applyState(m_exclude);
+    }
+
+    void undo() override {
+        applyState(!m_exclude);
+    }
+
+    int id() const override { return 1027; }
+
+private:
+    void applyState(bool exclude) {
+        if (exclude) {
+            for (const QString& rel : m_relPaths)
+                if (!m_excludedFiles->contains(rel)) m_excludedFiles->append(rel);
+            *m_activeFramePaths = m_newActivePaths;
+        } else {
+            for (const QString& rel : m_relPaths) m_excludedFiles->removeAll(rel);
+            *m_activeFramePaths = m_savedActivePaths;
+        }
+        if (m_ensureFrameList) m_ensureFrameList();
+        if (m_postExecute)     m_postExecute();
+    }
+
+    QStringList* m_excludedFiles;
+    QStringList* m_activeFramePaths;
+    QStringList  m_relPaths;
+    QStringList  m_savedActivePaths;
+    QStringList  m_newActivePaths;
+    bool         m_exclude;
+    std::function<bool()> m_ensureFrameList;
+    std::function<void()> m_postExecute;
     mutable bool m_skipFirstRedo;
 };

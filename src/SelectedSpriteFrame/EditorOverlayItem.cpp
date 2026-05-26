@@ -374,30 +374,24 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
             QAction* top = menu.addAction(trOverlay("Top"));
             QAction* bottom = menu.addAction(trOverlay("Bottom"));
             QAction* vcenter = menu.addAction(trOverlay("V-Center"));
-            menu.addSeparator();
-            QAction* applyAction = menu.addAction(trOverlay("Apply to Selected Frames"));
 
             QAction* sel = menu.exec(event->screenPos());
             if (sel) {
-                if (sel == applyAction) {
-                    emit applyPivotToSelectedFramesRequested();
-                } else {
-                    const int oldPivotX = activeSprite->pivotX;
-                    const int oldPivotY = activeSprite->pivotY;
-                    for (auto& sprite : m_sprites) {
-                        if (sel == left) sprite->pivotX = 0;
-                        else if (sel == right) sprite->pivotX = m_sceneSize.width();
-                        else if (sel == hcenter) sprite->pivotX = m_sceneSize.width() / 2;
-                        else if (sel == top) sprite->pivotY = 0;
-                        else if (sel == bottom) sprite->pivotY = m_sceneSize.height();
-                        else if (sel == vcenter) sprite->pivotY = m_sceneSize.height() / 2;
-                    }
-                    emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY);
-                    update();
-                    if (activeSprite->pivotX != oldPivotX || activeSprite->pivotY != oldPivotY)
-                        emit pivotDragFinished(oldPivotX, oldPivotY,
-                                               activeSprite->pivotX, activeSprite->pivotY);
+                const int oldPivotX = activeSprite->pivotX;
+                const int oldPivotY = activeSprite->pivotY;
+                for (auto& sprite : m_sprites) {
+                    if (sel == left) sprite->pivotX = 0;
+                    else if (sel == right) sprite->pivotX = m_sceneSize.width();
+                    else if (sel == hcenter) sprite->pivotX = m_sceneSize.width() / 2;
+                    else if (sel == top) sprite->pivotY = 0;
+                    else if (sel == bottom) sprite->pivotY = m_sceneSize.height();
+                    else if (sel == vcenter) sprite->pivotY = m_sceneSize.height() / 2;
                 }
+                emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY);
+                update();
+                if (activeSprite->pivotX != oldPivotX || activeSprite->pivotY != oldPivotY)
+                    emit pivotDragFinished(oldPivotX, oldPivotY,
+                                           activeSprite->pivotX, activeSprite->pivotY);
             }
             event->accept();
             return;
@@ -419,12 +413,6 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                     m_selectedVertexIndex = -1;
                     emit markerSelected(p.name);
                     update();
-                }
-                QMenu menu;
-                m_suppressNextViewContextMenu = true;
-                QAction* applyAction = menu.addAction(trOverlay("Apply to Selected Frames"));
-                if (menu.exec(event->screenPos()) == applyAction) {
-                    emit applyMarkerToSelectedFramesRequested(p.name);
                 }
                 event->accept();
                 return;

@@ -309,18 +309,6 @@ private slots:
      */
     void onMarkerChangedFromCanvas();
 
-    /**
-     * @brief Handles applying pivot to selected timeline frames.
-     */
-    void onApplyPivotToSelectedTimelineFrames();
-
-    /**
-     * @brief Handles applying marker to selected timeline frames.
-     * 
-     * @param markerName Name of marker to apply
-     */
-    void onApplyMarkerToSelectedTimelineFrames(const QString& markerName);
-
     // === Profile Management Events ===
     /**
      * @brief Handles changes to profile selection.
@@ -514,6 +502,8 @@ private slots:
     void onOpenSourceFolderClicked();
     void ensureSourceFolder();             // creates temp dir if needed
     void promoteSourceFolderAfterSave(const QString& saveDestination);
+    void copySpriteToProjectFolder(const QString& projectDir);
+    void syncNewSpritesToProjectFolder(const QString& projectDir);
     void updateOpenSourceFolderAction();   // enable/disable based on state
     void onWatchModePeriodicCheck();       // periodic file removal detection in Watch mode
 #ifdef Q_OS_WASM
@@ -1020,19 +1010,19 @@ private:
     QStringList collectDescendantSpritePaths(QTreeWidgetItem* item) const;
     QString folderPathForTreeItem(QTreeWidgetItem* item) const;
     void onNavigatorDeleteFrames(const QStringList& paths);
+    void onNavigatorExcludeKey(QTreeWidgetItem* item);
     void onNavigatorExcludeFromSmartFolder(const QString& absolutePath, int smartFolderIndex);
     void onNavigatorAddSmartFolder();
     void onNavigatorAddFrames(const QString& subfolder);
-    void onNavigatorSyncGroup(const QMap<QString, SpritePtr>& byPath,
-                              SpritePtr refSprite,
-                              const QStringList& groupPaths,
-                              bool syncPivot,
-                              const QStringList& syncMarkerNames);
     void onNavigatorAddToTimeline(const QStringList& paths);
     void onNavigatorCreateTimeline(const QStringList& paths, QTreeWidgetItem* contextItem = nullptr);
     void onNavigatorCreateGroup(const QStringList& paths, const QString& parentFolder);
     void onNavigatorDeleteGroup(QTreeWidgetItem* groupItem);
-    void onNavigatorUngroup(QTreeWidgetItem* groupItem);
+    void onNavigatorHideGroupOnly(QTreeWidgetItem* groupItem);
+    void onNavigatorUnhideGroup(int sourceIdx, const QString& relPath);
+    void onNavigatorExcludeGroup(QTreeWidgetItem* groupItem);
+    void onNavigatorReincludeFromSource(int sourceIdx, const QString& relPath);
+    QString absolutePathForNavItem(QTreeWidgetItem* item) const;
     void onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup);
     void onNavigatorAutoCreateTimelinesForSource(int sourceIndex);
 
@@ -1122,6 +1112,7 @@ public:
     void onSettingsClicked();
     void onSettingsStylesClicked();
     void onSettingsSpritesheetClicked();
+    void onSettingsFramesEditorClicked();
 #ifndef Q_OS_WASM
     void onSettingsCliToolsClicked();
 #endif
@@ -1130,6 +1121,16 @@ public:
      * @brief Applies settings to the UI.
      */
     void applySettings();
+
+    /**
+     * @brief Updates ghost (onion skin) display in the preview canvas.
+     */
+    void updateOnionSkinDisplay();
+
+    /**
+     * @brief Selects the sprite corresponding to the current animation frame index.
+     */
+    void syncSelectedSpriteToAnimFrame();
 
     /**
      * @brief Shows Quick Start guide dialog.
@@ -1241,6 +1242,8 @@ private:
     NavigatorTreeWidget* m_spriteTree      = nullptr;
     QLineEdit*      m_spriteFilterEdit    = nullptr;
     QLabel*         m_spriteFilterResultLabel = nullptr;
+    QCheckBox*      m_showHiddenToggleBtn = nullptr;
+    bool            m_showHiddenItems     = false;
     QAction*        m_showLayoutAction      = nullptr;
     QAction*        m_showNavigatorAction  = nullptr;
     QAction*        m_animationToggleAction = nullptr;
@@ -1488,6 +1491,7 @@ private:
     QSize m_singleImageDimensions;  // Cache to avoid redundant image loads
     bool m_inResize = false;
     bool m_isRestoringProject = false;
+    // hidden folders are now stored per-source in ProjectSource::hiddenFolders
 
 #ifdef Q_OS_WASM
     static MainWindow* s_wasmInstance;

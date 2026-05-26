@@ -26,6 +26,7 @@ void SettingsDialog::setupUi() {
     switch (m_initialSection) {
         case Section::Styles: setWindowTitle(tr("Style Settings")); break;
         case Section::Spritesheet: setWindowTitle(tr("Spritesheet Settings")); break;
+        case Section::FramesEditor: setWindowTitle(tr("Frames Editor Settings")); break;
 #ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
 #endif
@@ -138,6 +139,23 @@ void SettingsDialog::setupUi() {
     contentLayout->addWidget(m_spritesheetGroup);
     m_spritesheetGroup->setVisible(m_initialSection == Section::Spritesheet);
 
+    // Frames Editor Group
+    m_framesEditorGroup = new QGroupBox(tr("Frames Editor"), content);
+    QFormLayout* framesEditorForm = new QFormLayout(m_framesEditorGroup);
+
+    m_onionSkinCheck = new QCheckBox(tr("Enable onion skin"), this);
+    m_onionSkinCheck->setChecked(m_settings.onionSkinEnabled);
+    m_onionSkinCheck->setToolTip(tr("Show other checked frames as transparent overlays behind the active frame"));
+    framesEditorForm->addRow("", m_onionSkinCheck);
+
+    m_propagateEditsCheck = new QCheckBox(tr("Apply edits to all checked frames"), this);
+    m_propagateEditsCheck->setChecked(m_settings.propagateEditsToChecked);
+    m_propagateEditsCheck->setToolTip(tr("Automatically apply pivot and marker edits to all checked frames simultaneously"));
+    framesEditorForm->addRow("", m_propagateEditsCheck);
+
+    contentLayout->addWidget(m_framesEditorGroup);
+    m_framesEditorGroup->setVisible(m_initialSection == Section::FramesEditor);
+
 #ifndef Q_OS_WASM
     m_cliGroup = new QGroupBox(tr("CLI Tools"), content);
     QFormLayout* cliForm = new QFormLayout(m_cliGroup);
@@ -215,6 +233,8 @@ void SettingsDialog::resetToDefaults() {
     updateColorButton(m_borderColorBtn, m_settings.borderColor);
     updateColorButton(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor);
     m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
+    if (m_onionSkinCheck) m_onionSkinCheck->setChecked(AppSettings().onionSkinEnabled);
+    if (m_propagateEditsCheck) m_propagateEditsCheck->setChecked(AppSettings().propagateEditsToChecked);
 
     int deduplicateIndex = m_deduplicateModeCombo->findData(m_settings.deduplicateMode);
     if (deduplicateIndex >= 0) {
@@ -238,6 +258,8 @@ AppSettings SettingsDialog::getSettings() const {
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
     s.syncMode = (SyncMode)m_syncModeCombo->currentData().toInt();
+    if (m_onionSkinCheck) s.onionSkinEnabled = m_onionSkinCheck->isChecked();
+    if (m_propagateEditsCheck) s.propagateEditsToChecked = m_propagateEditsCheck->isChecked();
     return s;
 }
 

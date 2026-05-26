@@ -7,7 +7,7 @@ public:
     explicit NavigatorTreeWidget(QWidget* parent = nullptr);
 
 signals:
-    void deleteRequested(const QStringList& paths);
+    void excludeRequested(QTreeWidgetItem* item);
 
 protected:
     void startDrag(Qt::DropActions supportedActions) override;

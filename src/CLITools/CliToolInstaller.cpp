@@ -137,9 +137,18 @@ cmake -DSPRAT_DOWNLOAD_STB=ON .
 make -j$(nproc 2>/dev/null || echo 1)
 mkdir -p "$HOME/.local/bin"
 install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOME/.local/bin/"
-mkdir -p "$HOME/.local/share/sprat/transforms"
-cp spratprofiles.cfg "$HOME/.local/share/sprat/"
-cp -r transforms/. "$HOME/.local/share/sprat/transforms/"
+
+echo "Moving configuration and transforms..."
+PROFILES_PATH=$("./spratlayout" --default-profiles-config)
+TRANSFORMS_DIR=$("./spratconvert" --transforms-dir)
+if [ -f "spratprofiles.cfg" ]; then
+  mkdir -p "$(dirname "$PROFILES_PATH")"
+  cp "spratprofiles.cfg" "$PROFILES_PATH"
+fi
+if [ -d "transforms" ]; then
+  mkdir -p "$TRANSFORMS_DIR"
+  cp -r transforms/. "$TRANSFORMS_DIR/"
+fi
 
 echo "Checking installed CLI tool versions:"
 echo "Expected version: %1"
@@ -223,6 +232,18 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "  Write-Output \"$tool`: $installed_version\"; "
                              "  if ($installed_version -ne '%3') { throw \"Version mismatch for $tool! Expected %3 but got $installed_version\" } "
                              "}; "
+                             "Write-Output 'Moving configuration and transforms...'; "
+                             "$profilesPath = & '%2\spratlayout.exe' --default-profiles-config; "
+                             "$transformsDir = & '%2\spratconvert.exe' --transforms-dir; "
+                             "if (Test-Path '%2\spratprofiles.cfg') { "
+                             "  $profilesDir = Split-Path $profilesPath; "
+                             "  if (!(Test-Path $profilesDir)) { New-Item -ItemType Directory -Path $profilesDir -Force | Out-Null }; "
+                             "  Copy-Item -Path '%2\spratprofiles.cfg' -Destination $profilesPath -Force; "
+                             "}; "
+                             "if (Test-Path '%2\transforms') { "
+                             "  if (!(Test-Path $transformsDir)) { New-Item -ItemType Directory -Path $transformsDir -Force | Out-Null }; "
+                             "  Copy-Item -Path '%2\transforms\*' -Destination $transformsDir -Recurse -Force; "
+                             "}; "
                              "Write-Output '---'; "
                              "Write-Output 'Successfully installed all sprat-cli tools with version %3'")
                              .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"), expectedVersion);
@@ -248,6 +269,17 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "    exit 1\n"
                              "  fi\n"
                              "done\n"
+                             "echo \"Moving configuration and transforms...\"\n"
+                             "PROFILES_PATH=$(%2/cli/spratlayout --default-profiles-config)\n"
+                             "TRANSFORMS_DIR=$(%2/cli/spratconvert --transforms-dir)\n"
+                             "if [ -f \"%2/cli/spratprofiles.cfg\" ]; then\n"
+                             "  mkdir -p \"$(dirname \"$PROFILES_PATH\")\"\n"
+                             "  cp \"%2/cli/spratprofiles.cfg\" \"$PROFILES_PATH\"\n"
+                             "fi\n"
+                             "if [ -d \"%2/cli/transforms\" ]; then\n"
+                             "  mkdir -p \"$TRANSFORMS_DIR\"\n"
+                             "  cp -R \"%2/cli/transforms/.\" \"$TRANSFORMS_DIR/\"\n"
+                             "fi\n"
                              "echo \"---\"\n"
                              "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(shellQuote(filePath), shellQuote(appDir), expectedVersion);
     m_installProcess->start("bash", QStringList() << "-c" << script);

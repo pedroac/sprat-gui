@@ -10,6 +10,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QScreen>
@@ -38,7 +39,9 @@
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QPlainTextEdit>
+#include <QScrollBar>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QActionGroup>
 #include <QMessageBox>
 #include "NavigatorTreeWidget.h"
@@ -300,6 +303,10 @@ void MainWindow::setupUi() {
     m_spriteFilterResultLabel->setStyleSheet("color: #888; font-size: 11px;");
     m_spriteFilterResultLabel->setVisible(false);
     filterRow->addWidget(m_spriteFilterResultLabel);
+    m_showHiddenToggleBtn = new QCheckBox(tr("Show hidden"), navigatorContent);
+    m_showHiddenToggleBtn->setChecked(false);
+    m_showHiddenToggleBtn->setToolTip(tr("Show hidden and excluded items"));
+    filterRow->addWidget(m_showHiddenToggleBtn);
     navigatorLayout->addLayout(filterRow);
 
     m_spriteTree = new NavigatorTreeWidget(navigatorContent);
@@ -310,12 +317,16 @@ void MainWindow::setupUi() {
     m_spriteTree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_spriteTree, &QWidget::customContextMenuRequested,
             this, &MainWindow::onSpriteTreeContextMenu);
-    connect(m_spriteTree, &NavigatorTreeWidget::deleteRequested,
-            this, &MainWindow::onNavigatorDeleteFrames);
+    connect(m_spriteTree, &NavigatorTreeWidget::excludeRequested,
+            this, &MainWindow::onNavigatorExcludeKey);
     navigatorLayout->addWidget(m_spriteTree);
 
     // Connect filter box to search functionality
     connect(m_spriteFilterEdit, &QLineEdit::textChanged, this, &MainWindow::filterSpriteTree);
+    connect(m_showHiddenToggleBtn, &QCheckBox::toggled, this, [this](bool checked) {
+        m_showHiddenItems = checked;
+        refreshSpriteTree();
+    });
 
     // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
     connect(m_spriteTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int /*column*/) {
@@ -370,11 +381,12 @@ void MainWindow::setupUi() {
             for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
                 collectChecked(m_spriteTree->topLevelItem(i));
             m_session->selectedSprites = checked;
+            updateOnionSkinDisplay();
 
             // Update multi-selection label in the sprite editor panel
             if (m_multiSelectionLabel) {
                 const int n = checked.size();
-                if (n > 1) {
+                if (n > 1 && m_settings.propagateEditsToChecked) {
                     m_multiSelectionLabel->setText(
                         tr("%1 sprites selected — pivot and marker changes apply to all").arg(n));
                     m_multiSelectionLabel->setVisible(true);
@@ -614,10 +626,6 @@ void MainWindow::setupUi() {
     connect(m_previewView, &PreviewCanvas::pivotChanged, this, &MainWindow::onCanvasPivotChanged);
     connect(m_previewView->overlay(), &EditorOverlayItem::markerSelected, this, &MainWindow::onMarkerSelectedFromCanvas);
     connect(m_previewView->overlay(), &EditorOverlayItem::markerChanged, this, &MainWindow::onMarkerChangedFromCanvas);
-    connect(m_previewView->overlay(), &EditorOverlayItem::applyPivotToSelectedFramesRequested, this, &MainWindow::onApplyPivotToSelectedTimelineFrames);
-    connect(m_previewView->overlay(), &EditorOverlayItem::applyMarkerToSelectedFramesRequested, this, &MainWindow::onApplyMarkerToSelectedTimelineFrames);
-    connect(m_previewView, &PreviewCanvas::applyPivotToSelectedFramesRequested, this, &MainWindow::onApplyPivotToSelectedTimelineFrames);
-    connect(m_previewView, &PreviewCanvas::applyMarkerToSelectedFramesRequested, this, &MainWindow::onApplyMarkerToSelectedTimelineFrames);
     connect(m_previewView, &PreviewCanvas::zoomChanged, this, [this](double zoom) {
         m_previewZoomSpin->blockSignals(true);
         m_previewZoomSpin->setValue(zoom * 100.0);
@@ -911,6 +919,11 @@ void MainWindow::setupToolbar() {
     spritesheetAction->setToolTip(tr("Open spritesheet settings"));
     connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
 
+    QAction* framesEditorAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Frames Editor..."));
+    framesEditorAction->setToolTip(tr("Open frames editor settings"));
+    connect(framesEditorAction, &QAction::triggered, this, &MainWindow::onSettingsFramesEditorClicked);
+
 #ifndef Q_OS_WASM
     QAction* cliToolsAction = settingsMenu->addAction(
         style->standardIcon(QStyle::SP_ComputerIcon), tr("CLI Tools..."));
@@ -1124,8 +1137,61 @@ void MainWindow::syncPivotSpinsFromSprite() {
         m_previewView->overlay()->updateLayout();
 }
 
+// Recursively compute tristate check state for every folder node from the
+// bottom up.  Must be called with signals blocked so the setCheckState calls
+// don't cascade back into onSpriteTreeItemChanged.
+static void updateSpriteTreeFolderCheckState(QTreeWidgetItem* item)
+{
+    for (int i = 0; i < item->childCount(); ++i)
+        updateSpriteTreeFolderCheckState(item->child(i));
+    if (item->data(0, Qt::UserRole).isValid())      return; // sprite leaf
+    if (item->data(0, Qt::UserRole + 2).toInt() > 0) return; // hidden/excluded special item
+    int checked = 0, unchecked = 0;
+    for (int i = 0; i < item->childCount(); ++i) {
+        const Qt::CheckState cs = item->child(i)->checkState(0);
+        if (cs == Qt::Checked)        ++checked;
+        else if (cs == Qt::Unchecked) ++unchecked;
+        else { ++checked; ++unchecked; }
+    }
+    if (checked == 0)        item->setCheckState(0, Qt::Unchecked);
+    else if (unchecked == 0) item->setCheckState(0, Qt::Checked);
+    else                     item->setCheckState(0, Qt::PartiallyChecked);
+}
+
 void MainWindow::refreshSpriteTree() {
     if (!m_spriteTree) return;
+
+    // ── Save tree state before the rebuild ──────────────────────────────────
+    // Key a folder node by joining its full text path with a unit-separator
+    // so we can match it again after the tree is reconstructed.
+    auto treeItemKey = [](QTreeWidgetItem* node) -> QString {
+        QStringList parts;
+        while (node) { parts.prepend(node->text(0)); node = node->parent(); }
+        return parts.join(QChar(0x1F));
+    };
+    const bool hadItems = m_spriteTree->invisibleRootItem()->childCount() > 0;
+    QSet<QString> collapsedKeys;
+    QSet<QString> checkedPaths;
+    int scrollPos = 0;
+    if (hadItems) {
+        QTreeWidgetItemIterator sit(m_spriteTree);
+        while (*sit) {
+            const QVariant v = (*sit)->data(0, Qt::UserRole);
+            if (v.isValid()) {
+                if ((*sit)->checkState(0) == Qt::Checked) {
+                    const auto sprite = v.value<SpritePtr>();
+                    if (sprite) checkedPaths.insert(sprite->path);
+                }
+            } else {
+                if (!(*sit)->isExpanded())
+                    collapsedKeys.insert(treeItemKey(*sit));
+            }
+            ++sit;
+        }
+        scrollPos = m_spriteTree->verticalScrollBar()->value();
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     // Clear the filter when refreshing the tree
     if (m_spriteFilterEdit) {
         m_spriteFilterEdit->blockSignals(true);
@@ -1301,12 +1367,31 @@ void MainWindow::refreshSpriteTree() {
                 QString localName;
                 if (cleanedPath.startsWith(cleanedCache + QLatin1Char('/'))) {
                     const QString rel = cleanedPath.mid(cleanedCache.length() + 1);
+                    // Skip sprites that are currently excluded from this source.
+                    if (m_session->sources[bestIdx].excludedFiles.contains(rel)) continue;
                     const QString dir  = QFileInfo(rel).path();
                     const QString base = QFileInfo(rel).baseName();
                     localName = (dir.isEmpty() || dir == QLatin1String("."))
                                 ? base : dir + QLatin1Char('/') + base;
                 } else {
                     localName = sprite->name; // fallback
+                }
+                // Strip hidden folder segments (Hide group only).
+                // hiddenFolders stores relative paths within this source.
+                const QStringList& hiddenFolders = m_session->sources[bestIdx].hiddenFolders;
+                if (!hiddenFolders.isEmpty() && localName.contains('/')) {
+                    const QSet<QString> hiddenSet(hiddenFolders.begin(), hiddenFolders.end());
+                    const QStringList parts = localName.split('/');
+                    QStringList resultParts;
+                    QString accRelPath;
+                    for (int i = 0; i < parts.size() - 1; ++i) {
+                        if (!accRelPath.isEmpty()) accRelPath += '/';
+                        accRelPath += parts[i];
+                        if (!hiddenSet.contains(accRelPath))
+                            resultParts.append(parts[i]);
+                    }
+                    resultParts.append(parts.last());
+                    localName = resultParts.join('/');
                 }
                 perSource[bestIdx].append({sprite, localName});
             } else {
@@ -1317,7 +1402,12 @@ void MainWindow::refreshSpriteTree() {
         for (int si = 0; si < m_session->sources.size(); ++si) {
             if (perSource[si].isEmpty()) continue;
             const auto& src = m_session->sources[si];
-            auto* sourceNode = makeGroupNode(nullptr, src.name);
+            // When hidden toggle is OFF, show a count badge on the source node.
+            const int hiddenCount = src.hiddenFolders.size() + src.excludedFiles.size();
+            const QString nodeText = (!m_showHiddenItems && hiddenCount > 0)
+                ? tr("%1 (%2 hidden)").arg(src.name).arg(hiddenCount)
+                : src.name;
+            auto* sourceNode = makeGroupNode(nullptr, nodeText);
             QFont f = sourceNode->font(0);
             f.setBold(true);
             sourceNode->setFont(0, f);
@@ -1348,11 +1438,86 @@ void MainWindow::refreshSpriteTree() {
             sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
             buildSubTree(sourceNode, perSource[si]);
+
+            // ── Hidden-folder placeholders (only shown when "Hidden" toggle is ON) ──
+            if (m_showHiddenItems && !src.hiddenFolders.isEmpty()) {
+                const QSet<QString> hiddenSet(src.hiddenFolders.begin(), src.hiddenFolders.end());
+                const QColor dimColor = QApplication::palette().color(QPalette::Disabled, QPalette::Text);
+                for (const QString& relHidden : src.hiddenFolders) {
+                    const QString folderName = QFileInfo(relHidden).fileName();
+                    const QString parentRel  = QFileInfo(relHidden).path();
+
+                    // Effective parent: strip other hidden segments from parentRel.
+                    QString effectiveParentPath;
+                    if (parentRel != QLatin1String(".") && !parentRel.isEmpty()) {
+                        const QStringList parentParts = parentRel.split('/');
+                        QStringList resultParts;
+                        QString acc;
+                        for (const QString& part : parentParts) {
+                            if (!acc.isEmpty()) acc += '/';
+                            acc += part;
+                            if (!hiddenSet.contains(acc)) resultParts.append(part);
+                        }
+                        effectiveParentPath = resultParts.join('/');
+                    }
+
+                    QTreeWidgetItem* parentNode = sourceNode;
+                    if (!effectiveParentPath.isEmpty())
+                        parentNode = findOrCreateFolderPath(sourceNode, effectiveParentPath.split('/'));
+
+                    auto* placeholder = new QTreeWidgetItem(parentNode);
+                    placeholder->setText(0, folderName);
+                    placeholder->setIcon(0, folderIcon);
+                    QFont pf = placeholder->font(0);
+                    pf.setItalic(true);
+                    placeholder->setFont(0, pf);
+                    placeholder->setForeground(0, dimColor);
+                    placeholder->setToolTip(0, tr("Hidden — right-click to unhide"));
+                    placeholder->setData(0, Qt::UserRole + 2, 1);    // type: hidden-placeholder
+                    placeholder->setData(0, Qt::UserRole + 3, si);   // source index
+                    placeholder->setData(0, Qt::UserRole + 4, relHidden); // relative path
+                    placeholder->setFlags(placeholder->flags() & ~Qt::ItemIsUserCheckable);
+                }
+            }
         }
 
         if (!unassigned.isEmpty()) {
             auto* otherNode = makeGroupNode(nullptr, tr("Other"));
             buildSubTree(otherNode, unassigned);
+        }
+
+        // ── Global "Excluded" section (shown only when "Hidden" toggle is ON) ──
+        // All excluded items from every source appear in one collapsible node at
+        // the bottom, so the main tree stays clean when the toggle is off.
+        if (m_showHiddenItems) {
+            int totalExcluded = 0;
+            for (const auto& src : m_session->sources)
+                totalExcluded += src.excludedFiles.size();
+            if (totalExcluded > 0) {
+                const QColor dimColor = QApplication::palette().color(QPalette::Disabled, QPalette::Text);
+                auto* exclRoot = makeGroupNode(nullptr, tr("Excluded (%1)").arg(totalExcluded));
+                QFont ef = exclRoot->font(0);
+                ef.setItalic(true);
+                exclRoot->setFont(0, ef);
+                exclRoot->setForeground(0, dimColor);
+                exclRoot->setData(0, Qt::UserRole + 2, 3); // type: excluded-section header
+                exclRoot->setFlags(exclRoot->flags() & ~Qt::ItemIsUserCheckable);
+
+                const bool multiSource = m_session->sources.size() > 1;
+                for (int si = 0; si < m_session->sources.size(); ++si) {
+                    const auto& src = m_session->sources[si];
+                    for (const QString& relPath : src.excludedFiles) {
+                        auto* exclItem = new QTreeWidgetItem(exclRoot);
+                        exclItem->setText(0, multiSource ? src.name + ": " + relPath : relPath);
+                        exclItem->setForeground(0, dimColor);
+                        exclItem->setToolTip(0, tr("Excluded — right-click to re-include"));
+                        exclItem->setData(0, Qt::UserRole + 2, 2);      // type: excluded item
+                        exclItem->setData(0, Qt::UserRole + 3, si);     // source index
+                        exclItem->setData(0, Qt::UserRole + 4, relPath);// relative path
+                        exclItem->setFlags(exclItem->flags() & ~Qt::ItemIsUserCheckable);
+                    }
+                }
+            }
         }
     } else {
         // Single source (or no source tracking): existing atlas-based grouping.
@@ -1369,9 +1534,37 @@ void MainWindow::refreshSpriteTree() {
         }
     }
 
-    m_spriteTree->expandAll();
+    // ── Restore tree state ───────────────────────────────────────────────────
+    {
+        QTreeWidgetItemIterator rit(m_spriteTree);
+        while (*rit) {
+            if ((*rit)->data(0, Qt::UserRole + 2).toInt() > 0) {
+                // Hidden/excluded special item: skip (no check state to restore)
+                ++rit; continue;
+            }
+            const QVariant v = (*rit)->data(0, Qt::UserRole);
+            if (v.isValid()) {
+                // Leaf: restore check state
+                const auto sprite = v.value<SpritePtr>();
+                if (sprite && checkedPaths.contains(sprite->path))
+                    (*rit)->setCheckState(0, Qt::Checked);
+            } else {
+                // Folder: new folders expand by default; explicitly collapsed ones collapse
+                (*rit)->setExpanded(!collapsedKeys.contains(treeItemKey(*rit)));
+            }
+            ++rit;
+        }
+        // Propagate leaf check states up to folder tristate nodes
+        for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
+            updateSpriteTreeFolderCheckState(m_spriteTree->topLevelItem(i));
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     m_spriteTree->sortItems(0, Qt::AscendingOrder);
     m_spriteTree->blockSignals(false);
+
+    if (hadItems)
+        m_spriteTree->verticalScrollBar()->setValue(scrollPos);
 }
 
 void MainWindow::onAboutClicked() {

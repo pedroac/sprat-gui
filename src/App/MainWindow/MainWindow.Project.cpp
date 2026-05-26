@@ -19,8 +19,14 @@
 #include "FolderSyncService.h"
 #include "ImportPathSupport.h"
 
+#include <QCheckBox>
+#include <QDialog>
+#include <QFont>
+#include <QHBoxLayout>
 #include <QMenu>
 #include <QComboBox>
+#include <QSizePolicy>
+#include <QStyle>
 #include <QDirIterator>
 #include <QBuffer>
 #include <QClipboard>
@@ -570,6 +576,9 @@ void MainWindow::onSaveClicked() {
         MessageDialog::critical(this, tr("Save Failed"), error);
         return;
     }
+    if (m_lastSaveConfig.syncSprites) {
+        syncNewSpritesToProjectFolder(projectDir);
+    }
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
     if (m_undoStack) m_undoStack->setClean();
     updateUiState();
@@ -591,8 +600,9 @@ void MainWindow::onSaveAsClicked() {
             QStandardPaths::DocumentsLocation)).filePath("Sprat Projects");
     }
 
-    const QString projectDir = QFileDialog::getExistingDirectory(
-        this, tr("Choose Save Folder"), startDir);
+    const QString projectDir = QFileDialog::getSaveFileName(
+        this, tr("Save Project As"), startDir,
+        QString(), nullptr, QFileDialog::DontConfirmOverwrite);
     if (projectDir.isEmpty()) return;
 
     // Remember the parent so next Save As opens there.
@@ -600,8 +610,73 @@ void MainWindow::onSaveAsClicked() {
     CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
 
     QDir().mkpath(projectDir);
+
+    {
+        const QString folderName = QFileInfo(projectDir).fileName();
+
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Save Project"));
+        dlg.setWindowModality(Qt::WindowModal);
+        dlg.setMinimumWidth(420);
+
+        auto* iconLabel = new QLabel(&dlg);
+        iconLabel->setPixmap(QApplication::style()->standardIcon(QStyle::SP_MessageBoxQuestion).pixmap(64, 64));
+        iconLabel->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+        iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+        auto* headlineLabel = new QLabel(tr("Copy images into \"%1\"?").arg(folderName), &dlg);
+        headlineLabel->setWordWrap(true);
+        QFont headlineFont = headlineLabel->font();
+        headlineFont.setBold(true);
+        headlineFont.setPointSize(headlineFont.pointSize() + 2);
+        headlineLabel->setFont(headlineFont);
+
+        auto* bodyLabel = new QLabel(
+            tr("Source images will be saved into <b>sprites/</b> inside the project folder. "
+               "The project will be self-contained and portable — open it on any machine. "
+               "Uncheck to store the project file only."),
+            &dlg);
+        bodyLabel->setWordWrap(true);
+        bodyLabel->setTextFormat(Qt::RichText);
+
+        auto* cb = new QCheckBox(tr("Copy images into project folder"), &dlg);
+        cb->setChecked(true);
+
+        auto* textLayout = new QVBoxLayout();
+        textLayout->setSpacing(8);
+        textLayout->addWidget(headlineLabel);
+        textLayout->addWidget(bodyLabel);
+        textLayout->addSpacing(4);
+        textLayout->addWidget(cb);
+        textLayout->addStretch();
+
+        auto* contentLayout = new QHBoxLayout();
+        contentLayout->setSpacing(20);
+        contentLayout->setContentsMargins(0, 0, 0, 0);
+        contentLayout->addWidget(iconLabel);
+        contentLayout->addLayout(textLayout, 1);
+
+        auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dlg);
+        buttonBox->button(QDialogButtonBox::Save)->setDefault(true);
+        connect(buttonBox, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(buttonBox, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+        auto* mainLayout = new QVBoxLayout(&dlg);
+        mainLayout->setContentsMargins(24, 24, 24, 16);
+        mainLayout->setSpacing(24);
+        mainLayout->addLayout(contentLayout);
+        mainLayout->addWidget(buttonBox);
+
+        if (dlg.exec() != QDialog::Accepted) return;
+        m_lastSaveConfig.syncSprites = cb->isChecked();
+    }
+
     m_projectFilePath = QDir(projectDir).filePath("project.spart.json");
     m_lastSaveConfig.destination = projectDir;
+
+    if (m_lastSaveConfig.syncSprites) {
+        copySpriteToProjectFolder(projectDir);
+    }
 
     const QString folderName = QFileInfo(projectDir).fileName();
     setWindowTitle(tr("%1 — %2[*]").arg(folderName, projectDir));
@@ -838,7 +913,6 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     ProjectPayloadBuildInput input;
     input.currentFolder = session->currentFolder;
     input.sourceFolder = session->sourceFolder;
-    input.smartFolders = session->smartFolders;
     input.sources = session->sources;
     input.orphanedSpritePaths = session->orphanedSpritePaths;
     input.projectDir = m_projectFilePath.isEmpty()
@@ -901,7 +975,7 @@ void MainWindow::autosaveProject() {
     }
 
     QString error;
-    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload(m_lastSaveConfig, m_session), error)) {
+    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload(m_lastSaveConfig, m_session, /*portable=*/true), error)) {
         m_statusLabel->setText(tr("Autosaved project"));
     } else {
         m_statusLabel->setText(error);
@@ -1587,4 +1661,104 @@ void MainWindow::applyProjectPayload() {
 
 void MainWindow::onAutosaveTimer() {
     autosaveProject();
+}
+
+void MainWindow::copySpriteToProjectFolder(const QString& projectDir) {
+    const QString spritesPath = QDir(projectDir).filePath(QStringLiteral("sprites"));
+    QDir().mkpath(spritesPath);
+
+    QStringList frames;
+    if (m_session->layoutSourceIsList) {
+        frames = m_session->activeFramePaths;
+    } else if (!m_session->sourceFolder.isEmpty()) {
+        frames = ImageDiscoveryService::collectImagesRecursive({m_session->sourceFolder});
+    }
+    if (frames.isEmpty()) return;
+
+    // Copy frames preserving their path structure relative to sourceFolder.
+    // Each source already lives in its own named subfolder of sourceFolder
+    // (e.g. <sourceFolder>/archive/anim/run.png), so this mirrors that layout
+    // into <projectDir>/sprites/archive/anim/run.png.
+    const QDir srcRoot(m_session->sourceFolder);
+    const QDir dstRoot(spritesPath);
+    for (const QString& p : frames) {
+        const QString abs = QFileInfo(p).absoluteFilePath();
+        const QString rel = srcRoot.relativeFilePath(abs);
+        if (rel.startsWith("..")) continue; // outside sourceFolder — unexpected, skip
+        const QString dst = dstRoot.filePath(rel);
+        QDir().mkpath(QFileInfo(dst).absolutePath());
+        if (!QFileInfo::exists(dst)) {
+            QFile::copy(abs, dst);
+        }
+    }
+
+    // Update each source's cachedFolderPath to its new location inside sprites/
+    for (ProjectSource& src : m_session->sources) {
+        if (src.cachedFolderPath.isEmpty()) continue;
+        const QString rel = srcRoot.relativeFilePath(
+            QDir(src.cachedFolderPath).canonicalPath());
+        if (!rel.startsWith("..")) {
+            src.cachedFolderPath = dstRoot.filePath(rel);
+        }
+    }
+
+    // promoteSourceFolderAfterSave uses sourceFolder as base to remap activeFramePaths —
+    // the same base we used above — then updates sourceFolder/currentFolder/layoutSourcePath.
+    promoteSourceFolderAfterSave(projectDir);
+    if (m_session->layoutSourceIsList) {
+        ensureFrameListInput();
+    }
+}
+
+void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
+    const QString spritesPath = QDir(projectDir).filePath(QStringLiteral("sprites"));
+    const QString canonicalSprites = QDir(spritesPath).canonicalPath();
+
+    if (m_session->layoutSourceIsList) {
+        // Collect frames that live outside the project sprites folder
+        QStringList outside;
+        for (const QString& p : m_session->activeFramePaths) {
+            const QString abs = QFileInfo(p).absoluteFilePath();
+            if (canonicalSprites.isEmpty() || !abs.startsWith(canonicalSprites + QLatin1Char('/')))
+                outside.append(p);
+        }
+        if (outside.isEmpty()) return;
+
+        // Copy each outside frame into its source's named subfolder inside sprites/,
+        // preserving the structure within that source's cache directory.
+        const QDir dstRoot(spritesPath);
+        QHash<QString, QString> remapped;
+        for (const QString& p : outside) {
+            const QString abs = QFileInfo(p).absoluteFilePath();
+            QString rel;
+            for (const ProjectSource& src : m_session->sources) {
+                if (src.cachedFolderPath.isEmpty()) continue;
+                const QString canon = QDir(src.cachedFolderPath).canonicalPath();
+                if (!canon.isEmpty() && abs.startsWith(canon + QLatin1Char('/'))) {
+                    rel = src.name + QLatin1Char('/') +
+                          QDir(src.cachedFolderPath).relativeFilePath(abs);
+                    break;
+                }
+            }
+            if (rel.isEmpty() || rel.startsWith(".."))
+                rel = QFileInfo(p).fileName(); // fallback: flat in sprites/
+            const QString dst = dstRoot.filePath(rel);
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            if (!QFileInfo::exists(dst)) {
+                if (!QFile::copy(abs, dst)) continue;
+            }
+            remapped[p] = dst;
+        }
+        if (remapped.isEmpty()) return;
+        for (QString& p : m_session->activeFramePaths)
+            if (remapped.contains(p)) p = remapped[p];
+        ensureFrameListInput();
+    } else {
+        // Folder mode: if the source folder is already the project sprites folder, nothing to do
+        if (!canonicalSprites.isEmpty() &&
+            QDir(m_session->sourceFolder).canonicalPath() == canonicalSprites)
+            return;
+        // Still pointing to an external folder — copy everything in
+        copySpriteToProjectFolder(projectDir);
+    }
 }
