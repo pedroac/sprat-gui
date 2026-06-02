@@ -600,6 +600,7 @@ void MainWindow::setLoading(bool loading) {
 }
 
 void MainWindow::onSpriteSelected(SpritePtr sprite) {
+    clearCoordinateFieldOverride();
     m_session->selectedSprite = sprite;
     if (sprite) {
         m_statusLabel->setText(tr("Selected: ") + sprite->name);
@@ -615,6 +616,7 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
         m_previewZoomSpin,
         m_handleCombo,
         m_isRestoringProject);
+    syncCoordinateSpinsFromSelection();
 
     if (m_editAliasesBtn) m_editAliasesBtn->setEnabled(sprite != nullptr);
     updateAliasesButton();

@@ -20,6 +20,7 @@
 
 namespace {
 struct TransformInfo {
+    QString id;
     QString name;
 };
 
@@ -51,6 +52,7 @@ QVector<TransformInfo> loadAvailableTransforms() {
             QFile file(dir.filePath(fileName));
             if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
             TransformInfo info;
+            info.id = QFileInfo(fileName).completeBaseName().trimmed().toLower();
             bool inMeta = false;
             QTextStream in(&file);
             while (!in.atEnd()) {
@@ -64,7 +66,10 @@ QVector<TransformInfo> loadAvailableTransforms() {
                 const QString value = line.mid(eq + 1).trimmed();
                 if (key == "name") info.name = value;
             }
-            if (!info.name.isEmpty()) result.append(info);
+            if (info.name.isEmpty()) {
+                info.name = info.id;
+            }
+            if (!info.id.isEmpty()) result.append(info);
         }
         if (!result.isEmpty()) return result;
     }
@@ -76,17 +81,11 @@ SaveDialog::SaveDialog(const QString& defaultPath,
                        const QVector<SpratProfile>& availableProfiles,
                        const QString& selectedProfileName,
                        const SaveConfig& lastConfig,
-                       QWidget* parent,
-                       bool showDestination)
-    : QDialog(parent),
-      m_showDestination(showDestination) {
+                       QWidget* parent)
+    : QDialog(parent) {
     setupUi();
     
-    if (!lastConfig.destination.isEmpty()) {
-        m_destEdit->setText(lastConfig.destination);
-    } else {
-        m_destEdit->setText(defaultPath);
-    }
+    Q_UNUSED(defaultPath);
 
     if (!lastConfig.transform.isEmpty()) {
         const int idx = m_transformCombo->findData(lastConfig.transform);
@@ -125,36 +124,15 @@ SaveDialog::SaveDialog(const QString& defaultPath,
 }
 
 void SaveDialog::setupUi() {
-    setWindowTitle(tr("Save Spritesheet"));
-    resize(600, 400);
+    setWindowTitle(tr("Export Spritesheet"));
+    resize(500, 300);
     
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
 
-    auto* descLabel = new QLabel(tr("Choose the output destination and which profiles to include."), this);
+    auto* descLabel = new QLabel(tr("Choose which profiles to include and the output format."), this);
     descLabel->setWordWrap(true);
     mainLayout->addWidget(descLabel);
 
-    // Destination
-    QGroupBox* destGroup = new QGroupBox(tr("Destination"), this);
-    QVBoxLayout* destLayout = new QVBoxLayout(destGroup);
-    QHBoxLayout* destRow = new QHBoxLayout();
-    m_destEdit = new QLineEdit(this);
-    destRow->addWidget(m_destEdit);
-    
-    QPushButton* browseFolderBtn = new QPushButton(tr("Folder..."), this);
-    connect(browseFolderBtn, &QPushButton::clicked, this, &SaveDialog::onBrowseFolder);
-    destRow->addWidget(browseFolderBtn);
-    
-    QPushButton* browseFileBtn = new QPushButton(tr("File..."), this);
-    connect(browseFileBtn, &QPushButton::clicked, this, &SaveDialog::onBrowseFile);
-    destRow->addWidget(browseFileBtn);
-    
-    destLayout->addLayout(destRow);
-    if (!m_showDestination) {
-        destGroup->setVisible(false);
-    }
-    mainLayout->addWidget(destGroup);
-    
     // Options
     QGroupBox* optsGroup = new QGroupBox(tr("Options"), this);
     QFormLayout* optsLayout = new QFormLayout(optsGroup);
@@ -163,7 +141,7 @@ void SaveDialog::setupUi() {
     const QVector<TransformInfo> transforms = loadAvailableTransforms();
     if (!transforms.isEmpty()) {
         for (const TransformInfo& t : transforms) {
-            m_transformCombo->addItem(t.name, t.name);
+            m_transformCombo->addItem(t.name, t.id);
         }
     } else {
         m_transformCombo->addItem(QStringLiteral("json"), QStringLiteral("json"));
@@ -203,34 +181,10 @@ void SaveDialog::setupUi() {
 }
 
 /**
- * @brief Opens a directory picker for the destination.
- */
-void SaveDialog::onBrowseFolder() {
-    QString dir = QFileDialog::getExistingDirectory(this, tr("Select Destination Folder"), m_destEdit->text());
-    if (!dir.isEmpty()) {
-        m_destEdit->setText(dir);
-    }
-}
-
-/**
- * @brief Opens a file picker for the destination (zip).
- */
-void SaveDialog::onBrowseFile() {
-    QString file = QFileDialog::getSaveFileName(this, tr("Select Destination File"), m_destEdit->text(), tr("Zip Files (*.zip)"));
-    if (!file.isEmpty()) {
-        if (!file.endsWith(".zip", Qt::CaseInsensitive)) {
-            file += ".zip";
-        }
-        m_destEdit->setText(file);
-    }
-}
-
-/**
  * @brief Retrieves the configuration entered by the user.
  */
 SaveConfig SaveDialog::getConfig() const {
     SaveConfig config;
-    config.destination = m_destEdit->text();
     config.transform = m_transformCombo->currentData().toString();
 
     for (QCheckBox* checkBox : m_profileChecks) {

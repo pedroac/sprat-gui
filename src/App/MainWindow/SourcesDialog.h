@@ -32,6 +32,9 @@ signals:
     /** Emitted when the user requests a sync for the source at the given index. */
     void syncSourceRequested(int sourceIndex);
 
+    /** Emitted when the user requests writing the layout back to the source at the given index. */
+    void syncLayoutRequested(int sourceIndex);
+
     /** Emitted when the user requests removal of the source at the given index. */
     void removeSourceRequested(int sourceIndex);
 

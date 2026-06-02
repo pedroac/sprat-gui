@@ -69,6 +69,7 @@ class QVariantAnimation;
 class QMimeData;
 class QImage;
 class QUrl;
+class QSize;
 
 // Forward declarations for custom classes
 class FrameDetectionDialog;
@@ -172,6 +173,11 @@ private slots:
      * @brief Handles loading of a folder with images.
      */
     void onLoadFolder();
+
+    /**
+     * @brief Handles adding a local source file such as an image or archive.
+     */
+    void onAddSourceFile();
 
     /**
      * @brief Handles loading of a saved project.
@@ -287,10 +293,15 @@ private slots:
 
     /**
      * @brief Handles changes to handle combo box selection.
-     * 
+     *
      * @param index Selected index
      */
     void onHandleComboChanged(int index);
+
+    /**
+     * @brief Handles changes to the coordinate unit combo box (px / %).
+     */
+    void onCoordUnitChanged();
 
     /**
      * @brief Handles request to configure points.
@@ -490,6 +501,8 @@ private slots:
     // === Sources Dialog ===
     void onShowSources();
     void removeSource(int index);
+    void onSyncSourceRequested(int sourceIndex);
+    void onSyncLayoutRequested(int sourceIndex);
 
     // === Source Folder Sync ===
     void onSpriteTreeContextMenu(const QPoint& pos);
@@ -765,6 +778,31 @@ private:
     void syncPivotSpinsFromSprite();
 
     /**
+     * @brief Syncs coordinate spin boxes from the currently selected pivot or marker.
+     */
+    void syncCoordinateSpinsFromSelection();
+
+    /**
+     * @brief Returns the editable coordinate-space size for a sprite.
+     */
+    QSize spriteCoordinateSpaceSize(const SpritePtr& sprite) const;
+
+    /**
+     * @brief Clears any pending typed coordinate override for the spin boxes.
+     */
+    void clearCoordinateFieldOverride();
+
+    /**
+     * @brief Stores the currently typed coordinate values for the active selection.
+     */
+    void storeCoordinateFieldOverride();
+
+    /**
+     * @brief Whether a typed coordinate override should be shown instead of recalculated values.
+     */
+    bool coordinateFieldOverrideApplies() const;
+
+    /**
      * @brief Adds project to recent projects list.
      *
      * @param path Path to project file
@@ -879,6 +917,8 @@ private:
     bool tryImportClipboard(const QMimeData* mimeData, DropAction action = DropAction::Replace);
     QString createManagedImportFile(const QString& suggestedName, const QByteArray& data, QString& error);
     QString createManagedImportImageFile(const QImage& image, QString& error);
+    bool syncLayoutToImage(const ProjectSource& src, QString& error);
+    bool syncLayoutToGif(const ProjectSource& src, QString& error);
     void finishImportedPath(const QString& path, DropAction action);
     void openSettingsDialogForSection(SettingsDialog::Section section);
 
@@ -1280,10 +1320,21 @@ private:
     QLabel* m_multiSelectionLabel = nullptr;
     QComboBox* m_handleCombo;
     QPushButton* m_configPointsBtn;
-    QSpinBox* m_pivotXSpin;
-    QSpinBox* m_pivotYSpin;
+    QDoubleSpinBox* m_pivotXSpin;
+    QDoubleSpinBox* m_pivotYSpin;
+    QComboBox* m_coordUnitCombo = nullptr;
     QDoubleSpinBox* m_previewZoomSpin;
     PreviewCanvas* m_previewView;
+
+    struct CoordinateFieldOverride {
+        bool active = false;
+        const Sprite* sprite = nullptr;
+        QString markerName;
+        CoordUnit unit = CoordUnit::Pixels;
+        double x = 0.0;
+        double y = 0.0;
+    };
+    CoordinateFieldOverride m_coordinateFieldOverride;
 
     // Animation Test Area
     QDoubleSpinBox* m_animZoomSpin;
@@ -1295,6 +1346,9 @@ private:
     AnimationCanvas* m_animCanvas = nullptr;
 
     QAction* m_loadAction;
+    QAction* m_loadProjectAction = nullptr;
+    QAction* m_addSourceFileAction = nullptr;
+    QAction* m_addSourceUrlAction = nullptr;
     QAction* m_saveAction;
     QAction* m_saveAsAction = nullptr;
     QAction* m_exportAction = nullptr;

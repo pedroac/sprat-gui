@@ -465,9 +465,15 @@ struct SaveConfig {
 };
 
 /**
+ * @enum CoordUnit
+ * @brief Unit for displaying and editing pivot/marker coordinates.
+ */
+enum class CoordUnit { Pixels, Percent };
+
+/**
  * @struct AppSettings
  * @brief Application visual settings.
- * 
+ *
  * This struct contains user-configurable visual settings for the application.
  */
 struct AppSettings {
@@ -569,6 +575,13 @@ struct AppSettings {
      * Default: true
      */
     bool propagateEditsToChecked = true;
+
+    /**
+     * @brief Unit used to display/edit pivot and marker coordinates.
+     *
+     * Default: Pixels
+     */
+    CoordUnit coordUnit = CoordUnit::Pixels;
 
 };
 

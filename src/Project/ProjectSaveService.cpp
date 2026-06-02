@@ -13,7 +13,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
-#include <QRegularExpression>
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QProcess>
@@ -31,31 +30,6 @@ namespace {
     bool isCompactPreset(const QString& preset) {
         const QString p = preset.trimmed().toLower();
         return p == "quality" || p == "small";
-    }
-
-    // Rewrite the layout data so layout_raw.txt uses a portable relative root
-    // ("../../sprites") instead of the absolute source folder path.
-    // Profile dirs live at output/<profile>/, so ../../ resolves to the project root.
-    QByteArray rewriteLayoutRoot(const QByteArray& layoutData, const QString& sourceFolder) {
-        QString text = QString::fromUtf8(layoutData);
-        const QString relRoot = QStringLiteral("../../sprites");
-
-        // If there is a root line, replace it and leave relative sprite paths intact.
-        static const QRegularExpression rootLineRe(R"(root\s+"(?:[^"\\]|\\.)*")");
-        if (text.contains(rootLineRe)) {
-            text.replace(rootLineRe, QStringLiteral("root \"") + relRoot + QStringLiteral("\""));
-            return text.toUtf8();
-        }
-
-        // No root line: sprite paths are absolute. Substitute the source folder
-        // prefix with the relative root so paths become ../../sprites/<rel>.
-        if (!sourceFolder.isEmpty()) {
-            QString sfPrefix = QDir::cleanPath(sourceFolder);
-            if (!sfPrefix.endsWith('/')) sfPrefix += '/';
-            text.replace(sfPrefix, relRoot + '/');
-        }
-
-        return text.toUtf8();
     }
 }
 
@@ -142,10 +116,15 @@ bool ProjectSaveService::save(
         }
     }
 
-    // For folder exports, remove stale output/ first.
+    // For folder exports, remove stale profile folders first.
     if (!isZip) {
         const QDir wd(workingPath);
-        QDir(wd.filePath("output")).removeRecursively();
+        for (const QString& profileNameRaw : config.profiles) {
+            const QString profileName = profileNameRaw.trimmed();
+            if (!profileName.isEmpty()) {
+                QDir(wd.filePath(profileName)).removeRecursively();
+            }
+        }
     }
 
     if (setLoading) setLoading(true);
@@ -420,7 +399,7 @@ bool ProjectSaveService::save(
         const double profileScale = qBound(0.01, effectiveProfile.scale, 1.0);
         const bool profileTrimTransparent = effectiveProfile.trimTransparent;
 
-        QDir profileDir(destDir.filePath(QStringLiteral("output/") + profileName));
+        QDir profileDir(destDir.filePath(profileName));
         if (!profileDir.exists()) {
             if (!profileDir.mkpath(".")) {
                 error = QString(trPS("Could not create profile directory: %1")).arg(profileName);
@@ -580,21 +559,6 @@ bool ProjectSaveService::save(
         if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
         combinedInput.append(animContent.toUtf8());
 
-        // layout_raw.txt uses portable relative paths (../../sprites) so external
-        // tools can open sprites relative to the profile folder location.
-        {
-            QByteArray portableLayout = rewriteLayoutRoot(layoutData, sourceFolder);
-            if (!portableLayout.endsWith('\n')) portableLayout.append('\n');
-            portableLayout.append(markersContent.toUtf8());
-            if (!portableLayout.endsWith('\n')) portableLayout.append('\n');
-            portableLayout.append(animContent.toUtf8());
-            QFile layoutRawFile(profileDir.filePath("layout_raw.txt"));
-            if (layoutRawFile.open(QIODevice::WriteOnly)) {
-                layoutRawFile.write(portableLayout);
-                layoutRawFile.close();
-            }
-        }
-
         if (config.transform != "none" && !spratConvertBin.isEmpty()) {
             updateStatus(QString(trPS("Formatting output for profile '%1'...")).arg(profileName));
             if (checkCanceled()) {
@@ -602,28 +566,21 @@ bool ProjectSaveService::save(
             }
             QStringList convArgs;
             convArgs << "--transform" << config.transform;
+            convArgs << "--output-dir" << profileDir.absolutePath();
+
             if (isMultipack) {
-                convArgs << "--output" << "atlas_%d.png";
+                convArgs << "--atlas" << (hasDds ? "atlas_%d.dds" : "atlas_%d.png");
             } else {
-                convArgs << "--output" << "spritesheet.png";
+                convArgs << "--atlas" << (hasDds ? "spritesheet.dds" : "spritesheet.png");
             }
             
-            QByteArray convData;
-            if (!runProcess(spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, &convData)) {
+            if (!runProcess(spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, nullptr)) {
                 error = QString(trPS("Format conversion failed for profile '%1'")).arg(profileName);
                 return false;
             }
             if (checkCanceled()) {
                 return false;
             }
-            
-            QString ext = config.transform == "css" ? "css" : (config.transform == "xml" ? "xml" : (config.transform == "csv" ? "csv" : "json"));
-            QFile convFile(profileDir.filePath("layout_formatted." + ext));
-            if (!convFile.open(QIODevice::WriteOnly) || convFile.write(convData) < 0) {
-                error = QString(trPS("Could not write converted layout for profile '%1'.")).arg(profileName);
-                return false;
-            }
-            convFile.close();
         }
     }
 

@@ -139,8 +139,8 @@ mkdir -p "$HOME/.local/bin"
 install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOME/.local/bin/"
 
 echo "Moving configuration and transforms..."
-PROFILES_PATH=$("./spratlayout" --default-profiles-config)
-TRANSFORMS_DIR=$("./spratconvert" --transforms-dir)
+PROFILES_PATH=$("$HOME/.local/bin/spratlayout" --default-profiles-config)
+TRANSFORMS_DIR=$("$HOME/.local/bin/spratconvert" --transforms-dir)
 if [ -f "spratprofiles.cfg" ]; then
   mkdir -p "$(dirname "$PROFILES_PATH")"
   cp "spratprofiles.cfg" "$PROFILES_PATH"

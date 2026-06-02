@@ -402,6 +402,28 @@ void MainWindow::onLoadFolder() {
     }
 }
 
+void MainWindow::onAddSourceFile() {
+#ifdef Q_OS_WASM
+    wasmOpenFileDialog(false);
+    return;
+#endif
+    const QString filter = tr(
+        "All Supported Source Files (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz *.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds);;"
+        "Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz);;"
+        "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+    const QString startDir = m_session ? m_session->currentFolder : QString();
+    const QString path = QFileDialog::getOpenFileName(this, tr("Add Source File"), startDir, filter);
+    if (path.isEmpty()) {
+        return;
+    }
+
+    const DropAction action = confirmDropAction(path);
+    if (action == DropAction::Cancel) {
+        return;
+    }
+    tryHandleDroppedPath(path, action);
+}
+
 void MainWindow::onInstallFinished(int exitCode,
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess::ExitStatus exitStatus

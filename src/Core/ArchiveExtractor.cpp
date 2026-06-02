@@ -246,6 +246,39 @@ bool ArchiveExtractor::createZip(const QString& sourceDir, const QString& destZi
     return true;
 }
 
+QStringList ArchiveExtractor::listEntries(const QString& archivePath, QString& error) {
+    struct archive* a = archive_read_new();
+    archive_read_support_format_all(a);
+    archive_read_support_filter_all(a);
+
+#ifdef Q_OS_WIN
+    if (archive_read_open_filename_w(a, reinterpret_cast<const wchar_t*>(archivePath.utf16()), 10240)) {
+#else
+    if (archive_read_open_filename(a, PATH_TO_UTF8(archivePath), 10240)) {
+#endif
+        error = QString("Could not open archive: %1").arg(archive_error_string(a));
+        archive_read_free(a);
+        return {};
+    }
+
+    QStringList entries;
+    struct archive_entry* entry;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        if (archive_entry_filetype(entry) == AE_IFREG) {
+#ifdef Q_OS_WIN
+            entries.append(QString::fromWCharArray(archive_entry_pathname_w(entry)));
+#else
+            entries.append(QString::fromUtf8(archive_entry_pathname(entry)));
+#endif
+        }
+        archive_read_data_skip(a);
+    }
+
+    archive_read_close(a);
+    archive_read_free(a);
+    return entries;
+}
+
 int ArchiveExtractor::copyData(struct archive* ar, struct archive* aw) {
     int r;
     const void* buff;

@@ -3,7 +3,6 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QSpinBox>
 #include "PreviewCanvas.h"
 #include "models.h"
 
@@ -15,8 +14,8 @@ public:
         SpritePtr sprite,
         const QString& selectedPointName,
         QLineEdit* spriteNameEdit,
-        QSpinBox* pivotXSpin,
-        QSpinBox* pivotYSpin,
+        QDoubleSpinBox* pivotXSpin,
+        QDoubleSpinBox* pivotYSpin,
         QPushButton* configPointsBtn,
         PreviewCanvas* previewView,
         QDoubleSpinBox* previewZoomSpin,

@@ -38,7 +38,10 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - **Project persistence & Autosave**  
   Save and load full project state (layout options, markers, timelines). The app automatically performs a background autosave every 5 minutes to prevent data loss.
 
-- **Project synchronization**  
+- **Sources management**
+  Load sprites from folders, archives (ZIP/tar), single images (including animated GIFs), or URLs. Use **Sync Source to Layout** to re-import changes from the original file, or **Sync Layout to Source** to write the current pivot/marker state back to the source without leaving the app.
+
+- **Project synchronization**
   Sync your project with the source folder manually or via live file system monitoring (Watch mode) to pick up new or changed assets automatically.
 
 - **CLI tools configuration/installation UI**
@@ -66,10 +69,6 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - Optional export tools:
   - ImageMagick (`magick` or `convert`) for GIF
   - FFmpeg (`ffmpeg`) for video
-- Optional archive tools:
-  - `zip` (save `.zip` projects)
-  - `unzip` (load `.zip` projects)
-
 When the installer downloads the CLI tools for you, it clones the latest `main` branch of `sprat-cli` (`git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git`) before building.
 
 ## Local CLI development
@@ -209,7 +208,7 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
   - Click on a frame to place a splitting line; the view supports zoom for exact placement (CTRL + mouse wheel).
   - ![Splitting](README_assets/splitting.png)
   - Once satisfied, accept the detection to extract and load the frames into your project.
-  - ![Splitted accepted frames](README_assets/splitted_accepted_frames.png)
+  - ![Split accepted frames](README_assets/splitted_accepted_frames.png)
 
 - **Sprite sheet layout editing**
   - Select a sprite to see its preview details; use zoom/scroll controls inside the preview canvas.
@@ -235,6 +234,14 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
   - Use “Save Animation…” (right-click preview) after choosing ImageMagick/FFmpeg toolchains.
   - ![Animation panel](README_assets/animation.png)
 
+- **Sources management**
+  - Open **Sources** (toolbar or menu) to view, rename, and manage all image sources in the project.
+  - Each row shows the source type (folder, archive, image, or URL), its path, and two sync actions:
+    - **Sync Source to Layout**: re-imports changes from the original file into the project. Disabled when no cached copy exists (e.g., folder sources used directly).
+    - **Sync Layout to Source**: writes the current sprite state back to the original file — repacks archives, re-renders PNG atlases, or re-exports GIFs. A confirmation dialog shows a diff (files added / updated / deleted) before writing. Disabled for URL sources.
+  - If the original file has been moved or deleted, the app offers to recreate it from the cached copy, embed the live layout sprites into a new file, locate it from the filesystem, or remove the source entirely.
+  - If individual files are missing inside an existing source, the app offers to restore them from the project cache or locate a replacement folder.
+
 - **Project save/load**
   - Save projects as `.json` or `.zip` and pick exactly which data blocks to persist.
   - Use load actions to resume layout, timelines, and editor context from a saved project.
@@ -245,8 +252,8 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
 
 ### **General Application**
 - `Ctrl + S`: Save project.
-- `Ctrl + Z`: Undo pivot/marker change.
-- `Ctrl + Y`: Redo pivot/marker change.
+- `Ctrl + Z`: Undo (layout changes, pivot/marker edits, project state).
+- `Ctrl + Y`: Redo.
 - `Ctrl + V`: Paste / import image from clipboard.
 - `Ctrl + +` / `Ctrl + =`: Zoom In.
 - `Ctrl + -`: Zoom Out.
@@ -342,7 +349,7 @@ Generation behavior:
   The app will prompt you to install them automatically. Alternatively, open **Settings → CLI Tools** and set absolute paths for your own Sprat binaries.
 
 - **Cannot save/load `.zip` project**
-  Ensure `zip`/`unzip` are installed and available in `PATH`.
+  ZIP handling is built in via libarchive. If saving still fails, check that the destination path is writable and that sufficient disk space is available.
 
 - **Animation export disabled or failing**
   Install ImageMagick and/or FFmpeg, then restart the app.
@@ -352,15 +359,13 @@ Generation behavior:
 
 ## WASM Limitations
 
-The web version has the following known limitations due to Qt 6.10.2 WASM constraints:
+The web version shares most functionality with the desktop build. The following constraints apply:
 
-- **No drag-and-drop for non-file content**
-  Dragging files/folders works, but dragging links or tabs causes a segfault in Qt's WASM event handling (Qt bug). **Workaround:** Use the **Load Images Folder** button in the toolbar to select files via the file picker instead.
+- **Frame detection and animation export unavailable**
+  `spratframes`, ImageMagick, and FFmpeg are not available in the browser environment. Use the desktop version for GIF/video export or automatic frame detection.
 
-- **Keyboard shortcuts may not work**
-  This is a known Qt 6.10 WASM issue where the browser's active element doesn't properly focus the embedded Qt application. **Workaround:** Click on the canvas first to ensure focus, or use the UI buttons instead of keyboard shortcuts.
-
-These limitations may be resolved in future Qt versions. Consider upgrading to Qt 6.11+ if building from source, or file issues with the Qt project if you encounter them.
+- **File access via picker only**
+  The browser sandbox restricts direct filesystem access; use the **Load Images Folder** button or drag-and-drop files from your local machine.
 
 ## Contributing
 

@@ -243,13 +243,41 @@ void MainWindow::onLoadProject() {
     wasmOpenFileDialog(false);
     return;
 #endif
-    QString filter = tr("All Supported Files (*.json *.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz *.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds);;"
-                        "Project Files (*.json);;"
-                        "Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz);;"
-                        "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
-    QString file = QFileDialog::getOpenFileName(this, tr("Load File"), "", filter);
-    if (!file.isEmpty()) {
-        loadProject(file);
+    QMessageBox picker(this);
+    picker.setWindowTitle(tr("Load"));
+    picker.setIcon(QMessageBox::Question);
+    picker.setText(tr("Load a project file or a project folder?"));
+
+    QPushButton* projectFileButton = picker.addButton(tr("Project File..."), QMessageBox::AcceptRole);
+    QPushButton* projectFolderButton = picker.addButton(tr("Project Folder..."), QMessageBox::AcceptRole);
+    picker.addButton(QMessageBox::Cancel);
+    picker.exec();
+
+    if (picker.clickedButton() == projectFileButton) {
+        const QString filter = tr("Project Files (project.spart.json *.json);;"
+                                  "ZIP Projects (*.zip);;"
+                                  "All Supported Files (*.json *.zip)");
+        const QString file = QFileDialog::getOpenFileName(this, tr("Load Project File"), "", filter);
+        if (!file.isEmpty()) {
+            loadProject(file);
+        }
+        return;
+    }
+
+    if (picker.clickedButton() == projectFolderButton) {
+        const QString folder = QFileDialog::getExistingDirectory(this, tr("Select Project Folder"));
+        if (folder.isEmpty()) {
+            return;
+        }
+        const QString projectFile = QDir(folder).filePath("project.spart.json");
+        if (!QFileInfo::exists(projectFile)) {
+            MessageDialog::warning(
+                this,
+                tr("Load Failed"),
+                tr("The selected folder does not contain a project.spart.json file."));
+            return;
+        }
+        loadProject(projectFile);
     }
 }
 
@@ -261,8 +289,8 @@ void MainWindow::onLoadFromUrl() {
     bool accepted = false;
     const QString input = QInputDialog::getText(
         this,
-        tr("Load From URL"),
-        tr("Enter an image, project, or archive URL:"),
+        tr("Add Source URL"),
+        tr("Enter an image or archive URL:"),
         QLineEdit::Normal,
         QString(),
         &accepted);
@@ -703,46 +731,59 @@ void MainWindow::onExportClicked() {
 }
 
 void MainWindow::onExportAsClicked() {
-    QString defaultPath;
+    QString startDir;
+#ifndef Q_OS_WASM
+    if (!m_lastSaveConfig.destination.isEmpty()) {
+        startDir = m_lastSaveConfig.destination;
+    } else if (!m_session->currentFolder.isEmpty()) {
+        startDir = QFileInfo(m_session->currentFolder).dir().filePath("export");
+    } else {
+        startDir = QDir::currentPath() + "/export";
+    }
+#endif
+
+    SaveDialog dlg(startDir,
+                   configuredProfiles(),
+                   m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
+                   m_lastSaveConfig,
+                   this);
+
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    SaveConfig config = dlg.getConfig();
+
 #ifdef Q_OS_WASM
     QString baseName = m_session ? QFileInfo(m_session->currentFolder).fileName().trimmed() : QString();
     if (baseName.isEmpty()) {
         baseName = "sprat-export";
     }
-    defaultPath = QDir::temp().filePath(baseName + ".zip");
-    SaveConfig dialogConfig = m_lastSaveConfig;
-    dialogConfig.destination = defaultPath;
-    SaveDialog dlg(defaultPath,
-                   configuredProfiles(),
-                   m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
-                   dialogConfig,
-                   this,
-                   false);
+    config.destination = QDir::temp().filePath(baseName + ".zip");
 #else
-    defaultPath = QDir::currentPath() + "/export";
-    if (!m_session->currentFolder.isEmpty()) {
-        defaultPath = QFileInfo(m_session->currentFolder).dir().filePath("export");
-    }
-    SaveDialog dlg(defaultPath, configuredProfiles(), m_profileCombo ? m_profileCombo->currentData().toString() : QString(), m_lastSaveConfig, this);
-#endif
-    const int result = dlg.exec();
-    SaveConfig config = dlg.getConfig();
-#ifdef Q_OS_WASM
-    config.destination = defaultPath;
-#endif
-    if (result != QDialog::Accepted) {
+    const QString dest = QFileDialog::getExistingDirectory(this, tr("Select Destination Folder"), startDir);
+    if (dest.isEmpty()) {
         return;
     }
+    config.destination = dest;
+#endif
 
     // Warn if overwriting an existing export (non-ZIP destinations only)
     const bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
     if (!isZip) {
-        const QDir dest(config.destination);
-        if (QDir(dest.filePath("output")).exists()) {
+        const QDir destDir(config.destination);
+        bool hasProfiles = false;
+        for (const QString& p : config.profiles) {
+            if (destDir.exists(p)) {
+                hasProfiles = true;
+                break;
+            }
+        }
+        if (hasProfiles) {
             const int answer = MessageDialog::confirmWarning(
                 this, tr("Overwrite Export?"),
-                tr("The folder \"%1\" already contains an export.\n"
-                   "The output folder will be cleared and replaced.\n\n"
+                tr("The folder \"%1\" already contains profile(s) from a previous export.\n"
+                   "Existing profile folders will be cleared and replaced.\n\n"
                    "Continue?").arg(config.destination),
                 QMessageBox::Yes | QMessageBox::Cancel,
                 QMessageBox::Cancel);

@@ -8,19 +8,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sources dialog** redesigned with per-source "Sync Layout to Source" and "Sync Source to Layout" buttons
+- **Sync Layout to Source**: writes current layout sprites back to the original source file — repacks archives (ZIP), re-renders PNG atlases, and re-exports GIFs from the current pivot/marker state
+- **Sync Source to Layout**: re-imports any changes from the original source; disabled when no cached copy exists
+- Pre-sync diff summary in the confirmation dialog showing how many files will be added, updated, or deleted
+- Source-not-found recovery: if the original file is missing, the user is offered to recreate it from the cached copy, embed live sprites from the layout, pick a new location from the filesystem, or remove the source
+- Missing-file detection: if individual files are absent inside an existing source, the user is offered to restore them from the project cache or locate a replacement folder
+- `ArchiveExtractor::listEntries` utility for enumerating archive contents without extraction
+- Enable/disable logic for sync buttons based on source type and cached copy availability (URL sources always disabled)
+
+## [0.7.0]
+
+### Added
+- Onion skin preview in the animation test panel
+- Frames editor settings (configurable overlay and display options)
+
+### Changed
+- Full undo/redo now covers layout changes, marker edits, and project-level state (not just pivots)
+- Timeline tree interactions overhauled with drag-reorder, inline rename, and keyboard navigation
+- UI polish: replaced redundant text labels with icons throughout toolbars and dialogs
+
+## [0.6.0]
+
+### Added
+- WASM: sprite folder browser allows selecting image folders in the browser environment
+- Timeline undo/redo support
+
+### Changed
+- Enhanced WASM file management with improved upload/download flows
+- Optimized background file scanning for large folders
+
+### Fixed
+- Default sort order corrected for newly loaded sprite folders
+
+## [0.5.0]
+
+### Added
+- Undo/redo for pivot and marker edits (`Ctrl+Z` / `Ctrl+Y`)
+- Portable ZIP projects now embed all source images
+- Profile presets: save and restore full layout-profile configurations
+- Help menu with Quick Start guide and Hotkeys reference
+- Keyboard shortcuts for sprite deletion (`Delete`) and atlas view switching (`Alt+L` / `Alt+N`)
+
+### Changed
+- Animation panel improvements: frame reordering via drag-and-drop, better FPS controls
+- File loading UX overhauled; layout rebuild debounced to reduce redundant re-packs
+- Navigator improvements including context actions for grouping, timeline creation, and folder operations
+
+## [0.4.0]
+
+### Added
+- Watch mode: live file-system monitoring auto-resyncs the project when source images change
+- Split sprites: right-click a sprite in the layout canvas to divide it into sub-frames
+- Sprite Navigator: hierarchical tree view of all sprites organised by folder (toggle with `Alt+N`)
+- CLI Log dock for inspecting raw CLI tool output
+- Remote import: load sprite folders or ZIP files from URLs directly into the project
+- Granular settings sections (Spritesheet, Styles, CLI Tools, …)
+
+### Changed
+- Dock layout reorganised into Atlas, Animation, and Debug groups
+- Lazy layout rebuild with immediate visual feedback; full repack deferred 2 seconds after last change
+- Rendering, hit-testing, and lookup hot paths optimised for large atlases
+
+## [0.3.2]
+
+### Fixed
+- Upgraded libarchive to v3.8.5 (security and stability)
+- Resolved "Unsupported ZIP compression method" error on Windows by ensuring zlib availability
+- Fixed wide-character pathname handling for libarchive on Windows
+
+## [0.3.0]
+
+### Added
+- Per-profile GPU texture compression: DXT1 (RGB) and DXT5 (RGBA) output as `.dds`
+- Per-profile pixel dilation (0–16 passes) to reduce dark halos around trimmed sprites
+- Deduplication mode selection: Exact (byte-for-byte) or Perceptual (visually similar)
+
+### Changed
+- Settings dialog reorganised into logical groups (Spritesheet, Styles, CLI Tools)
+
+## [0.2.5]
+
+### Added
 - CLI tool integration stability improvements with robust version parsing
 - Version persistence to QSettings for faster startup heuristic
 - Manual CLI path selection dialog (ProvidePath feature)
 - Real-time installation progress feedback via installLog signal connection
+- itch.io web demo deployment
 
 ### Fixed
-- Fixed fragile CLI version string parsing using `output.split()`
+- Fragile CLI version string parsing using `output.split()`
 - Prevent CLI operations from executing against old binaries during upgrade
 - Handle edge cases with whitespace, newlines, and format variants in version strings
+- WASM Asyncify resize assertion error resolved by disabling strict checks
 
 ### Changed
 - m_cliReady heuristic now gates on both binary presence AND version match
-- Improved error handling for missing or corrupted CLI tools
 
 ## [0.2.4] - 2026-04-15
 

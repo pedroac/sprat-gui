@@ -41,6 +41,14 @@ public:
      */
     static bool createZip(const QString& sourceDir, const QString& destZipPath, QString& error);
 
+    /**
+     * @brief Lists the file paths stored inside an archive.
+     * @param archivePath Path to the archive file.
+     * @param error Output error message if listing fails.
+     * @return List of relative file paths contained in the archive.
+     */
+    static QStringList listEntries(const QString& archivePath, QString& error);
+
 private:
     static int copyData(struct archive* ar, struct archive* aw);
 };

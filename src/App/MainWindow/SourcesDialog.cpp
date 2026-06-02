@@ -47,7 +47,7 @@ SourcesDialog::SourcesDialog(QWidget* parent)
     : QDialog(parent, Qt::Tool | Qt::WindowStaysOnTopHint)
 {
     setWindowTitle(tr("Project Sources"));
-    setMinimumSize(560, 320);
+    setMinimumSize(700, 320);
     buildUi();
 }
 
@@ -166,20 +166,49 @@ void SourcesDialog::refresh(const QVector<ProjectSource>& sources,
         auto* actLayout = new QHBoxLayout(actionsWidget);
         actLayout->setContentsMargins(2, 0, 2, 0);
         actLayout->setSpacing(2);
+        actionsWidget->setMinimumWidth(340);
 
-        auto* syncBtn   = new QPushButton(tr("Sync"), actionsWidget);
-        auto* removeBtn = new QPushButton(tr("Remove"), actionsWidget);
+        const bool isUrl     = (src.type == SourceType::Url);
+        const bool hasCopy   = !src.cachedFolderPath.isEmpty();
+        const bool isFolder  = (src.type == SourceType::Folder);
+
+        // "Sync Source to Layout": re-import from original into the layout's working copy.
+        // Requires a cached copy for non-folder sources; folders are used directly so always valid.
+        const bool syncSourceEnabled = !isUrl && (isFolder || hasCopy);
+
+        // "Sync Layout to Source": write the working copy back to the original file.
+        // Only meaningful when a copy exists; direct folder sources need no write-back.
+        const bool syncLayoutEnabled = !isUrl && hasCopy;
+
+        auto* syncLayoutBtn = new QPushButton(tr("Sync Layout to Source"), actionsWidget);
+        auto* syncBtn       = new QPushButton(tr("Sync Source to Layout"), actionsWidget);
+        auto* removeBtn     = new QPushButton(tr("Remove"),                actionsWidget);
+        syncLayoutBtn->setFixedHeight(22);
         syncBtn->setFixedHeight(22);
         removeBtn->setFixedHeight(22);
+        syncLayoutBtn->setEnabled(syncLayoutEnabled);
+        syncBtn->setEnabled(syncSourceEnabled);
+        syncLayoutBtn->setToolTip(
+            isUrl    ? tr("Not available for URL sources") :
+            !hasCopy ? tr("Not available when using the source directly (no cached copy)")
+                     : tr("Write current layout sprites back to the source file"));
+        syncBtn->setToolTip(
+            isUrl              ? tr("Not available for URL sources") :
+            (!isFolder && !hasCopy) ? tr("No cached copy available to sync from")
+                                    : tr("Re-import any changes from the source"));
 
         const int capturedIndex = i;
-        connect(syncBtn,   &QPushButton::clicked, this, [this, capturedIndex]() {
+        connect(syncLayoutBtn, &QPushButton::clicked, this, [this, capturedIndex]() {
+            emit syncLayoutRequested(capturedIndex);
+        });
+        connect(syncBtn, &QPushButton::clicked, this, [this, capturedIndex]() {
             emit syncSourceRequested(capturedIndex);
         });
         connect(removeBtn, &QPushButton::clicked, this, [this, capturedIndex]() {
             emit removeSourceRequested(capturedIndex);
         });
 
+        actLayout->addWidget(syncLayoutBtn);
         actLayout->addWidget(syncBtn);
         actLayout->addWidget(removeBtn);
         m_sourcesTable->setCellWidget(i, 4, actionsWidget);

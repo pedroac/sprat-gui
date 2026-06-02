@@ -25,7 +25,7 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliP
 void SettingsDialog::setupUi() {
     switch (m_initialSection) {
         case Section::Styles: setWindowTitle(tr("Style Settings")); break;
-        case Section::Spritesheet: setWindowTitle(tr("Spritesheet Settings")); break;
+        case Section::Spritesheet: setWindowTitle(tr("Atlas Sprites Settings")); break;
         case Section::FramesEditor: setWindowTitle(tr("Frames Editor Settings")); break;
 #ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
@@ -91,8 +91,8 @@ void SettingsDialog::setupUi() {
     contentLayout->addWidget(m_stylesGroup);
     m_stylesGroup->setVisible(m_initialSection == Section::Styles);
 
-    // Spritesheet Group
-    m_spritesheetGroup = new QGroupBox(tr("Spritesheet"), content);
+    // Atlas Sprites Group
+    m_spritesheetGroup = new QGroupBox(tr("Atlas Sprites"), content);
     QFormLayout* spritesheetForm = new QFormLayout(m_spritesheetGroup);
 
     auto* dedupDesc = new QLabel(tr("Deduplication creates aliases for identical or similar sprites, "

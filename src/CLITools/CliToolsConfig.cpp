@@ -56,7 +56,9 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.theme = settings.value("settings/theme", out.theme).toString();
     out.onionSkinEnabled        = settings.value("settings/onion_skin_enabled", out.onionSkinEnabled).toBool();
     out.propagateEditsToChecked = settings.value("settings/propagate_edits_to_checked", out.propagateEditsToChecked).toBool();
-    out.defaultProjectsFolder = settings.value("settings/default_projects_folder", 
+    out.coordUnit = settings.value("settings/coord_unit", 0).toInt() == 1
+                  ? CoordUnit::Percent : CoordUnit::Pixels;
+    out.defaultProjectsFolder = settings.value("settings/default_projects_folder",
         QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects")).toString();
     out.recentProjects = settings.value("recent/projects", out.recentProjects).toStringList();
     return out;
@@ -96,6 +98,8 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/default_projects_folder", settings.defaultProjectsFolder);
     qsettings.setValue("settings/onion_skin_enabled",         settings.onionSkinEnabled);
     qsettings.setValue("settings/propagate_edits_to_checked", settings.propagateEditsToChecked);
+    qsettings.setValue("settings/coord_unit",
+        settings.coordUnit == CoordUnit::Percent ? 1 : 0);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

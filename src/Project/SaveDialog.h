@@ -28,8 +28,7 @@ public:
                         const QVector<SpratProfile>& availableProfiles,
                         const QString& selectedProfileName,
                         const SaveConfig& lastConfig,
-                        QWidget* parent = nullptr,
-                        bool showDestination = true);
+                        QWidget* parent = nullptr);
     /**
      * @brief Retrieves the configuration entered by the user.
      * @return A SaveConfig struct containing the settings.
@@ -37,16 +36,12 @@ public:
     SaveConfig getConfig() const;
 
 private slots:
-    void onBrowseFolder();
-    void onBrowseFile();
 
 private:
     void setupUi();
     void updateProfileSelectionState();
 
-    QLineEdit* m_destEdit;
     QComboBox* m_transformCombo;
     QVBoxLayout* m_profilesLayout;
     QVector<QCheckBox*> m_profileChecks;
-    bool m_showDestination = true;
 };

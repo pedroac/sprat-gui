@@ -106,9 +106,15 @@ public:
 // ---------------------------------------------------------------------------
 class SetPivotCommand : public QUndoCommand {
 public:
+    struct CoTarget {
+        SpritePtr sprite;
+        QPair<int, int> oldPos;
+        QPair<int, int> newPos;
+    };
+
     SetPivotCommand(SpritePtr sprite, int oldX, int oldY, int newX, int newY,
                     bool alreadyApplied = false,
-                    QVector<QPair<SpritePtr, QPair<int,int>>> coTargets = {},
+                    QVector<CoTarget> coTargets = {},
                     QUndoCommand* parent = nullptr)
         : QUndoCommand(QObject::tr("Set Pivot"), parent)
         , m_sprite(sprite)
@@ -123,10 +129,10 @@ public:
             m_sprite->pivotX = m_newX;
             m_sprite->pivotY = m_newY;
         }
-        for (const auto& pair : m_coTargets) {
-            if (pair.first) {
-                pair.first->pivotX = m_newX;
-                pair.first->pivotY = m_newY;
+        for (const auto& target : m_coTargets) {
+            if (target.sprite) {
+                target.sprite->pivotX = target.newPos.first;
+                target.sprite->pivotY = target.newPos.second;
             }
         }
         AnimationPreviewService::invalidateBounds();
@@ -137,10 +143,10 @@ public:
             m_sprite->pivotX = m_oldX;
             m_sprite->pivotY = m_oldY;
         }
-        for (const auto& pair : m_coTargets) {
-            if (pair.first) {
-                pair.first->pivotX = pair.second.first;
-                pair.first->pivotY = pair.second.second;
+        for (const auto& target : m_coTargets) {
+            if (target.sprite) {
+                target.sprite->pivotX = target.oldPos.first;
+                target.sprite->pivotY = target.oldPos.second;
             }
         }
         AnimationPreviewService::invalidateBounds();
@@ -152,8 +158,14 @@ public:
         const auto* o = static_cast<const SetPivotCommand*>(other);
         if (o->m_sprite != m_sprite) return false;
         if (o->m_coTargets.size() != m_coTargets.size()) return false;
+        for (int i = 0; i < m_coTargets.size(); ++i) {
+            if (m_coTargets[i].sprite != o->m_coTargets[i].sprite) return false;
+        }
         m_newX = o->m_newX;
         m_newY = o->m_newY;
+        for (int i = 0; i < m_coTargets.size(); ++i) {
+            m_coTargets[i].newPos = o->m_coTargets[i].newPos;
+        }
         return true;
     }
 
@@ -161,7 +173,7 @@ private:
     SpritePtr m_sprite;
     int m_oldX, m_oldY, m_newX, m_newY;
     mutable bool m_skipFirstRedo = false;
-    QVector<QPair<SpritePtr, QPair<int,int>>> m_coTargets;
+    QVector<CoTarget> m_coTargets;
 };
 
 // ---------------------------------------------------------------------------
@@ -526,11 +538,17 @@ private:
 // ---------------------------------------------------------------------------
 class SetMarkersCommand : public QUndoCommand {
 public:
+    struct CoTarget {
+        SpritePtr sprite;
+        QVector<NamedPoint> oldPoints;
+        QVector<NamedPoint> newPoints;
+    };
+
     SetMarkersCommand(SpritePtr sprite,
                        const QVector<NamedPoint>& oldPoints,
                        const QVector<NamedPoint>& newPoints,
                        std::function<void()> postExecute,
-                       QVector<QPair<SpritePtr, QVector<NamedPoint>>> coTargets = {},
+                       QVector<CoTarget> coTargets = {},
                        QUndoCommand* parent = nullptr)
         : QUndoCommand(QObject::tr("Edit Markers"), parent)
         , m_sprite(sprite)
@@ -544,16 +562,16 @@ public:
     void redo() override {
         if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
         if (m_sprite) m_sprite->points = m_newPoints;
-        for (const auto& pair : m_coTargets) {
-            if (pair.first) pair.first->points = m_newPoints;
+        for (const auto& target : m_coTargets) {
+            if (target.sprite) target.sprite->points = target.newPoints;
         }
         if (m_postExecute) m_postExecute();
     }
 
     void undo() override {
         if (m_sprite) m_sprite->points = m_oldPoints;
-        for (const auto& pair : m_coTargets) {
-            if (pair.first) pair.first->points = pair.second;
+        for (const auto& target : m_coTargets) {
+            if (target.sprite) target.sprite->points = target.oldPoints;
         }
         if (m_postExecute) m_postExecute();
     }
@@ -566,7 +584,7 @@ private:
     QVector<NamedPoint> m_newPoints;
     std::function<void()> m_postExecute;
     mutable bool m_skipFirstRedo;
-    QVector<QPair<SpritePtr, QVector<NamedPoint>>> m_coTargets;
+    QVector<CoTarget> m_coTargets;
 };
 
 // ---------------------------------------------------------------------------

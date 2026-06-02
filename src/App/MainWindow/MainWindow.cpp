@@ -67,6 +67,10 @@
 #include <QVBoxLayout>
 #include <QTextEdit>
 #include <QPushButton>
+#include <QPainter>
+#include <QImage>
+#include <QDirIterator>
+#include "ArchiveExtractor.h"
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -111,12 +115,11 @@ void MainWindow::onShowSources() {
     if (!m_sourcesDialog) {
         m_sourcesDialog = new SourcesDialog(this);
 
-        connect(m_sourcesDialog, &SourcesDialog::syncSourceRequested, this,
-                [this](int index) {
-            if (!m_session || index < 0 || index >= m_session->sources.size()) return;
-            // Re-run layout to pick up any changes from this source
-            onRunLayout(true);
-        });
+        connect(m_sourcesDialog, &SourcesDialog::syncSourceRequested,
+                this, &MainWindow::onSyncSourceRequested);
+
+        connect(m_sourcesDialog, &SourcesDialog::syncLayoutRequested,
+                this, &MainWindow::onSyncLayoutRequested);
 
         connect(m_sourcesDialog, &SourcesDialog::removeSourceRequested,
                 this, [this](int index) { removeSource(index); });
@@ -324,6 +327,501 @@ void MainWindow::removeSource(int index) {
     }
 
     postExecuteRedo();
+}
+
+void MainWindow::onSyncSourceRequested(int sourceIndex) {
+    if (!m_session || sourceIndex < 0 || sourceIndex >= m_session->sources.size()) return;
+    const ProjectSource& src = m_session->sources.at(sourceIndex);
+
+    // --- Check if the source can be located ---
+    const bool located = [&]() -> bool {
+        switch (src.type) {
+        case SourceType::Folder:      return QFileInfo(src.originalPath).isDir();
+        case SourceType::Archive:
+        case SourceType::SingleImage: return QFileInfo::exists(src.originalPath);
+        case SourceType::Url:         return true;
+        }
+        return false;
+    }();
+
+    if (located) {
+        // --- Detect individual files missing from the source ---
+        QStringList haveLocally;  // File is in our cache but absent from the source archive
+        QStringList missingFully; // File is referenced in the layout but gone from disk entirely
+
+        if (src.type == SourceType::Archive && !src.cachedFolderPath.isEmpty()) {
+            // Files in the local cache that were removed from the zip
+            QString listErr;
+            const QStringList zipEntries = ArchiveExtractor::listEntries(src.originalPath, listErr);
+            const QSet<QString> zipSet(zipEntries.begin(), zipEntries.end());
+            QDirIterator cit(src.cachedFolderPath, QDir::Files, QDirIterator::Subdirectories);
+            while (cit.hasNext()) {
+                cit.next();
+                const QString rel = QDir(src.cachedFolderPath).relativeFilePath(cit.filePath());
+                if (!zipSet.contains(rel))
+                    haveLocally.append(cit.filePath());
+            }
+        } else if (src.type == SourceType::Folder) {
+            // Layout sprites from this folder whose files no longer exist
+            for (const auto& model : m_session->layoutModels) {
+                for (const auto& sprite : model.sprites) {
+                    if (!sprite || !sprite->path.startsWith(src.originalPath)) continue;
+                    if (!QFileInfo::exists(sprite->path)
+                            && !missingFully.contains(sprite->path))
+                        missingFully.append(sprite->path);
+                }
+            }
+        }
+
+        if (!haveLocally.isEmpty()) {
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle(tr("Files Missing in Source"));
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText(tr("%n file(s) are present in the project but missing from the source.",
+                              "", haveLocally.size()));
+            msgBox.setDetailedText(haveLocally.join(QLatin1Char('\n')));
+            auto* addBtn = msgBox.addButton(tr("Add to Source"), QMessageBox::AcceptRole);
+            msgBox.addButton(tr("Skip"), QMessageBox::RejectRole);
+            msgBox.exec();
+
+            if (msgBox.clickedButton() == addBtn) {
+                QString error;
+                if (!ArchiveExtractor::createZip(src.cachedFolderPath, src.originalPath, error))
+                    MessageDialog::warning(this, tr("Failed to Update Source"), error);
+            }
+        }
+
+        if (!missingFully.isEmpty()) {
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle(tr("Files Missing in Source"));
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText(tr("%n file(s) are missing from the source and the project.",
+                              "", missingFully.size()));
+            msgBox.setDetailedText(missingFully.join(QLatin1Char('\n')));
+            auto* locateBtn = msgBox.addButton(tr("Locate in Folder…"), QMessageBox::AcceptRole);
+            msgBox.addButton(tr("Skip"), QMessageBox::RejectRole);
+            msgBox.exec();
+
+            if (msgBox.clickedButton() == locateBtn) {
+                const QString dir = QFileDialog::getExistingDirectory(
+                    this, tr("Select Folder Containing Missing Files"),
+                    src.originalPath);
+                if (!dir.isEmpty()) {
+                    bool anyFound = false;
+                    for (const QString& missing : missingFully) {
+                        const QString fileName = QFileInfo(missing).fileName();
+                        const QString candidate = QDir(dir).filePath(fileName);
+                        if (QFileInfo::exists(candidate)) {
+                            // Copy to source and update layout path to the new location
+                            const QString dest = QDir(src.originalPath).filePath(fileName);
+                            if (candidate != dest)
+                                QFile::copy(candidate, dest);
+                            for (QString& p : m_session->activeFramePaths)
+                                if (p == missing) p = dest;
+                            anyFound = true;
+                        }
+                    }
+                    if (!anyFound)
+                        MessageDialog::warning(this, tr("Files Not Found"),
+                            tr("None of the missing files were found in the selected folder."));
+                }
+            }
+        }
+
+        onRunLayout(true);
+        return;
+    }
+
+    // --- Determine what we still have ---
+
+    // Case 1: cached/embedded copy exists
+    const bool hasCachedFiles = !src.cachedFolderPath.isEmpty()
+                                 && QFileInfo(src.cachedFolderPath).isDir()
+                                 && [&]() {
+                                     QDirIterator it(src.cachedFolderPath, QDir::Files,
+                                                     QDirIterator::Subdirectories);
+                                     return it.hasNext();
+                                 }();
+
+    // Case 2: sprites that still exist on disk are loaded in the layout
+    QStringList liveSpritePaths;
+    if (!hasCachedFiles) {
+        for (const auto& model : m_session->layoutModels) {
+            for (const auto& sprite : model.sprites) {
+                if (!sprite) continue;
+                const bool fromCache  = !src.cachedFolderPath.isEmpty()
+                                        && sprite->path.startsWith(src.cachedFolderPath);
+                const bool fromSource = !src.originalPath.isEmpty()
+                                        && sprite->path.startsWith(src.originalPath);
+                if ((fromCache || fromSource) && QFileInfo::exists(sprite->path)
+                        && !liveSpritePaths.contains(sprite->path))
+                    liveSpritePaths.append(sprite->path);
+            }
+        }
+    }
+
+    const QString notFoundMsg =
+        tr("The source \"%1\" could not be located:\n%2").arg(src.name, src.originalPath);
+
+    // --- Case 1: cached files present — offer to recreate source ---
+    if (hasCachedFiles) {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle(tr("Source Not Found"));
+        msgBox.setIcon(QMessageBox::Warning);
+        msgBox.setText(notFoundMsg);
+        msgBox.setInformativeText(
+            tr("The files are cached in the project. "
+               "Do you want to recreate the source from the cached files?"));
+        auto* recreateBtn = msgBox.addButton(tr("Recreate Source"), QMessageBox::AcceptRole);
+        msgBox.addButton(QMessageBox::Cancel);
+        msgBox.setDefaultButton(recreateBtn);
+        msgBox.exec();
+        if (msgBox.clickedButton() != recreateBtn) return;
+
+        QDir().mkpath(QFileInfo(src.originalPath).absolutePath());
+        QString error;
+        bool ok = false;
+        switch (src.type) {
+        case SourceType::Archive:
+            ok = ArchiveExtractor::createZip(src.cachedFolderPath, src.originalPath, error);
+            break;
+        case SourceType::Folder: {
+            ok = QDir().mkpath(src.originalPath);
+            if (ok) {
+                QDirIterator it(src.cachedFolderPath, QDir::Files, QDirIterator::Subdirectories);
+                while (it.hasNext()) {
+                    it.next();
+                    const QString rel  = QDir(src.cachedFolderPath).relativeFilePath(it.filePath());
+                    const QString dest = QDir(src.originalPath).filePath(rel);
+                    QDir().mkpath(QFileInfo(dest).absolutePath());
+                    QFile::copy(it.filePath(), dest);
+                }
+            }
+            break;
+        }
+        case SourceType::SingleImage:
+            if (src.originalPath.endsWith(".gif", Qt::CaseInsensitive))
+                ok = syncLayoutToGif(src, error);
+            else
+                ok = syncLayoutToImage(src, error);
+            break;
+        default:
+            break;
+        }
+
+        if (ok) {
+            m_statusLabel->setText(
+                tr("Source recreated: %1").arg(QFileInfo(src.originalPath).fileName()));
+            onRunLayout(true);
+        } else {
+            MessageDialog::warning(this, tr("Recreate Source Failed"),
+                error.isEmpty() ? tr("Could not recreate the source.") : error);
+        }
+        return;
+    }
+
+    // --- Case 2: live sprites in layout — offer to embed ---
+    if (!liveSpritePaths.isEmpty()) {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle(tr("Source Not Found"));
+        msgBox.setIcon(QMessageBox::Warning);
+        msgBox.setText(notFoundMsg);
+        msgBox.setInformativeText(
+            tr("The layout still has %n sprite(s) from this source. "
+               "Do you want to embed them in the project?", "", liveSpritePaths.size()));
+        auto* embedBtn = msgBox.addButton(tr("Embed Sprites"), QMessageBox::AcceptRole);
+        msgBox.addButton(QMessageBox::Cancel);
+        msgBox.setDefaultButton(embedBtn);
+        msgBox.exec();
+        if (msgBox.clickedButton() != embedBtn) return;
+
+        ensureSourceFolder();
+
+        QString safeName;
+        for (const QChar& c : src.name)
+            safeName += (c.isLetterOrNumber() || c == QLatin1Char('-') || c == QLatin1Char('_'))
+                        ? c : QLatin1Char('_');
+        if (safeName.isEmpty()) safeName = QStringLiteral("embedded");
+
+        QString destFolder = QDir(m_session->sourceFolder).filePath(safeName);
+        { int n = 1;
+          while (QFileInfo::exists(destFolder))
+              destFolder = QDir(m_session->sourceFolder).filePath(
+                  safeName + QLatin1Char('_') + QString::number(++n)); }
+
+        if (!QDir().mkpath(destFolder)) {
+            MessageDialog::warning(this, tr("Embed Failed"),
+                                   tr("Could not create destination folder."));
+            return;
+        }
+
+        QHash<QString, QString> pathMap;
+        for (const QString& from : liveSpritePaths) {
+            const QString to = QDir(destFolder).filePath(QFileInfo(from).fileName());
+            if (QFile::copy(from, to))
+                pathMap[from] = to;
+        }
+        for (QString& p : m_session->activeFramePaths)
+            if (pathMap.contains(p)) p = pathMap.value(p);
+
+        m_session->sources[sourceIndex].cachedFolderPath = destFolder;
+        refreshSourcesDialogIfVisible();
+        scheduleLayoutRebuild(true);
+        m_statusLabel->setText(
+            tr("Sprites embedded: %1").arg(QFileInfo(destFolder).fileName()));
+        return;
+    }
+
+    // --- Case 3: nothing usable — offer to pick, remove, or cancel ---
+    {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle(tr("Source Not Found"));
+        msgBox.setIcon(QMessageBox::Warning);
+        msgBox.setText(notFoundMsg);
+        msgBox.setInformativeText(
+            tr("The source could not be located and no sprites are loaded from it."));
+        auto* pickBtn   = msgBox.addButton(tr("Pick from Filesystem…"), QMessageBox::ActionRole);
+        auto* removeBtn = msgBox.addButton(tr("Remove Source"),          QMessageBox::DestructiveRole);
+        msgBox.addButton(QMessageBox::Cancel);
+        msgBox.exec();
+
+        if (msgBox.clickedButton() == pickBtn) {
+            const QString startDir = QFileInfo(src.originalPath).absolutePath();
+            QString path;
+            switch (src.type) {
+            case SourceType::Folder:
+                path = QFileDialog::getExistingDirectory(
+                    this, tr("Select Replacement Folder"), startDir);
+                break;
+            case SourceType::Archive:
+                path = QFileDialog::getOpenFileName(
+                    this, tr("Select Replacement Archive"), startDir,
+                    tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)"));
+                break;
+            case SourceType::SingleImage:
+                path = QFileDialog::getOpenFileName(
+                    this, tr("Select Replacement Image"), startDir,
+                    tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga)"));
+                break;
+            default:
+                break;
+            }
+            if (!path.isEmpty()) {
+                m_session->sources[sourceIndex].originalPath = path;
+                m_session->sources[sourceIndex].cachedFolderPath.clear();
+                refreshSourcesDialogIfVisible();
+                onRunLayout(true);
+            }
+        } else if (msgBox.clickedButton() == removeBtn) {
+            removeSource(sourceIndex);
+        }
+    }
+}
+
+void MainWindow::onSyncLayoutRequested(int sourceIndex) {
+    if (!m_session || sourceIndex < 0 || sourceIndex >= m_session->sources.size()) return;
+    const ProjectSource& src = m_session->sources.at(sourceIndex);
+    if (src.type == SourceType::Url) return;
+
+    // --- Compute diff summary for the confirmation dialog ---
+    QString diffSummary;
+
+    switch (src.type) {
+    case SourceType::Folder: {
+        int present = 0, missing = 0;
+        for (const auto& model : m_session->layoutModels) {
+            for (const auto& sprite : model.sprites) {
+                if (!sprite || !sprite->path.startsWith(src.originalPath)) continue;
+                if (QFileInfo::exists(sprite->path)) ++present;
+                else ++missing;
+            }
+        }
+        QStringList parts;
+        if (present > 0) parts << tr("%n file(s) present", "", present);
+        if (missing > 0) parts << tr("%n file(s) missing", "", missing);
+        diffSummary = parts.isEmpty()
+            ? tr("No sprites found for this source.")
+            : parts.join(QStringLiteral(", ")) + QLatin1Char('.');
+        break;
+    }
+
+    case SourceType::Archive: {
+        if (!src.cachedFolderPath.isEmpty()) {
+            QStringList newFiles;
+            {
+                QDirIterator it(src.cachedFolderPath, QDir::Files, QDirIterator::Subdirectories);
+                while (it.hasNext()) {
+                    it.next();
+                    newFiles.append(QDir(src.cachedFolderPath).relativeFilePath(it.filePath()));
+                }
+                newFiles.sort();
+            }
+            QStringList oldFiles;
+            if (QFileInfo::exists(src.originalPath)) {
+                QString listErr;
+                oldFiles = ArchiveExtractor::listEntries(src.originalPath, listErr);
+                oldFiles.sort();
+            }
+            const QSet<QString> oldSet(oldFiles.begin(), oldFiles.end());
+            const QSet<QString> newSet(newFiles.begin(), newFiles.end());
+            int added = 0, updated = 0, deleted = 0;
+            for (const auto& f : newFiles) {
+                if (oldSet.contains(f)) ++updated; else ++added;
+            }
+            for (const auto& f : oldFiles) {
+                if (!newSet.contains(f)) ++deleted;
+            }
+            QStringList parts;
+            if (added   > 0) parts << tr("%n file(s) added",   "", added);
+            if (updated > 0) parts << tr("%n file(s) updated", "", updated);
+            if (deleted > 0) parts << tr("%n file(s) deleted", "", deleted);
+            diffSummary = parts.isEmpty()
+                ? tr("No changes detected.")
+                : parts.join(QStringLiteral(", ")) + QLatin1Char('.');
+        }
+        break;
+    }
+
+    case SourceType::SingleImage: {
+        const bool isGif = src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
+                           && !src.cachedFolderPath.isEmpty();
+        const bool fileExists = QFileInfo::exists(src.originalPath);
+        if (isGif) {
+            int frameCount = 0;
+            QDirIterator it(src.cachedFolderPath, QDir::Files);
+            while (it.hasNext()) { it.next(); ++frameCount; }
+            diffSummary = fileExists
+                ? tr("%n frame(s): 1 file updated.", "", frameCount)
+                : tr("%n frame(s): 1 file added.", "", frameCount);
+        } else {
+            diffSummary = fileExists ? tr("1 file updated.") : tr("1 file added.");
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+
+    // --- Confirmation dialog ---
+    QString dialogText;
+    if (src.type == SourceType::Folder) {
+        dialogText = tr("Verify sprite files in \"%1\".\n\n%2\n\nContinue?")
+                     .arg(src.originalPath, diffSummary);
+    } else {
+        dialogText = tr("This will overwrite \"%1\" with the current layout content.\n\n"
+                        "%2\n\nThis action cannot be undone. Continue?")
+                     .arg(src.originalPath, diffSummary);
+    }
+
+    const QMessageBox::StandardButton answer = MessageDialog::confirmWarning(
+        this, tr("Sync Layout to Source"),
+        dialogText,
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (answer != QMessageBox::Yes) return;
+
+    // --- Perform the sync ---
+    QString error;
+    bool ok = false;
+
+    switch (src.type) {
+    case SourceType::Folder:
+        ok = true;
+        for (const auto& model : m_session->layoutModels) {
+            for (const auto& sprite : model.sprites) {
+                if (!sprite || !sprite->path.startsWith(src.originalPath)) continue;
+                if (!QFileInfo::exists(sprite->path)) {
+                    error = tr("File not found: %1").arg(sprite->path);
+                    ok = false;
+                }
+            }
+        }
+        break;
+
+    case SourceType::Archive:
+        if (src.cachedFolderPath.isEmpty()) {
+            error = tr("No cached folder for this archive source.");
+        } else {
+            ok = ArchiveExtractor::createZip(src.cachedFolderPath, src.originalPath, error);
+        }
+        break;
+
+    case SourceType::SingleImage:
+        if (src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
+                && !src.cachedFolderPath.isEmpty()) {
+            ok = syncLayoutToGif(src, error);
+        } else {
+            ok = syncLayoutToImage(src, error);
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    if (ok) {
+        m_statusLabel->setText(tr("Sync Layout: saved to '%1'").arg(
+            QFileInfo(src.originalPath).fileName()));
+    } else {
+        MessageDialog::warning(this, tr("Sync Layout Failed"),
+            error.isEmpty() ? tr("Unknown error.") : error);
+    }
+}
+
+bool MainWindow::syncLayoutToImage(const ProjectSource& src, QString& error) {
+    if (m_session->layoutModels.isEmpty()) {
+        error = tr("No layout to export.");
+        return false;
+    }
+    const LayoutModel& model = m_session->layoutModels.first();
+    if (model.atlasWidth <= 0 || model.atlasHeight <= 0) {
+        error = tr("Invalid atlas dimensions.");
+        return false;
+    }
+    QImage atlas(model.atlasWidth, model.atlasHeight, QImage::Format_ARGB32);
+    atlas.fill(Qt::transparent);
+    QPainter painter(&atlas);
+    for (const auto& sprite : model.sprites) {
+        if (!sprite) continue;
+        QPixmap pix(sprite->path);
+        if (!pix.isNull())
+            painter.drawPixmap(sprite->rect.topLeft(), pix);
+    }
+    painter.end();
+    if (!atlas.save(src.originalPath)) {
+        error = tr("Could not write to '%1'.").arg(src.originalPath);
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
+    QStringList framePaths;
+    for (const auto& model : m_session->layoutModels) {
+        for (const auto& sprite : model.sprites) {
+            if (sprite && sprite->path.startsWith(src.cachedFolderPath))
+                framePaths.append(sprite->path);
+        }
+    }
+    if (framePaths.isEmpty()) {
+        error = tr("No frames found for this GIF source.");
+        return false;
+    }
+
+    const int fps = (!m_session->timelines.isEmpty())
+                    ? m_session->timelines.first().fps : 8;
+    AnimationTimeline tl;
+    tl.fps    = fps;
+    tl.frames = framePaths;
+
+    auto setLoadingFn = [this](bool v) { setLoading(v); };
+    auto setStatusFn  = [this](const QString& s) { m_statusLabel->setText(s); };
+
+    const bool ok = AnimationExportService::exportAnimation(
+        this, {tl}, 0, m_session->layoutModels, fps,
+        src.originalPath, setLoadingFn, setStatusFn);
+    if (!ok) error = tr("GIF export failed (ImageMagick required).");
+    return ok;
 }
 
 void MainWindow::registerLoadedSource(const QString& sourcePath, DropAction action,
@@ -551,13 +1049,35 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         connect(m_previewView->overlay(), &EditorOverlayItem::pivotDragFinished,
                 this, [this](int oldX, int oldY, int newX, int newY) {
             if (!m_session->selectedSprite) return;
-            QVector<QPair<SpritePtr, QPair<int,int>>> coTargets;
+            const CoordUnit unit = m_settings.coordUnit;
+            const QSize activeSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
+            const double relX = (unit == CoordUnit::Percent && activeSize.width() > 0)
+                ? (double(newX) * 100.0 / activeSize.width())
+                : double(newX);
+            const double relY = (unit == CoordUnit::Percent && activeSize.height() > 0)
+                ? (double(newY) * 100.0 / activeSize.height())
+                : double(newY);
+            QVector<SetPivotCommand::CoTarget> coTargets;
             if (m_settings.propagateEditsToChecked) {
                 for (const auto& sprite : m_session->selectedSprites) {
                     if (sprite && sprite != m_session->selectedSprite) {
-                        coTargets.append({sprite, {sprite->pivotX, sprite->pivotY}});
-                        sprite->pivotX = newX;
-                        sprite->pivotY = newY;
+                        const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
+                        if (unit == CoordUnit::Percent) {
+                            const QSize coSize = spriteCoordinateSpaceSize(sprite);
+                            sprite->pivotX = coSize.width() > 0
+                                ? qRound(relX * coSize.width() / 100.0)
+                                : newX;
+                            sprite->pivotY = coSize.height() > 0
+                                ? qRound(relY * coSize.height() / 100.0)
+                                : newY;
+                        } else {
+                            sprite->pivotX = newX;
+                            sprite->pivotY = newY;
+                        }
+                        const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
+                        if (oldPos != newPos) {
+                            coTargets.append({sprite, oldPos, newPos});
+                        }
                     }
                 }
             }
@@ -570,12 +1090,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         connect(m_previewView->overlay(), &EditorOverlayItem::markerDragFinished,
                 this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
             if (!m_session->selectedSprite) return;
-            QVector<QPair<SpritePtr, QVector<NamedPoint>>> coTargets;
+            QVector<SetMarkersCommand::CoTarget> coTargets;
             if (m_settings.propagateEditsToChecked) {
                 for (const auto& sprite : m_session->selectedSprites) {
                     if (sprite && sprite != m_session->selectedSprite) {
-                        coTargets.append({sprite, sprite->points});
+                        const QVector<NamedPoint> oldCoPoints = sprite->points;
                         sprite->points = newPoints;
+                        coTargets.append({sprite, oldCoPoints, sprite->points});
                     }
                 }
             }
@@ -2333,12 +2854,14 @@ void MainWindow::showSyncNotification(const QString& message) {
 
 void MainWindow::onUndo() {
     if (!m_undoStack) return;
+    clearCoordinateFieldOverride();
     m_undoStack->undo();
     syncPivotSpinsFromSprite();
 }
 
 void MainWindow::onRedo() {
     if (!m_undoStack) return;
+    clearCoordinateFieldOverride();
     m_undoStack->redo();
     syncPivotSpinsFromSprite();
 }
@@ -2386,8 +2909,7 @@ void MainWindow::onQuickStart() {
 
         "<h3>Sprites Folder &amp; Sync</h3>"
         "<p>Each project can have a <b>sprites folder</b> on disk. "
-        "Use <i>File &rarr; Open Sprites Folder</i> to reveal it in your file manager. "
-        "In <i>Settings &rarr; Spritesheet</i> you can enable folder synchronization:</p>"
+        "In <i>Settings &rarr; Atlas Sprites</i> you can enable folder synchronization:</p>"
         "<ul>"
         "<li><b>Manual</b> &mdash; Press <i>Sync Now</i> to pick up new, modified, or deleted files.</li>"
         "<li><b>Watch</b> &mdash; The app monitors the folder in real time and updates the layout automatically.</li>"

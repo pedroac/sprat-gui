@@ -47,6 +47,20 @@
 #include "NavigatorTreeWidget.h"
 #include "TimelineTreeWidget.h"
 
+static double toDisplay(int px, int dim, CoordUnit unit) {
+    return (unit == CoordUnit::Percent && dim > 0)
+        ? px * 100.0 / dim : double(px);
+}
+
+namespace {
+void setCoordinateSpinValue(QDoubleSpinBox* spin, int px, int dim, CoordUnit unit) {
+    if (!spin) return;
+    spin->blockSignals(true);
+    spin->setValue(toDisplay(px, dim, unit));
+    spin->blockSignals(false);
+}
+}
+
 void MainWindow::setupUi() {
     resize(1400, 860);
     setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
@@ -597,21 +611,35 @@ void MainWindow::setupUi() {
     pivotRow->addWidget(m_handleCombo);
     connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
     pivotRow->addWidget(new QLabel(tr("X:")));
-    m_pivotXSpin = new QSpinBox(this);
+    m_pivotXSpin = new QDoubleSpinBox(this);
     m_pivotXSpin->setEnabled(false);
+    m_pivotXSpin->setDecimals(0);
     m_pivotXSpin->setRange(0, 9999);
     m_pivotXSpin->setToolTip(tr("Pivot X: horizontal origin for sprite rotation"));
     m_pivotXSpin->setAccessibleName(tr("Pivot X"));
-    connect(m_pivotXSpin, &QSpinBox::valueChanged, this, [this](int){ onPivotSpinChanged(); });
+    connect(m_pivotXSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double){ onPivotSpinChanged(); });
     pivotRow->addWidget(m_pivotXSpin);
     pivotRow->addWidget(new QLabel(tr("Y:")));
-    m_pivotYSpin = new QSpinBox(this);
+    m_pivotYSpin = new QDoubleSpinBox(this);
     m_pivotYSpin->setEnabled(false);
+    m_pivotYSpin->setDecimals(0);
     m_pivotYSpin->setRange(0, 9999);
     m_pivotYSpin->setToolTip(tr("Pivot Y: vertical origin for sprite rotation"));
     m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
-    connect(m_pivotYSpin, &QSpinBox::valueChanged, this, [this](int){ onPivotSpinChanged(); });
+    connect(m_pivotYSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double){ onPivotSpinChanged(); });
     pivotRow->addWidget(m_pivotYSpin);
+    m_coordUnitCombo = new QComboBox(this);
+    m_coordUnitCombo->addItem(tr("px"), int(CoordUnit::Pixels));
+    m_coordUnitCombo->addItem(tr("%"),  int(CoordUnit::Percent));
+    m_coordUnitCombo->setCurrentIndex(
+        m_settings.coordUnit == CoordUnit::Percent ? 1 : 0);
+    m_coordUnitCombo->setEnabled(false);
+    m_coordUnitCombo->setToolTip(tr("Coordinate unit: pixels or percent of sprite dimensions"));
+    connect(m_coordUnitCombo, &QComboBox::currentIndexChanged,
+            this, &MainWindow::onCoordUnitChanged);
+    pivotRow->addWidget(m_coordUnitCombo);
     m_configPointsBtn = new QPushButton(
         QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView), "", this);
     m_configPointsBtn->setToolTip(tr("Manage Markers: define named points on this sprite, such as hitboxes, spawn positions, or attachment points"));
@@ -835,20 +863,27 @@ void MainWindow::setupToolbar() {
 
     fileMenu->addSeparator();
 
+    m_loadProjectAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Load..."));
+    m_loadProjectAction->setToolTip(
+        tr("Load a project.spart.json file or a project folder containing that file"));
+    connect(m_loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
+
     m_loadAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DirOpenIcon), tr("Import Images Folder..."));
-    m_loadAction->setToolTip(tr("Import a folder of sprite images into the current project"));
+        style->standardIcon(QStyle::SP_DirOpenIcon), tr("Add Source Folder..."));
+    m_loadAction->setToolTip(tr("Add a source folder of sprite images to the current project"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
 
-    QAction* addSmartFolderAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DirOpenIcon), tr("Add Source Folder..."));
-    addSmartFolderAction->setToolTip(tr("Add an additional source folder — the tool reads images from it but never modifies its files"));
-    connect(addSmartFolderAction, &QAction::triggered, this, &MainWindow::onNavigatorAddSmartFolder);
+    m_addSourceFileAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_FileIcon), tr("Add Source File..."));
+    m_addSourceFileAction->setToolTip(
+        tr("Add a source image or archive file such as PNG, GIF, ZIP, or TAR"));
+    connect(m_addSourceFileAction, &QAction::triggered, this, &MainWindow::onAddSourceFile);
 
-    QAction* loadUrlAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_CommandLink), tr("Import from URL..."));
-    loadUrlAction->setToolTip(tr("Download and import an image, project, or archive from a URL"));
-    connect(loadUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
+    m_addSourceUrlAction = fileMenu->addAction(
+        style->standardIcon(QStyle::SP_CommandLink), tr("Add Source URL..."));
+    m_addSourceUrlAction->setToolTip(tr("Download and add an image or archive from a URL"));
+    connect(m_addSourceUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
 
     fileMenu->addSeparator();
     m_saveAction = fileMenu->addAction(
@@ -880,33 +915,33 @@ void MainWindow::setupToolbar() {
     connect(m_exportAsAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
     fileMenu->addSeparator();
-    m_openSourceFolderAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DirIcon), tr("Open Sprites Folder"));
-    m_openSourceFolderAction->setToolTip(tr("Open the sprites source folder in the file manager"));
-    m_openSourceFolderAction->setEnabled(false);
-    connect(m_openSourceFolderAction, &QAction::triggered,
-            this, &MainWindow::onOpenSourceFolderClicked);
-#ifdef Q_OS_WASM
-    m_openSourceFolderAction->setText(tr("Browse Sprites Folder..."));
-    m_openSourceFolderAction->setToolTip(tr("Browse and manage files in the virtual sprites folder"));
-#endif
-
-    fileMenu->addSeparator();
     QAction* quitAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogCloseButton), tr("Quit"));
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
 
     QMenu* editMenu = mainMenuBar->addMenu(tr("&Edit"));
-    QAction* undoAction = m_undoStack->createUndoAction(this, tr("&Undo"));
+    QAction* undoAction = editMenu->addAction(
+        style->standardIcon(QStyle::SP_ArrowBack), tr("&Undo"));
     undoAction->setIcon(style->standardIcon(QStyle::SP_ArrowBack));
     undoAction->setShortcut(QKeySequence::Undo);
-    editMenu->addAction(undoAction);
+    undoAction->setEnabled(m_undoStack->canUndo());
+    connect(undoAction, &QAction::triggered, this, [this]() {
+        clearCoordinateFieldOverride();
+        m_undoStack->undo();
+    });
+    connect(m_undoStack, &QUndoStack::canUndoChanged, undoAction, &QAction::setEnabled);
 
-    QAction* redoAction = m_undoStack->createRedoAction(this, tr("&Redo"));
+    QAction* redoAction = editMenu->addAction(
+        style->standardIcon(QStyle::SP_ArrowForward), tr("&Redo"));
     redoAction->setIcon(style->standardIcon(QStyle::SP_ArrowForward));
     redoAction->setShortcut(QKeySequence::Redo);
-    editMenu->addAction(redoAction);
+    redoAction->setEnabled(m_undoStack->canRedo());
+    connect(redoAction, &QAction::triggered, this, [this]() {
+        clearCoordinateFieldOverride();
+        m_undoStack->redo();
+    });
+    connect(m_undoStack, &QUndoStack::canRedoChanged, redoAction, &QAction::setEnabled);
 
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
     QAction* stylesAction = settingsMenu->addAction(
@@ -915,8 +950,8 @@ void MainWindow::setupToolbar() {
     connect(stylesAction, &QAction::triggered, this, &MainWindow::onSettingsStylesClicked);
 
     QAction* spritesheetAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_FileDialogListView), tr("Spritesheet..."));
-    spritesheetAction->setToolTip(tr("Open spritesheet settings"));
+        style->standardIcon(QStyle::SP_FileDialogListView), tr("Atlas Sprites..."));
+    spritesheetAction->setToolTip(tr("Open atlas sprites settings"));
     connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
 
     QAction* framesEditorAction = settingsMenu->addAction(
@@ -1042,6 +1077,17 @@ void MainWindow::updateUiState() {
         m_exportAsAction,
         m_saveAsAction);
 
+    const bool sourceActionsEnabled = m_loadAction ? m_loadAction->isEnabled() : false;
+    if (m_loadProjectAction) {
+        m_loadProjectAction->setEnabled(!m_isLoading);
+    }
+    if (m_addSourceFileAction) {
+        m_addSourceFileAction->setEnabled(sourceActionsEnabled);
+    }
+    if (m_addSourceUrlAction) {
+        m_addSourceUrlAction->setEnabled(sourceActionsEnabled);
+    }
+
     if (m_recentProjectBtn) {
         m_recentProjectBtn->setEnabled(!m_isLoading);
     }
@@ -1125,16 +1171,90 @@ void MainWindow::addToRecentProjects(const QString& path) {
     updateRecentProjectsMenu();
 }
 
+void MainWindow::clearCoordinateFieldOverride() {
+    m_coordinateFieldOverride = {};
+}
+
+void MainWindow::storeCoordinateFieldOverride() {
+    if (!m_session || !m_session->selectedSprite || !m_pivotXSpin || !m_pivotYSpin) {
+        clearCoordinateFieldOverride();
+        return;
+    }
+
+    m_coordinateFieldOverride.active = true;
+    m_coordinateFieldOverride.sprite = m_session->selectedSprite.get();
+    m_coordinateFieldOverride.markerName = m_session->selectedPointName;
+    m_coordinateFieldOverride.unit = m_settings.coordUnit;
+    m_coordinateFieldOverride.x = m_pivotXSpin->value();
+    m_coordinateFieldOverride.y = m_pivotYSpin->value();
+}
+
+bool MainWindow::coordinateFieldOverrideApplies() const {
+    return m_coordinateFieldOverride.active
+        && m_session
+        && m_session->selectedSprite
+        && m_coordinateFieldOverride.sprite == m_session->selectedSprite.get()
+        && m_coordinateFieldOverride.markerName == m_session->selectedPointName
+        && m_coordinateFieldOverride.unit == m_settings.coordUnit;
+}
+
 void MainWindow::syncPivotSpinsFromSprite() {
-    if (!m_session->selectedSprite) return;
-    m_pivotXSpin->blockSignals(true);
-    m_pivotYSpin->blockSignals(true);
-    m_pivotXSpin->setValue(m_session->selectedSprite->pivotX);
-    m_pivotYSpin->setValue(m_session->selectedSprite->pivotY);
-    m_pivotXSpin->blockSignals(false);
-    m_pivotYSpin->blockSignals(false);
+    syncCoordinateSpinsFromSelection();
     if (m_previewView && m_previewView->overlay())
         m_previewView->overlay()->updateLayout();
+}
+
+void MainWindow::syncCoordinateSpinsFromSelection() {
+    if (!m_session || !m_session->selectedSprite) {
+        if (m_coordUnitCombo) {
+            m_coordUnitCombo->setEnabled(false);
+        }
+        return;
+    }
+
+    const QSize spriteSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
+    const int spriteWidth = spriteSize.width();
+    const int spriteHeight = spriteSize.height();
+    const bool hasDimensions = spriteWidth > 0 && spriteHeight > 0;
+    const CoordUnit displayUnit = hasDimensions ? m_settings.coordUnit : CoordUnit::Pixels;
+
+    if (m_coordUnitCombo) {
+        m_coordUnitCombo->setEnabled(hasDimensions);
+    }
+    if (m_pivotXSpin) {
+        m_pivotXSpin->setDecimals(displayUnit == CoordUnit::Percent ? 1 : 0);
+    }
+    if (m_pivotYSpin) {
+        m_pivotYSpin->setDecimals(displayUnit == CoordUnit::Percent ? 1 : 0);
+    }
+
+    if (coordinateFieldOverrideApplies()) {
+        m_pivotXSpin->blockSignals(true);
+        m_pivotYSpin->blockSignals(true);
+        m_pivotXSpin->setValue(m_coordinateFieldOverride.x);
+        m_pivotYSpin->setValue(m_coordinateFieldOverride.y);
+        m_pivotXSpin->blockSignals(false);
+        m_pivotYSpin->blockSignals(false);
+        return;
+    }
+
+    if (m_session->selectedPointName.isEmpty()) {
+        setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit);
+        setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit);
+        return;
+    }
+
+    for (const auto& point : m_session->selectedSprite->points) {
+        if (point.name != m_session->selectedPointName) {
+            continue;
+        }
+        setCoordinateSpinValue(m_pivotXSpin, point.x, spriteWidth, displayUnit);
+        setCoordinateSpinValue(m_pivotYSpin, point.y, spriteHeight, displayUnit);
+        return;
+    }
+
+    setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit);
+    setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit);
 }
 
 // Recursively compute tristate check state for every folder node from the
