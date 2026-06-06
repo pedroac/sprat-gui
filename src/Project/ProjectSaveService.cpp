@@ -507,6 +507,9 @@ bool ProjectSaveService::save(
         if (hasDds) {
             packArgs << "--gpu-compress" << effectiveProfile.gpuCompress;
         }
+        if (!config.scaleFilter.isEmpty() && config.scaleFilter != QLatin1String("nearest")) {
+            packArgs << "--scale-filter" << config.scaleFilter;
+        }
 
         if (!runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
             const QString packDetails = error;

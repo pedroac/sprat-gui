@@ -363,7 +363,6 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     }
 
     m_centerPivotsOnNextLayout = true;
-    refreshSourcesDialogIfVisible();
 #ifdef Q_OS_WASM
     // Defer on WASM so the loading overlay can paint before the synchronous layout run.
     QTimer::singleShot(0, this, [this]() { scheduleLayoutRebuild(true); });

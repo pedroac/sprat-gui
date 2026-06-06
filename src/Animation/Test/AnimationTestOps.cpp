@@ -19,6 +19,7 @@ bool AnimationTestOps::stepNext(const QStringList& frames, int& frameIndex) {
 bool AnimationTestOps::tick(const QStringList& frames, int& frameIndex, int count) {
     if (frames.isEmpty())
         return false;
-    frameIndex = (frameIndex + qMax(1, count)) % frames.size();
+    const int n = frames.size();
+    frameIndex = ((frameIndex + qMax(1, count)) % n + n) % n;
     return true;
 }

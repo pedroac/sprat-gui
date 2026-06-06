@@ -271,8 +271,13 @@ set(PROJECT_SOURCES
     src/CLITools/FolderSyncService.h
     src/SelectedSpriteFrame/Markers/MarkersDialog.cpp
     src/SelectedSpriteFrame/Markers/MarkersDialog.h
-    src/Project/SaveDialog.cpp
-    src/Project/SaveDialog.h
+    src/App/MainWindow/IAtlasViewport.h
+    src/App/MainWindow/PackedAtlasView.cpp
+    src/App/MainWindow/PackedAtlasView.h
+    src/App/MainWindow/ExportWorkspace.cpp
+    src/App/MainWindow/ExportWorkspace.h
+    src/App/MainWindow/AtlasLayoutWorkspace.cpp
+    src/App/MainWindow/AtlasLayoutWorkspace.h
     src/Settings/SettingsDialog.cpp
     src/Settings/SettingsDialog.h
     src/SpriteSheetLayout/LayoutParser.cpp
@@ -322,10 +327,9 @@ set(PROJECT_SOURCES
     src/Profiles/ProfilesDialog.h
     src/Animation/Timelines/TimelineBuilder.cpp
     src/Animation/Timelines/TimelineBuilder.h
+    src/App/MainWindow/ElidedLabel.h
     src/Core/MessageDialog.cpp
     src/Core/MessageDialog.h
-    src/App/MainWindow/SourcesDialog.cpp
-    src/App/MainWindow/SourcesDialog.h
     src/Core/ZoomableGraphicsView.cpp
     src/Core/ZoomableGraphicsView.h
     src/Core/ArchiveExtractor.cpp

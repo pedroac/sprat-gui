@@ -17,6 +17,11 @@ bool AutosaveProjectStore::load(const QString& path, QJsonObject& root, QString&
         error = "No autosave found.";
         return false;
     }
+    constexpr qint64 kMaxFileSize = 256 * 1024 * 1024; // 256 MB
+    if (QFileInfo(path).size() > kMaxFileSize) {
+        error = "Autosave file is too large (> 256 MB).";
+        return false;
+    }
     if (!file.open(QIODevice::ReadOnly)) {
         error = "Could not open autosave file.";
         return false;

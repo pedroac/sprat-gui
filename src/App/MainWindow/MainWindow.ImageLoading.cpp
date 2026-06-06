@@ -452,7 +452,6 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
         ensureFrameListInput();
         m_shouldClearSpritesFolder = false;
         m_centerPivotsOnNextLayout = true;
-        refreshSourcesDialogIfVisible();
         scheduleLayoutRebuild(true);
         return;
     }
@@ -543,7 +542,6 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
             refreshSpriteTree();
             updateMainContentView();
             updateUiState();
-            refreshSourcesDialogIfVisible();
 
             setLoading(false);
             qInfo() << "[WASM] handleSingleImageLayout done";
@@ -659,7 +657,6 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
 
     m_statusLabel->setText(QString(tr("Loaded %1 frames")).arg(framePaths.size()));
     m_centerPivotsOnNextLayout = true;
-    refreshSourcesDialogIfVisible();
     return true;
 }
 
@@ -741,6 +738,5 @@ void MainWindow::onTransparencyProcessingFinished() {
 
     m_statusLabel->setText(QString(tr("Loaded %1 frames")).arg(framePaths.size()));
     m_centerPivotsOnNextLayout = true;
-    refreshSourcesDialogIfVisible();
     scheduleLayoutRebuild(true);
 }

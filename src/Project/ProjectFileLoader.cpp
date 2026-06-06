@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 
 namespace {
@@ -18,6 +19,11 @@ bool ProjectFileLoader::load(const QString& path, QJsonObject& root, QString& er
             return false;
         }
     } else {
+        constexpr qint64 kMaxFileSize = 256 * 1024 * 1024; // 256 MB
+        if (QFileInfo(path).size() > kMaxFileSize) {
+            error = trProjectFileLoader("File is too large (> 256 MB).");
+            return false;
+        }
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
             error = trProjectFileLoader("Could not open file.");

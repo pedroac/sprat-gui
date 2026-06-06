@@ -293,6 +293,7 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     // ── Section 0: source-specific actions (top-level source nodes only) ───
     QAction* openFolderAction   = nullptr;
     QAction* syncSourceAction   = nullptr;
+    QAction* syncLayoutAction   = nullptr;
     QAction* removeSourceAction = nullptr;
     if (clickedIsSourceNode) {
         // Open the cached folder where the source's files live (so the user can edit them).
@@ -307,7 +308,16 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
             openFolderAction->setData(openFolderPath);
             hadItems = true;
         }
-        syncSourceAction   = menu.addAction(tr("Sync \"%1\"").arg(clickedItem->text(0)));
+        if (clickedSourceIndex >= 0 && clickedSourceIndex < m_session->sources.size()) {
+            const ProjectSource& src = m_session->sources[clickedSourceIndex];
+            const bool isUrl    = (src.type == SourceType::Url);
+            const bool hasCopy  = !src.cachedFolderPath.isEmpty();
+            const bool isFolder = (src.type == SourceType::Folder);
+            syncSourceAction = menu.addAction(tr("Sync Source to Layout"));
+            syncSourceAction->setEnabled(!isUrl && (isFolder || hasCopy));
+            syncLayoutAction = menu.addAction(tr("Sync Layout to Source"));
+            syncLayoutAction->setEnabled(!isUrl && hasCopy);
+        }
         removeSourceAction = menu.addAction(tr("Remove \"%1\"").arg(clickedItem->text(0)));
         hadItems = true;
         addSep();
@@ -373,12 +383,28 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
         hadItems = true;
     }
 
-    // ── Dispatch ───────────────────────────────────────────────────────────
+    // ── Add Source submenu (always present, bottom of menu) ───────────────
+    QAction* addSourceFolderAction  = nullptr;
+    QAction* addSourceImageAction   = nullptr;
+    QAction* addSourceArchiveAction = nullptr;
+    QAction* addSourceUrlAction     = nullptr;
+    {
+        addSep();
+        QMenu* addSourceMenu   = menu.addMenu(tr("Add Source"));
+        addSourceFolderAction  = addSourceMenu->addAction(tr("Folder..."));
+        addSourceImageAction   = addSourceMenu->addAction(tr("Image..."));
+        addSourceArchiveAction = addSourceMenu->addAction(tr("Archive..."));
+        addSourceUrlAction     = addSourceMenu->addAction(tr("URL..."));
+        hadItems = true;
+    }
+
+    // ── Dispatch ──────────────────────────────────────────────────────────
     QAction* chosen = menu.exec(m_spriteTree->viewport()->mapToGlobal(pos));
     if (!chosen) return;
 
     if      (chosen == openFolderAction)                                  QDesktopServices::openUrl(QUrl::fromLocalFile(chosen->data().toString()));
-    else if (chosen == syncSourceAction)                                  onRunLayout(true);
+    else if (chosen == syncSourceAction)                                  onSyncSourceRequested(clickedSourceIndex);
+    else if (chosen == syncLayoutAction)                                  onSyncLayoutRequested(clickedSourceIndex);
     else if (chosen == removeSourceAction)                                removeSource(clickedSourceIndex);
     else if (chosen == excludeFrameAction)                                onNavigatorExcludeFromSmartFolder(clickedLeafPath, clickedLeafSmartFolderIdx);
     else if (chosen == deleteFrameAction)                                 onNavigatorDeleteFrames(clickedPaths);
@@ -396,6 +422,26 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     else if (chosen == createTimelineFromSelectedAction)                  onNavigatorCreateTimeline(checkedPaths, nullptr);
     else if (chosen == addToTimelineAction)                               onNavigatorAddToTimeline(checkedPaths);
     else if (chosen == groupSelectedAction)                               onNavigatorCreateGroup(checkedPaths, subfolder);
+    else if (chosen == addSourceFolderAction)  onLoadFolder();
+    else if (chosen == addSourceImageAction) {
+        const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Add Image"), m_session ? m_session->currentFolder : QString(), filter);
+        if (!path.isEmpty()) {
+            const DropAction action = confirmDropAction(path);
+            if (action != DropAction::Cancel) loadImageWithFrameDetection(path, action);
+        }
+    }
+    else if (chosen == addSourceArchiveAction) {
+        const QString filter = tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)");
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Add Archive"), m_session ? m_session->currentFolder : QString(), filter);
+        if (!path.isEmpty()) {
+            const DropAction action = confirmDropAction(path);
+            if (action != DropAction::Cancel) loadProject(path, action);
+        }
+    }
+    else if (chosen == addSourceUrlAction) onLoadFromUrl();
 }
 
 // ---------------------------------------------------------------------------

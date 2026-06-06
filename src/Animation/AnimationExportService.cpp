@@ -195,7 +195,14 @@ bool AnimationExportService::exportAnimation(
         setLoading(false);
         return false;
     }
-    proc.waitForFinished(-1);
+    constexpr int kExportTimeoutMs = 5 * 60 * 1000; // 5 minutes
+    if (!proc.waitForFinished(kExportTimeoutMs)) {
+        proc.kill();
+        setStatus(trAnimationExport("Export timed out"));
+        MessageDialog::critical(parent, trAnimationExport("Export Failed"), trAnimationExport("Export process timed out after 5 minutes."));
+        setLoading(false);
+        return false;
+    }
     bool ok = QFile::exists(outPath) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
 #else
     Q_UNUSED(useMagick);

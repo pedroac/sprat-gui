@@ -436,10 +436,19 @@ struct AnimationTimeline {
 struct SaveConfig {
     /**
      * @brief Destination path for saving.
-     * 
+     *
      * Can be a file path or directory path depending on the save operation.
      */
     QString destination;
+
+    /**
+     * @brief Absolute output path for the export pipeline.
+     *
+     * Set by "Export As" and used directly by "Export" without prompting.
+     * Empty means no export path has been configured yet; "Export" is disabled
+     * until this is set.
+     */
+    QString outputPath;
 
     /**
      * @brief Transformation to apply during save.
@@ -454,6 +463,14 @@ struct SaveConfig {
      * Profiles define layout and optimization settings.
      */
     QStringList profiles;
+
+    /**
+     * @brief Resampling filter passed to spratpack via --scale-filter.
+     *
+     * One of: "nearest" (default), "bilinear", "bicubic", "mitchell".
+     * Empty string means use the spratpack default (nearest).
+     */
+    QString scaleFilter;
 
     /**
      * @brief Whether to copy sprites into the project folder on save.

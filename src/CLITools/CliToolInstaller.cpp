@@ -246,7 +246,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "}; "
                              "Write-Output '---'; "
                              "Write-Output 'Successfully installed all sprat-cli tools with version %3'")
-                             .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"), expectedVersion);
+                             .arg(QString(filePath).replace("'", "''"), QString(destDir).replace("'", "''"), QString(expectedVersion).replace("'", "''"));
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
     emit installLog("Mounting DMG and copying files...");
@@ -281,7 +281,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "  cp -R \"%2/cli/transforms/.\" \"$TRANSFORMS_DIR/\"\n"
                              "fi\n"
                              "echo \"---\"\n"
-                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(shellQuote(filePath), shellQuote(appDir), expectedVersion);
+                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(shellQuote(filePath), shellQuote(appDir), shellQuote(expectedVersion));
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
 #endif

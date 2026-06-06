@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include "ElidedLabel.h"
+#include "PackedAtlasView.h"
+#include "AtlasLayoutWorkspace.h"
 #include "UndoCommands.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
@@ -114,6 +117,26 @@ void MainWindow::setupUi() {
     
     m_mainStack->addWidget(m_welcomePage);
 
+    // Page 2: Export Workspace
+    m_exportWorkspace = new ExportWorkspace(this);
+    m_mainStack->addWidget(m_exportWorkspace);  // page 1
+    connect(m_exportWorkspace, &ExportWorkspace::exportRequested,
+            this, &MainWindow::onExportWorkspaceRequested);
+    connect(m_exportWorkspace, &ExportWorkspace::cancelled,
+            this, &MainWindow::leaveExportWorkspace);
+
+    m_packedAtlasView = new PackedAtlasView(this);
+    m_packedAtlasView->hide();
+
+    connect(m_exportWorkspace, &ExportWorkspace::previewSettingsChanged,
+            this, &MainWindow::schedulePreviewPack);
+    connect(&m_previewPackWatcher, &QFutureWatcher<QByteArray>::finished,
+            this, &MainWindow::onPreviewPackFinished);
+
+    // Page 3: Atlas Layout Workspace
+    m_atlasLayoutWorkspace = new AtlasLayoutWorkspace(this);
+    m_mainStack->addWidget(m_atlasLayoutWorkspace);  // page 2
+
     // --- Create Docks ---
     const int groupMargin = 4;
     const int groupTopPadding = 12;
@@ -125,73 +148,38 @@ void MainWindow::setupUi() {
     QVBoxLayout* canvasLayout = new QVBoxLayout(canvasContent);
     canvasLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
-    // Controls
-    QWidget* canvasControlsWidget = new QWidget(canvasContent);
-    canvasControlsWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    QHBoxLayout* canvasControls = new QHBoxLayout(canvasControlsWidget);
-    canvasControls->setContentsMargins(0, 0, 0, 0);
-    {
+    // makeZoomLabel – used by frame editor and animation panels below
+    auto makeZoomLabel = [this]() {
         QPixmap pix(16, 16);
         pix.fill(Qt::transparent);
         QPainter painter(&pix);
         painter.setRenderHint(QPainter::Antialiasing);
-        QPen pen(palette().color(QPalette::WindowText), 1.2);
-        painter.setPen(pen);
+        painter.setPen(QPen(palette().color(QPalette::WindowText), 1.5));
         painter.setBrush(Qt::NoBrush);
-        painter.drawRect(1, 1,  13, 4);   // top layer
-        painter.drawRect(1, 6,  13, 4);   // middle layer
-        painter.drawRect(1, 11, 13, 4);   // bottom layer
+        painter.drawEllipse(QPointF(6, 6), 4.5, 4.5);
+        painter.drawLine(QPointF(9.2, 9.2), QPointF(14, 14));
         painter.end();
-        auto* profileLabel = new QLabel(this);
-        profileLabel->setPixmap(pix);
-        profileLabel->setToolTip(tr("Layout profile: controls packing mode, atlas size, padding, and other export settings"));
-        canvasControls->addWidget(profileLabel);
-    }
-    m_profileSelectorStack = new QStackedWidget(this);
-    m_profileSelectorStack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    QWidget* profileSelectPage = new QWidget(m_profileSelectorStack);
-    QHBoxLayout* profileSelectLayout = new QHBoxLayout(profileSelectPage);
-    profileSelectLayout->setContentsMargins(0, 0, 0, 0);
-    profileSelectLayout->setSpacing(4);
-    m_profileCombo = new QComboBox(profileSelectPage);
-    m_profileCombo->setToolTip(tr("Select the output layout profile"));
+        auto* label = new QLabel(this);
+        label->setPixmap(pix);
+        label->setToolTip(tr("Zoom"));
+        return label;
+    };
+
+    // Hidden profile combo – drives layout logic, never shown directly
+    m_profileCombo = new QComboBox(this);
+    m_profileCombo->setVisible(false);
+    m_profileCombo->setToolTip(tr("Layout profile"));
     m_profileCombo->setAccessibleName(tr("Layout profile"));
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
-    profileSelectLayout->addWidget(m_profileCombo);
-    m_profileSelectorStack->addWidget(profileSelectPage);
-
-    QWidget* addProfilesPage = new QWidget(m_profileSelectorStack);
-    QHBoxLayout* addProfilesLayout = new QHBoxLayout(addProfilesPage);
-    addProfilesLayout->setContentsMargins(0, 0, 0, 0);
-    addProfilesLayout->setSpacing(0);
-    m_addProfilesBtn = new QPushButton(tr("Add Profiles"), addProfilesPage);
-    m_addProfilesBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder));
-    connect(m_addProfilesBtn, &QPushButton::clicked, this, &MainWindow::onManageProfiles);
-    addProfilesLayout->addWidget(m_addProfilesBtn);
-    m_profileSelectorStack->addWidget(addProfilesPage);
-
-    canvasControls->addWidget(m_profileSelectorStack);
+    // Keep profileCombo in sync with workspace selection
+    connect(m_profileCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        if (m_atlasLayoutWorkspace && m_profileCombo)
+            m_atlasLayoutWorkspace->setSelectedProfile(m_profileCombo->currentData().toString());
+    });
     applyConfiguredProfiles(configuredProfiles(), QString());
 
-    canvasControls->addSpacing(8);
-    {
-        QPixmap pix(16, 16);
-        pix.fill(Qt::transparent);
-        QPainter painter(&pix);
-        painter.setRenderHint(QPainter::Antialiasing);
-        QPen pen(palette().color(QPalette::WindowText), 1.2);
-        painter.setPen(pen);
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRect(1, 1, 13, 9);       // screen
-        painter.drawLine(6, 10, 6, 12);      // neck
-        painter.drawLine(4, 12, 11, 12);     // base
-        painter.end();
-        auto* resLabel = new QLabel(this);
-        resLabel->setPixmap(pix);
-        resLabel->setToolTip(tr("Source resolution"));
-        canvasControls->addWidget(resLabel);
-    }
-    m_sourceResolutionCombo = new QComboBox(canvasControlsWidget);
+    // Resolution combo
+    m_sourceResolutionCombo = new QComboBox(this);
     m_sourceResolutionCombo->setToolTip(tr("Target source resolution for layout"));
     m_sourceResolutionCombo->setAccessibleName(tr("Source resolution"));
     m_sourceResolutionCombo->addItems(ResolutionsConfig::loadResolutionOptions());
@@ -207,7 +195,6 @@ void MainWindow::setupUi() {
         for (int i = 0; i < m_sourceResolutionCombo->count(); ++i) {
             int w, h;
             if (parseResolutionText(m_sourceResolutionCombo->itemText(i), w, h)) {
-                // Manhatan distance for simple closeness
                 int distance = qAbs(w - screenSize.width()) + qAbs(h - screenSize.height());
                 if (distance < minDistance) {
                     minDistance = distance;
@@ -219,7 +206,6 @@ void MainWindow::setupUi() {
         m_currentResolution = m_sourceResolutionCombo->currentText();
     }
 
-    canvasControls->addWidget(m_sourceResolutionCombo);
     if (!m_sourceResolutionDebounceTimer) {
         m_sourceResolutionDebounceTimer = new QTimer(this);
         m_sourceResolutionDebounceTimer->setSingleShot(true);
@@ -250,35 +236,39 @@ void MainWindow::setupUi() {
     };
     connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, scheduleSourceResolutionLayoutRun);
 
-    canvasControls->addStretch();
-    auto makeZoomLabel = [this]() {
-        QPixmap pix(16, 16);
-        pix.fill(Qt::transparent);
-        QPainter painter(&pix);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setPen(QPen(palette().color(QPalette::WindowText), 1.5));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QPointF(6, 6), 4.5, 4.5);
-        painter.drawLine(QPointF(9.2, 9.2), QPointF(14, 14));
-        painter.end();
-        auto* label = new QLabel(this);
-        label->setPixmap(pix);
-        label->setToolTip(tr("Zoom"));
-        return label;
-    };
-    canvasControls->addWidget(makeZoomLabel());
+    // Zoom spin
     m_layoutZoomSpin = new QDoubleSpinBox(this);
     m_layoutZoomSpin->setRange(10.0, 800.0);
     m_layoutZoomSpin->setValue(100.0);
     m_layoutZoomSpin->setSuffix("%");
     m_layoutZoomSpin->setSingleStep(10.0);
     connect(m_layoutZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onLayoutZoomChanged);
-    canvasControls->addWidget(m_layoutZoomSpin);
 
-    canvasLayout->addWidget(canvasControlsWidget, 0, Qt::AlignTop);
+    // Move view controls into workspace right panel
+    m_atlasLayoutWorkspace->setViewControls(m_sourceResolutionCombo, m_layoutZoomSpin);
+
+    // Workspace → m_profileCombo sync (workspace selection drives layout)
+    connect(m_atlasLayoutWorkspace, &AtlasLayoutWorkspace::selectedProfileChanged,
+            this, [this](const QString& name) {
+                if (!m_profileCombo) return;
+                const int idx = m_profileCombo->findData(name);
+                if (idx >= 0 && idx != m_profileCombo->currentIndex())
+                    m_profileCombo->setCurrentIndex(idx);
+            });
+    connect(m_atlasLayoutWorkspace, &AtlasLayoutWorkspace::selectedAtlasChanged,
+            this, [this](int index) { if (m_canvas) m_canvas->scrollToAtlas(index); });
+    connect(m_atlasLayoutWorkspace, &AtlasLayoutWorkspace::manageProfilesRequested,
+            this, &MainWindow::onManageProfiles);
 
     m_canvas = new LayoutCanvas(this);
     canvasLayout->addWidget(m_canvas);
+
+    m_atlasDimsLabel = new QLabel(canvasContent);
+    m_atlasDimsLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_atlasDimsLabel->setContentsMargins(8, 2, 8, 2);
+    m_atlasDimsLabel->setVisible(false);
+    canvasLayout->addWidget(m_atlasDimsLabel);
+
     connect(m_canvas, &LayoutCanvas::spriteSelected, this, &MainWindow::onSpriteSelected);
     connect(m_canvas, &LayoutCanvas::selectionChanged, this, [this](const QList<SpritePtr>& selection) {
         m_session->selectedSprites = selection;
@@ -428,7 +418,7 @@ void MainWindow::setupUi() {
     emptyAtlasLabel->setAlignment(Qt::AlignCenter);
     emptyAtlasLabel->setStyleSheet("font-size: 14px; color: #888;");
     m_atlasViewStack->addWidget(emptyAtlasLabel);
-    m_atlasViewStack->setCurrentIndex(0);
+    m_atlasViewStack->setCurrentIndex(1);
 
     // 2. Animation Timelines panel
     QWidget* timelineContent = new QWidget(this);
@@ -662,6 +652,21 @@ void MainWindow::setupUi() {
     connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onPreviewZoomChanged);
     editorLayoutBox->addWidget(m_previewView);
 
+    {
+        auto* spriteFooterRow = new QHBoxLayout();
+        spriteFooterRow->setContentsMargins(8, 2, 8, 2);
+        m_spriteNameFooterLabel = new ElidedLabel(editorContent);
+        m_spriteNameFooterLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        m_spriteNameFooterLabel->setVisible(false);
+        spriteFooterRow->addWidget(m_spriteNameFooterLabel);
+        spriteFooterRow->addStretch();
+        m_spriteDimsLabel = new QLabel(editorContent);
+        m_spriteDimsLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_spriteDimsLabel->setVisible(false);
+        spriteFooterRow->addWidget(m_spriteDimsLabel);
+        editorLayoutBox->addLayout(spriteFooterRow);
+    }
+
     // 4. Animation Test panel
     QWidget* animContent = new QWidget(this);
     animContent->setStyleSheet("font-weight: normal;");
@@ -733,18 +738,24 @@ void MainWindow::setupUi() {
     // Groups occupy separate rows so they never share a dock row.
 
     // Atlas group: Canvas | Editor
-    m_atlasDock = new QDockWidget(tr("Atlas"), this);
+    m_atlasDock = new QDockWidget(tr("Sprites"), this);
     m_atlasDock->setObjectName("atlasDock");
     m_atlasDock->setFont(boldFont);
-    auto *atlasSplitter = new QSplitter(Qt::Horizontal, m_atlasDock);
-    atlasSplitter->addWidget(m_atlasViewStack);
-    atlasSplitter->addWidget(editorContent);
-    m_atlasDock->setWidget(atlasSplitter);
+    m_atlasDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
+    m_atlasDock->setTitleBarWidget(new QWidget(this));
+    m_atlasSplitter = new QSplitter(Qt::Horizontal, m_atlasDock);
+    m_atlasSplitter->addWidget(m_atlasViewStack);
+    m_atlasSplitter->addWidget(editorContent);
+    m_atlasSplitter->setStretchFactor(0, 0);
+    m_atlasSplitter->setStretchFactor(1, 1);
+    m_atlasDock->setWidget(m_atlasSplitter);
 
     // Animation group: Timelines | Anim Test
     m_animationDock = new QDockWidget(tr("Animation"), this);
     m_animationDock->setObjectName("animationDock");
     m_animationDock->setFont(boldFont);
+    m_animationDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
+    m_animationDock->setTitleBarWidget(new QWidget(this));
     auto *animSplitter = new QSplitter(Qt::Horizontal, m_animationDock);
     animSplitter->addWidget(timelineContent);
     animSplitter->addWidget(animContent);
@@ -782,47 +793,47 @@ void MainWindow::setupUi() {
     resizeDocks({m_animationDock}, {260}, Qt::Vertical);
 
     // View menu
-    m_viewMenu = menuBar()->addMenu(tr("&View"));
+    m_viewMenu = menuBar()->addMenu(tr("&Workspace"));
 
-    // Atlas submenu with Layout / Navigation toggle
-    QMenu* atlasSubMenu = m_viewMenu->addMenu(tr("Atlas"));
-    auto* atlasViewGroup = new QActionGroup(this);
-    atlasViewGroup->setExclusive(true);
+    auto* workspaceGroup = new QActionGroup(this);
+    workspaceGroup->setExclusive(true);
 
-    m_showLayoutAction = atlasSubMenu->addAction(tr("Layout"));
-    m_showLayoutAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_L));
-    m_showLayoutAction->setCheckable(true);
-    m_showLayoutAction->setChecked(true);
-    atlasViewGroup->addAction(m_showLayoutAction);
-    connect(m_showLayoutAction, &QAction::triggered, this, [this]() {
-        m_atlasViewStack->setCurrentIndex(0);
-        if (m_atlasDock->isHidden()) m_atlasDock->show();
-        if (m_layoutDirty) {
-            m_layoutDirty = false;
-            if (m_layoutDebounceTimer) m_layoutDebounceTimer->stop();
-            onRunLayout();
-        }
-    });
+    m_exportationWorkspaceAction = m_viewMenu->addAction(
+        QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"));
+    m_exportationWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_E));
+    m_exportationWorkspaceAction->setCheckable(true);
+    workspaceGroup->addAction(m_exportationWorkspaceAction);
+    connect(m_exportationWorkspaceAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
-    m_showNavigatorAction = atlasSubMenu->addAction(tr("Navigation"));
-    m_showNavigatorAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_N));
-    m_showNavigatorAction->setCheckable(true);
-    atlasViewGroup->addAction(m_showNavigatorAction);
-    connect(m_showNavigatorAction, &QAction::triggered, this, [this]() {
-        m_atlasViewStack->setCurrentIndex(1);
-        if (m_atlasDock->isHidden()) m_atlasDock->show();
-        refreshSpriteTree();
-    });
-
-    m_animationToggleAction = m_animationDock->toggleViewAction();
-    m_viewMenu->addAction(m_animationToggleAction);
     m_viewMenu->addSeparator();
-    m_viewMenu->addAction(m_debugDock->toggleViewAction());
+
+    m_atlasWorkspaceAction = m_viewMenu->addAction(tr("Sprites"));
+    m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
+    m_atlasWorkspaceAction->setCheckable(true);
+    m_atlasWorkspaceAction->setChecked(true);
+    workspaceGroup->addAction(m_atlasWorkspaceAction);
+    connect(m_atlasWorkspaceAction, &QAction::triggered, this, &MainWindow::switchToAtlasWorkspace);
+
+    m_frameAnimWorkspaceAction = m_viewMenu->addAction(tr("Frame Animation"));
+    m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
+    m_frameAnimWorkspaceAction->setCheckable(true);
+    workspaceGroup->addAction(m_frameAnimWorkspaceAction);
+    connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, &MainWindow::switchToFrameAnimWorkspace);
+
+    m_atlasLayoutWorkspaceAction = m_viewMenu->addAction(tr("Atlas Layout"));
+    m_atlasLayoutWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_L));
+    m_atlasLayoutWorkspaceAction->setCheckable(true);
+    workspaceGroup->addAction(m_atlasLayoutWorkspaceAction);
+    connect(m_atlasLayoutWorkspaceAction, &QAction::triggered, this, &MainWindow::showAtlasLayoutWorkspace);
+
     m_viewMenu->addSeparator();
-    QAction* sourcesAction = m_viewMenu->addAction(
-        QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon), tr("Sources..."));
-    sourcesAction->setToolTip(tr("Show the project sources panel"));
-    connect(sourcesAction, &QAction::triggered, this, &MainWindow::onShowSources);
+
+    auto* debugShortcut = new QAction(this);
+    debugShortcut->setShortcut(QKeySequence(Qt::Key_F12));
+    addAction(debugShortcut);
+    connect(debugShortcut, &QAction::triggered, this, [this]() {
+        if (m_debugDock) m_debugDock->setVisible(!m_debugDock->isVisible());
+    });
 
     // Help menu (added last so it sits on the right)
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -908,12 +919,6 @@ void MainWindow::setupToolbar() {
     m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
     connect(m_exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
 
-    m_exportAsAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export As..."));
-    m_exportAsAction->setEnabled(false);
-    m_exportAsAction->setToolTip(tr("Run the export pipeline to a new destination"));
-    connect(m_exportAsAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
-
     fileMenu->addSeparator();
     QAction* quitAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogCloseButton), tr("Quit"));
@@ -997,9 +1002,6 @@ void MainWindow::setupStatusBarUi() {
 
 void MainWindow::setupZoomShortcuts() {
     auto performZoom = [this](bool zoomIn) {
-        if (!m_canvas) {
-            return;
-        }
         QWidget* fw = QApplication::focusWidget();
         if (!fw) {
             return;
@@ -1012,6 +1014,8 @@ void MainWindow::setupZoomShortcuts() {
             targetSpin = m_previewZoomSpin;
         } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
             targetSpin = m_animZoomSpin;
+        } else if (m_exportWorkspace && m_exportWorkspaceActive && (fw == m_exportWorkspace || m_exportWorkspace->isAncestorOf(fw))) {
+            targetSpin = m_exportWorkspace->zoomSpin();
         }
 
         if (!targetSpin) {
@@ -1043,6 +1047,16 @@ void MainWindow::setupZoomShortcuts() {
         } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
             if (fitToContent) { m_animCanvas->setZoomManual(false); m_animCanvas->initialFit(); }
             else              { m_animCanvas->setZoomManual(true);  m_animZoomSpin->setValue(100.0); }
+        } else if (m_exportWorkspace && m_exportWorkspaceActive && (fw == m_exportWorkspace || m_exportWorkspace->isAncestorOf(fw))) {
+            if (fitToContent) {
+                if (m_packedAtlasView) {
+                    m_packedAtlasView->setZoomManual(false);
+                    m_packedAtlasView->initialFit();
+                }
+            } else {
+                if (m_packedAtlasView) m_packedAtlasView->setZoomManual(true);
+                m_exportWorkspace->zoomSpin()->setValue(100.0);
+            }
         }
     };
 
@@ -1070,11 +1084,11 @@ void MainWindow::updateUiState() {
         m_cliReady,
         m_isLoading,
         hasModels,
+        !m_lastSaveConfig.outputPath.isEmpty(),
         m_loadAction,
         m_profileCombo,
         m_saveAction,
         m_exportAction,
-        m_exportAsAction,
         m_saveAsAction);
 
     const bool sourceActionsEnabled = m_loadAction ? m_loadAction->isEnabled() : false;
@@ -1102,24 +1116,27 @@ void MainWindow::updateUiState() {
     // View menu items: enabled once a project is open or sprites are loaded
     const bool hasProject = !m_projectFilePath.isEmpty();
     const bool viewEnabled = hasProject || hasModels;
-    if (m_showLayoutAction)       m_showLayoutAction->setEnabled(viewEnabled);
-    if (m_showNavigatorAction)    m_showNavigatorAction->setEnabled(viewEnabled);
-    if (m_animationToggleAction)  m_animationToggleAction->setEnabled(viewEnabled);
+    if (m_atlasWorkspaceAction)         m_atlasWorkspaceAction->setEnabled(viewEnabled);
+    if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
+    if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
+    if (m_atlasLayoutWorkspaceAction)   m_atlasLayoutWorkspaceAction->setEnabled(viewEnabled && hasModels);
 
-    // Toggle docks and welcome page based on project / sprite state
+    // Toggle docks and welcome page based on project / sprite state.
+    // Skip this block while any full-screen workspace is active.
+    if (m_exportWorkspaceActive || m_atlasLayoutWorkspaceActive) return;
+
     if (hasModels) {
         m_mainStack->hide();
         if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        if (m_animationDock && m_animationDock->isHidden()) m_animationDock->show();
-        // Leave Layout/Navigator selection as-is; only move away from empty-state page
-        if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 2) {
-            m_atlasViewStack->setCurrentIndex(0);
-            if (m_showLayoutAction) m_showLayoutAction->setChecked(true);
-        }
+        const bool wantsAnim = (m_activeWorkspace == Workspace::FrameAnimation);
+        if (m_animationDock) m_animationDock->setVisible(wantsAnim);
+        if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 2)
+            m_atlasViewStack->setCurrentIndex(1); // Navigation
     } else if (hasProject) {
         m_mainStack->hide();
         if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        if (m_animationDock && m_animationDock->isHidden()) m_animationDock->show();
+        const bool wantsAnim = (m_activeWorkspace == Workspace::FrameAnimation);
+        if (m_animationDock) m_animationDock->setVisible(wantsAnim);
         if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(2); // Empty-state placeholder
     } else {
         m_mainStack->setCurrentIndex(0); // Welcome page
@@ -1132,13 +1149,19 @@ void MainWindow::updateUiState() {
 
 void MainWindow::updateMainContentView() {
     const bool hasLayout = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
+    if (m_atlasDimsLabel && !hasLayout)
+        m_atlasDimsLabel->setVisible(false);
     const bool hasProject = !m_projectFilePath.isEmpty();
 
-    m_mainStack->setVisible(!hasLayout && !hasProject);
-    if (!hasLayout && !hasProject) {
-        m_mainStack->setCurrentIndex(0);
-        setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
-    } else if (hasLayout) {
+    if (!m_exportWorkspaceActive && !m_atlasLayoutWorkspaceActive) {
+        m_mainStack->setVisible(!hasLayout && !hasProject);
+        if (!hasLayout && !hasProject) {
+            m_mainStack->setCurrentIndex(0);
+            setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
+            return;
+        }
+    }
+    if (hasLayout) {
         QString projectName = QFileInfo(m_projectFilePath).dir().dirName();
         if (projectName.isEmpty() || projectName == ".") {
             projectName = tr("Untitled Project");

@@ -100,8 +100,13 @@ void AnimationPreviewService::preloadTimeline(const QStringList& frames)
 static void recomputeBounds(const QStringList& frames,
                              const QHash<QString, SpritePtr>& spriteMap)
 {
-    if (g_frameSizeCache.size() > 16384)
-        g_frameSizeCache.clear();
+    if (g_frameSizeCache.size() > 16384) {
+        auto it = g_frameSizeCache.begin();
+        int toRemove = g_frameSizeCache.size() / 2;
+        while (toRemove-- > 0 && it != g_frameSizeCache.end()) {
+            it = g_frameSizeCache.erase(it);
+        }
+    }
 
     int maxLeft = 0, maxRight = 0, maxTop = 0, maxBottom = 0;
 

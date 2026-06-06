@@ -79,9 +79,9 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
         const QString canonicalDest = QDir(destination.absolutePath()).canonicalPath();
         const QString candidatePath = QDir::cleanPath(fullPath);
         if (!candidatePath.startsWith(canonicalDest + QDir::separator()) && candidatePath != canonicalDest) {
-            // Path traversal attempt detected; skip this entry
-            qWarning() << "Skipping entry with path traversal attempt:" << currentFile;
-            continue;
+            error = QString("Path traversal attempt detected in archive entry: %1").arg(currentFile);
+            r = ARCHIVE_FATAL;
+            break;
         }
 
 #ifdef Q_OS_WIN
@@ -95,6 +95,12 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
             error = QString("Error writing archive header: %1").arg(archive_error_string(ext));
             break;
         } else if (archive_entry_size(entry) > 0) {
+            constexpr la_int64_t kMaxExtractEntrySize = 256 * 1024 * 1024; // 256 MB per entry
+            if (archive_entry_size(entry) > kMaxExtractEntrySize) {
+                error = QString("Archive entry too large (> 256 MB): %1").arg(currentFile);
+                r = ARCHIVE_FATAL;
+                break;
+            }
             r = copyData(a, ext);
             if (r < ARCHIVE_OK) {
                 // If r < 0, it could be from archive_read_data_block or archive_write_data_block

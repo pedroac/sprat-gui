@@ -6,7 +6,7 @@ AnimationManager::AnimationManager(QObject* parent) : QObject(parent), m_timer(n
 }
 
 AnimationManager::~AnimationManager() {
-    delete m_timer;
+    // m_timer is a Qt child object (parent = this) and is deleted automatically
 }
 
 void AnimationManager::setAnimationData(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex) {
@@ -26,7 +26,7 @@ void AnimationManager::stopAnimation() {
 }
 
 void AnimationManager::setFps(int fps) {
-    m_timer->setInterval(1000 / fps);
+    m_timer->setInterval(1000 / qMax(1, fps));
 }
 
 void AnimationManager::onTimerTimeout() {

@@ -8,6 +8,7 @@
 #include <QIcon>
 #include <QJsonObject>
 #include <QFutureWatcher>
+#include <QPair>
 #include <QMutex>
 #include <QElapsedTimer>
 #include <QNetworkAccessManager>
@@ -25,7 +26,7 @@
 #include "LayoutRunner.h"
 #include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
-#include "SaveDialog.h"
+#include "ExportWorkspace.h"
 #include "SpratProfilesConfig.h"
 #include "models.h"
 #include "SettingsDialog.h"
@@ -59,6 +60,7 @@ class QTemporaryDir;
 class QWidget;
 class QProgressBar;
 class QDockWidget;
+class QSplitter;
 class QTextEdit;
 class QPlainTextEdit;
 class QAction;
@@ -75,7 +77,9 @@ class QSize;
 class FrameDetectionDialog;
 class AnimationCanvas;
 class SourceFolderWatcher;
-class SourcesDialog;
+class ElidedLabel;
+class PackedAtlasView;
+class AtlasLayoutWorkspace;
 #ifdef Q_OS_WASM
 class WasmFolderBrowserDialog;
 #endif
@@ -96,6 +100,8 @@ public:
         Merge,
         Cancel
     };
+
+    enum class Workspace { Atlas, FrameAnimation, Exportation, AtlasLayout };
 
     /**
      * @brief Constructor for MainWindow.
@@ -227,9 +233,20 @@ private slots:
     void onExportClicked();
 
     /**
-     * @brief Always opens the export dialog to choose a destination.
+     * @brief Always opens the export workspace to choose a destination.
      */
     void onExportAsClicked();
+
+    void showExportWorkspace();
+    void leaveExportWorkspace();
+    void onExportWorkspaceRequested(SaveConfig config);
+    void schedulePreviewPack(const QString& profileName, const QString& scaleFilter);
+    void runPreviewPack();
+    void onPreviewPackFinished();
+    void showAtlasLayoutWorkspace();
+    void leaveAtlasLayoutWorkspace();
+    void switchToAtlasWorkspace();
+    void switchToFrameAnimWorkspace();
 
     /**
      * @brief Handles when a generic process finishes execution.
@@ -498,8 +515,7 @@ private slots:
     // === CLI Installation Logging ===
     void onCliInstallLog(const QString& message);
 
-    // === Sources Dialog ===
-    void onShowSources();
+    // === Sources ===
     void removeSource(int index);
     void onSyncSourceRequested(int sourceIndex);
     void onSyncLayoutRequested(int sourceIndex);
@@ -590,9 +606,6 @@ private:
      * sourceFolder / layoutSourcePath / layoutSourceIsList approach.
      */
     LayoutRunConfig buildLayoutInput() const;
-
-    /** Refreshes the Sources dialog content if it is currently visible. */
-    void refreshSourcesDialogIfVisible();
 
     /**
      * @brief Returns a sanitized subfolder name for a source being merged.
@@ -1265,11 +1278,24 @@ private:
     // === UI Components ===
     QStackedWidget* m_mainStack;
     QWidget* m_welcomePage;
+    ExportWorkspace* m_exportWorkspace = nullptr;
+    bool m_exportWorkspaceActive = false;
+    bool m_frameAnimFirstLoad = true;
+    AtlasLayoutWorkspace* m_atlasLayoutWorkspace = nullptr;
+    bool m_atlasLayoutWorkspaceActive = false;
+    PackedAtlasView*           m_packedAtlasView          = nullptr;
+    QFutureWatcher<QPair<QByteArray,QString>> m_previewPackWatcher;
+    QTimer*                    m_previewPackDebounceTimer  = nullptr;
+    std::atomic<bool>          m_previewPackCanceled{false};
+    QString                    m_previewPackProfile;
+    QString                    m_previewPackScaleFilter;
+    Workspace m_activeWorkspace = Workspace::Atlas;
     QLabel* m_welcomeLabel;
     QPushButton* m_recentProjectBtn;
     QLabel* m_folderLabel;
 
     QDockWidget* m_atlasDock = nullptr;
+    QSplitter*   m_atlasSplitter = nullptr;
     QDockWidget* m_animationDock = nullptr;
     QDockWidget* m_debugDock = nullptr;
     QPlainTextEdit* m_cliLog = nullptr;
@@ -1284,9 +1310,10 @@ private:
     QLabel*         m_spriteFilterResultLabel = nullptr;
     QCheckBox*      m_showHiddenToggleBtn = nullptr;
     bool            m_showHiddenItems     = false;
-    QAction*        m_showLayoutAction      = nullptr;
-    QAction*        m_showNavigatorAction  = nullptr;
-    QAction*        m_animationToggleAction = nullptr;
+    QAction*        m_atlasWorkspaceAction            = nullptr;
+    QAction*        m_frameAnimWorkspaceAction        = nullptr;
+    QAction*        m_exportationWorkspaceAction      = nullptr;
+    QAction*        m_atlasLayoutWorkspaceAction      = nullptr;
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas = nullptr;
@@ -1352,7 +1379,6 @@ private:
     QAction* m_saveAction;
     QAction* m_saveAsAction = nullptr;
     QAction* m_exportAction = nullptr;
-    QAction* m_exportAsAction = nullptr;
     QLabel* m_statusLabel;
     QProgressBar* m_statusProgressBar = nullptr;
     QToolButton* m_recentProjectsBtn = nullptr;
@@ -1369,7 +1395,6 @@ private:
     QString m_spratUnpackBin;
     LayoutRunner* m_layoutRunner;
     SourceFolderWatcher* m_folderWatcher = nullptr;
-    SourcesDialog* m_sourcesDialog = nullptr;
     QAction* m_openSourceFolderAction = nullptr;
     QString  m_projectFilePath;            // path of the last loaded project file
     bool     m_sourceFolderIsTemp = false; // true when sourceFolder is a QTemporaryDir
@@ -1391,6 +1416,9 @@ private:
     SaveConfig m_lastSaveConfig;
     QWidget* m_cliInstallOverlay = nullptr;
     QLabel* m_cliInstallOverlayLabel = nullptr;
+    QLabel* m_atlasDimsLabel = nullptr;
+    ElidedLabel* m_spriteNameFooterLabel = nullptr;
+    QLabel* m_spriteDimsLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;
     QPushButton* m_cancelLoadingButton = nullptr;
     QPlainTextEdit* m_cliInstallLog = nullptr;

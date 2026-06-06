@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "AnimationCanvas.h"
+#include "PackedAtlasView.h"
+#include "AtlasLayoutWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -723,7 +725,7 @@ void MainWindow::onSaveAsClicked() {
 #endif
 
 void MainWindow::onExportClicked() {
-    if (m_lastSaveConfig.destination.isEmpty()) {
+    if (m_lastSaveConfig.outputPath.isEmpty()) {
         onExportAsClicked();
         return;
     }
@@ -732,46 +734,282 @@ void MainWindow::onExportClicked() {
 
 void MainWindow::onExportAsClicked() {
     QString startDir;
-#ifndef Q_OS_WASM
-    if (!m_lastSaveConfig.destination.isEmpty()) {
-        startDir = m_lastSaveConfig.destination;
+    if (!m_lastSaveConfig.outputPath.isEmpty()) {
+        startDir = m_lastSaveConfig.outputPath;
     } else if (!m_session->currentFolder.isEmpty()) {
         startDir = QFileInfo(m_session->currentFolder).dir().filePath("export");
     } else {
         startDir = QDir::currentPath() + "/export";
     }
-#endif
 
-    SaveDialog dlg(startDir,
-                   configuredProfiles(),
-                   m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
-                   m_lastSaveConfig,
-                   this);
-
-    if (dlg.exec() != QDialog::Accepted) {
-        return;
+    const QVector<SpratProfile> allProfiles = configuredProfiles();
+    const QStringList enabled = m_atlasLayoutWorkspace
+        ? m_atlasLayoutWorkspace->enabledProfiles() : QStringList();
+    QVector<SpratProfile> toExport;
+    for (const SpratProfile& p : allProfiles) {
+        if (enabled.isEmpty() || enabled.contains(p.name.trimmed()))
+            toExport << p;
     }
+    m_exportWorkspace->populate(toExport,
+                                m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
+                                m_lastSaveConfig,
+                                startDir);
+    showExportWorkspace();
+}
 
-    SaveConfig config = dlg.getConfig();
+void MainWindow::showAtlasLayoutWorkspace() {
+    if (!m_atlasLayoutWorkspace || !m_atlasViewStack) return;
+    if (m_exportWorkspaceActive) leaveExportWorkspace();
+    m_atlasLayoutWorkspaceActive = true;
+    m_activeWorkspace = Workspace::AtlasLayout;
+    if (m_atlasLayoutWorkspaceAction) m_atlasLayoutWorkspaceAction->setChecked(true);
 
+    // Show canvas page (page 0) in the view stack
+    m_atlasViewStack->setCurrentIndex(0);
+
+    // Reparent canvas into the workspace (editor stays in m_atlasSplitter)
+    m_atlasLayoutWorkspace->setCanvasWidget(m_atlasViewStack);
+
+    // Hide docks so they don't compete with the workspace
+    if (m_atlasDock)     m_atlasDock->hide();
+    if (m_animationDock) m_animationDock->hide();
+
+    m_mainStack->setCurrentIndex(2);
+    m_mainStack->show();
+}
+
+void MainWindow::leaveAtlasLayoutWorkspace() {
+    m_atlasLayoutWorkspaceActive = false;
+
+    // Detach canvas from workspace pane (sets parent to nullptr)
+    if (m_atlasLayoutWorkspace)
+        m_atlasLayoutWorkspace->clearCanvasWidget();
+
+    // Restore canvas to the left slot of the original splitter
+    if (m_atlasSplitter && m_atlasViewStack)
+        m_atlasSplitter->insertWidget(0, m_atlasViewStack);
+
+    m_mainStack->setCurrentIndex(0); // reset; updateUiState restores correct page
+    updateUiState();
+}
+
+void MainWindow::switchToAtlasWorkspace() {
+    if (m_exportWorkspaceActive) leaveExportWorkspace();
+    if (m_atlasLayoutWorkspaceActive) leaveAtlasLayoutWorkspace();
+    m_activeWorkspace = Workspace::Atlas;
+    if (m_atlasWorkspaceAction) m_atlasWorkspaceAction->setChecked(true);
+    if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1);
+    if (m_animationDock) m_animationDock->hide();
+}
+
+void MainWindow::switchToFrameAnimWorkspace() {
+    if (m_exportWorkspaceActive) leaveExportWorkspace();
+    if (m_atlasLayoutWorkspaceActive) leaveAtlasLayoutWorkspace();
+    m_activeWorkspace = Workspace::FrameAnimation;
+    if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1);
+    if (m_animationDock) m_animationDock->show();
+    if (m_frameAnimFirstLoad) {
+        m_frameAnimFirstLoad = false;
+        resizeDocks({m_atlasDock, m_animationDock}, {200, 500}, Qt::Vertical);
+    }
+}
+
+void MainWindow::showExportWorkspace() {
+    if (m_atlasLayoutWorkspaceActive) leaveAtlasLayoutWorkspace();
+    m_exportWorkspaceActive = true;
+    m_activeWorkspace = Workspace::Exportation;
+    if (m_exportationWorkspaceAction) m_exportationWorkspaceAction->setChecked(true);
+    if (m_atlasDock)     m_atlasDock->hide();
+    if (m_animationDock) m_animationDock->hide();
+    if (m_debugDock)     m_debugDock->hide();
+    if (m_packedAtlasView && m_exportWorkspace) {
+        m_exportWorkspace->setViewport(m_packedAtlasView);
+    }
+    m_mainStack->setCurrentIndex(1);
+    m_mainStack->show();
+    // Give keyboard focus to the preview view so zoom hotkeys (Ctrl+/-/0/1) work immediately
+    if (m_packedAtlasView) m_packedAtlasView->setFocus();
+    // Kick off preview with the currently selected profile/scale filter
+    if (m_exportWorkspace) {
+        const SaveConfig cfg = m_exportWorkspace->getConfig();
+        const QString profileName = cfg.profiles.isEmpty() ? QString() : cfg.profiles.first();
+        schedulePreviewPack(profileName, cfg.scaleFilter);
+    }
+}
+
+void MainWindow::leaveExportWorkspace() {
+    m_exportWorkspaceActive = false;
+    m_activeWorkspace = Workspace::Atlas;
+    if (m_atlasWorkspaceAction) m_atlasWorkspaceAction->setChecked(true);
+    if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1); // restore Navigation
+    // Cancel any in-flight preview generation
+    m_previewPackCanceled = true;
+    if (m_previewPackDebounceTimer) m_previewPackDebounceTimer->stop();
+    m_exportWorkspace->clearViewport();
+    if (m_packedAtlasView) {
+        m_packedAtlasView->setParent(this);
+        m_packedAtlasView->hide();
+    }
+    m_mainStack->setCurrentIndex(0);  // reset; updateUiState restores correct page
+    updateUiState();                  // restores docks and stack for current project state
+}
+
+void MainWindow::schedulePreviewPack(const QString& profileName, const QString& scaleFilter) {
+    m_previewPackProfile = profileName;
+    m_previewPackScaleFilter = scaleFilter;
+    if (!m_previewPackDebounceTimer) {
+        m_previewPackDebounceTimer = new QTimer(this);
+        m_previewPackDebounceTimer->setSingleShot(true);
+        connect(m_previewPackDebounceTimer, &QTimer::timeout,
+                this, &MainWindow::runPreviewPack);
+    }
+    m_previewPackDebounceTimer->start(400);
+}
+
+void MainWindow::runPreviewPack() {
+    if (!m_exportWorkspaceActive || !m_cliReady) return;
+    if (m_session->activeFramePaths.isEmpty() && m_session->layoutSourcePath.isEmpty()) return;
+
+    // Signal any in-flight task to exit early, then reset for the new task
+    m_previewPackCanceled = true;
+    m_previewPackCanceled = false;
+
+    // Capture all state from the main thread before dispatching
+    const QString profileName      = m_previewPackProfile;
+    const QString scaleFilter      = m_previewPackScaleFilter;
+    const QString layoutBin        = m_spratLayoutBin;
+    const QString packBin          = m_spratPackBin;
+    const QStringList framePaths   = m_session->activeFramePaths;
+    const QString layoutSourcePath = m_session->layoutSourcePath;
+    const QString cachedLayout     = m_session->cachedLayoutOutput;
+    const double  cachedLayoutScale = m_session->cachedLayoutScale;
+    const QString lastProfile      = m_session->lastSuccessfulProfile;
+    const QString deduplicateMode  = m_settings.deduplicateMode;
+    const QVector<SpratProfile> profiles = configuredProfiles();
+    std::atomic<bool>* canceledPtr = &m_previewPackCanceled;
+
+    if (m_packedAtlasView) m_packedAtlasView->setLoading();
+
+    using PreviewResult = QPair<QByteArray, QString>; // {imageData, errorMsg}
+
+    auto task = [=]() -> PreviewResult {
+        // Find effective profile definition
+        SpratProfile effectiveProfile;
+        for (const SpratProfile& p : profiles) {
+            if (p.name.trimmed() == profileName) {
+                effectiveProfile = p;
+                break;
+            }
+        }
+        const double profileScale = qBound(0.01,
+            effectiveProfile.scale > 0.0 ? effectiveProfile.scale : 1.0, 1.0);
+
+        // Write frame list to a temp file when needed
+        QString layoutInputPath = layoutSourcePath;
+        QTemporaryFile frameListFile;
+        if (!framePaths.isEmpty()) {
+            frameListFile.setFileTemplate(
+                QDir::temp().filePath("sprat-preview-frames-XXXXXX.txt"));
+            if (!frameListFile.open()) return {{}, tr("Could not create temporary frame list")};
+            {
+                QTextStream out(&frameListFile);
+                for (const QString& p : framePaths) out << p << "\n";
+                out.flush();
+            }
+            frameListFile.flush();
+            layoutInputPath = frameListFile.fileName();
+            frameListFile.close();
+        }
+
+        if (canceledPtr->load()) return {};
+
+        // Use cached layout when it matches the selected profile + scale
+        QByteArray layoutData;
+        constexpr double kTolerance = 1e-6;
+        if (!cachedLayout.isEmpty()
+            && lastProfile == profileName
+            && std::abs(cachedLayoutScale - profileScale) < kTolerance
+            && cachedLayout.contains(QLatin1String("atlas "))) {
+            layoutData = cachedLayout.toUtf8();
+        } else {
+            QStringList layoutArgs;
+            if (!layoutInputPath.isEmpty()) layoutArgs << layoutInputPath;
+            if (!effectiveProfile.preset.trimmed().isEmpty())
+                layoutArgs << "--preset" << effectiveProfile.preset.trimmed();
+            if (effectiveProfile.maxWidth > 0)
+                layoutArgs << "--max-width" << QString::number(effectiveProfile.maxWidth);
+            if (effectiveProfile.maxHeight > 0)
+                layoutArgs << "--max-height" << QString::number(effectiveProfile.maxHeight);
+            layoutArgs << "--padding" << QString::number(qMax(0, effectiveProfile.padding));
+            if (effectiveProfile.extrude > 0)
+                layoutArgs << "--extrude" << QString::number(effectiveProfile.extrude);
+            layoutArgs << "--scale" << QString::number(profileScale);
+            if (effectiveProfile.trimTransparent) layoutArgs << "--trim-transparent";
+            if (effectiveProfile.allowRotation)   layoutArgs << "--rotate";
+            if (effectiveProfile.multipack)        layoutArgs << "--multipack";
+            if (!effectiveProfile.sort.trimmed().isEmpty())
+                layoutArgs << "--sort" << effectiveProfile.sort.trimmed();
+            if (!deduplicateMode.isEmpty() && deduplicateMode != QLatin1String("none"))
+                layoutArgs << "--deduplicate" << deduplicateMode;
+
+            QByteArray layoutStderr;
+            if (!this->runTool(layoutBin, layoutArgs, nullptr, &layoutData, &layoutStderr)) {
+                const QString msg = QString::fromUtf8(layoutStderr).trimmed();
+                return {{}, msg.isEmpty() ? tr("Layout generation failed") : msg};
+            }
+        }
+
+        if (canceledPtr->load()) return {};
+
+        if (layoutData.isEmpty() || !layoutData.contains("atlas ")) return {};
+
+        // Run spratpack with layout data as stdin
+        QStringList packArgs;
+        if (effectiveProfile.dilate > 0)
+            packArgs << "--dilate" << QString::number(effectiveProfile.dilate);
+        if (!scaleFilter.isEmpty() && scaleFilter != QLatin1String("nearest"))
+            packArgs << "--scale-filter" << scaleFilter;
+
+        QByteArray packOutput;
+        QByteArray packStderr;
+        if (!this->runTool(packBin, packArgs, &layoutData, &packOutput, &packStderr)) {
+            const QString msg = QString::fromUtf8(packStderr).trimmed();
+            return {{}, msg.isEmpty() ? tr("Packing failed") : msg};
+        }
+
+        return {packOutput, {}};
+    };
+
+    m_previewPackWatcher.setFuture(QtConcurrent::run(task));
+}
+
+void MainWindow::onPreviewPackFinished() {
+    if (!m_exportWorkspaceActive || m_previewPackCanceled.load()) return;
+    if (!m_packedAtlasView) return;
+    const auto result = m_previewPackWatcher.result();
+    const QByteArray& imageData = result.first;
+    const QString& errorMsg     = result.second;
+    if (imageData.isEmpty()) {
+        m_packedAtlasView->setError(
+            errorMsg.isEmpty() ? tr("Preview generation failed") : errorMsg);
+    } else {
+        m_packedAtlasView->setImage(imageData);
+    }
+}
+
+void MainWindow::onExportWorkspaceRequested(SaveConfig config) {
 #ifdef Q_OS_WASM
     QString baseName = m_session ? QFileInfo(m_session->currentFolder).fileName().trimmed() : QString();
     if (baseName.isEmpty()) {
         baseName = "sprat-export";
     }
-    config.destination = QDir::temp().filePath(baseName + ".zip");
-#else
-    const QString dest = QFileDialog::getExistingDirectory(this, tr("Select Destination Folder"), startDir);
-    if (dest.isEmpty()) {
-        return;
-    }
-    config.destination = dest;
+    config.outputPath = QDir::temp().filePath(baseName + ".zip");
 #endif
 
     // Warn if overwriting an existing export (non-ZIP destinations only)
-    const bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
+    const bool isZip = config.outputPath.endsWith(".zip", Qt::CaseInsensitive);
     if (!isZip) {
-        const QDir destDir(config.destination);
+        const QDir destDir(config.outputPath);
         bool hasProfiles = false;
         for (const QString& p : config.profiles) {
             if (destDir.exists(p)) {
@@ -784,18 +1022,25 @@ void MainWindow::onExportAsClicked() {
                 this, tr("Overwrite Export?"),
                 tr("The folder \"%1\" already contains profile(s) from a previous export.\n"
                    "Existing profile folders will be cleared and replaced.\n\n"
-                   "Continue?").arg(config.destination),
+                   "Continue?").arg(config.outputPath),
                 QMessageBox::Yes | QMessageBox::Cancel,
                 QMessageBox::Cancel);
-            if (answer != QMessageBox::Yes) return;
+            if (answer != QMessageBox::Yes) return;  // stay in workspace
         }
     }
 
     m_lastSaveConfig = config;
+    leaveExportWorkspace();
+    updateUiState();  // enables Export action now that outputPath is set
     runExport(m_lastSaveConfig);
 }
 
 bool MainWindow::runExport(SaveConfig config) {
+    // Map the export-specific output path into destination for ProjectSaveService.
+    if (!config.outputPath.isEmpty()) {
+        config.destination = config.outputPath;
+    }
+
     if (m_spratLayoutBin.isEmpty() || m_spratPackBin.isEmpty()) {
         if (!m_cliReady) {
             MessageDialog::critical(this, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
@@ -1506,7 +1751,6 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     }
     updateManualFrameLabel();
     m_statusLabel->setText(QString(tr("Loaded %1 image frame(s) from ZIP")).arg(absolutePaths.size()));
-    refreshSourcesDialogIfVisible();
     scheduleLayoutRebuild(true);
 }
 
@@ -1618,7 +1862,6 @@ void MainWindow::applyProjectPayload() {
         m_session->sources = applied.sources;
     }
     m_session->orphanedSpritePaths = applied.orphanedSpritePaths;
-    refreshSourcesDialogIfVisible();
 
     // Initialize source folder for sync if layoutSourcePath points to a folder
     if (!m_session->layoutSourcePath.isEmpty()) {

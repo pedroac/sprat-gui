@@ -1,5 +1,6 @@
 #pragma once
 #include "ZoomableGraphicsView.h"
+#include "IAtlasViewport.h"
 #include "models.h"
 #include "SpriteItem.h"
 #include <atomic>
@@ -11,14 +12,16 @@ class QGraphicsRectItem;
 /**
  * @class LayoutCanvas
  * @brief Custom QGraphicsView for displaying and managing sprite layouts.
- * 
+ *
  * This class provides a visual interface for managing sprite sheets and layouts.
  * It handles sprite display, selection, zooming, panning, and drag-and-drop operations.
  */
-class LayoutCanvas : public ZoomableGraphicsView {
+class LayoutCanvas : public ZoomableGraphicsView, public IAtlasViewport {
     Q_OBJECT
 public:
     explicit LayoutCanvas(QWidget* parent = nullptr);
+
+    QWidget* widget() override { return this; }
 
     /**
      * @brief Sets the layout models to display.
@@ -143,6 +146,9 @@ public:
      * @brief Sets the atlas background rect at the given index (for animation).
      */
     void setAtlasRect(int index, const QRectF& rect);
+
+    /// Scrolls the view to centre on the atlas at the given index.
+    void scrollToAtlas(int index);
 
 signals:
     /**

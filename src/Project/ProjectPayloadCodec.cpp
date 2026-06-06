@@ -31,8 +31,13 @@ bool isValidCliPath(const QString& path) {
     if (path.isEmpty()) {
         return true; // Empty path is allowed (use default)
     }
-    QFileInfo fi(path);
-    return fi.isAbsolute() && fi.isExecutable() && !fi.isDir() && !path.contains("..");
+    // Resolve symlinks and .. components to get the real path
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    if (canonical.isEmpty()) {
+        return false; // Path doesn't exist or can't be resolved
+    }
+    QFileInfo fi(canonical);
+    return fi.isAbsolute() && fi.isExecutable() && !fi.isDir();
 }
 
 }  // namespace
@@ -273,6 +278,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
 
     QJsonObject saveOpts;
     saveOpts["destination"] = input.saveConfig.destination;
+    saveOpts["output_path"] = input.saveConfig.outputPath;
     saveOpts["transform"] = input.saveConfig.transform;
     QJsonArray profilesArr;
     for (const QString& profileName : input.saveConfig.profiles) {
@@ -450,6 +456,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
 
     QJsonObject saveOpts = root["save_options"].toObject();
     out.saveConfig.destination = saveOpts["destination"].toString();
+    out.saveConfig.outputPath = saveOpts["output_path"].toString();
     out.saveConfig.transform = saveOpts["transform"].toString();
     QJsonArray profilesArr = saveOpts["profiles"].toArray();
     out.saveConfig.profiles.reserve(profilesArr.size());
@@ -479,6 +486,10 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 QString origPath = sObj["originalPath"].toString();
                 if (!origPath.isEmpty() && QDir::isRelativePath(origPath) && !currentFolder.isEmpty()) {
                     origPath = QDir(currentFolder).absoluteFilePath(origPath);
+                    // Reject traversal attempts that escape the project folder
+                    if (!QDir::cleanPath(origPath).startsWith(QDir::cleanPath(currentFolder))) {
+                        origPath.clear();
+                    }
                 }
                 src.originalPath = origPath;
                 src.cachedFolderPath = sObj["cachedFolder"].toString();
@@ -509,6 +520,9 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                     QString path = sfObj["path"].toString();
                     if (!path.isEmpty() && QDir::isRelativePath(path) && !currentFolder.isEmpty()) {
                         path = QDir(currentFolder).absoluteFilePath(path);
+                        if (!QDir::cleanPath(path).startsWith(QDir::cleanPath(currentFolder))) {
+                            path.clear();
+                        }
                     }
                     sf.path = path;
                     const QJsonArray excArr = sfObj["excluded"].toArray();
@@ -529,6 +543,9 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 if (!legacyFolder.isEmpty()) {
                     if (QDir::isRelativePath(legacyFolder) && !currentFolder.isEmpty()) {
                         legacyFolder = QDir(currentFolder).absoluteFilePath(legacyFolder);
+                        if (!QDir::cleanPath(legacyFolder).startsWith(QDir::cleanPath(currentFolder))) {
+                            legacyFolder.clear();
+                        }
                     }
                     SmartFolder sf;
                     sf.path = legacyFolder;

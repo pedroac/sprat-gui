@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "AtlasLayoutWorkspace.h"
+#include "ElidedLabel.h"
 #include "UndoCommands.h"
 
 #include "SpriteSelectionPresenter.h"
@@ -405,6 +407,14 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                     .arg(m_session->activeFramePaths.size())
                     .arg(m_session->layoutModels.size()));
 
+                if (m_atlasDimsLabel) {
+                    QStringList parts;
+                    for (const auto& model : m_session->layoutModels)
+                        parts << QString("%1 × %2").arg(model.atlasWidth).arg(model.atlasHeight);
+                    m_atlasDimsLabel->setText(parts.join(QStringLiteral(", ")) + QStringLiteral(" px"));
+                    m_atlasDimsLabel->setVisible(true);
+                }
+
                 setLoading(false);
 
                 // populateActiveFrameListFromModel() and initializeSourceFolderWatcher()
@@ -422,6 +432,10 @@ void MainWindow::onLayoutFinished(const LayoutResult& result) {
                 m_session->lastSuccessfulProfile = m_profileCombo->currentData().toString();
 
                 refreshSpriteTree();
+
+                if (m_atlasLayoutWorkspace)
+                    m_atlasLayoutWorkspace->setAtlasCount(
+                        static_cast<int>(m_session->layoutModels.size()));
 
                 updateMainContentView();
                 updateUiState();
@@ -604,6 +618,22 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
     m_session->selectedSprite = sprite;
     if (sprite) {
         m_statusLabel->setText(tr("Selected: ") + sprite->name);
+    }
+    if (m_spriteDimsLabel) {
+        if (sprite) {
+            const int w = sprite->rotated ? sprite->rect.height() : sprite->rect.width();
+            const int h = sprite->rotated ? sprite->rect.width()  : sprite->rect.height();
+            if (m_spriteNameFooterLabel) {
+                m_spriteNameFooterLabel->setFullText(sprite->name);
+                m_spriteNameFooterLabel->setVisible(true);
+            }
+            m_spriteDimsLabel->setText(QString("%1 × %2 px").arg(w).arg(h));
+            m_spriteDimsLabel->setVisible(true);
+        } else {
+            if (m_spriteNameFooterLabel)
+                m_spriteNameFooterLabel->setVisible(false);
+            m_spriteDimsLabel->setVisible(false);
+        }
     }
     SpriteSelectionPresenter::applySpriteSelection(
         sprite,

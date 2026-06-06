@@ -373,10 +373,14 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
                     pixmap = pixmap.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
                 }
 
-                // Prevent unbounded cache growth: drop all entries if we exceed the limit
+                // Prevent unbounded cache growth: evict half the entries when at the limit
                 constexpr int kMaxTransformedCache = 500;
                 if (m_transformedPixmapCache.size() >= kMaxTransformedCache) {
-                    m_transformedPixmapCache.clear();
+                    auto it = m_transformedPixmapCache.begin();
+                    int toRemove = kMaxTransformedCache / 2;
+                    while (toRemove-- > 0 && it != m_transformedPixmapCache.end()) {
+                        it = m_transformedPixmapCache.erase(it);
+                    }
                 }
                 m_transformedPixmapCache.insert(cacheKey, pixmap);
             }
@@ -1267,6 +1271,12 @@ void LayoutCanvas::setAtlasRect(int index, const QRectF& rect) {
     if (index < 0 || index >= m_atlasBackgroundItems.size()) return;
     if (m_atlasBackgroundItems[index])
         m_atlasBackgroundItems[index]->setRect(rect);
+}
+
+void LayoutCanvas::scrollToAtlas(int index) {
+    if (index < 0 || index >= m_atlasBackgroundItems.size()) return;
+    if (const auto* item = m_atlasBackgroundItems.at(index))
+        centerOn(item);
 }
 
 void LayoutCanvas::freezeSceneRect() {

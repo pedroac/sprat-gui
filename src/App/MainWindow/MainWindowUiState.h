@@ -9,10 +9,10 @@ public:
         bool cliReady,
         bool isLoading,
         bool hasSprites,
+        bool hasExportPath,
         QAction* loadAction,
         QComboBox* profileCombo,
         QAction* saveAction,
         QAction* exportAction = nullptr,
-        QAction* exportAsAction = nullptr,
         QAction* saveAsAction = nullptr);
 };

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
-#include "SourcesDialog.h"
+#include "PackedAtlasView.h"
+#include "AtlasLayoutWorkspace.h"
 #include "UndoCommands.h"
 #include "AnimationCanvas.h"
 #include "MarkersDialog.h"
@@ -111,85 +112,6 @@ QString sanitizeSubfolderName(const QString& name) {
 }
 }
 
-void MainWindow::onShowSources() {
-    if (!m_sourcesDialog) {
-        m_sourcesDialog = new SourcesDialog(this);
-
-        connect(m_sourcesDialog, &SourcesDialog::syncSourceRequested,
-                this, &MainWindow::onSyncSourceRequested);
-
-        connect(m_sourcesDialog, &SourcesDialog::syncLayoutRequested,
-                this, &MainWindow::onSyncLayoutRequested);
-
-        connect(m_sourcesDialog, &SourcesDialog::removeSourceRequested,
-                this, [this](int index) { removeSource(index); });
-
-        connect(m_sourcesDialog, &SourcesDialog::sourceRenamed, this,
-                [this](int index, const QString& newName) {
-            if (!m_session || index < 0 || index >= m_session->sources.size()) return;
-            m_session->sources[index].name = newName;
-        });
-
-        connect(m_sourcesDialog, &SourcesDialog::addFolderRequested,
-                this, &MainWindow::onLoadFolder);
-
-        connect(m_sourcesDialog, &SourcesDialog::addFileRequested, this, [this]() {
-            const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
-            const QString path = QFileDialog::getOpenFileName(
-                this, tr("Add Image File"), m_session ? m_session->currentFolder : QString(), filter);
-            if (!path.isEmpty()) {
-                const DropAction action = confirmDropAction(path);
-                if (action != DropAction::Cancel)
-                    loadImageWithFrameDetection(path, action);
-            }
-        });
-
-        connect(m_sourcesDialog, &SourcesDialog::addArchiveRequested, this, [this]() {
-            const QString filter = tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)");
-            const QString path = QFileDialog::getOpenFileName(
-                this, tr("Add Archive"), m_session ? m_session->currentFolder : QString(), filter);
-            if (!path.isEmpty()) {
-                const DropAction action = confirmDropAction(path);
-                if (action != DropAction::Cancel)
-                    loadProject(path, action);
-            }
-        });
-
-        connect(m_sourcesDialog, &SourcesDialog::addUrlRequested,
-                this, &MainWindow::onLoadFromUrl);
-
-        connect(m_sourcesDialog, &SourcesDialog::restoreOrphanRequested, this,
-                [this](const QString& path) {
-            if (!m_session) return;
-            m_session->orphanedSpritePaths.removeAll(path);
-            if (!m_session->activeFramePaths.contains(path)) {
-                m_session->activeFramePaths.append(path);
-            }
-            m_sourcesDialog->refresh(m_session->sources, m_session->orphanedSpritePaths);
-            scheduleLayoutRebuild(true);
-        });
-
-        connect(m_sourcesDialog, &SourcesDialog::discardOrphanRequested, this,
-                [this](const QString& path) {
-            if (!m_session) return;
-            m_session->orphanedSpritePaths.removeAll(path);
-            m_sourcesDialog->refresh(m_session->sources, m_session->orphanedSpritePaths);
-        });
-    }
-
-    m_sourcesDialog->refresh(
-        m_session ? m_session->sources : QVector<ProjectSource>(),
-        m_session ? m_session->orphanedSpritePaths : QStringList());
-    m_sourcesDialog->show();
-    m_sourcesDialog->raise();
-    m_sourcesDialog->activateWindow();
-}
-
-void MainWindow::refreshSourcesDialogIfVisible() {
-    if (m_sourcesDialog && m_sourcesDialog->isVisible() && m_session) {
-        m_sourcesDialog->refresh(m_session->sources, m_session->orphanedSpritePaths);
-    }
-}
 
 void MainWindow::removeSource(int index) {
     if (!m_session || index < 0 || index >= m_session->sources.size()) return;
@@ -288,16 +210,10 @@ void MainWindow::removeSource(int index) {
         } else {
             scheduleLayoutRebuild(true);
         }
-        if (m_sourcesDialog)
-            m_sourcesDialog->refresh(m_session->sources,
-                                     m_session->orphanedSpritePaths);
     };
 
     auto postExecuteUndo = [this]() {
         scheduleLayoutRebuild(true);
-        if (m_sourcesDialog)
-            m_sourcesDialog->refresh(m_session->sources,
-                                     m_session->orphanedSpritePaths);
     };
 
     if (m_undoStack) {
@@ -565,7 +481,6 @@ void MainWindow::onSyncSourceRequested(int sourceIndex) {
             if (pathMap.contains(p)) p = pathMap.value(p);
 
         m_session->sources[sourceIndex].cachedFolderPath = destFolder;
-        refreshSourcesDialogIfVisible();
         scheduleLayoutRebuild(true);
         m_statusLabel->setText(
             tr("Sprites embedded: %1").arg(QFileInfo(destFolder).fileName()));
@@ -609,7 +524,6 @@ void MainWindow::onSyncSourceRequested(int sourceIndex) {
             if (!path.isEmpty()) {
                 m_session->sources[sourceIndex].originalPath = path;
                 m_session->sources[sourceIndex].cachedFolderPath.clear();
-                refreshSourcesDialogIfVisible();
                 onRunLayout(true);
             }
         } else if (msgBox.clickedButton() == removeBtn) {
@@ -1555,6 +1469,20 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
     if (!effectiveNames.contains(m_session->lastSuccessfulProfile)) {
         m_session->lastSuccessfulProfile.clear();
     }
+
+    if (m_atlasLayoutWorkspace) {
+        QStringList names, labels;
+        for (const SpratProfile& p : profiles) {
+            const QString name = p.name.trimmed();
+            if (!name.isEmpty() && !names.contains(name)) {
+                names  << name;
+                labels << (p.label.trimmed().isEmpty() ? name : p.label.trimmed());
+            }
+        }
+        const QStringList prevEnabled = m_atlasLayoutWorkspace->enabledProfiles();
+        m_atlasLayoutWorkspace->setProfiles(names, labels, m_currentProfile,
+            prevEnabled.isEmpty() ? names : prevEnabled);
+    }
 }
 
 void MainWindow::onCanvasAddFramesRequested() {
@@ -1934,8 +1862,34 @@ void MainWindow::onManageProfiles() {
 
     const QString previousProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
     applyConfiguredProfiles(profiles, previousProfile);
-    if (!m_session->layoutSourcePath.isEmpty() && m_profileCombo && !m_profileCombo->currentData().toString().trimmed().isEmpty()) {
-        // Profiles dialog closed - rebuild immediately with new settings
+
+    // Invalidate cached layout so changed profile settings take effect
+    if (m_session) {
+        m_session->cachedLayoutOutput.clear();
+        m_session->lastSuccessfulProfile.clear();
+    }
+
+    if (m_exportWorkspaceActive && m_exportWorkspace) {
+        // Re-populate the export workspace profile combo with the updated definitions
+        const QStringList enabled = m_atlasLayoutWorkspace
+            ? m_atlasLayoutWorkspace->enabledProfiles() : QStringList();
+        QVector<SpratProfile> toExport;
+        for (const SpratProfile& p : profiles) {
+            if (enabled.isEmpty() || enabled.contains(p.name.trimmed()))
+                toExport << p;
+        }
+        m_exportWorkspace->populate(toExport,
+                                    m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
+                                    m_lastSaveConfig,
+                                    QString());
+        // Refresh the preview with the updated profile settings
+        const SaveConfig cfg = m_exportWorkspace->getConfig();
+        schedulePreviewPack(cfg.profiles.isEmpty() ? QString() : cfg.profiles.first(),
+                            cfg.scaleFilter);
+    } else if (!m_session->layoutSourcePath.isEmpty()
+               && m_profileCombo
+               && !m_profileCombo->currentData().toString().trimmed().isEmpty()) {
+        // Rebuild the atlas layout with the new profile settings
         scheduleLayoutRebuild(true);
     }
 }
@@ -1959,6 +1913,9 @@ void MainWindow::updateOnionSkinDisplay() {
 void MainWindow::applySettings() {
     if (m_canvas) {
         SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
+    }
+    if (m_packedAtlasView) {
+        m_packedAtlasView->setSettings(m_settings);
     }
 
     // Update source folder watcher based on sync mode

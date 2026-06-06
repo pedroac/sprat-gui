@@ -19,10 +19,12 @@ ZoomableGraphicsView::ZoomableGraphicsView(QWidget* parent) : QGraphicsView(pare
 
 void ZoomableGraphicsView::setZoom(double zoom) {
     zoom = qBound(m_minZoom, zoom, m_maxZoom);
+    if (qFuzzyCompare(zoom, this->zoom())) return;
     QPointF center = mapToScene(viewport()->rect().center());
     resetTransform();
     scale(zoom, zoom);
     centerOn(center);
+    emit zoomChanged(zoom);
 }
 
 double ZoomableGraphicsView::zoom() const {
@@ -83,19 +85,14 @@ void ZoomableGraphicsView::wheelEvent(QWheelEvent* event) {
         setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
         m_isZoomManual = true;
         double oldZoom = zoom();
-        double newZoom = oldZoom;
         const double scaleFactor = 1.15;
-        if (event->angleDelta().y() > 0) {
-            newZoom *= scaleFactor;
-        } else {
-            newZoom /= scaleFactor;
-        }
+        double newZoom = event->angleDelta().y() > 0 ? oldZoom * scaleFactor : oldZoom / scaleFactor;
         newZoom = qBound(m_minZoom, newZoom, m_maxZoom);
 
-        double relativeScale = newZoom / oldZoom;
-        scale(relativeScale, relativeScale);
-        
-        emit zoomChanged(newZoom);
+        if (!qFuzzyCompare(newZoom, oldZoom)) {
+            scale(newZoom / oldZoom, newZoom / oldZoom);
+            emit zoomChanged(newZoom);
+        }
         event->accept();
     } else {
         QGraphicsView::wheelEvent(event);
