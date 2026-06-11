@@ -4,9 +4,9 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QHash>
 #include <QJsonObject>
-#include <QTemporaryDir>
-#include <memory>
+#include <QUuid>
 #include "models.h"
 
 /**
@@ -32,16 +32,29 @@ public:
     QString frameListPath; // Temporary file path for frame list
     QStringList orphanedSpritePaths; // Sprites whose source image is no longer available
 
-    // --- Layout Model ---
-    QVector<LayoutModel> layoutModels;
+    // --- Atlases ---
+    QVector<AtlasEntry> atlases;
+    int activeAtlasIndex = 0;
+
+    /// Path → SpritePtr for all sprites known to the project.
+    /// Populated during image scan; rect/trim fields filled in after layout.
+    QHash<QString, SpritePtr> spriteIndex;
+
+    // Per-atlas layout cache (kept at session level for the active atlas)
     QString cachedLayoutOutput;
     double cachedLayoutScale = 1.0;
     QString lastSuccessfulProfile;
     bool lastRunUsedTrim = false;
 
-    // --- Animation Timelines ---
-    QVector<AnimationTimeline> timelines;
+    // --- Timeline selection (UI state, not per-atlas) ---
     int selectedTimelineIndex = -1;
+
+    AtlasEntry& activeAtlas();
+    const AtlasEntry& activeAtlas() const;
+    AtlasEntry* atlasById(const QString& id);
+    AtlasEntry* atlasForSprite(const QString& path);
+    int neutralAtlasIndex() const;
+    int excludedAtlasIndex() const;
 
     // --- UI State Selection (Data-side) ---
     SpritePtr selectedSprite;
@@ -53,39 +66,13 @@ public:
 
     void clear();
     bool isEmpty() const;
-
-    /**
-     * @brief Adds a temporary directory to be managed by the session.
-     * 
-     * @param dir Pointer to the temporary directory. Ownership is transferred.
-     */
-    void addTempDir(std::unique_ptr<QTemporaryDir> dir);
-
-    /**
-     * @brief Clears all managed temporary directories.
-     */
-    void clearTempDirs();
-
-    /**
-     * @brief Sets the temporary directory for the source folder (sprites folder).
-     *
-     * This directory is kept separate and not cleared by clearTempDirs(),
-     * allowing sprite files to persist while the layout is active.
-     */
-    void setSourceFolderTempDir(std::unique_ptr<QTemporaryDir> dir);
-
-    /**
-     * @brief Clears the source folder temporary directory.
-     */
-    void clearSourceFolderTempDir();
+    void rebuildSpriteIndex();
 
 signals:
     void changed();
     void layoutChanged();
     void timelinesChanged();
     void selectionChanged();
+    void atlasesChanged();
 
-private:
-    std::vector<std::unique_ptr<QTemporaryDir>> m_tempDirs;
-    std::unique_ptr<QTemporaryDir> m_sourceFolderTempDir;  // Persistent sprite folder temp dir
 };

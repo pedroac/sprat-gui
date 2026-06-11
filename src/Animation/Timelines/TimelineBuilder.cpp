@@ -45,6 +45,14 @@ bool parseTimelineSeedName(const QString& spriteName, QString& label, int& index
 }
 }
 
+QString TimelineBuilder::groupLabelFor(const QString& name) {
+    QString label;
+    int index = 0;
+    if (parseTimelineSeedName(name, label, index))
+        return label;
+    return {};
+}
+
 QVector<TimelineSeed> TimelineBuilder::buildFromSprites(const QVector<SpritePtr>& sprites) {
     QMap<QString, QVector<QPair<int, QString>>> groups;
 

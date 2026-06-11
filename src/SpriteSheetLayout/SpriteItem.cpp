@@ -61,8 +61,8 @@ void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
 
     QGraphicsPixmapItem::paint(painter, option, widget);
 
-    // Draw Name Chip (hidden during animations to avoid label rotation visual artifacts)
-    if (!m_labelHidden) {
+    // Draw Name Chip (hidden during animations or when label mode is None)
+    if (!m_labelHidden && m_labelMode != LayoutLabelMode::None) {
         qreal lod = QStyleOptionGraphicsItem::levelOfDetailFromTransform(painter->transform());
         QRectF rect = boundingRect();
         double screenWidth = rect.width() * lod;
@@ -82,7 +82,9 @@ void SpriteItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
             int maxWidth = static_cast<int>(screenWidth) - (padding * 2);
 
             if (maxWidth > 20) {
-                QString elidedText = kChipFm.elidedText(m_data->name, Qt::ElideRight, maxWidth);
+                const QString labelText = (m_labelMode == LayoutLabelMode::FullPath)
+                    ? m_data->path : m_data->name;
+                QString elidedText = kChipFm.elidedText(labelText, Qt::ElideRight, maxWidth);
                 int textWidth = kChipFm.horizontalAdvance(elidedText);
                 int textHeight = kChipFm.height();
 

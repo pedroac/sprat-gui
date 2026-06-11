@@ -8,14 +8,18 @@ class QWidget;
 
 class AnimationExportService {
 public:
+    struct ExportCallbacks {
+        std::function<void(bool)>                           setLoading;
+        std::function<void(const QString&)>                 setStatus;
+        std::function<void(const QString&, const QString&)> showError; // title, msg
+    };
+
     static QString chooseOutputPath(QWidget* parent);
     static bool exportAnimation(
-        QWidget* parent,
         const QVector<AnimationTimeline>& timelines,
         int selectedTimelineIndex,
         const QVector<LayoutModel>& layoutModels,
         int fps,
         const QString& outPath,
-        const std::function<void(bool)>& setLoading,
-        const std::function<void(const QString&)>& setStatus);
+        ExportCallbacks callbacks = {});
 };

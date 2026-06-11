@@ -1,7 +1,6 @@
 #include "MainWindow.h"
-#include "ElidedLabel.h"
 #include "PackedAtlasView.h"
-#include "AtlasLayoutWorkspace.h"
+#include "AtlasesManagementWorkspace.h"
 #include "UndoCommands.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
@@ -41,6 +40,7 @@
 #include <QVBoxLayout>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <algorithm>
 #include <QPlainTextEdit>
 #include <QScrollBar>
 #include <QTreeWidget>
@@ -49,6 +49,8 @@
 #include <QMessageBox>
 #include "NavigatorTreeWidget.h"
 #include "TimelineTreeWidget.h"
+#include "SpriteTreeUtils.h"
+#include <QUuid>
 
 static double toDisplay(int px, int dim, CoordUnit unit) {
     return (unit == CoordUnit::Percent && dim > 0)
@@ -77,6 +79,7 @@ void MainWindow::setupUi() {
     topSpacer->setFloatable(false);
     topSpacer->setAllowedAreas(Qt::TopToolBarArea);
     topSpacer->setStyleSheet("background: transparent; border: none;");
+    topSpacer->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     addToolBar(Qt::TopToolBarArea, topSpacer);
 
     // Prepare fonts for dock titles
@@ -128,14 +131,146 @@ void MainWindow::setupUi() {
     m_packedAtlasView = new PackedAtlasView(this);
     m_packedAtlasView->hide();
 
+    m_exportLayoutCanvas = new LayoutCanvas(this);
+    m_exportLayoutCanvas->hide();
+    m_exportLayoutCanvas->setSettings(m_settings);
+    m_exportLayoutCanvas->setDisplayOnly(true);
+
     connect(m_exportWorkspace, &ExportWorkspace::previewSettingsChanged,
             this, &MainWindow::schedulePreviewPack);
-    connect(&m_previewPackWatcher, &QFutureWatcher<QByteArray>::finished,
+    connect(m_exportWorkspace, &ExportWorkspace::previewAtlasChanged,
+            this, [this](int sessionAtlasIndex) {
+                m_exportPreviewAtlasIndex = sessionAtlasIndex;
+                // Invalidate the pack cache so the new atlas gets a fresh pack.
+                m_cachedPackedImage.clear();
+                m_cachedPackLayout.clear();
+                if (!m_session || !m_exportLayoutCanvas) return;
+                QVector<LayoutModel> models;
+                if (sessionAtlasIndex < 0) {
+                    for (const auto& atlas : m_session->atlases)
+                        if (!atlas.isExcluded)
+                            models.append(atlas.layoutModels);
+                } else if (sessionAtlasIndex < m_session->atlases.size()) {
+                    models = m_session->atlases[sessionAtlasIndex].layoutModels;
+                }
+                m_exportLayoutCanvas->setModels(models);
+                m_exportLayoutCanvas->setZoomManual(false);
+                m_exportLayoutCanvas->initialFit();
+                if (m_exportWorkspaceActive)
+                    m_exportWorkspace->setViewport(m_exportLayoutCanvas);
+                const SaveConfig cfg = m_exportWorkspace->getConfig();
+                schedulePreviewPack(cfg.profiles.isEmpty() ? QString() : cfg.profiles.first(),
+                                    cfg.scaleFilter);
+            });
+    connect(&m_previewPackWatcher, &QFutureWatcher<PackPreviewResult>::finished,
             this, &MainWindow::onPreviewPackFinished);
 
-    // Page 3: Atlas Layout Workspace
-    m_atlasLayoutWorkspace = new AtlasLayoutWorkspace(this);
-    m_mainStack->addWidget(m_atlasLayoutWorkspace);  // page 2
+    // Page 3: Atlases Management Workspace
+    m_atlasesManagementWorkspace = new AtlasesManagementWorkspace(this);
+    m_atlasesManagementWorkspace->setSession(m_session);
+    m_mainStack->addWidget(m_atlasesManagementWorkspace);  // page 2
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::addAtlasRequested,
+            this, [this]() {
+                if (!m_session) return;
+                AtlasEntry newAtlas;
+                newAtlas.id   = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                newAtlas.name = tr("Atlas %1").arg(m_session->atlases.size());
+                m_session->atlases.append(newAtlas);
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->setAtlases(
+                    m_session->atlases, m_session->activeAtlasIndex);
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::atlasRenamed,
+            this, [this](int index, const QString& newName) {
+                if (!m_session || index < 0 || index >= m_session->atlases.size()) return;
+                m_session->atlases[index].name = newName;
+                m_session->atlases[index].outputSubdir =
+                    newName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->setAtlases(
+                    m_session->atlases, m_session->activeAtlasIndex);
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::removeAtlasRequested,
+            this, [this](int index) {
+                if (!m_session || index < 0 || index >= m_session->atlases.size()) return;
+                if (m_session->atlases[index].isNeutral) return;
+                // Move sprites to neutral atlas
+                const QStringList orphanPaths = m_session->atlases[index].spritePaths;
+                const int neutralIdx = m_session->neutralAtlasIndex();
+                for (const QString& p : orphanPaths) {
+                    if (!m_session->atlases[neutralIdx].spritePaths.contains(p))
+                        m_session->atlases[neutralIdx].spritePaths.append(p);
+                }
+                m_session->atlases.remove(index);
+                m_session->activeAtlasIndex = qBound(0, m_session->activeAtlasIndex,
+                                                      m_session->atlases.size() - 1);
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->setAtlases(
+                    m_session->atlases, m_session->activeAtlasIndex);
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::moveSpritesRequested,
+            this, [this](const QStringList& paths, int sourceAtlasIndex, int targetAtlasIndex) {
+                if (!m_session) return;
+                if (sourceAtlasIndex < 0 || sourceAtlasIndex >= m_session->atlases.size()) return;
+                if (targetAtlasIndex < 0 || targetAtlasIndex >= m_session->atlases.size()) return;
+                const int excIdx          = m_session->excludedAtlasIndex();
+                const bool toExcluded     = (targetAtlasIndex == excIdx);
+                const bool fromExcluded   = (sourceAtlasIndex == excIdx);
+                moveAtlasSprites(paths, sourceAtlasIndex, targetAtlasIndex);
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+                if (m_atlasesManagementWorkspace->viewMode()
+                        == AtlasesManagementWorkspace::ViewMode::Layout) {
+                    if (m_canvas)
+                        m_canvas->setModels(m_session->atlases[sourceAtlasIndex].layoutModels);
+                    scheduleLayoutRebuild(true);
+                }
+                if (toExcluded || fromExcluded)
+                    refreshSpriteTree();
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::createAtlasFromGroupRequested,
+            this, [this](const QString& groupName, const QStringList& paths) {
+                if (!m_session || paths.isEmpty()) return;
+                const int srcIdx = m_atlasesManagementWorkspace->selectedAtlasIndex();
+                if (srcIdx < 0 || srcIdx >= m_session->atlases.size()) return;
+                AtlasEntry newAtlas;
+                newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                newAtlas.name         = groupName;
+                newAtlas.outputSubdir = groupName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                m_session->atlases.append(newAtlas);
+                moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->setAtlases(m_session->atlases, m_session->activeAtlasIndex);
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::autoCreateAtlasesRequested,
+            this, [this](const QVector<QPair<QString, QStringList>>& groups) {
+                if (!m_session || groups.isEmpty()) return;
+                const int srcIdx = m_atlasesManagementWorkspace->selectedAtlasIndex();
+                if (srcIdx < 0 || srcIdx >= m_session->atlases.size()) return;
+                for (const auto& [groupName, paths] : groups) {
+                    AtlasEntry newAtlas;
+                    newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                    newAtlas.name         = groupName;
+                    newAtlas.outputSubdir = groupName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                    m_session->atlases.append(newAtlas);
+                    moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
+                }
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->setAtlases(m_session->atlases, m_session->activeAtlasIndex);
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::atlasSelected,
+            this, [this](int index) {
+                if (!m_session || index < 0 || index >= m_session->atlases.size()) return;
+                m_session->activeAtlasIndex = index;
+                if (m_atlasesManagementWorkspace->viewMode()
+                        == AtlasesManagementWorkspace::ViewMode::Layout)
+                    scheduleLayoutRebuild(true);
+            });
+    connect(m_session, &ProjectSession::atlasesChanged,
+            this, [this]() {
+        updateNavigatorAtlasCombo();
+        m_session->rebuildSpriteIndex();
+    });
 
     // --- Create Docks ---
     const int groupMargin = 4;
@@ -148,33 +283,18 @@ void MainWindow::setupUi() {
     QVBoxLayout* canvasLayout = new QVBoxLayout(canvasContent);
     canvasLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
-    // makeZoomLabel – used by frame editor and animation panels below
-    auto makeZoomLabel = [this]() {
-        QPixmap pix(16, 16);
-        pix.fill(Qt::transparent);
-        QPainter painter(&pix);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setPen(QPen(palette().color(QPalette::WindowText), 1.5));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QPointF(6, 6), 4.5, 4.5);
-        painter.drawLine(QPointF(9.2, 9.2), QPointF(14, 14));
-        painter.end();
-        auto* label = new QLabel(this);
-        label->setPixmap(pix);
-        label->setToolTip(tr("Zoom"));
-        return label;
-    };
-
     // Hidden profile combo – drives layout logic, never shown directly
     m_profileCombo = new QComboBox(this);
     m_profileCombo->setVisible(false);
+    m_profileCombo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     m_profileCombo->setToolTip(tr("Layout profile"));
     m_profileCombo->setAccessibleName(tr("Layout profile"));
     connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
     // Keep profileCombo in sync with workspace selection
     connect(m_profileCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        if (m_atlasLayoutWorkspace && m_profileCombo)
-            m_atlasLayoutWorkspace->setSelectedProfile(m_profileCombo->currentData().toString());
+        if (!m_profileCombo) return;
+        const QString name = m_profileCombo->currentData().toString();
+        if (m_atlasesManagementWorkspace) m_atlasesManagementWorkspace->setSelectedProfile(name);
     });
     applyConfiguredProfiles(configuredProfiles(), QString());
 
@@ -235,30 +355,63 @@ void MainWindow::setupUi() {
         m_sourceResolutionDebounceTimer->start(AppConstants::kSourceResDebounceMs);
     };
     connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, scheduleSourceResolutionLayoutRun);
+    m_sourceResolutionCombo->hide();
+    m_sourceResolutionCombo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
-    // Zoom spin
-    m_layoutZoomSpin = new QDoubleSpinBox(this);
-    m_layoutZoomSpin->setRange(10.0, 800.0);
-    m_layoutZoomSpin->setValue(100.0);
-    m_layoutZoomSpin->setSuffix("%");
-    m_layoutZoomSpin->setSingleStep(10.0);
-    connect(m_layoutZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onLayoutZoomChanged);
+    // m_layoutZoom (double) tracks the current layout canvas zoom percentage.
 
-    // Move view controls into workspace right panel
-    m_atlasLayoutWorkspace->setViewControls(m_sourceResolutionCombo, m_layoutZoomSpin);
-
-    // Workspace → m_profileCombo sync (workspace selection drives layout)
-    connect(m_atlasLayoutWorkspace, &AtlasLayoutWorkspace::selectedProfileChanged,
+    // AtlasesManagementWorkspace — resolution and profile wiring
+    m_atlasesManagementWorkspace->setResolutionOptions(
+        ResolutionsConfig::loadResolutionOptions(), m_currentResolution);
+    // Keep resolution combos in sync (m_sourceResolutionCombo ↔ AtlasesManagement)
+    connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this]() {
+        if (m_atlasesManagementWorkspace)
+            m_atlasesManagementWorkspace->setCurrentResolution(m_sourceResolutionCombo->currentText());
+    });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::resolutionChanged,
+            this, [this](const QString& res) {
+        const int idx = m_sourceResolutionCombo->findText(res);
+        if (idx >= 0) m_sourceResolutionCombo->setCurrentIndex(idx);
+    });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::selectedProfileChanged,
             this, [this](const QString& name) {
-                if (!m_profileCombo) return;
-                const int idx = m_profileCombo->findData(name);
-                if (idx >= 0 && idx != m_profileCombo->currentIndex())
-                    m_profileCombo->setCurrentIndex(idx);
-            });
-    connect(m_atlasLayoutWorkspace, &AtlasLayoutWorkspace::selectedAtlasChanged,
-            this, [this](int index) { if (m_canvas) m_canvas->scrollToAtlas(index); });
-    connect(m_atlasLayoutWorkspace, &AtlasLayoutWorkspace::manageProfilesRequested,
+        if (!m_profileCombo) return;
+        const int idx = m_profileCombo->findData(name);
+        if (idx >= 0 && idx != m_profileCombo->currentIndex())
+            m_profileCombo->setCurrentIndex(idx);
+    });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::manageProfilesRequested,
             this, &MainWindow::onManageProfiles);
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::zoomChanged,
+            this, &MainWindow::onLayoutZoomChanged);
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::viewModeChanged,
+            this, [this](AtlasesManagementWorkspace::ViewMode mode) {
+        if (mode == AtlasesManagementWorkspace::ViewMode::Layout) {
+            m_atlasesManagementWorkspace->setCanvasWidget(m_canvas);
+            m_atlasesManagementWorkspace->setZoom(m_layoutZoom);
+            if (!m_session) return;
+            // Rebuild so the canvas reflects the currently selected atlas (it may have
+            // changed while Navigation mode was active without triggering a layout run).
+            scheduleLayoutRebuild(true);
+        } else {
+            // Clear dim filter before returning the canvas to the Sprites workspace.
+            if (m_canvas) m_canvas->setDimFilter(QString());
+            m_atlasesManagementWorkspace->clearCanvasWidget();
+            // Re-parent the canvas back to its original dock container so it
+            // is not left as a floating top-level window blocking the menu bar.
+            if (m_canvas && m_atlasViewStack && m_atlasViewStack->widget(0)) {
+                QWidget* cc = m_atlasViewStack->widget(0);
+                m_canvas->setParent(cc);
+                if (auto* l = cc->layout()) l->addWidget(m_canvas);
+                m_canvas->show();
+            }
+        }
+    });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::layoutFilterChanged,
+            this, [this](const QString& query) {
+        if (m_canvas) m_canvas->setDimFilter(query);
+    });
 
     m_canvas = new LayoutCanvas(this);
     canvasLayout->addWidget(m_canvas);
@@ -274,14 +427,15 @@ void MainWindow::setupUi() {
         m_session->selectedSprites = selection;
     });
     connect(m_canvas, &LayoutCanvas::zoomChanged, this, [this](double zoom) {
-        m_layoutZoomSpin->blockSignals(true);
-        m_layoutZoomSpin->setValue(zoom * 100.0);
-        m_layoutZoomSpin->blockSignals(false);
+        m_layoutZoom = zoom * 100.0;
+        if (m_atlasesManagementWorkspace)
+            m_atlasesManagementWorkspace->setZoom(zoom * 100.0);
     });
     connect(m_canvas, &LayoutCanvas::requestTimelineGeneration, this, &MainWindow::onGenerateTimelinesFromFrames);
     connect(m_canvas, &LayoutCanvas::externalPathDropped, this, &MainWindow::onLayoutCanvasPathDropped);
     connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onCanvasAddFramesRequested);
     connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onCanvasRemoveFramesRequested);
+    connect(m_canvas, &LayoutCanvas::removeSmallFramesRequested, m_canvas, &LayoutCanvas::removeFramesSmallerThan);
     connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
     connect(m_canvas, &LayoutCanvas::userInteractionStarted, this, &MainWindow::pauseLayoutRebuild);
     connect(m_canvas, &LayoutCanvas::userInteractionEnded, this, &MainWindow::resumeLayoutRebuild);
@@ -292,45 +446,52 @@ void MainWindow::setupUi() {
     });
     m_canvas->viewport()->installEventFilter(this);
 
-    // Navigator panel (tree view of sprites)
+    // Navigator panel (tree view of sprites) — now managed by NavigatorPanel
     QWidget* navigatorContent = new QWidget(this);
     navigatorContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
     navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
-    // Sprite filter search box + result count label
-    QHBoxLayout* filterRow = new QHBoxLayout();
-    m_spriteFilterEdit = new QLineEdit(navigatorContent);
-    m_spriteFilterEdit->setPlaceholderText(tr("Search sprites..."));
-    filterRow->addWidget(m_spriteFilterEdit);
-    m_spriteFilterResultLabel = new QLabel(navigatorContent);
-    m_spriteFilterResultLabel->setStyleSheet("color: #888; font-size: 11px;");
-    m_spriteFilterResultLabel->setVisible(false);
-    filterRow->addWidget(m_spriteFilterResultLabel);
-    m_showHiddenToggleBtn = new QCheckBox(tr("Show hidden"), navigatorContent);
-    m_showHiddenToggleBtn->setChecked(false);
-    m_showHiddenToggleBtn->setToolTip(tr("Show hidden and excluded items"));
-    filterRow->addWidget(m_showHiddenToggleBtn);
-    navigatorLayout->addLayout(filterRow);
+    m_navigatorPanel = new NavigatorPanel(navigatorContent);
+    navigatorLayout->addWidget(m_navigatorPanel);
 
-    m_spriteTree = new NavigatorTreeWidget(navigatorContent);
-    m_spriteTree->setHeaderLabel(tr("Sprites"));
-    m_spriteTree->setIconSize(QSize(20, 20));
-    m_spriteTree->setSortingEnabled(true);
-    m_spriteTree->sortByColumn(0, Qt::AscendingOrder);
-    m_spriteTree->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_spriteTree, &QWidget::customContextMenuRequested,
-            this, &MainWindow::onSpriteTreeContextMenu);
-    connect(m_spriteTree, &NavigatorTreeWidget::excludeRequested,
-            this, &MainWindow::onNavigatorExcludeKey);
-    navigatorLayout->addWidget(m_spriteTree);
+    // Wire up NavigatorPanel's internal widgets back to MainWindow's existing pointers
+    // so all other code (context menus, filterSpriteTree, etc.) keeps working unchanged.
+    m_spriteTree            = m_navigatorPanel->tree();
+    m_spriteFilterEdit      = m_navigatorPanel->filterEdit();
+    m_spriteFilterResultLabel = m_navigatorPanel->filterResultLabel();
+    m_showHiddenToggleBtn   = m_navigatorPanel->showHiddenCheckBox();
+    m_navigatorAtlasRow     = m_navigatorPanel->atlasRow();
+    m_navigatorAtlasCombo   = m_navigatorPanel->atlasCombo();
 
-    // Connect filter box to search functionality
-    connect(m_spriteFilterEdit, &QLineEdit::textChanged, this, &MainWindow::filterSpriteTree);
-    connect(m_showHiddenToggleBtn, &QCheckBox::toggled, this, [this](bool checked) {
+    // Atlas combo changes: update session + refresh everything
+    connect(m_navigatorPanel, &NavigatorPanel::atlasIndexChanged,
+            this, [this](int atlasIndex) {
+                if (!m_session) return;
+                if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
+                    m_session->activeAtlasIndex = atlasIndex;
+                    refreshSpriteTree();
+                    refreshTimelineList();
+                    refreshAnimationTest();
+                    // Ensure the selected atlas is packed so the sprite tree is populated.
+                    scheduleLayoutRebuild(true);
+                } else {
+                    // "All" selected: refresh tree only, active atlas unchanged.
+                    refreshSpriteTree();
+                }
+            });
+
+    // Show-hidden checkbox
+    connect(m_navigatorPanel, &NavigatorPanel::showHiddenChanged, this, [this](bool checked) {
         m_showHiddenItems = checked;
         refreshSpriteTree();
     });
+
+    // Context menu + exclude key: delegate to existing MainWindow slots
+    connect(m_spriteTree, &QWidget::customContextMenuRequested,
+            this, &MainWindow::onSpriteTreeContextMenu);
+    connect(m_navigatorPanel, &NavigatorPanel::excludeKeyPressed,
+            this, &MainWindow::onNavigatorExcludeKey);
 
     // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
     connect(m_spriteTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int /*column*/) {
@@ -420,34 +581,30 @@ void MainWindow::setupUi() {
     m_atlasViewStack->addWidget(emptyAtlasLabel);
     m_atlasViewStack->setCurrentIndex(1);
 
-    // 2. Animation Timelines panel
-    QWidget* timelineContent = new QWidget(this);
-    timelineContent->setStyleSheet("font-weight: normal;");
-    QVBoxLayout* timelineLayout = new QVBoxLayout(timelineContent);
-    timelineLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+    // 2. Animation Timelines panel — owned by TimelineEditorPanel
+    m_timelineEditorPanel = new TimelineEditorPanel(this);
 
-    QHBoxLayout* timelineAddLayout = new QHBoxLayout();
-    timelineAddLayout->addWidget(new QLabel(tr("Name:")));
-    m_timelineCreateEdit = new QLineEdit(this);
-    m_timelineCreateEdit->setPlaceholderText(tr("Timeline name (optional)"));
-    timelineAddLayout->addWidget(m_timelineCreateEdit);
-    QPushButton* addTimelineBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), "", this);
-    addTimelineBtn->setToolTip(tr("Add timeline"));
-    connect(addTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineAddClicked);
-    connect(m_timelineCreateEdit, &QLineEdit::returnPressed, this, &MainWindow::onTimelineAddClicked);
-    timelineAddLayout->addWidget(addTimelineBtn);
-    timelineLayout->addLayout(timelineAddLayout);
+    // Wire MainWindow's raw-pointer members to the panel's child widgets
+    m_timelineCreateEdit      = m_timelineEditorPanel->timelineCreateEdit();
+    m_timelineList            = m_timelineEditorPanel->timelineList();
+    m_timelineEditorContainer = m_timelineEditorPanel->timelineEditorContainer();
+    m_selectedTimelineGroup   = m_timelineEditorPanel->selectedTimelineGroup();
+    m_timelineNameEdit        = m_timelineEditorPanel->timelineNameEdit();
+    m_timelineFpsSpin         = m_timelineEditorPanel->timelineFpsSpin();
+    m_timelineAliasLabel      = m_timelineEditorPanel->timelineAliasLabel();
+    m_timelineFlipLabel       = m_timelineEditorPanel->timelineFlipLabel();
+    m_timelineFlipCombo       = m_timelineEditorPanel->timelineFlipCombo();
+    m_timelineDropArea        = m_timelineEditorPanel->timelineDropArea();
+    m_timelineDragHintLabel   = m_timelineEditorPanel->timelineDragHintLabel();
+    m_timelineFramesList      = m_timelineEditorPanel->timelineFramesList();
 
-    m_timelineList = new TimelineTreeWidget(this);
-    m_timelineList->setHeaderHidden(true);
-    m_timelineList->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
-    m_timelineList->setIconSize(QSize(32, 32));
-    m_timelineList->setDragEnabled(true);
-    connect(m_timelineList, &QTreeWidget::itemSelectionChanged, this, &MainWindow::onTimelineSelectionChanged);
-    timelineLayout->addWidget(m_timelineList, 1); // Give it a stretch factor
-    m_timelineList->setVisible(false);
-    m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
+    // Connect timeline-list signals
+    connect(m_timelineEditorPanel->addTimelineButton(), &QPushButton::clicked,
+            this, &MainWindow::onTimelineAddClicked);
+    connect(m_timelineCreateEdit, &QLineEdit::returnPressed,
+            this, &MainWindow::onTimelineAddClicked);
+    connect(m_timelineList, &QTreeWidget::itemSelectionChanged,
+            this, &MainWindow::onTimelineSelectionChanged);
     connect(m_timelineList, &QWidget::customContextMenuRequested,
             this, &MainWindow::onTimelineContextMenu);
     connect(m_timelineList, &TimelineTreeWidget::deleteKeyPressed,
@@ -457,263 +614,109 @@ void MainWindow::setupUi() {
     connect(m_timelineList, &QTreeWidget::itemChanged,
             this, &MainWindow::onTimelineItemChanged);
 
-    // Add a gap between the list and the editor
-    timelineLayout->addSpacing(8);
-
-    m_timelineEditorContainer = new QWidget(this);
-    m_timelineEditorContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-    QVBoxLayout* editorContainerLayout = new QVBoxLayout(m_timelineEditorContainer);
-    editorContainerLayout->setContentsMargins(0, 0, 0, 0);
-    timelineLayout->addWidget(m_timelineEditorContainer, 0); // No stretch for the editor area
-    m_timelineEditorContainer->setVisible(false);
-
-    m_selectedTimelineGroup = new QGroupBox(tr("Selected Timeline"), m_timelineEditorContainer);
-    QVBoxLayout* groupLayout = new QVBoxLayout(m_selectedTimelineGroup);
-    editorContainerLayout->addWidget(m_selectedTimelineGroup);
-
-    QHBoxLayout* timelineNameLayout = new QHBoxLayout();
-    timelineNameLayout->addWidget(new QLabel(tr("Name:")));
-    m_timelineNameEdit = new QLineEdit(this);
-    m_timelineNameEdit->setEnabled(false);
-    connect(m_timelineNameEdit, &QLineEdit::editingFinished, this, &MainWindow::onTimelineNameChanged);
-    timelineNameLayout->addWidget(m_timelineNameEdit);
-    timelineNameLayout->addWidget(new QLabel(tr("FPS:")));
-    m_timelineFpsSpin = new QSpinBox(this);
-    m_timelineFpsSpin->setRange(1, 60);
-    m_timelineFpsSpin->setValue(8);
-    m_timelineFpsSpin->setEnabled(false);
-    m_timelineFpsSpin->setToolTip(tr("Frames per second for animation playback"));
-    m_timelineFpsSpin->setAccessibleName(tr("Timeline FPS"));
-    connect(m_timelineFpsSpin, &QSpinBox::valueChanged, this, &MainWindow::onTimelineFpsChanged);
-    timelineNameLayout->addWidget(m_timelineFpsSpin);
-    QPushButton* removeTimelineBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton), "", this);
-    removeTimelineBtn->setToolTip(tr("Remove timeline"));
-    connect(removeTimelineBtn, &QPushButton::clicked, this, &MainWindow::onTimelineRemoveClicked);
-    timelineNameLayout->addWidget(removeTimelineBtn);
-    groupLayout->addLayout(timelineNameLayout);
-
-    m_timelineAliasLabel = new QLabel(this);
-    m_timelineAliasLabel->setVisible(false);
-    m_timelineAliasLabel->setToolTip(tr("An alias timeline references another timeline's frames but can have its own flip and transform settings."));
-    groupLayout->addWidget(m_timelineAliasLabel);
-
-    QHBoxLayout* flipRow = new QHBoxLayout();
-    m_timelineFlipLabel = new QLabel(tr("Flip:"), this);
-    m_timelineFlipLabel->setVisible(false);
-    flipRow->addWidget(m_timelineFlipLabel);
-    m_timelineFlipCombo = new QComboBox(this);
-    m_timelineFlipCombo->addItem(tr("None"),       0);
-    m_timelineFlipCombo->addItem(tr("Horizontal"), 1);
-    m_timelineFlipCombo->addItem(tr("Vertical"),   2);
-    m_timelineFlipCombo->addItem(tr("Both"),       3);
-    m_timelineFlipCombo->setVisible(false);
+    // Connect selected-timeline editor signals
+    connect(m_timelineNameEdit, &QLineEdit::editingFinished,
+            this, &MainWindow::onTimelineNameChanged);
+    connect(m_timelineFpsSpin, &QSpinBox::valueChanged,
+            this, &MainWindow::onTimelineFpsChanged);
+    connect(m_timelineEditorPanel->removeTimelineButton(), &QPushButton::clicked,
+            this, &MainWindow::onTimelineRemoveClicked);
     connect(m_timelineFlipCombo, &QComboBox::currentIndexChanged,
             this, &MainWindow::onTimelineFlipChanged);
-    flipRow->addWidget(m_timelineFlipCombo);
-    flipRow->addStretch();
-    groupLayout->addLayout(flipRow);
 
-    m_timelineDropArea = new QWidget(this); // No longer a group box, replaced by Selected Timeline group
-    QVBoxLayout* dropAreaLayout = new QVBoxLayout(m_timelineDropArea);
-    dropAreaLayout->setContentsMargins(0, 4, 0, 0);
-    m_timelineDragHintLabel = new QLabel(tr("Drag frames from layout canvas here"), m_timelineDropArea);
-    dropAreaLayout->addWidget(m_timelineDragHintLabel);
-    m_timelineFramesList = new TimelineListWidget(m_timelineDropArea);
-    m_timelineFramesList->setViewMode(QListWidget::IconMode);
-    m_timelineFramesList->setFlow(QListWidget::LeftToRight);
-    m_timelineFramesList->setWrapping(false);
-    m_timelineFramesList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_timelineFramesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-    m_timelineFramesList->setResizeMode(QListWidget::Adjust);
-    m_timelineFramesList->setIconSize(QSize(48, 48));
-    m_timelineFramesList->setFixedHeight(96);
-    connect(m_timelineFramesList, &TimelineListWidget::frameDropped, this, &MainWindow::onFrameDropped);
-    connect(m_timelineFramesList, &TimelineListWidget::frameMoved, this, &MainWindow::onFrameMoved);
-    connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested, this, &MainWindow::onFrameRemoveRequested);
-    connect(m_timelineFramesList, &TimelineListWidget::duplicateFrameRequested, this, &MainWindow::onFrameDuplicateRequested);
-    connect(m_timelineFramesList, &QListWidget::itemSelectionChanged, this, &MainWindow::onTimelineFrameSelectionChanged);
-    dropAreaLayout->addWidget(m_timelineFramesList);
-    groupLayout->addWidget(m_timelineDropArea);
-    timelineLayout->addStretch(0);
+    // Connect timeline frames list signals
+    connect(m_timelineFramesList, &TimelineListWidget::frameDropped,
+            this, &MainWindow::onFrameDropped);
+    connect(m_timelineFramesList, &TimelineListWidget::frameMoved,
+            this, &MainWindow::onFrameMoved);
+    connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested,
+            this, &MainWindow::onFrameRemoveRequested);
+    connect(m_timelineFramesList, &TimelineListWidget::duplicateFrameRequested,
+            this, &MainWindow::onFrameDuplicateRequested);
+    connect(m_timelineFramesList, &QListWidget::itemSelectionChanged,
+            this, &MainWindow::onTimelineFrameSelectionChanged);
 
-    // 3. Selected Frame Editor panel
-    QWidget* editorContent = new QWidget(this);
-    editorContent->setStyleSheet("font-weight: normal;");
-    QVBoxLayout* editorLayoutBox = new QVBoxLayout(editorContent);
-    editorLayoutBox->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+    // The panel widget itself is never placed in any layout — its sub-widgets are
+    // distributed directly into the animation dock. Hide it so it doesn't sit as
+    // an invisible 100×30 overlay on top of the menu bar.
+    m_timelineEditorPanel->hide();
 
-    // Multi-selection indicator (shown when >1 sprite is checked in Navigator)
-    m_multiSelectionLabel = new QLabel(this);
-    m_multiSelectionLabel->setStyleSheet("color: #5a9fd4; font-style: italic; padding: 2px 0;");
-    m_multiSelectionLabel->setAlignment(Qt::AlignCenter);
-    m_multiSelectionLabel->setVisible(false);
-    editorLayoutBox->addWidget(m_multiSelectionLabel);
+    // 3. Selected Frame Editor panel — owned by SpriteEditorPanel
+    m_spriteEditorPanel = new SpriteEditorPanel(this);
+    m_editorContent = m_spriteEditorPanel;
 
-    // Name row: label + editable name field + aliases button
-    QHBoxLayout* nameRow = new QHBoxLayout();
-    nameRow->addWidget(new QLabel(tr("Name:")));
-    m_spriteNameEdit = new QLineEdit(this);
-    m_spriteNameEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_spriteNameEdit->setEnabled(false);
-    connect(m_spriteNameEdit, &QLineEdit::editingFinished,
-            this, &MainWindow::onSpriteNameEditingFinished);
-    nameRow->addWidget(m_spriteNameEdit);
-    m_editAliasesBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView), "", this);
-    m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases (alternative names that share markers and pivots)"));
-    m_editAliasesBtn->setEnabled(false);
-    connect(m_editAliasesBtn, &QPushButton::clicked, this, &MainWindow::onEditAliases);
-    nameRow->addWidget(m_editAliasesBtn);
-    nameRow->addWidget(makeZoomLabel());
-    m_previewZoomSpin = new QDoubleSpinBox(this);
-    m_previewZoomSpin->setRange(10.0, 1600.0);
-    m_previewZoomSpin->setValue(200.0);
-    m_previewZoomSpin->setSuffix("%");
-    m_previewZoomSpin->setSingleStep(10.0);
-    nameRow->addWidget(m_previewZoomSpin);
-    editorLayoutBox->addLayout(nameRow);
+    // Wire MainWindow's raw-pointer members to the panel's child widgets
+    m_multiSelectionLabel    = m_spriteEditorPanel->multiSelectionLabel();
+    m_spriteNameEdit         = m_spriteEditorPanel->spriteNameEdit();
+    m_editAliasesBtn         = m_spriteEditorPanel->editAliasesBtn();
+    m_previewZoomSpin        = m_spriteEditorPanel->previewZoomSpin();
+    m_handleCombo            = m_spriteEditorPanel->handleCombo();
+    m_pivotXSpin             = m_spriteEditorPanel->pivotXSpin();
+    m_pivotYSpin             = m_spriteEditorPanel->pivotYSpin();
+    m_coordUnitCombo         = m_spriteEditorPanel->coordUnitCombo();
+    m_configPointsBtn        = m_spriteEditorPanel->configPointsBtn();
+    m_previewView            = m_spriteEditorPanel->previewCanvas();
+    m_spriteNameFooterLabel  = m_spriteEditorPanel->spriteNameFooterLabel();
+    m_spriteDimsLabel        = m_spriteEditorPanel->spriteDimsLabel();
 
-    QHBoxLayout* pivotRow = new QHBoxLayout();
-    {
-        QPixmap pix(16, 16);
-        pix.fill(Qt::transparent);
-        QPainter painter(&pix);
-        painter.setRenderHint(QPainter::Antialiasing);
-        QPen pen(palette().color(QPalette::WindowText), 1.2);
-        painter.setPen(pen);
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QPointF(8, 8), 3.5, 3.5);  // center circle
-        painter.drawLine(QPointF(8, 1),  QPointF(8, 4));   // top tick
-        painter.drawLine(QPointF(8, 12), QPointF(8, 15));  // bottom tick
-        painter.drawLine(QPointF(1, 8),  QPointF(4, 8));   // left tick
-        painter.drawLine(QPointF(12, 8), QPointF(15, 8));  // right tick
-        painter.end();
-        auto* handleLabel = new QLabel(this);
-        handleLabel->setPixmap(pix);
-        handleLabel->setToolTip(tr("Selected marker: the pivot point, a named point, or a named area."));
-        pivotRow->addWidget(handleLabel);
-    }
-    m_handleCombo = new QComboBox(this);
-    m_handleCombo->addItem(tr("pivot"));
-    m_handleCombo->setToolTip(tr("Select pivot or a named marker to edit"));
-    m_handleCombo->setAccessibleName(tr("Handle selector"));
-    pivotRow->addWidget(m_handleCombo);
-    connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
-    pivotRow->addWidget(new QLabel(tr("X:")));
-    m_pivotXSpin = new QDoubleSpinBox(this);
-    m_pivotXSpin->setEnabled(false);
-    m_pivotXSpin->setDecimals(0);
-    m_pivotXSpin->setRange(0, 9999);
-    m_pivotXSpin->setToolTip(tr("Pivot X: horizontal origin for sprite rotation"));
-    m_pivotXSpin->setAccessibleName(tr("Pivot X"));
-    connect(m_pivotXSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double){ onPivotSpinChanged(); });
-    pivotRow->addWidget(m_pivotXSpin);
-    pivotRow->addWidget(new QLabel(tr("Y:")));
-    m_pivotYSpin = new QDoubleSpinBox(this);
-    m_pivotYSpin->setEnabled(false);
-    m_pivotYSpin->setDecimals(0);
-    m_pivotYSpin->setRange(0, 9999);
-    m_pivotYSpin->setToolTip(tr("Pivot Y: vertical origin for sprite rotation"));
-    m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
-    connect(m_pivotYSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double){ onPivotSpinChanged(); });
-    pivotRow->addWidget(m_pivotYSpin);
-    m_coordUnitCombo = new QComboBox(this);
-    m_coordUnitCombo->addItem(tr("px"), int(CoordUnit::Pixels));
-    m_coordUnitCombo->addItem(tr("%"),  int(CoordUnit::Percent));
+    // Apply initial coordinate unit from settings
     m_coordUnitCombo->setCurrentIndex(
         m_settings.coordUnit == CoordUnit::Percent ? 1 : 0);
-    m_coordUnitCombo->setEnabled(false);
-    m_coordUnitCombo->setToolTip(tr("Coordinate unit: pixels or percent of sprite dimensions"));
+
+    // Connect panel widget signals to MainWindow slots
+    connect(m_spriteNameEdit, &QLineEdit::editingFinished,
+            this, &MainWindow::onSpriteNameEditingFinished);
+    connect(m_editAliasesBtn, &QPushButton::clicked, this, &MainWindow::onEditAliases);
+    connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
+    connect(m_pivotXSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double){ onPivotSpinChanged(); });
+    connect(m_pivotYSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double){ onPivotSpinChanged(); });
     connect(m_coordUnitCombo, &QComboBox::currentIndexChanged,
             this, &MainWindow::onCoordUnitChanged);
-    pivotRow->addWidget(m_coordUnitCombo);
-    m_configPointsBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView), "", this);
-    m_configPointsBtn->setToolTip(tr("Manage Markers: define named points on this sprite, such as hitboxes, spawn positions, or attachment points"));
-    m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     connect(m_configPointsBtn, &QPushButton::clicked, this, &MainWindow::onPointsConfigClicked);
-    pivotRow->addWidget(m_configPointsBtn);
-    m_configPointsBtn->setEnabled(false);
-    pivotRow->addStretch();
-    editorLayoutBox->addLayout(pivotRow);
-
-    m_previewView = new PreviewCanvas(this);
     connect(m_previewView, &PreviewCanvas::pivotChanged, this, &MainWindow::onCanvasPivotChanged);
-    connect(m_previewView->overlay(), &EditorOverlayItem::markerSelected, this, &MainWindow::onMarkerSelectedFromCanvas);
-    connect(m_previewView->overlay(), &EditorOverlayItem::markerChanged, this, &MainWindow::onMarkerChangedFromCanvas);
+    connect(m_previewView->overlay(), &EditorOverlayItem::markerSelected,
+            this, &MainWindow::onMarkerSelectedFromCanvas);
+    connect(m_previewView->overlay(), &EditorOverlayItem::markerChanged,
+            this, &MainWindow::onMarkerChangedFromCanvas);
     connect(m_previewView, &PreviewCanvas::zoomChanged, this, [this](double zoom) {
         m_previewZoomSpin->blockSignals(true);
         m_previewZoomSpin->setValue(zoom * 100.0);
         m_previewZoomSpin->blockSignals(false);
     });
-    connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onPreviewZoomChanged);
-    editorLayoutBox->addWidget(m_previewView);
+    connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onPreviewZoomChanged);
 
-    {
-        auto* spriteFooterRow = new QHBoxLayout();
-        spriteFooterRow->setContentsMargins(8, 2, 8, 2);
-        m_spriteNameFooterLabel = new ElidedLabel(editorContent);
-        m_spriteNameFooterLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        m_spriteNameFooterLabel->setVisible(false);
-        spriteFooterRow->addWidget(m_spriteNameFooterLabel);
-        spriteFooterRow->addStretch();
-        m_spriteDimsLabel = new QLabel(editorContent);
-        m_spriteDimsLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        m_spriteDimsLabel->setVisible(false);
-        spriteFooterRow->addWidget(m_spriteDimsLabel);
-        editorLayoutBox->addLayout(spriteFooterRow);
-    }
+    // 4. Animation Preview panel — owned by AnimationPreviewPanel
+    m_animPreviewPanel = new AnimationPreviewPanel(this);
 
-    // 4. Animation Test panel
-    QWidget* animContent = new QWidget(this);
-    animContent->setStyleSheet("font-weight: normal;");
-    QVBoxLayout* animLayout = new QVBoxLayout(animContent);
-    animLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+    // Wire MainWindow's raw-pointer members to the panel's child widgets
+    m_animPrevBtn      = m_animPreviewPanel->prevButton();
+    m_animPlayPauseBtn = m_animPreviewPanel->playPauseButton();
+    m_animNextBtn      = m_animPreviewPanel->nextButton();
+    m_animOverlayBtn   = m_animPreviewPanel->overlayButton();
+    m_animZoomSpin     = m_animPreviewPanel->zoomSpin();
+    m_animStatusLabel  = m_animPreviewPanel->statusLabel();
+    m_animCanvas       = m_animPreviewPanel->animCanvas();
 
-    QHBoxLayout* animControls = new QHBoxLayout();
-    auto* style_ = QApplication::style();
-    m_animPrevBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaSkipBackward), "");
-    m_animPrevBtn->setToolTip(tr("Step to previous frame"));
-    m_animPrevBtn->setAccessibleName(tr("Previous frame"));
-    connect(m_animPrevBtn, &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
-    animControls->addWidget(m_animPrevBtn);
-    m_animPlayPauseBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaPlay), "");
-    m_animPlayPauseBtn->setToolTip(tr("Play or pause animation"));
-    m_animPlayPauseBtn->setAccessibleName(tr("Play or pause"));
+    // Connect animation panel signals to MainWindow slots
+    connect(m_animPrevBtn,      &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
     connect(m_animPlayPauseBtn, &QPushButton::clicked, this, &MainWindow::onAnimPlayPauseClicked);
-    animControls->addWidget(m_animPlayPauseBtn);
-    m_animNextBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaSkipForward), "");
-    m_animNextBtn->setToolTip(tr("Step to next frame"));
-    m_animNextBtn->setAccessibleName(tr("Next frame"));
-    connect(m_animNextBtn, &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
-    animControls->addWidget(m_animNextBtn);
-    animControls->addStretch();
-    animControls->addWidget(makeZoomLabel());
-    m_animZoomSpin = new QDoubleSpinBox(this);
-    m_animZoomSpin->setRange(10.0, 1600.0);
-    m_animZoomSpin->setValue(200.0);
-    m_animZoomSpin->setSuffix("%");
-    m_animZoomSpin->setSingleStep(10.0);
-    m_animZoomSpin->setToolTip(tr("Zoom level for animation preview"));
-    m_animZoomSpin->setAccessibleName(tr("Animation zoom"));
-    connect(m_animZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &MainWindow::onAnimZoomChanged);
-    animControls->addWidget(m_animZoomSpin);
-    animLayout->addLayout(animControls);
-
-    m_animStatusLabel = new QLabel(tr("Create/select a timeline and drag frames into it."), this);
-    m_animStatusLabel->setStyleSheet("color: #808080;");
-    animLayout->addWidget(m_animStatusLabel);
-
-    m_animCanvas = new AnimationCanvas(this);
-    connect(m_animCanvas, &AnimationCanvas::zoomChanged, this, [this](double zoom) {
-        m_animZoomSpin->blockSignals(true);
-        m_animZoomSpin->setValue(zoom * 100.0);
-        m_animZoomSpin->blockSignals(false);
+    connect(m_animNextBtn,      &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
+    connect(m_animZoomSpin,     QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onAnimZoomChanged);
+    connect(m_animCanvas->overlay(), &EditorOverlayItem::pivotChanged,
+            this, &MainWindow::onCanvasPivotChanged);
+    connect(m_animCanvas->overlay(), &EditorOverlayItem::markerSelected,
+            this, &MainWindow::onMarkerSelectedFromCanvas);
+    connect(m_animCanvas->overlay(), &EditorOverlayItem::markerChanged,
+            this, &MainWindow::onMarkerChangedFromCanvas);
+    connect(m_animOverlayBtn, &QToolButton::toggled, this, [this](bool checked) {
+        m_animCanvas->setOverlayVisible(checked);
+        if (checked)
+            m_animCanvas->setOverlayEditable(!m_animPlaying);
     });
-    animLayout->addWidget(m_animCanvas);
 
     // 5. CLI Log panel
     QWidget* cliLogContent = new QWidget(this);
@@ -745,21 +748,35 @@ void MainWindow::setupUi() {
     m_atlasDock->setTitleBarWidget(new QWidget(this));
     m_atlasSplitter = new QSplitter(Qt::Horizontal, m_atlasDock);
     m_atlasSplitter->addWidget(m_atlasViewStack);
-    m_atlasSplitter->addWidget(editorContent);
+    m_atlasSplitter->addWidget(m_editorContent);
     m_atlasSplitter->setStretchFactor(0, 0);
     m_atlasSplitter->setStretchFactor(1, 1);
+    m_atlasSplitter->setSizes({270, 1030});  // sprites tree : frame editor  ~1:4
     m_atlasDock->setWidget(m_atlasSplitter);
 
-    // Animation group: Timelines | Anim Test
+    // Animation dock (right column in Frame Animation workspace):
+    //   Top  = timeline list
+    //   Bottom = selected-timeline editor  +  animation preview
     m_animationDock = new QDockWidget(tr("Animation"), this);
     m_animationDock->setObjectName("animationDock");
     m_animationDock->setFont(boldFont);
     m_animationDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
     m_animationDock->setTitleBarWidget(new QWidget(this));
-    auto *animSplitter = new QSplitter(Qt::Horizontal, m_animationDock);
-    animSplitter->addWidget(timelineContent);
-    animSplitter->addWidget(animContent);
-    m_animationDock->setWidget(animSplitter);
+    {
+        auto* animBottomPanel = new QWidget(m_animationDock);
+        auto* animBottomLayout = new QVBoxLayout(animBottomPanel);
+        animBottomLayout->setContentsMargins(0, 0, 0, 0);
+        animBottomLayout->setSpacing(0);
+        animBottomLayout->addWidget(m_timelineEditorContainer);
+        animBottomLayout->addWidget(m_animPreviewPanel, 1);
+
+        auto* animSplitter = new QSplitter(Qt::Vertical, m_animationDock);
+        animSplitter->addWidget(m_timelineEditorPanel->listAreaWidget());
+        animSplitter->addWidget(animBottomPanel);
+        animSplitter->setStretchFactor(0, 2);
+        animSplitter->setStretchFactor(1, 3);
+        m_animationDock->setWidget(animSplitter);
+    }
 
     // Debug group: CLI diagnostics + log
     m_debugDock = new QDockWidget(tr("Debug"), this);
@@ -782,15 +799,14 @@ void MainWindow::setupUi() {
         }
     });
 
-    // Layout: three rows
+    // Atlas dock fills the top area; animation dock sits to its right but starts hidden.
+    // Debug dock lives below in its own row.
     addDockWidget(Qt::TopDockWidgetArea, m_atlasDock);
-    addDockWidget(Qt::BottomDockWidgetArea, m_animationDock);
+    addDockWidget(Qt::TopDockWidgetArea, m_animationDock);
+    splitDockWidget(m_atlasDock, m_animationDock, Qt::Horizontal);
+    m_animationDock->hide();
     addDockWidget(Qt::BottomDockWidgetArea, m_debugDock);
-    splitDockWidget(m_animationDock, m_debugDock, Qt::Vertical);
-
-    // Atlas row taller than Animation row
-    resizeDocks({m_atlasDock}, {600}, Qt::Vertical);
-    resizeDocks({m_animationDock}, {260}, Qt::Vertical);
+    resizeDocks({m_atlasDock}, {500}, Qt::Vertical);
 
     // View menu
     m_viewMenu = menuBar()->addMenu(tr("&Workspace"));
@@ -807,6 +823,13 @@ void MainWindow::setupUi() {
 
     m_viewMenu->addSeparator();
 
+    m_atlasesManagementWorkspaceAction = m_viewMenu->addAction(tr("Atlases"));
+    m_atlasesManagementWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_M));
+    m_atlasesManagementWorkspaceAction->setCheckable(true);
+    workspaceGroup->addAction(m_atlasesManagementWorkspaceAction);
+    connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
+            this, &MainWindow::showAtlasesManagementWorkspace);
+
     m_atlasWorkspaceAction = m_viewMenu->addAction(tr("Sprites"));
     m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
     m_atlasWorkspaceAction->setCheckable(true);
@@ -819,12 +842,6 @@ void MainWindow::setupUi() {
     m_frameAnimWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_frameAnimWorkspaceAction);
     connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, &MainWindow::switchToFrameAnimWorkspace);
-
-    m_atlasLayoutWorkspaceAction = m_viewMenu->addAction(tr("Atlas Layout"));
-    m_atlasLayoutWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_L));
-    m_atlasLayoutWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_atlasLayoutWorkspaceAction);
-    connect(m_atlasLayoutWorkspaceAction, &QAction::triggered, this, &MainWindow::showAtlasLayoutWorkspace);
 
     m_viewMenu->addSeparator();
 
@@ -949,11 +966,6 @@ void MainWindow::setupToolbar() {
     connect(m_undoStack, &QUndoStack::canRedoChanged, redoAction, &QAction::setEnabled);
 
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
-    QAction* stylesAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_DesktopIcon), tr("Styles..."));
-    stylesAction->setToolTip(tr("Open style settings"));
-    connect(stylesAction, &QAction::triggered, this, &MainWindow::onSettingsStylesClicked);
-
     QAction* spritesheetAction = settingsMenu->addAction(
         style->standardIcon(QStyle::SP_FileDialogListView), tr("Atlas Sprites..."));
     spritesheetAction->setToolTip(tr("Open atlas sprites settings"));
@@ -963,6 +975,16 @@ void MainWindow::setupToolbar() {
         style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Frames Editor..."));
     framesEditorAction->setToolTip(tr("Open frames editor settings"));
     connect(framesEditorAction, &QAction::triggered, this, &MainWindow::onSettingsFramesEditorClicked);
+
+    QAction* atlasLayoutAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_DesktopIcon), tr("Atlas Layout..."));
+    atlasLayoutAction->setToolTip(tr("Open atlas layout settings"));
+    connect(atlasLayoutAction, &QAction::triggered, this, &MainWindow::onSettingsAtlasLayoutClicked);
+
+    QAction* exportationAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation..."));
+    exportationAction->setToolTip(tr("Open exportation settings"));
+    connect(exportationAction, &QAction::triggered, this, &MainWindow::onSettingsExportationClicked);
 
 #ifndef Q_OS_WASM
     QAction* cliToolsAction = settingsMenu->addAction(
@@ -1007,10 +1029,15 @@ void MainWindow::setupZoomShortcuts() {
             return;
         }
 
-        QDoubleSpinBox* targetSpin = nullptr;
+        const double scaleFactor = 1.25;
         if (m_canvas && (fw == m_canvas || m_canvas->isAncestorOf(fw))) {
-            targetSpin = m_layoutZoomSpin;
-        } else if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
+            double zoom = qBound(10.0, zoomIn ? m_layoutZoom * scaleFactor : m_layoutZoom / scaleFactor, 800.0);
+            m_layoutZoom = zoom;
+            onLayoutZoomChanged(zoom);
+            return;
+        }
+        QDoubleSpinBox* targetSpin = nullptr;
+        if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
             targetSpin = m_previewZoomSpin;
         } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
             targetSpin = m_animZoomSpin;
@@ -1022,7 +1049,6 @@ void MainWindow::setupZoomShortcuts() {
             return;
         }
         double zoom = targetSpin->value();
-        const double scaleFactor = 1.25;
         zoom = zoomIn ? zoom * scaleFactor : zoom / scaleFactor;
         targetSpin->setValue(zoom);
     };
@@ -1040,7 +1066,7 @@ void MainWindow::setupZoomShortcuts() {
         if (!fw) return;
         if (m_canvas && (fw == m_canvas || m_canvas->isAncestorOf(fw))) {
             if (fitToContent) { m_canvas->setZoomManual(false); m_canvas->initialFit(); }
-            else              { m_canvas->setZoomManual(true);  m_layoutZoomSpin->setValue(100.0); }
+            else              { m_layoutZoom = 100.0; onLayoutZoomChanged(100.0); }
         } else if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
             if (fitToContent) { m_previewView->setZoomManual(false); m_previewView->initialFit(); }
             else              { m_previewView->setZoomManual(true);  m_previewZoomSpin->setValue(100.0); }
@@ -1078,7 +1104,7 @@ void MainWindow::setupKeyboardShortcuts() {
 
 void MainWindow::updateUiState() {
     const bool enabled = m_cliReady && !m_isLoading;
-    const bool hasModels = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
+    const bool hasModels = m_session && !m_session->activeAtlas().layoutModels.isEmpty() && !m_session->activeAtlas().layoutModels.first().sprites.isEmpty();
 
     MainWindowUiState::apply(
         m_cliReady,
@@ -1114,16 +1140,15 @@ void MainWindow::updateUiState() {
     }
 
     // View menu items: enabled once a project is open or sprites are loaded
-    const bool hasProject = !m_projectFilePath.isEmpty();
+    const bool hasProject = m_projectController && !m_projectController->projectFilePath().isEmpty();
     const bool viewEnabled = hasProject || hasModels;
     if (m_atlasWorkspaceAction)         m_atlasWorkspaceAction->setEnabled(viewEnabled);
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
-    if (m_atlasLayoutWorkspaceAction)   m_atlasLayoutWorkspaceAction->setEnabled(viewEnabled && hasModels);
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
-    if (m_exportWorkspaceActive || m_atlasLayoutWorkspaceActive) return;
+    if (m_exportWorkspaceActive || m_atlasesManagementWorkspaceActive) return;
 
     if (hasModels) {
         m_mainStack->hide();
@@ -1148,12 +1173,13 @@ void MainWindow::updateUiState() {
 }
 
 void MainWindow::updateMainContentView() {
-    const bool hasLayout = m_session && !m_session->layoutModels.isEmpty() && !m_session->layoutModels.first().sprites.isEmpty();
+    const bool hasLayout = m_session && !m_session->activeAtlas().layoutModels.isEmpty() && !m_session->activeAtlas().layoutModels.first().sprites.isEmpty();
     if (m_atlasDimsLabel && !hasLayout)
         m_atlasDimsLabel->setVisible(false);
-    const bool hasProject = !m_projectFilePath.isEmpty();
+    const QString projectFilePathUi = m_projectController ? m_projectController->projectFilePath() : QString();
+    const bool hasProject = !projectFilePathUi.isEmpty();
 
-    if (!m_exportWorkspaceActive && !m_atlasLayoutWorkspaceActive) {
+    if (!m_exportWorkspaceActive && !m_atlasesManagementWorkspaceActive) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1162,7 +1188,7 @@ void MainWindow::updateMainContentView() {
         }
     }
     if (hasLayout) {
-        QString projectName = QFileInfo(m_projectFilePath).dir().dirName();
+        QString projectName = QFileInfo(projectFilePathUi).dir().dirName();
         if (projectName.isEmpty() || projectName == ".") {
             projectName = tr("Untitled Project");
         }
@@ -1225,6 +1251,8 @@ void MainWindow::syncPivotSpinsFromSprite() {
     syncCoordinateSpinsFromSelection();
     if (m_previewView && m_previewView->overlay())
         m_previewView->overlay()->updateLayout();
+    if (m_animCanvas && m_animCanvas->overlay())
+        m_animCanvas->overlay()->updateLayout();
 }
 
 void MainWindow::syncCoordinateSpinsFromSelection() {
@@ -1304,6 +1332,24 @@ static void updateSpriteTreeFolderCheckState(QTreeWidgetItem* item)
 void MainWindow::refreshSpriteTree() {
     if (!m_spriteTree) return;
 
+    // Keep excluded atlas in sync with sources' excludedFiles before rebuilding.
+    syncExcludedAtlas();
+
+    // Refresh the atlases workspace sprite list if it is visible.
+    if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+        m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+
+    // Delegate the actual tree build to NavigatorPanel when it's available.
+    if (m_navigatorPanel && m_session) {
+        int atlasFilter = -1;
+        if (m_activeWorkspace == Workspace::FrameAnimation && m_navigatorAtlasCombo)
+            atlasFilter = m_navigatorAtlasCombo->currentData().toInt();
+        m_navigatorPanel->refresh(m_session, m_showHiddenItems, atlasFilter);
+        return;
+    }
+
+    // Fallback (should not normally be reached once NavigatorPanel is active)
+
     // ── Save tree state before the rebuild ──────────────────────────────────
     // Key a folder node by joining its full text path with a unit-separator
     // so we can match it again after the tree is reconstructed.
@@ -1346,37 +1392,20 @@ void MainWindow::refreshSpriteTree() {
     m_spriteTree->blockSignals(true);
     m_spriteTree->clear();
 
-    if (!m_session || m_session->layoutModels.isEmpty()) {
+    // In Frame Animation workspace the relevant "is there anything to show" check
+    // is whether the selected atlas has any packed sprites — not the global
+    // activeFramePaths list which doesn't change when switching atlases.
+    const bool nothingToShow = !m_session ||
+        (m_activeWorkspace == Workspace::FrameAnimation
+            ? m_session->activeAtlas().layoutModels.isEmpty()
+            : m_session->activeFramePaths.isEmpty());
+    if (nothingToShow) {
         m_spriteTree->blockSignals(false);
         return;
     }
 
-    // Strip trailing digits to find a group prefix for animation sequences.
-    // e.g. "walk1" → "walk", "idle" → "idle"
-    // Returns empty string if no trailing digits found.
-    auto groupPrefix = [](const QString& name) -> QString {
-        int end = name.size();
-        while (end > 0 && name[end - 1].isDigit()) --end;
-        if (end == 0 || end == name.size()) return QString();
-        return name.left(end);
-    };
-
-    auto endsWithDigit = [](const QString& name) -> bool {
-        return !name.isEmpty() && name.back().isDigit();
-    };
-
-    const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
-
-    auto makeLeaf = [&](QTreeWidgetItem* parent, const SpritePtr& sprite, const QString& leafName) {
-        auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
-        leaf->setText(0, leafName);
-        leaf->setFlags(leaf->flags() | Qt::ItemIsUserCheckable);
-        leaf->setCheckState(0, Qt::Unchecked);
-        leaf->setData(0, Qt::UserRole, QVariant::fromValue(sprite));
-        QPixmap pix(sprite->path);
-        if (!pix.isNull())
-            leaf->setIcon(0, QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
-    };
+    const QIcon folderIcon    = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
+    const QIcon animGroupIcon = QApplication::style()->standardIcon(QStyle::SP_DirLinkIcon);
 
     auto makeGroupNode = [&](QTreeWidgetItem* parent, const QString& text) {
         auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
@@ -1387,7 +1416,47 @@ void MainWindow::refreshSpriteTree() {
         return node;
     };
 
-    // Find or create folder nodes along a path like "player/sub"
+    using SpriteLeaf = QPair<SpritePtr, QString>;
+
+    // Collect sprites for the navigator tree.
+    // Frame Animation: show only the selected atlas's sprites.
+    // All other workspaces: show every active sprite across all non-excluded atlases.
+    QVector<SpritePtr> allSprites;
+    if (m_activeWorkspace == Workspace::FrameAnimation) {
+        for (const auto& model : m_session->activeAtlas().layoutModels)
+            for (const auto& sp : model.sprites)
+                allSprites.append(sp);
+    } else {
+        QSet<QString> seen;
+        for (const auto& atlas : m_session->atlases) {
+            if (atlas.isExcluded) continue;
+            for (const auto& model : atlas.layoutModels) {
+                for (const auto& sp : model.sprites) {
+                    if (!seen.contains(sp->path)) {
+                        seen.insert(sp->path);
+                        allSprites.append(sp);
+                    }
+                }
+            }
+        }
+    }
+
+    QMap<QString, SpritePtr> spriteByPath;
+    for (const SpritePtr& sp : allSprites)
+        spriteByPath[sp->path] = sp;
+
+    auto makeLeafCb = [&](QTreeWidgetItem* parent, const QString& path, const QString& leafName) {
+        auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
+        leaf->setText(0, leafName);
+        leaf->setFlags(leaf->flags() | Qt::ItemIsUserCheckable);
+        leaf->setCheckState(0, Qt::Unchecked);
+        leaf->setData(0, Qt::UserRole, QVariant::fromValue(spriteByPath.value(path)));
+        QPixmap pix(path);
+        if (!pix.isNull())
+            leaf->setIcon(0, QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    };
+
+    // findOrCreateFolderPath is needed for hidden-folder placeholder insertion.
     auto findOrCreateFolderPath = [&](QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
         QTreeWidgetItem* current = root;
         for (const QString& part : parts) {
@@ -1406,77 +1475,13 @@ void MainWindow::refreshSpriteTree() {
         return current;
     };
 
-    // Populate sprite-tree items under `root` for a set of (sprite, localName) pairs.
-    // `localName` is the display path used for folder/anim-group computation.
-    using SpriteLeaf = QPair<SpritePtr, QString>;
-    auto buildSubTree = [&](QTreeWidgetItem* root, const QVector<SpriteLeaf>& entries) {
-        // Group by folder (everything before the last '/')
-        QMap<QString, QVector<SpriteLeaf>> folderGroups;
-        for (const auto& [sprite, localName] : entries) {
-            int lastSlash = localName.lastIndexOf('/');
-            QString folder = (lastSlash >= 0) ? localName.left(lastSlash) : QString();
-            folderGroups[folder].append({sprite, localName});
-        }
-
-        for (auto it = folderGroups.constBegin(); it != folderGroups.constEnd(); ++it) {
-            const QString& folderPath = it.key();
-            const QVector<SpriteLeaf>& sprites = it.value();
-
-            QTreeWidgetItem* folderNode = root;
-            if (!folderPath.isEmpty())
-                folderNode = findOrCreateFolderPath(root, folderPath.split('/'));
-
-            // Sub-group numbered files by their digit-stripped prefix.
-            QMap<QString, QVector<SpriteLeaf>> animGroups;
-            for (const auto& [sprite, localName] : sprites) {
-                const int ls = localName.lastIndexOf('/');
-                const QString leafName = (ls >= 0) ? localName.mid(ls + 1) : localName;
-                if (endsWithDigit(leafName)) {
-                    const QString prefix = groupPrefix(leafName);
-                    animGroups[prefix.isEmpty() ? leafName : prefix].append({sprite, leafName});
-                } else {
-                    animGroups[leafName].append({sprite, leafName});
-                }
-            }
-
-            struct GroupInfo { bool isAnimGroup = false; };
-            QMap<QString, GroupInfo> groupInfo;
-            int groupNodeCount = 0;
-            for (auto git = animGroups.constBegin(); git != animGroups.constEnd(); ++git) {
-                const QVector<SpriteLeaf>& members = git.value();
-                if (members.size() <= 1) continue;
-                bool allDigits = true;
-                for (const auto& [s, ln] : members)
-                    if (!endsWithDigit(ln)) { allDigits = false; break; }
-                if (allDigits && !groupPrefix(members.first().second).isEmpty()) {
-                    groupInfo[git.key()].isAnimGroup = true;
-                    ++groupNodeCount;
-                }
-            }
-
-            const bool skipSingleSequenceNode = (groupNodeCount == 1);
-
-            for (auto git = animGroups.constBegin(); git != animGroups.constEnd(); ++git) {
-                const QString& prefix = git.key();
-                const QVector<SpriteLeaf>& members = git.value();
-                if (members.size() == 1) {
-                    makeLeaf(folderNode, members.first().first, members.first().second);
-                } else if (groupInfo[prefix].isAnimGroup && !skipSingleSequenceNode) {
-                    auto* gNode = makeGroupNode(folderNode, prefix);
-                    for (const auto& [sprite, leafName] : members)
-                        makeLeaf(gNode, sprite, leafName);
-                } else {
-                    for (const auto& [sprite, leafName] : members)
-                        makeLeaf(folderNode, sprite, leafName);
-                }
-            }
-        }
+    auto toEntries = [](const QVector<SpriteLeaf>& leaves) -> QVector<QPair<QString, QString>> {
+        QVector<QPair<QString, QString>> result;
+        result.reserve(leaves.size());
+        for (const auto& [sp, name] : leaves)
+            result.append({sp->path, name});
+        return result;
     };
-
-    // Collect all sprites from every layout model.
-    QVector<SpritePtr> allSprites;
-    for (const auto& model : m_session->layoutModels)
-        allSprites.append(model.sprites);
 
     if (!m_session->sources.isEmpty()) {
         // One or more sources: group sprites under a top-level source node each.
@@ -1546,7 +1551,7 @@ void MainWindow::refreshSpriteTree() {
             if (perSource[si].isEmpty()) continue;
             const auto& src = m_session->sources[si];
             // When hidden toggle is OFF, show a count badge on the source node.
-            const int hiddenCount = src.hiddenFolders.size() + src.excludedFiles.size();
+            const int hiddenCount = src.hiddenFolders.size();
             const QString nodeText = (!m_showHiddenItems && hiddenCount > 0)
                 ? tr("%1 (%2 hidden)").arg(src.name).arg(hiddenCount)
                 : src.name;
@@ -1580,7 +1585,8 @@ void MainWindow::refreshSpriteTree() {
             sourceNode->setIcon(0, QApplication::style()->standardIcon(pixmap));
             sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
-            buildSubTree(sourceNode, perSource[si]);
+            SpriteTreeUtils::buildSubTree(m_spriteTree, sourceNode, toEntries(perSource[si]),
+                folderIcon, animGroupIcon, /*checkable=*/true, makeLeafCb);
 
             // ── Hidden-folder placeholders (only shown when "Hidden" toggle is ON) ──
             if (m_showHiddenItems && !src.hiddenFolders.isEmpty()) {
@@ -1622,59 +1628,91 @@ void MainWindow::refreshSpriteTree() {
                     placeholder->setFlags(placeholder->flags() & ~Qt::ItemIsUserCheckable);
                 }
             }
+
+            // ── Per-source "Excluded" trash node (always shown when non-empty) ──
+            if (!src.excludedFiles.isEmpty()) {
+                const QColor dimColor = QApplication::palette().color(QPalette::Disabled, QPalette::Text);
+                const int N = src.excludedFiles.size();
+
+                auto* trashNode = new QTreeWidgetItem(sourceNode);
+                trashNode->setText(0, tr("Excluded (%1)").arg(N));
+                trashNode->setIcon(0, QApplication::style()->standardIcon(QStyle::SP_TrashIcon));
+                {
+                    QFont tf = trashNode->font(0);
+                    tf.setItalic(true);
+                    trashNode->setFont(0, tf);
+                }
+                trashNode->setForeground(0, dimColor);
+                trashNode->setToolTip(0, tr("Sprites excluded from layout — right-click to re-include"));
+                trashNode->setData(0, Qt::UserRole + 2, 3); // type: excluded-section header
+                trashNode->setData(0, Qt::UserRole + 3, si); // source index
+                trashNode->setFlags(trashNode->flags() & ~Qt::ItemIsUserCheckable);
+                trashNode->setExpanded(true);
+
+                // find-or-create dim, non-checkable folder nodes within the trash subtree
+                auto findOrCreateExclFolder = [&](auto& self, QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
+                    QTreeWidgetItem* current = root;
+                    for (const QString& part : parts) {
+                        QTreeWidgetItem* found = nullptr;
+                        for (int i = 0; i < current->childCount(); ++i) {
+                            QTreeWidgetItem* child = current->child(i);
+                            if (child->text(0) == part && !child->data(0, Qt::UserRole).isValid()
+                                    && child->data(0, Qt::UserRole + 2).toInt() == 0) {
+                                found = child;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            found = new QTreeWidgetItem(current);
+                            found->setText(0, part);
+                            found->setIcon(0, folderIcon);
+                            found->setForeground(0, dimColor);
+                            found->setFlags(found->flags() & ~Qt::ItemIsUserCheckable);
+                            found->setExpanded(true);
+                        }
+                        current = found;
+                    }
+                    return current;
+                };
+
+                for (const QString& relPath : src.excludedFiles) {
+                    const QStringList parts = relPath.split('/');
+                    const QString baseName  = QFileInfo(relPath).baseName();
+
+                    QTreeWidgetItem* parent = trashNode;
+                    if (parts.size() > 1)
+                        parent = findOrCreateExclFolder(findOrCreateExclFolder, trashNode, parts.mid(0, parts.size() - 1));
+
+                    auto* exclItem = new QTreeWidgetItem(parent);
+                    exclItem->setText(0, baseName);
+                    exclItem->setForeground(0, dimColor);
+                    {
+                        QFont ef = exclItem->font(0);
+                        ef.setItalic(true);
+                        exclItem->setFont(0, ef);
+                    }
+                    exclItem->setToolTip(0, tr("Excluded from layout — right-click to re-include"));
+                    exclItem->setData(0, Qt::UserRole + 2, 2);       // type: excluded item
+                    exclItem->setData(0, Qt::UserRole + 3, si);      // source index
+                    exclItem->setData(0, Qt::UserRole + 4, relPath); // relative path
+                    exclItem->setFlags(exclItem->flags() & ~Qt::ItemIsUserCheckable);
+                }
+            }
         }
 
         if (!unassigned.isEmpty()) {
             auto* otherNode = makeGroupNode(nullptr, tr("Other"));
-            buildSubTree(otherNode, unassigned);
-        }
-
-        // ── Global "Excluded" section (shown only when "Hidden" toggle is ON) ──
-        // All excluded items from every source appear in one collapsible node at
-        // the bottom, so the main tree stays clean when the toggle is off.
-        if (m_showHiddenItems) {
-            int totalExcluded = 0;
-            for (const auto& src : m_session->sources)
-                totalExcluded += src.excludedFiles.size();
-            if (totalExcluded > 0) {
-                const QColor dimColor = QApplication::palette().color(QPalette::Disabled, QPalette::Text);
-                auto* exclRoot = makeGroupNode(nullptr, tr("Excluded (%1)").arg(totalExcluded));
-                QFont ef = exclRoot->font(0);
-                ef.setItalic(true);
-                exclRoot->setFont(0, ef);
-                exclRoot->setForeground(0, dimColor);
-                exclRoot->setData(0, Qt::UserRole + 2, 3); // type: excluded-section header
-                exclRoot->setFlags(exclRoot->flags() & ~Qt::ItemIsUserCheckable);
-
-                const bool multiSource = m_session->sources.size() > 1;
-                for (int si = 0; si < m_session->sources.size(); ++si) {
-                    const auto& src = m_session->sources[si];
-                    for (const QString& relPath : src.excludedFiles) {
-                        auto* exclItem = new QTreeWidgetItem(exclRoot);
-                        exclItem->setText(0, multiSource ? src.name + ": " + relPath : relPath);
-                        exclItem->setForeground(0, dimColor);
-                        exclItem->setToolTip(0, tr("Excluded — right-click to re-include"));
-                        exclItem->setData(0, Qt::UserRole + 2, 2);      // type: excluded item
-                        exclItem->setData(0, Qt::UserRole + 3, si);     // source index
-                        exclItem->setData(0, Qt::UserRole + 4, relPath);// relative path
-                        exclItem->setFlags(exclItem->flags() & ~Qt::ItemIsUserCheckable);
-                    }
-                }
-            }
+            SpriteTreeUtils::buildSubTree(m_spriteTree, otherNode, toEntries(unassigned),
+                folderIcon, animGroupIcon, /*checkable=*/true, makeLeafCb);
         }
     } else {
-        // Single source (or no source tracking): existing atlas-based grouping.
-        for (int mi = 0; mi < m_session->layoutModels.size(); ++mi) {
-            const auto& model = m_session->layoutModels[mi];
-            QTreeWidgetItem* atlasRoot = nullptr;
-            if (m_session->layoutModels.size() > 1)
-                atlasRoot = makeGroupNode(nullptr, tr("Atlas %1").arg(mi + 1));
-            QVector<SpriteLeaf> entries;
-            entries.reserve(model.sprites.size());
-            for (const auto& sprite : model.sprites)
-                entries.append({sprite, sprite->name});
-            buildSubTree(atlasRoot, entries);
-        }
+        // Single source (or no source tracking): flat list from all sprites.
+        QVector<QPair<QString, QString>> entries;
+        entries.reserve(allSprites.size());
+        for (const auto& sprite : allSprites)
+            entries.append({sprite->path, sprite->name});
+        SpriteTreeUtils::buildSubTree(m_spriteTree, nullptr, entries,
+            folderIcon, animGroupIcon, /*checkable=*/true, makeLeafCb);
     }
 
     // ── Restore tree state ───────────────────────────────────────────────────
@@ -1728,4 +1766,92 @@ void MainWindow::onAboutClicked() {
           "zlib &mdash; ZIP compression<br>"
           "CMake &mdash; build system</p>"
     );
+}
+
+void MainWindow::updateNavigatorAtlasCombo() {
+    if (!m_session) return;
+    if (m_navigatorPanel) {
+        m_navigatorPanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+        return;
+    }
+    // Fallback: direct combo manipulation (kept for safety)
+    if (!m_navigatorAtlasCombo) return;
+    m_navigatorAtlasCombo->blockSignals(true);
+    m_navigatorAtlasCombo->clear();
+    int selectComboIdx = 0;
+    for (int i = 0; i < m_session->atlases.size(); ++i) {
+        const auto& atlas = m_session->atlases[i];
+        if (atlas.isExcluded) continue;
+        if (atlas.spritePaths.isEmpty()) continue;  // Hide empty atlases
+        if (i == m_session->activeAtlasIndex)
+            selectComboIdx = m_navigatorAtlasCombo->count();
+        m_navigatorAtlasCombo->addItem(atlas.name, i);  // Store real atlas index as item data
+    }
+    m_navigatorAtlasCombo->setCurrentIndex(selectComboIdx);
+    m_navigatorAtlasCombo->blockSignals(false);
+}
+
+// ---------------------------------------------------------------------------
+// Atlas sprite move helper
+// ---------------------------------------------------------------------------
+
+void MainWindow::moveAtlasSprites(const QStringList& paths, int srcIdx, int tgtIdx)
+{
+    if (!m_session) return;
+    if (srcIdx < 0 || srcIdx >= m_session->atlases.size()) return;
+    if (tgtIdx < 0 || tgtIdx >= m_session->atlases.size()) return;
+
+    AtlasEntry& src = m_session->atlases[srcIdx];
+    AtlasEntry& tgt = m_session->atlases[tgtIdx];
+
+    QSet<QString> movedNorm;
+    for (const QString& p : paths) {
+        const QString norm = QFileInfo(p).absoluteFilePath();
+        movedNorm.insert(norm);
+
+        // Remove from source using normalized comparison so path-format differences
+        // (relative vs absolute, extra separators, etc.) never cause duplicates to linger.
+        src.spritePaths.erase(
+            std::remove_if(src.spritePaths.begin(), src.spritePaths.end(),
+                [&norm](const QString& sp) {
+                    return QFileInfo(sp).absoluteFilePath() == norm;
+                }),
+            src.spritePaths.end());
+
+        // Add to target only if not already present.
+        const bool inTgt = std::any_of(tgt.spritePaths.begin(), tgt.spritePaths.end(),
+            [&norm](const QString& sp) {
+                return QFileInfo(sp).absoluteFilePath() == norm;
+            });
+        if (!inTgt)
+            tgt.spritePaths.append(norm);
+    }
+
+    // Bidirectional sync: keep excludedFiles in sync with atlas membership.
+    const int excIdx = m_session->excludedAtlasIndex();
+    if (tgtIdx == excIdx) {
+        for (const QString& p : paths) {
+            addToExcludedFiles(p);
+            m_session->activeFramePaths.removeAll(p);
+        }
+        syncExcludedAtlas();
+    } else if (srcIdx == excIdx) {
+        for (const QString& p : paths) {
+            removeFromExcludedFiles(p);
+            if (!m_session->activeFramePaths.contains(p))
+                m_session->activeFramePaths.append(p);
+        }
+        syncExcludedAtlas();
+    }
+
+    // Strip moved sprites from the source layout models so stale entries never linger.
+    for (auto& model : src.layoutModels) {
+        QVector<SpritePtr> kept;
+        kept.reserve(model.sprites.size());
+        for (const auto& s : model.sprites) {
+            if (!movedNorm.contains(QFileInfo(s->path).absoluteFilePath()))
+                kept.append(s);
+        }
+        model.sprites = std::move(kept);
+    }
 }

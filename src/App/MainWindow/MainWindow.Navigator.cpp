@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AtlasesManagementWorkspace.h"
 #include "MessageDialog.h"
 #include "NavigatorTreeWidget.h"
 #include "AnimationTimelineOps.h"
@@ -203,7 +204,7 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
                                      ? clickedItem->data(0, Qt::UserRole + 1).toInt() : -1;
     const bool hasChecked     = !checkedPaths.isEmpty();
     const bool hasTimeline    = m_session->selectedTimelineIndex >= 0
-                                && m_session->selectedTimelineIndex < m_session->timelines.size();
+                                && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size();
 
     // Special item types stored in UserRole+2 (int):
     //   1 = hidden-folder placeholder  2 = excluded item
@@ -234,15 +235,21 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
             if (menu.exec(m_spriteTree->viewport()->mapToGlobal(pos)) == action)
                 onNavigatorReincludeFromSource(clickedSpecialSourceIdx, clickedSpecialRelPath);
         } else if (clickedItemType == 3) {
-            // Excluded section header: offer Re-include all.
-            // Collect child data before any mutation (refreshSpriteTree invalidates items).
+            // Excluded-section (trash) header: offer Re-include all.
+            // Collect leaf data recursively before any mutation (refreshSpriteTree invalidates items).
             QVector<QPair<int, QString>> toReinclude;
-            for (int i = 0; i < clickedItem->childCount(); ++i) {
-                QTreeWidgetItem* child = clickedItem->child(i);
-                if (child->data(0, Qt::UserRole + 2).toInt() != 2) continue;
-                toReinclude.append({child->data(0, Qt::UserRole + 3).toInt(),
-                                    child->data(0, Qt::UserRole + 4).toString()});
-            }
+            std::function<void(QTreeWidgetItem*)> collectExcluded = [&](QTreeWidgetItem* node) {
+                for (int i = 0; i < node->childCount(); ++i) {
+                    QTreeWidgetItem* child = node->child(i);
+                    if (child->data(0, Qt::UserRole + 2).toInt() == 2) {
+                        toReinclude.append({child->data(0, Qt::UserRole + 3).toInt(),
+                                            child->data(0, Qt::UserRole + 4).toString()});
+                    } else {
+                        collectExcluded(child); // recurse into folder nodes
+                    }
+                }
+            };
+            collectExcluded(clickedItem);
             if (!toReinclude.isEmpty()) {
                 auto* action = menu.addAction(tr("Re-include all (%1)").arg(toReinclude.size()));
                 if (menu.exec(m_spriteTree->viewport()->mapToGlobal(pos)) == action) {
@@ -345,7 +352,7 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
         hideGroupOnlyAction     = hideGroupMenu->addAction(tr("group only"));
         hadItems = true;
     }
-    if (hasChecked)                             { deleteSelectedAction = menu.addAction(tr("Remove selected from Layout")); hadItems = true; }
+    if (hasChecked)                             { deleteSelectedAction = menu.addAction(tr("Exclude selected from Layout")); hadItems = true; }
 
     // ── Section 2: add frames (not applicable to source nodes) ────────────
     QAction* addFramesAction = nullptr;
@@ -364,7 +371,7 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     QAction* createTimelineFromSelectedAction = nullptr;
     QAction* addToTimelineAction              = nullptr;
 
-    if (clickedIsGroup || hasChecked) {
+    if (m_activeWorkspace == Workspace::FrameAnimation && (clickedIsGroup || hasChecked)) {
         addSep();
         // "Create timeline from group" doesn't apply to source nodes; use Auto-create instead.
         if (clickedIsGroup && !clickedIsSourceNode) { createTimelineFromGroupAction    = menu.addAction(tr("Create timeline from group"));          hadItems = true; }
@@ -372,15 +379,6 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
         if (clickedGroupHasGroups || clickedIsSourceNode) { autoCreateTimelinesAction  = menu.addAction(tr("Auto-create timelines"));               hadItems = true; }
         if (hasChecked)                             { createTimelineFromSelectedAction = menu.addAction(tr("Create timeline from selected frames")); hadItems = true; }
         if (hasChecked && hasTimeline)              { addToTimelineAction              = menu.addAction(tr("Add selected to current timeline"));    hadItems = true; }
-    }
-
-    // ── Section 4: grouping ────────────────────────────────────────────────
-    QAction* groupSelectedAction = nullptr;
-
-    if (hasChecked) {
-        addSep();
-        groupSelectedAction = menu.addAction(tr("Group selected frames..."));
-        hadItems = true;
     }
 
     // ── Add Source submenu (always present, bottom of menu) ───────────────
@@ -421,7 +419,6 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     }
     else if (chosen == createTimelineFromSelectedAction)                  onNavigatorCreateTimeline(checkedPaths, nullptr);
     else if (chosen == addToTimelineAction)                               onNavigatorAddToTimeline(checkedPaths);
-    else if (chosen == groupSelectedAction)                               onNavigatorCreateGroup(checkedPaths, subfolder);
     else if (chosen == addSourceFolderAction)  onLoadFolder();
     else if (chosen == addSourceImageAction) {
         const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
@@ -460,9 +457,9 @@ void MainWindow::onNavigatorExcludeFromSmartFolder(const QString& absolutePath, 
     }
 
     const QStringList savedActivePaths = m_session->activeFramePaths;
-    const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+    const QVector<AnimationTimeline> savedTimelines = m_session->activeAtlas().timelines;
     const int savedTimelineIdx = m_session->selectedTimelineIndex;
-    const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
+    const QVector<LayoutModel> savedLayoutModels = m_session->activeAtlas().layoutModels;
 
     auto postExecuteRedo = [this, absolutePath]() {
         if (m_canvas) m_canvas->removeSprites({absolutePath});
@@ -471,7 +468,7 @@ void MainWindow::onNavigatorExcludeFromSmartFolder(const QString& absolutePath, 
         refreshTimelineList();
         refreshAnimationTest();
         if (m_session->activeFramePaths.isEmpty()) {
-            m_session->layoutModels.clear();
+            m_session->activeAtlas().layoutModels.clear();
             if (m_canvas) m_canvas->clearCanvas();
             updateMainContentView();
         } else {
@@ -494,9 +491,9 @@ void MainWindow::onNavigatorExcludeFromSmartFolder(const QString& absolutePath, 
         smartFolderIndex,
         relPath,
         &m_session->activeFramePaths,
-        &m_session->timelines,
+        &m_session->activeAtlas().timelines,
         &m_session->selectedTimelineIndex,
-        &m_session->layoutModels,
+        &m_session->activeAtlas().layoutModels,
         absolutePath,
         savedActivePaths,
         savedTimelines,
@@ -543,7 +540,7 @@ void MainWindow::onNavigatorAddSmartFolder()
     m_statusLabel->setText(tr("Added source folder: %1").arg(QDir(absFolder).dirName()));
 
     // Trigger a sync to import the new folder's images into the layout
-    if (!m_session->layoutModels.isEmpty()) {
+    if (!m_session->activeAtlas().layoutModels.isEmpty()) {
         performFolderSync();
     }
 }
@@ -596,10 +593,17 @@ void MainWindow::onNavigatorExcludeKey(QTreeWidgetItem* item)
 }
 
 // ---------------------------------------------------------------------------
-// Action: Delete selected frames
+// Action: Delete selected frames (persists to excludedFiles when source found)
 // ---------------------------------------------------------------------------
 void MainWindow::onNavigatorDeleteFrames(const QStringList& paths)
 {
+    if (m_session) {
+        for (const QString& p : paths)
+            addToExcludedFiles(p);
+        syncExcludedAtlas();
+        if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+            m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+    }
     onRemoveFramesRequested(paths);
 }
 
@@ -683,7 +687,7 @@ void MainWindow::onNavigatorAddToTimeline(const QStringList& paths)
 {
     if (paths.isEmpty()) return;
     const int tlIdx = m_session->selectedTimelineIndex;
-    if (tlIdx < 0 || tlIdx >= m_session->timelines.size()) return;
+    if (tlIdx < 0 || tlIdx >= m_session->activeAtlas().timelines.size()) return;
 
     auto postExecute = [this]() {
         refreshTimelineFrames();
@@ -694,10 +698,10 @@ void MainWindow::onNavigatorAddToTimeline(const QStringList& paths)
     const bool useMacro = paths.size() > 1;
     if (useMacro) m_undoStack->beginMacro(tr("Add Frames to Timeline"));
     for (const QString& path : paths) {
-        const int insertIdx = m_session->timelines[tlIdx].frames.size();
-        AnimationTimelineOps::dropFrame(m_session->timelines, tlIdx, path, -1);
+        const int insertIdx = m_session->activeAtlas().timelines[tlIdx].frames.size();
+        AnimationTimelineOps::dropFrame(m_session->activeAtlas().timelines, tlIdx, path, -1);
         m_undoStack->push(new TimelineFrameDropCommand(
-            &m_session->timelines, tlIdx, path, insertIdx, postExecute));
+            &m_session->activeAtlas().timelines, tlIdx, path, insertIdx, postExecute));
     }
     if (useMacro) m_undoStack->endMacro();
 
@@ -750,8 +754,8 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     timeline.name = uniqueName;
     timeline.fps = 8;
     timeline.frames = paths;
-    m_session->timelines.append(timeline);
-    m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
+    m_session->activeAtlas().timelines.append(timeline);
+    m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
 
     refreshTimelineList();
     m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
@@ -759,7 +763,7 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     refreshAnimationTest();
 
     m_undoStack->push(new TimelineAddCommand(
-        &m_session->timelines,
+        &m_session->activeAtlas().timelines,
         timeline,
         &m_session->selectedTimelineIndex,
         [this]() {
@@ -1021,6 +1025,18 @@ void MainWindow::onNavigatorReincludeFromSource(int sourceIdx, const QString& re
         MessageDialog::warning(this, tr("Re-include"), tr("Could not create temporary frame list."));
         return;
     }
+
+    // Re-add to the neutral atlas so it appears in the Atlases workspace.
+    const int neutralIdx = m_session->neutralAtlasIndex();
+    if (neutralIdx >= 0 && neutralIdx < m_session->atlases.size()) {
+        AtlasEntry& neutral = m_session->atlases[neutralIdx];
+        if (!neutral.spritePaths.contains(absPath))
+            neutral.spritePaths.append(absPath);
+    }
+    syncExcludedAtlas();
+    if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+        m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+
     scheduleLayoutRebuild();
     refreshSpriteTree();
 
@@ -1068,11 +1084,11 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
         timeline.fps = 8;
         timeline.frames = paths;
 
-        m_session->timelines.append(timeline);
-        m_session->selectedTimelineIndex = m_session->timelines.size() - 1;
-        
+        m_session->activeAtlas().timelines.append(timeline);
+        m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
+
         m_undoStack->push(new TimelineAddCommand(
-            &m_session->timelines, timeline,
+            &m_session->activeAtlas().timelines, timeline,
             &m_session->selectedTimelineIndex, postExecute));
         
         addedCount++;
@@ -1104,7 +1120,7 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
     // Use names derived relative to cachedFolderPath so grouping is independent
     // of m_session->currentFolder at parse time and matches the navigator display.
     QVector<SpritePtr> sourceSprites;
-    for (const auto& model : m_session->layoutModels) {
+    for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             if (!sprite) continue;
             const QString cp = QDir::cleanPath(sprite->path);
@@ -1129,14 +1145,14 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
         return;
     }
 
-    const QVector<AnimationTimeline> oldTimelines = m_session->timelines;
+    const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
     const int oldSelection = m_session->selectedTimelineIndex;
 
     int focusIndex = -1;
     QString status;
     bool changed = TimelineGenerationService::generateFromSprites(
         sourceSprites,
-        m_session->timelines,
+        m_session->activeAtlas().timelines,
         focusIndex,
         [this](const QString& name) {
             return TimelineUi::askTimelineConflictResolution(this, name);
@@ -1159,9 +1175,9 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
         };
 
         m_undoStack->push(new TimelinesUpdateCommand(
-            &m_session->timelines,
+            &m_session->activeAtlas().timelines,
             oldTimelines,
-            m_session->timelines,
+            m_session->activeAtlas().timelines,
             oldSelection,
             m_session->selectedTimelineIndex,
             &m_session->selectedTimelineIndex,
@@ -1179,6 +1195,12 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
 // Navigator Search Filter
 // ---------------------------------------------------------------------------
 void MainWindow::filterSpriteTree(const QString& text) {
+    // Delegate to NavigatorPanel when available
+    if (m_navigatorPanel) {
+        m_navigatorPanel->applyFilter(text);
+        return;
+    }
+
     if (!m_spriteTree) return;
 
     // Iterate through all items in the tree and apply filter

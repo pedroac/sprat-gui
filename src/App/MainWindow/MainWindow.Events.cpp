@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "LayoutOrchestrator.h"
 #include "AnimationCanvas.h"
 #include "ImportPathSupport.h"
 #include "MessageDialog.h"
@@ -80,13 +81,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             return handleAnimPreviewContextMenu(static_cast<QContextMenuEvent*>(event));
         }
     }
-    if (m_canvas && watched == m_canvas->viewport()
-            && m_layoutDebounceTimer && m_layoutDebounceTimer->isActive()) {
+    if (m_canvas && watched == m_canvas->viewport() && m_layoutOrchestrator) {
         const auto type = event->type();
         if (type == QEvent::MouseButtonPress ||
             type == QEvent::MouseButtonRelease ||
             type == QEvent::Wheel) {
-            m_layoutDebounceTimer->start(m_layoutDebounceTimer->interval());
+            m_layoutOrchestrator->resetDebounceTimer();
         }
     }
     return QMainWindow::eventFilter(watched, event);
@@ -105,8 +105,8 @@ MainWindow::DropAction MainWindow::confirmDropAction(const QString& /*path*/) {
     // New files are always added as an additional source (Merge).
     // Replace is only used for the very first load when there is no content yet.
     const bool hasContent = m_session
-        && !m_session->layoutModels.isEmpty()
-        && !m_session->layoutModels.first().sprites.isEmpty();
+        && !m_session->activeAtlas().layoutModels.isEmpty()
+        && !m_session->activeAtlas().layoutModels.first().sprites.isEmpty();
     return hasContent ? DropAction::Merge : DropAction::Replace;
 }
 bool MainWindow::tryHandleDroppedPath(const QString& path, DropAction action) {

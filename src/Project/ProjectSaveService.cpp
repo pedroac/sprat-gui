@@ -72,11 +72,12 @@ bool ProjectSaveService::save(
     QString& savedDestination,
     QString& error,
     const QString& deduplicateMode,
-    const std::function<void(bool)>& setLoading,
-    const std::function<void(const QString&)>& setStatus,
-    const std::function<bool()>& shouldCancel,
-    const std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)>& runProcessFunc
+    SaveCallbacks callbacks
 ) {
+    const auto& setLoading     = callbacks.setLoading;
+    const auto& setStatus      = callbacks.setStatus;
+    const auto& shouldCancel   = callbacks.shouldCancel;
+    const auto& runProcessFunc = callbacks.runProcess;
     constexpr int kProcessTimeoutMs = 120000;
 
     struct LoadingGuard {

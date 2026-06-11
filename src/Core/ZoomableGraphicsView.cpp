@@ -102,7 +102,16 @@ void ZoomableGraphicsView::wheelEvent(QWheelEvent* event) {
 void ZoomableGraphicsView::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spacePressed = true;
-        setCursor(Qt::OpenHandCursor);
+        if (!m_isPanning) {
+            // Override cursor takes precedence over QGraphicsItem cursors,
+            // ensuring the pan cursor is visible even over interactive handles.
+            if (m_hasOverrideCursor)
+                QApplication::changeOverrideCursor(Qt::SizeAllCursor);
+            else {
+                QApplication::setOverrideCursor(Qt::SizeAllCursor);
+                m_hasOverrideCursor = true;
+            }
+        }
         event->accept();
         return;
     }
@@ -112,17 +121,28 @@ void ZoomableGraphicsView::keyPressEvent(QKeyEvent* event) {
 void ZoomableGraphicsView::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
         m_spacePressed = false;
-        if (!m_isPanning) setCursor(Qt::ArrowCursor);
+        if (!m_isPanning && m_hasOverrideCursor) {
+            QApplication::restoreOverrideCursor();
+            m_hasOverrideCursor = false;
+        }
         event->accept();
         return;
     }
     QGraphicsView::keyReleaseEvent(event);
 }
 
+void ZoomableGraphicsView::enterEvent(QEnterEvent* event) {
+    setFocus();
+    QGraphicsView::enterEvent(event);
+}
+
 void ZoomableGraphicsView::focusOutEvent(QFocusEvent* event) {
+    if (m_hasOverrideCursor) {
+        QApplication::restoreOverrideCursor();
+        m_hasOverrideCursor = false;
+    }
     m_spacePressed = false;
     m_isPanning = false;
-    setCursor(Qt::ArrowCursor);
     QGraphicsView::focusOutEvent(event);
 }
 
@@ -137,7 +157,12 @@ void ZoomableGraphicsView::mousePressEvent(QMouseEvent* event) {
 #endif
     if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && m_spacePressed)) {
         m_isPanning = true;
-        setCursor(Qt::ClosedHandCursor);
+        if (m_hasOverrideCursor)
+            QApplication::changeOverrideCursor(Qt::ClosedHandCursor);
+        else {
+            QApplication::setOverrideCursor(Qt::ClosedHandCursor);
+            m_hasOverrideCursor = true;
+        }
         event->accept();
         return;
     }
@@ -159,14 +184,52 @@ void ZoomableGraphicsView::mouseMoveEvent(QMouseEvent* event) {
 void ZoomableGraphicsView::mouseReleaseEvent(QMouseEvent* event) {
     if (m_isPanning) {
         m_isPanning = false;
-        setCursor(m_spacePressed ? Qt::OpenHandCursor : Qt::ArrowCursor);
+        if (m_spacePressed && m_hasOverrideCursor) {
+            QApplication::changeOverrideCursor(Qt::SizeAllCursor);
+        } else if (m_hasOverrideCursor) {
+            QApplication::restoreOverrideCursor();
+            m_hasOverrideCursor = false;
+        }
         event->accept();
         return;
     }
     QGraphicsView::mouseReleaseEvent(event);
 }
 
+void ZoomableGraphicsView::setPendingRestore(double zoom, const QPointF& sceneCenter) {
+    const double clampedZoom = qBound(m_minZoom, zoom, m_maxZoom);
+    m_isZoomManual = true;
+    m_pendingRestoreZoom   = clampedZoom;
+    m_pendingRestoreCenter = sceneCenter;
+
+#ifndef Q_OS_WASM
+    // Suppress viewport paints while the stale scroll position is in effect.
+    // show()/setSizes() schedule paint events that can be dispatched before
+    // this function returns, rendering the content at the wrong (old) position.
+    // A 0-ms timer fires only after all queued events — including those paints
+    // — have drained, at which point the viewport has its correct geometry and
+    // we can safely restore zoom + scroll without any visible flash.
+    viewport()->setUpdatesEnabled(false);
+    QTimer::singleShot(0, this, [this]() {
+        if (m_pendingRestoreZoom > 0.0) {
+            if (m_resizeTimer) m_resizeTimer->stop();
+            // On desktop, resizeEvent() already called QGraphicsView::resizeEvent()
+            // synchronously, so scroll-bar ranges are already up to date here.
+            resetTransform();
+            scale(m_pendingRestoreZoom, m_pendingRestoreZoom);
+            centerOn(m_pendingRestoreCenter);
+            const double z = m_pendingRestoreZoom;
+            m_pendingRestoreZoom = -1.0;
+            emit zoomChanged(z);
+        }
+        viewport()->setUpdatesEnabled(true);
+        viewport()->update();
+    });
+#endif
+}
+
 void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
+#ifdef Q_OS_WASM
     // In WASM, directly calling the base class or doing work here can cause
     // a crash if a resize event arrives while the app is suspended.
     // Instead, we do NOTHING but start a debounced timer. The timer's
@@ -179,18 +242,36 @@ void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
         m_resizeTimer->setSingleShot(true);
         m_resizeTimer->setInterval(AppConstants::kResizeDebounceMs);
         connect(m_resizeTimer, &QTimer::timeout, this, [this]() {
-#ifdef Q_OS_WASM
             if (jsIsAsyncBusy() || jsHaveJspi()) {
                 m_resizeTimer->start(); // Try again if busy
                 return;
             }
-#endif
             QResizeEvent dummyEvent(m_pendingResizeSize, m_pendingResizeOldSize);
-            QGraphicsView::resizeEvent(&dummyEvent); // Call base class implementation
-            if (!m_isZoomManual) {
+            QGraphicsView::resizeEvent(&dummyEvent);
+            if (m_pendingRestoreZoom > 0.0) {
+                const double z = m_pendingRestoreZoom;
+                const QPointF c = m_pendingRestoreCenter;
+                m_pendingRestoreZoom = -1.0;
+                resetTransform();
+                scale(z, z);
+                centerOn(c);
+                m_isZoomManual = true;
+                emit zoomChanged(z);
+            } else if (!m_isZoomManual) {
                 initialFit();
             }
         });
     }
     m_resizeTimer->start();
+#else
+    // On desktop, call the base class directly — the debounce is a WASM-only
+    // concern. Calling it here keeps scroll-bar ranges immediately current so
+    // that any subsequent centerOn() / setPendingRestore() is not clamped.
+    QGraphicsView::resizeEvent(event);
+    if (m_pendingRestoreZoom > 0.0) {
+        // A restore is already queued via setPendingRestore(); leave it alone.
+    } else if (!m_isZoomManual) {
+        initialFit();
+    }
+#endif
 }

@@ -389,6 +389,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
             item->setPixmap(pixmap);
             item->setPos(sprite->rect.x(), currentY + sprite->rect.y());
             item->setIndex(m_items.size());
+            item->setLabelMode(m_settings.layoutLabelMode);
             m_scene->addItem(item);
             m_pathToIndex.insert(sprite->path, m_items.size());
             m_items.append(item);
@@ -409,6 +410,15 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
         currentY += model.atlasHeight + margin;
     }
     m_scene->setSceneRect(0, 0, maxW, currentY - margin);
+
+    if (m_displayOnly) {
+        for (auto* border : m_borderItems) border->hide();
+        for (auto* item : m_items) item->setLabelHidden(true);
+    }
+
+    // Re-apply dim filter if one was active before the rebuild.
+    if (!m_dimFilter.isEmpty())
+        setDimFilter(m_dimFilter);
 }
 
 void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomic<bool>* canceled, std::function<void()> onFinished) {
@@ -596,6 +606,12 @@ void LayoutCanvas::setSettings(const AppSettings& settings) {
         return;
     }
 
+    // Label mode change: update all items in-place
+    if (oldSettings.layoutLabelMode != settings.layoutLabelMode) {
+        for (auto* item : m_items)
+            item->setLabelMode(settings.layoutLabelMode);
+    }
+
     // Border-only changes can be applied in-place
     if (oldSettings.borderColor != settings.borderColor || oldSettings.borderStyle != settings.borderStyle) {
         updateBorderHighlights();
@@ -603,6 +619,10 @@ void LayoutCanvas::setSettings(const AppSettings& settings) {
 }
 
 void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
+    if (m_displayOnly) {
+        ZoomableGraphicsView::mousePressEvent(event);
+        return;
+    }
     // Commit split on left-click in split mode
     if ((m_splitMode || (event->modifiers() & Qt::AltModifier)) && event->button() == Qt::LeftButton && m_splitLineItem) {
         if (m_splitItemIndex >= 0 && m_splitItemIndex < m_items.size() && m_splitLineItem->isVisible()) {
@@ -617,13 +637,6 @@ void LayoutCanvas::mousePressEvent(QMouseEvent* event) {
                 m_splitItemIndex = -1;
             }
         }
-        event->accept();
-        return;
-    }
-
-    if (!m_searchQuery.isEmpty() && m_searchCloseRect.contains(event->pos())) {
-        m_searchQuery.clear();
-        updateSearch();
         event->accept();
         return;
     }
@@ -853,6 +866,10 @@ void LayoutCanvas::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
+    if (m_displayOnly) {
+        ZoomableGraphicsView::keyPressEvent(event);
+        return;
+    }
 #ifdef Q_OS_WASM
     EM_ASM({
         console.log("[LayoutCanvas] keyPressEvent - Key: " + $0 + " Text: " + UTF8ToString($1));
@@ -936,37 +953,6 @@ void LayoutCanvas::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
-    switch (event->key()) {
-        case Qt::Key_Space:
-            if (!m_searchQuery.isEmpty()) {
-                m_searchQuery += QLatin1Char(' ');
-                updateSearch();
-                event->accept();
-                return;
-            }
-            break;
-        case Qt::Key_Escape:
-            m_searchQuery.clear();
-            updateSearch();
-            event->accept();
-            return;
-        case Qt::Key_Backspace:
-            if (!m_searchQuery.isEmpty()) {
-                m_searchQuery.chop(1);
-                updateSearch();
-                event->accept();
-                return;
-            }
-            break;
-    }
-
-    if (!event->text().isEmpty() && event->text().at(0).isPrint()) {
-        m_searchQuery += event->text();
-        updateSearch();
-        event->accept();
-        return;
-    }
-
     // Handle Delete key to remove selected sprites
     if (event->key() == Qt::Key_Delete) {
         QList<SpriteItem*> selectedItems;
@@ -993,52 +979,66 @@ void LayoutCanvas::keyReleaseEvent(QKeyEvent* event) {
     ZoomableGraphicsView::keyReleaseEvent(event);
 }
 
-void LayoutCanvas::resizeEvent(QResizeEvent* event) {
-    ZoomableGraphicsView::resizeEvent(event);
+void LayoutCanvas::setDisplayOnly(bool displayOnly) {
+    m_displayOnly = displayOnly;
+    for (auto* border : m_borderItems) border->setVisible(!displayOnly);
+    for (auto* item : m_items) {
+        item->setLabelHidden(displayOnly);
+        if (displayOnly) {
+            item->setSelectedState(false);
+            item->setPrimaryState(false);
+        }
+    }
 }
 
-void LayoutCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
-    if (m_searchQuery.isEmpty()) {
-        return;
+void LayoutCanvas::resizeEvent(QResizeEvent* event) {
+    ZoomableGraphicsView::resizeEvent(event);
+    if (m_loadingBanner && m_loadingBanner->isVisible()) {
+        const int bw = m_loadingBanner->width();
+        const int bh = m_loadingBanner->height();
+        m_loadingBanner->move((width() - bw) / 2, (height() - bh) / 2);
     }
+}
 
-    static const QFont kSearchFont("Monospace", 12, QFont::Bold);
-    static const QFontMetrics kSearchFm(kSearchFont);
-    static const QColor kSearchBg(0, 0, 0, 180);
-    static const QPen kClosePen(Qt::white, 2);
+void LayoutCanvas::setLoadingHint(bool loading) {
+    if (loading) {
+        if (!m_loadingBanner) {
+            m_loadingBanner = new QLabel(tr("Loading atlas image\u2026"), this);
+            m_loadingBanner->setAlignment(Qt::AlignCenter);
+            m_loadingBanner->setAttribute(Qt::WA_TransparentForMouseEvents);
+            m_loadingBanner->setStyleSheet(
+                "background: rgba(0,0,0,160); color: white; "
+                "padding: 4px 14px; border-radius: 4px;");
+            m_loadingBanner->adjustSize();
+        }
+        const int bw = m_loadingBanner->sizeHint().width();
+        const int bh = m_loadingBanner->sizeHint().height();
+        m_loadingBanner->setGeometry((width() - bw) / 2, (height() - bh) / 2, bw, bh);
+        m_loadingBanner->show();
+        m_loadingBanner->raise();
+    } else {
+        if (m_loadingBanner) m_loadingBanner->hide();
+    }
+}
 
-    painter->save();
-    painter->setWorldMatrixEnabled(false);
+void LayoutCanvas::setSearchQuery(const QString& query) {
+    if (m_searchQuery == query) return;
+    m_searchQuery = query;
+    updateSearch();
+}
 
-    const int padding = 10;
-    const int margin = 20;
-    const QString text = tr("Search: ") + m_searchQuery;
-    painter->setFont(kSearchFont);
-    const int textWidth = kSearchFm.horizontalAdvance(text);
-    const int textHeight = kSearchFm.height();
-
-    const int closeSize = 16;
-    const int boxWidth = textWidth + (padding * 5) + closeSize + 20;
-    const int boxHeight = textHeight + padding * 2;
-    const QRect boxRect(viewport()->width() - boxWidth - margin, margin, boxWidth, boxHeight);
-
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(kSearchBg);
-    painter->drawRoundedRect(boxRect, 5, 5);
-
-    painter->setPen(Qt::white);
-    QRect textRect = boxRect.adjusted(padding * 2, 0, -(padding * 2 + closeSize), 0);
-    painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, text);
-
-    m_searchCloseRect = QRect(boxRect.right() - padding - closeSize, boxRect.center().y() - closeSize / 2, closeSize, closeSize);
-    painter->setPen(kClosePen);
-    painter->drawLine(m_searchCloseRect.topLeft(), m_searchCloseRect.bottomRight());
-    painter->drawLine(m_searchCloseRect.topRight(), m_searchCloseRect.bottomLeft());
-
-    painter->restore();
+void LayoutCanvas::setDimFilter(const QString& query) {
+    m_dimFilter = query;
+    const bool active = !query.isEmpty();
+    for (auto* item : m_items) {
+        const bool matches = !active ||
+            QFileInfo(item->getData()->path).baseName().contains(query, Qt::CaseInsensitive);
+        item->setOpacity(matches ? 1.0 : 0.25);
+    }
 }
 
 void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
+    if (m_displayOnly) return;
     SpriteItem* target = nullptr;
     QList<QGraphicsItem*> itemsAtPos = items(event->pos());
     for (auto* it : itemsAtPos) {
@@ -1052,9 +1052,6 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
     QAction* addFramesAction = menu.addAction(tr("Add Frames..."));
     connect(addFramesAction, &QAction::triggered, this, &LayoutCanvas::addFramesRequested);
 
-    QAction* genTimelineAction = menu.addAction(tr("Auto-create Timelines"));
-    connect(genTimelineAction, &QAction::triggered, this, &LayoutCanvas::requestTimelineGeneration);
-
     menu.addSeparator();
 
     QList<SpriteItem*> selectedItems;
@@ -1064,7 +1061,7 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
         }
     }
 
-    QAction* removeFramesAction = menu.addAction(tr("Remove Selected Frames"));
+    QAction* removeFramesAction = menu.addAction(tr("Exclude Selected Frames"));
     removeFramesAction->setEnabled(!selectedItems.isEmpty());
     connect(removeFramesAction, &QAction::triggered, this, [this, selectedItems]() {
         QStringList paths;
@@ -1133,7 +1130,7 @@ void LayoutCanvas::onRemoveSmallTriggered() {
     layout->addWidget(buttonBox);
 
     if (dialog.exec() == QDialog::Accepted) {
-        removeFramesSmallerThan(widthSpin->value(), heightSpin->value());
+        emit removeSmallFramesRequested(widthSpin->value(), heightSpin->value());
     }
 }
 
@@ -1311,24 +1308,13 @@ void LayoutCanvas::updateSearch() {
 }
 
 void LayoutCanvas::finalizeSearchSelection() {
-    if (!m_searchQuery.isEmpty()) {
-        for (auto* item : m_items) {
-            if (item->isSearchMatch()) {
-                m_baseSelectionPaths.insert(item->getData()->path);
-            }
+    m_baseSelectionPaths.clear();
+    for (auto* item : m_items) {
+        if (item->isSelectedState()) {
+            m_baseSelectionPaths.insert(item->getData()->path);
         }
-        m_searchQuery.clear();
-        updateSearch();
-    } else {
-        // When no search is active, ensure our manual selection is reflected in m_baseSelectionPaths
-        m_baseSelectionPaths.clear();
-        for (auto* item : m_items) {
-            if (item->isSelectedState()) {
-                m_baseSelectionPaths.insert(item->getData()->path);
-            }
-        }
-        emitSelectionChanged();
     }
+    emitSelectionChanged();
 }
 
 void LayoutCanvas::emitSelectionChanged() {

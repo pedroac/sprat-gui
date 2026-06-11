@@ -76,27 +76,25 @@ void NavigatorTreeWidget::mousePressEvent(QMouseEvent* event)
 
         if (mods & Qt::ShiftModifier) {
             // Range-check: set all visible items from anchor to this item as Checked.
+            // The base class call below handles standard Shift+range-select for drag/context-menu.
             QTreeWidgetItem* anchor = m_checkboxAnchor ? m_checkboxAnchor : item;
             setCheckStateRange(anchor, item, Qt::Checked);
-            setCurrentItem(item);
-            event->accept();
-            return;
-        }
-
-        if (mods & Qt::ControlModifier) {
-            // Ctrl+click: toggle the item's checkbox and select it for the editor.
+            m_checkboxAnchor = item;
+        } else if (mods & Qt::ControlModifier) {
+            // Toggle the item's checkbox.
+            // The base class call below handles standard Ctrl+multi-select for drag/context-menu.
             if (item->flags() & Qt::ItemIsUserCheckable)
                 item->setCheckState(0, item->checkState(0) == Qt::Checked ? Qt::Unchecked : Qt::Checked);
-            setCurrentItem(item);
             m_checkboxAnchor = item;
-            event->accept();
-            return;
+        } else {
+            // Normal click: update the anchor for future Shift+clicks.
+            m_checkboxAnchor = item;
         }
-
-        // Normal click: update the anchor for future Shift+clicks.
-        m_checkboxAnchor = item;
     }
 
+    // Always call the base class so that standard selection behaviour (single-click
+    // select, Ctrl+multi-select, Shift+range-select) is preserved.  This is what
+    // makes drag-and-drop and context-menu operations on multiple selected items work.
     QTreeWidget::mousePressEvent(event);
 }
 

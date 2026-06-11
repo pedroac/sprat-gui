@@ -236,6 +236,10 @@ set(PROJECT_SOURCES
     src/App/MainWindow/TimelineTreeWidget.h
     src/App/MainWindow/TimelineTreeWidget.cpp
     src/App/MainWindow/MainWindow.h
+    src/App/MainWindow/LayoutOrchestrator.h
+    src/App/MainWindow/LayoutOrchestrator.cpp
+    src/App/MainWindow/ProjectController.h
+    src/App/MainWindow/ProjectController.cpp
     src/App/WasmFileDialog.cpp
     src/App/WasmFileDialog.h
     src/App/WasmFolderBrowserDialog.cpp
@@ -256,6 +260,8 @@ set(PROJECT_SOURCES
     src/Animation/Timelines/TimelineListWidget.h
     src/CLITools/CliToolInstaller.cpp
     src/CLITools/CliToolInstaller.h
+    src/CLITools/CliSetupController.cpp
+    src/CLITools/CliSetupController.h
     src/CLITools/CliToolsUi.cpp
     src/CLITools/CliToolsUi.h
     src/Animation/AnimationManager.cpp
@@ -276,8 +282,18 @@ set(PROJECT_SOURCES
     src/App/MainWindow/PackedAtlasView.h
     src/App/MainWindow/ExportWorkspace.cpp
     src/App/MainWindow/ExportWorkspace.h
-    src/App/MainWindow/AtlasLayoutWorkspace.cpp
-    src/App/MainWindow/AtlasLayoutWorkspace.h
+    src/App/MainWindow/AtlasesManagementWorkspace.cpp
+    src/App/MainWindow/AtlasesManagementWorkspace.h
+    src/App/MainWindow/NavigatorPanel.h
+    src/App/MainWindow/NavigatorPanel.cpp
+    src/App/MainWindow/FrameAnimationWorkspace.h
+    src/App/MainWindow/FrameAnimationWorkspace.cpp
+    src/App/MainWindow/SpriteEditorPanel.h
+    src/App/MainWindow/SpriteEditorPanel.cpp
+    src/App/MainWindow/AnimationPreviewPanel.h
+    src/App/MainWindow/AnimationPreviewPanel.cpp
+    src/App/MainWindow/TimelineEditorPanel.h
+    src/App/MainWindow/TimelineEditorPanel.cpp
     src/Settings/SettingsDialog.cpp
     src/Settings/SettingsDialog.h
     src/SpriteSheetLayout/LayoutParser.cpp
@@ -330,6 +346,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/ElidedLabel.h
     src/Core/MessageDialog.cpp
     src/Core/MessageDialog.h
+    src/Core/SpriteTreeUtils.cpp
+    src/Core/SpriteTreeUtils.h
     src/Core/ZoomableGraphicsView.cpp
     src/Core/ZoomableGraphicsView.h
     src/Core/ArchiveExtractor.cpp

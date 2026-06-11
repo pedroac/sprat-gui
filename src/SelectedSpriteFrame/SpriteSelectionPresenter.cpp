@@ -7,47 +7,46 @@
 void SpriteSelectionPresenter::applySpriteSelection(
     SpritePtr sprite,
     const QString& selectedPointName,
-    QLineEdit* spriteNameEdit,
-    QDoubleSpinBox* pivotXSpin,
-    QDoubleSpinBox* pivotYSpin,
-    QPushButton* configPointsBtn,
-    PreviewCanvas* previewView,
-    QDoubleSpinBox* previewZoomSpin,
-    QComboBox* handleCombo,
-    bool useCurrentZoom) {
+    const SpriteEditorWidgets& widgets,
+    FrameZoomMode zoomMode) {
     if (sprite) {
-        spriteNameEdit->blockSignals(true);
-        spriteNameEdit->setText(sprite->name);
-        spriteNameEdit->blockSignals(false);
-        spriteNameEdit->setEnabled(true);
-        pivotXSpin->blockSignals(true);
-        pivotXSpin->setValue(sprite->pivotX);
-        pivotXSpin->blockSignals(false);
-        pivotXSpin->setEnabled(true);
-        pivotYSpin->blockSignals(true);
-        pivotYSpin->setValue(sprite->pivotY);
-        pivotYSpin->blockSignals(false);
-        pivotYSpin->setEnabled(true);
-        previewView->setSprites({sprite});
-        if (useCurrentZoom) {
-            previewView->setZoom(previewZoomSpin->value() / 100.0);
-            previewView->centerContent();
-        } else {
-            previewView->setZoomManual(false);
-            QTimer::singleShot(0, previewView, &PreviewCanvas::initialFit);
+        widgets.nameEdit->blockSignals(true);
+        widgets.nameEdit->setText(sprite->name);
+        widgets.nameEdit->blockSignals(false);
+        widgets.nameEdit->setEnabled(true);
+        widgets.pivotXSpin->blockSignals(true);
+        widgets.pivotXSpin->setValue(sprite->pivotX);
+        widgets.pivotXSpin->blockSignals(false);
+        widgets.pivotXSpin->setEnabled(true);
+        widgets.pivotYSpin->blockSignals(true);
+        widgets.pivotYSpin->setValue(sprite->pivotY);
+        widgets.pivotYSpin->blockSignals(false);
+        widgets.pivotYSpin->setEnabled(true);
+        widgets.previewView->setSprites({sprite});
+        if (zoomMode == FrameZoomMode::Fit) {
+            widgets.previewView->setZoomManual(false);
+            QTimer::singleShot(0, widgets.previewView, &PreviewCanvas::initialFit);
+        } else if (zoomMode == FrameZoomMode::Reset100) {
+            widgets.previewView->setZoomManual(true);
+            widgets.previewView->setZoom(1.0);
+            widgets.previewView->centerContent();
+        } else { // Keep
+            widgets.previewView->setZoomManual(true);
+            widgets.previewView->setZoom(widgets.previewZoomSpin->value() / 100.0);
+            widgets.previewView->centerContent();
         }
-        configPointsBtn->setEnabled(true);
+        widgets.configPointsBtn->setEnabled(true);
     } else {
-        spriteNameEdit->blockSignals(true);
-        spriteNameEdit->clear();
-        spriteNameEdit->blockSignals(false);
-        spriteNameEdit->setEnabled(false);
-        pivotXSpin->setEnabled(false);
-        pivotYSpin->setEnabled(false);
-        previewView->setSprites({});
-        configPointsBtn->setEnabled(false);
+        widgets.nameEdit->blockSignals(true);
+        widgets.nameEdit->clear();
+        widgets.nameEdit->blockSignals(false);
+        widgets.nameEdit->setEnabled(false);
+        widgets.pivotXSpin->setEnabled(false);
+        widgets.pivotYSpin->setEnabled(false);
+        widgets.previewView->setSprites({});
+        widgets.configPointsBtn->setEnabled(false);
     }
-    refreshHandleCombo(handleCombo, sprite, selectedPointName);
+    refreshHandleCombo(widgets.handleCombo, sprite, selectedPointName);
 }
 
 void SpriteSelectionPresenter::refreshHandleCombo(QComboBox* handleCombo, SpritePtr selectedSprite, const QString& selectedPointName) {

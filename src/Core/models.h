@@ -8,6 +8,7 @@
 #include <memory>
 #include <QColor>
 #include <QMetaType>
+#include <QUuid>
 
 /**
  * @enum MarkerKind
@@ -427,6 +428,29 @@ struct AnimationTimeline {
 };
 
 /**
+ * @struct AtlasEntry
+ * @brief A named atlas within a project, owning its sprites, timelines, and layout pages.
+ */
+struct AtlasEntry {
+    /** Stable UUID generated once, never changes. */
+    QString id;
+    /** Display name. */
+    QString name;
+    /** True for the permanent default/neutral atlas. */
+    bool isNeutral = false;
+    /** True for the permanent excluded atlas (receives excluded sprites). */
+    bool isExcluded = false;
+    /** Sprite paths assigned to this atlas. */
+    QStringList spritePaths;
+    /** Owned animation timelines. */
+    QVector<AnimationTimeline> timelines;
+    /** Runtime-generated atlas pages. */
+    QVector<LayoutModel> layoutModels;
+    /** Relative subdir under global output path (empty = root). */
+    QString outputSubdir;
+};
+
+/**
  * @struct SaveConfig
  * @brief Configuration for saving the project/spritesheet.
  * 
@@ -486,6 +510,127 @@ struct SaveConfig {
  * @brief Unit for displaying and editing pivot/marker coordinates.
  */
 enum class CoordUnit { Pixels, Percent };
+
+/**
+ * @enum FrameZoomMode
+ * @brief Controls how the preview zoom behaves when navigating between frames
+ * (outside of flipbook mode).
+ *
+ * - Fit:      Fit the new frame to the viewport (default, previous behaviour).
+ * - Keep:     Keep the current zoom level unchanged.
+ * - Reset100: Reset zoom to 100% (1:1 pixel mapping).
+ */
+enum class FrameZoomMode { Fit, Keep, Reset100 };
+
+inline QString frameZoomModeToString(FrameZoomMode m) {
+    switch (m) {
+    case FrameZoomMode::Keep:     return "keep";
+    case FrameZoomMode::Reset100: return "reset_100";
+    default:                      return "fit";
+    }
+}
+
+inline FrameZoomMode frameZoomModeFromString(const QString& s) {
+    if (s == "keep")      return FrameZoomMode::Keep;
+    if (s == "reset_100") return FrameZoomMode::Reset100;
+    return FrameZoomMode::Fit;
+}
+
+/**
+ * @enum FlipbookMode
+ * @brief Controls how the frame editor keeps the pivot in a fixed viewport position.
+ *
+ * - None:      No compensation (default).
+ * - SameGroup: Lock pivot only when navigating within an animation group.
+ * - All:       Lock pivot when navigating between any two frames.
+ */
+enum class FlipbookMode { None, SameGroup, All };
+
+inline QString flipbookModeToString(FlipbookMode mode) {
+    switch (mode) {
+    case FlipbookMode::SameGroup: return "same_group";
+    case FlipbookMode::All:       return "all";
+    default:                      return "none";
+    }
+}
+
+inline FlipbookMode flipbookModeFromString(const QString& s) {
+    if (s == "same_group") return FlipbookMode::SameGroup;
+    if (s == "all")        return FlipbookMode::All;
+    return FlipbookMode::None;
+}
+
+/**
+ * @enum LayoutZoomOnChange
+ * @brief Controls how the atlas layout canvas zoom behaves after each layout rebuild.
+ *
+ * - NoChange:  Keep the current zoom level (default).
+ * - Fit:       Fit the layout to the viewport.
+ * - Reset100:  Reset zoom to 100% (1:1 pixel mapping).
+ */
+enum class LayoutZoomOnChange { NoChange, Fit, Reset100 };
+
+inline QString layoutZoomOnChangeToString(LayoutZoomOnChange m) {
+    switch (m) {
+    case LayoutZoomOnChange::Fit:      return "fit";
+    case LayoutZoomOnChange::Reset100: return "reset_100";
+    default:                           return "no_change";
+    }
+}
+
+inline LayoutZoomOnChange layoutZoomOnChangeFromString(const QString& s) {
+    if (s == "fit")       return LayoutZoomOnChange::Fit;
+    if (s == "reset_100") return LayoutZoomOnChange::Reset100;
+    return LayoutZoomOnChange::NoChange;
+}
+
+/**
+ * @enum LayoutLabelMode
+ * @brief Controls what text is shown on sprite labels in the atlas layout canvas.
+ *
+ * - Name:     Show the sprite's canonical name (default).
+ * - FullPath: Show the sprite's full file path.
+ * - None:     Hide labels entirely.
+ */
+enum class LayoutLabelMode { Name, FullPath, None };
+
+inline QString layoutLabelModeToString(LayoutLabelMode m) {
+    switch (m) {
+    case LayoutLabelMode::FullPath: return "full_path";
+    case LayoutLabelMode::None:     return "none";
+    default:                        return "name";
+    }
+}
+
+inline LayoutLabelMode layoutLabelModeFromString(const QString& s) {
+    if (s == "full_path") return LayoutLabelMode::FullPath;
+    if (s == "none")      return LayoutLabelMode::None;
+    return LayoutLabelMode::Name;
+}
+
+/**
+ * @enum ExportZoomOnChange
+ * @brief Controls how the export preview canvas zoom behaves after each preview update.
+ *
+ * - Fit:       Fit the preview to the viewport (default, previous behaviour).
+ * - NoChange:  Keep the current zoom level.
+ * - Reset100:  Reset zoom to 100% (1:1 pixel mapping).
+ */
+enum class ExportZoomOnChange { Fit, NoChange, Reset100 };
+
+inline QString exportZoomOnChangeToString(ExportZoomOnChange m) {
+    switch (m) {
+    case ExportZoomOnChange::NoChange:  return "no_change";
+    case ExportZoomOnChange::Reset100:  return "reset_100";
+    default:                            return "fit";
+    }
+}
+
+inline ExportZoomOnChange exportZoomOnChangeFromString(const QString& s) {
+    if (s == "no_change") return ExportZoomOnChange::NoChange;
+    if (s == "reset_100") return ExportZoomOnChange::Reset100;
+    return ExportZoomOnChange::Fit;
+}
 
 /**
  * @struct AppSettings
@@ -580,11 +725,11 @@ struct AppSettings {
     QString theme = "system";
 
     /**
-     * @brief Whether to show other checked frames as ghost overlays in the preview canvas.
+     * @brief Opacity of ghost (onion skin) overlays in the preview canvas (0–100).
      *
-     * Default: true
+     * 0 disables onion skin entirely. Default: 30 (30 %).
      */
-    bool onionSkinEnabled = true;
+    int onionSkinOpacity = 30;
 
     /**
      * @brief Whether pivot/marker edits are propagated to all checked frames.
@@ -599,6 +744,64 @@ struct AppSettings {
      * Default: Pixels
      */
     CoordUnit coordUnit = CoordUnit::Pixels;
+
+    /**
+     * @brief Flipbook pivot-lock mode for the frame editor.
+     *
+     * When non-None, the viewport is scrolled on frame navigation so the
+     * pivot of the new frame appears at the same screen position the
+     * previous pivot occupied.
+     */
+    FlipbookMode flipbookMode = FlipbookMode::None;
+
+    /**
+     * @brief Zoom behaviour when navigating between frames (outside flipbook mode).
+     *
+     * Default: Fit (fit the new frame to the viewport).
+     */
+    FrameZoomMode frameZoomMode = FrameZoomMode::Fit;
+
+    /**
+     * @brief Zoom behaviour after each atlas layout rebuild.
+     *
+     * Default: NoChange (keep the current zoom level).
+     */
+    LayoutZoomOnChange layoutZoomOnChange = LayoutZoomOnChange::NoChange;
+
+    /**
+     * @brief Controls what text is shown on sprite labels in the atlas layout canvas.
+     *
+     * Default: Name (show the sprite's canonical name).
+     */
+    LayoutLabelMode layoutLabelMode = LayoutLabelMode::Name;
+
+    /**
+     * @brief Zoom behaviour after each export preview update.
+     *
+     * Default: Fit (fit the preview to the viewport).
+     */
+    ExportZoomOnChange exportZoomOnChange = ExportZoomOnChange::Fit;
+
+    /**
+     * @brief Default export output folder shown when no previous export was made.
+     *
+     * Default: empty (resolved to <home>/Sprat at load time).
+     */
+    QString exportDefaultOutputFolder;
+
+    /**
+     * @brief Default metadata format for new exports.
+     *
+     * Default: "none" (no metadata).
+     */
+    QString exportDefaultFormat = "none";
+
+    /**
+     * @brief Default scale filter for new exports.
+     *
+     * Default: "nearest".
+     */
+    QString exportDefaultScaleFilter = "nearest";
 
 };
 

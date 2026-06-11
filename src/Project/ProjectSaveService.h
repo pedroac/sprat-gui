@@ -6,10 +6,15 @@
 #include "models.h"
 #include "SpratProfilesConfig.h"
 
-class QWidget;
-
 class ProjectSaveService {
 public:
+    struct SaveCallbacks {
+        std::function<void(bool)>            setLoading;
+        std::function<void(const QString&)>  setStatus;
+        std::function<bool()>                shouldCancel;
+        std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)> runProcess;
+    };
+
     static bool save(
         SaveConfig config,
         const QString& layoutInputPath,
@@ -24,10 +29,7 @@ public:
         QString& savedDestination,
         QString& error,
         const QString& deduplicateMode = "none",
-        const std::function<void(bool)>& setLoading = nullptr,
-        const std::function<void(const QString&)>& setStatus = nullptr,
-        const std::function<bool()>& shouldCancel = nullptr,
-        const std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)>& runProcessFunc = nullptr
+        SaveCallbacks callbacks = {}
     );
 
     static bool writeProjectJson(

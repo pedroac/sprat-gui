@@ -78,12 +78,12 @@ void MainWindow::refreshTimelineList() {
     m_timelineList->clear();
 
     // Build sorted order by timeline name (case-insensitive)
-    const int count = m_session->timelines.size();
+    const int count = m_session->activeAtlas().timelines.size();
     QVector<int> sortedIndices(count);
     std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
     std::sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b) {
-        return m_session->timelines[a].name.compare(
-            m_session->timelines[b].name, Qt::CaseInsensitive) < 0;
+        return m_session->activeAtlas().timelines[a].name.compare(
+            m_session->activeAtlas().timelines[b].name, Qt::CaseInsensitive) < 0;
     });
 
     const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
@@ -116,7 +116,7 @@ void MainWindow::refreshTimelineList() {
     };
 
     for (int idx : sortedIndices) {
-        const auto& timeline = m_session->timelines[idx];
+        const auto& timeline = m_session->activeAtlas().timelines[idx];
 
         // Split name on '/' → folder path + leaf name
         QStringList parts = timeline.name.split('/');
@@ -132,7 +132,7 @@ void MainWindow::refreshTimelineList() {
         // For aliases, display source frames
         const QStringList* displayFrames = &timeline.frames;
         if (!timeline.aliasOf.isEmpty()) {
-            for (const auto& src : m_session->timelines) {
+            for (const auto& src : m_session->activeAtlas().timelines) {
                 if (src.name == timeline.aliasOf && src.aliasOf.isEmpty()) {
                     displayFrames = &src.frames;
                     break;
@@ -185,7 +185,7 @@ void MainWindow::refreshTimelineList() {
 
     m_timelineList->setCurrentItem(timelineItemForIndex(savedIndex));
     m_timelineList->blockSignals(false);
-    m_timelineList->setVisible(!m_session->timelines.isEmpty());
+    m_timelineList->setVisible(!m_session->activeAtlas().timelines.isEmpty());
 
     // ── Restore checked state (signals unblocked → tristate cascade fires) ──
     if (!checkedIndices.isEmpty()) {
@@ -219,17 +219,17 @@ void MainWindow::refreshTimelineFrames() {
     }
     m_timelineFramesList->setUpdatesEnabled(false);
     m_timelineFramesList->clear();
-    if (m_session->selectedTimelineIndex < 0 || m_session->selectedTimelineIndex >= m_session->timelines.size()) {
+    if (m_session->selectedTimelineIndex < 0 || m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) {
         m_timelineFramesList->setUpdatesEnabled(true);
         return;
     }
 
-    const auto& timeline = m_session->timelines[m_session->selectedTimelineIndex];
+    const auto& timeline = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex];
 
     // Resolve effective frames for display (alias support)
     const QStringList* framesToShow = &timeline.frames;
     if (!timeline.aliasOf.isEmpty()) {
-        for (const auto& src : m_session->timelines) {
+        for (const auto& src : m_session->activeAtlas().timelines) {
             if (src.name == timeline.aliasOf && src.aliasOf.isEmpty()) {
                 framesToShow = &src.frames;
                 break;
@@ -252,12 +252,12 @@ void MainWindow::refreshTimelineFrames() {
 }
 
 void MainWindow::onFrameDropped(const QString& path, int index) {
-    if (!AnimationTimelineOps::dropFrame(m_session->timelines, m_session->selectedTimelineIndex, path, index)) {
+    if (!AnimationTimelineOps::dropFrame(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex, path, index)) {
         return;
     }
 
     // Compute actual inserted index (dropFrame clamps negative/overflowing indices to end)
-    const auto& frames = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    const auto& frames = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames;
     const int insertedIdx = (index < 0 || index >= (int)frames.size())
                                 ? (int)frames.size() - 1
                                 : index;
@@ -270,7 +270,7 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
     refreshAnimationTest();
 
     m_undoStack->push(new TimelineFrameDropCommand(
-        &m_session->timelines,
+        &m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
         path,
         insertedIdx,
@@ -284,13 +284,13 @@ void MainWindow::onFrameDropped(const QString& path, int index) {
 
 void MainWindow::onFrameMoved(int from, int to) {
     if (m_session->selectedTimelineIndex < 0 ||
-        m_session->selectedTimelineIndex >= m_session->timelines.size()) {
+        m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) {
         return;
     }
     // Capture frames before the move for undo
-    QStringList savedFramesBefore = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    QStringList savedFramesBefore = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames;
 
-    if (!AnimationTimelineOps::moveFrame(m_session->timelines, m_session->selectedTimelineIndex, from, to)) {
+    if (!AnimationTimelineOps::moveFrame(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex, from, to)) {
         return;
     }
     refreshTimelineFrames();
@@ -298,7 +298,7 @@ void MainWindow::onFrameMoved(int from, int to) {
     refreshAnimationTest();
 
     m_undoStack->push(new TimelineFrameMoveCommand(
-        &m_session->timelines,
+        &m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
         from,
         to,
@@ -313,15 +313,15 @@ void MainWindow::onFrameMoved(int from, int to) {
 
 void MainWindow::onFrameDuplicateRequested(int index) {
     if (m_session->selectedTimelineIndex < 0 ||
-        m_session->selectedTimelineIndex >= m_session->timelines.size()) {
+        m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) {
         return;
     }
     // Capture path for command (needed for subsequent redo after undo)
-    const auto& frames = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    const auto& frames = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames;
     if (index < 0 || index >= frames.size()) return;
     const QString path = frames[index];
 
-    if (!AnimationTimelineOps::duplicateFrame(m_session->timelines, m_session->selectedTimelineIndex, index)) {
+    if (!AnimationTimelineOps::duplicateFrame(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex, index)) {
         return;
     }
     refreshTimelineFrames();
@@ -329,7 +329,7 @@ void MainWindow::onFrameDuplicateRequested(int index) {
     refreshAnimationTest();
 
     m_undoStack->push(new TimelineFrameDuplicateCommand(
-        &m_session->timelines,
+        &m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
         index,
         path,
@@ -343,7 +343,7 @@ void MainWindow::onFrameDuplicateRequested(int index) {
 
 void MainWindow::onFrameRemoveRequested() {
     if (m_session->selectedTimelineIndex < 0 ||
-        m_session->selectedTimelineIndex >= m_session->timelines.size()) {
+        m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) {
         return;
     }
     QList<QListWidgetItem*> items = m_timelineFramesList->selectedItems();
@@ -356,7 +356,7 @@ void MainWindow::onFrameRemoveRequested() {
     std::sort(rows.begin(), rows.end(), std::greater<int>());
 
     // Capture (index, path) pairs ascending for the undo command
-    const auto& frames = m_session->timelines[m_session->selectedTimelineIndex].frames;
+    const auto& frames = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames;
     QVector<QPair<int,QString>> removed;
     removed.reserve(rows.size());
     for (int i = rows.size() - 1; i >= 0; --i) {
@@ -366,14 +366,14 @@ void MainWindow::onFrameRemoveRequested() {
         }
     }
 
-    AnimationTimelineOps::removeFrames(m_session->timelines, m_session->selectedTimelineIndex, rows);
+    AnimationTimelineOps::removeFrames(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex, rows);
     refreshTimelineFrames();
     refreshTimelineList();
     refreshAnimationTest();
 
     if (!removed.isEmpty()) {
         m_undoStack->push(new TimelineFrameRemoveCommand(
-            &m_session->timelines,
+            &m_session->activeAtlas().timelines,
             m_session->selectedTimelineIndex,
             removed,
             [this]() {
@@ -386,11 +386,11 @@ void MainWindow::onFrameRemoveRequested() {
 }
 
 void MainWindow::onTimelineFrameSelectionChanged() {
-    if (m_animPlaying || m_session->selectedTimelineIndex < 0 || m_session->selectedTimelineIndex >= m_session->timelines.size() || !m_timelineFramesList) {
+    if (m_animPlaying || m_session->selectedTimelineIndex < 0 || m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size() || !m_timelineFramesList) {
         return;
     }
     const int selectedRow = m_timelineFramesList->currentRow();
-    if (selectedRow < 0 || selectedRow >= m_session->timelines[m_session->selectedTimelineIndex].frames.size()) {
+    if (selectedRow < 0 || selectedRow >= m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames.size()) {
         return;
     }
     m_animFrameIndex = selectedRow;
@@ -398,19 +398,19 @@ void MainWindow::onTimelineFrameSelectionChanged() {
 }
 
 void MainWindow::onGenerateTimelinesFromFrames() {
-    if (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty()) {
+    if (m_session->activeAtlas().layoutModels.isEmpty() || m_session->activeAtlas().layoutModels.first().sprites.isEmpty()) {
         MessageDialog::information(this, tr("Generate Timelines"), tr("Load or generate a layout before creating timelines."));
         return;
     }
 
-    const QVector<AnimationTimeline> oldState = m_session->timelines;
+    const QVector<AnimationTimeline> oldState = m_session->activeAtlas().timelines;
     const int oldSelection = m_session->selectedTimelineIndex;
 
     // Build sprites with names relative to their cachedFolderPath so that
     // timeline names are clean and never include temp-dir path components.
     QVector<SpritePtr> renamedSprites;
     const bool multiSource = m_session->sources.size() > 1;
-    for (const auto& model : m_session->layoutModels) {
+    for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             if (!sprite) continue;
             const QString cp = QDir::cleanPath(sprite->path);
@@ -452,7 +452,7 @@ void MainWindow::onGenerateTimelinesFromFrames() {
     QString status;
     bool changed = TimelineGenerationService::generateFromSprites(
         renamedSprites,
-        m_session->timelines,
+        m_session->activeAtlas().timelines,
         focusIndex,
         [this](const QString& timelineName) {
             return TimelineUi::askTimelineConflictResolution(this, timelineName);
@@ -477,9 +477,9 @@ void MainWindow::onGenerateTimelinesFromFrames() {
         };
 
         m_undoStack->push(new TimelinesUpdateCommand(
-            &m_session->timelines,
+            &m_session->activeAtlas().timelines,
             oldState,
-            m_session->timelines,
+            m_session->activeAtlas().timelines,
             oldSelection,
             m_session->selectedTimelineIndex,
             &m_session->selectedTimelineIndex,
@@ -505,7 +505,7 @@ void MainWindow::onAnimZoomChanged(double value) {
 
 void MainWindow::onAnimPrevClicked() {
     if (!AnimationPlaybackService::prev(
-            m_session->timelines,
+            m_session->activeAtlas().timelines,
             m_session->selectedTimelineIndex,
             m_animFrameIndex,
             m_animPlaying,
@@ -520,9 +520,9 @@ void MainWindow::onAnimPrevClicked() {
 void MainWindow::onAnimPlayPauseClicked() {
     const bool wasPlaying = m_animPlaying;
     AnimationPlaybackService::togglePlayPause(
-        m_session->timelines,
+        m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
-        selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex),
+        selectedTimelineFps(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex),
         m_animPlaying,
         m_animTimer,
         m_animPlayPauseBtn);
@@ -531,11 +531,13 @@ void MainWindow::onAnimPlayPauseClicked() {
     } else if (wasPlaying && !m_animPlaying) {
         syncSelectedSpriteToAnimFrame();
     }
+    if (m_animCanvas)
+        m_animCanvas->setOverlayEditable(!m_animPlaying);
 }
 
 void MainWindow::onAnimNextClicked() {
     if (!AnimationPlaybackService::next(
-            m_session->timelines,
+            m_session->activeAtlas().timelines,
             m_session->selectedTimelineIndex,
             m_animFrameIndex,
             m_animPlaying,
@@ -549,12 +551,12 @@ void MainWindow::onAnimNextClicked() {
 
 void MainWindow::syncSelectedSpriteToAnimFrame() {
     if (m_session->selectedTimelineIndex < 0 ||
-        m_session->selectedTimelineIndex >= m_session->timelines.size()) return;
+        m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) return;
 
-    const auto& tl = m_session->timelines[m_session->selectedTimelineIndex];
+    const auto& tl = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex];
     const QStringList* frames = &tl.frames;
     if (!tl.aliasOf.isEmpty()) {
-        for (const auto& src : m_session->timelines) {
+        for (const auto& src : m_session->activeAtlas().timelines) {
             if (src.name == tl.aliasOf && src.aliasOf.isEmpty()) {
                 frames = &src.frames;
                 break;
@@ -565,7 +567,7 @@ void MainWindow::syncSelectedSpriteToAnimFrame() {
     if (m_animFrameIndex < 0 || m_animFrameIndex >= frames->size()) return;
     const QString& path = (*frames)[m_animFrameIndex];
 
-    for (const auto& model : m_session->layoutModels) {
+    for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             if (!sprite || sprite->path != path) continue;
             onSpriteSelected(sprite);
@@ -592,7 +594,7 @@ void MainWindow::syncSelectedSpriteToAnimFrame() {
 }
 
 void MainWindow::onAnimTimerTimeout() {
-    const int fps = selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex);
+    const int fps = selectedTimelineFps(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex);
 #ifdef Q_OS_WASM
     // Timer fires on every RAF callback (~16 ms). Skip until a full frame-duration
     // has elapsed so the animation plays at the correct fps rather than at 60 fps.
@@ -600,7 +602,7 @@ void MainWindow::onAnimTimerTimeout() {
         return;
 #endif
     const qint64 elapsed = m_animElapsed.restart();
-    if (!AnimationPlaybackService::tick(m_session->timelines, m_session->selectedTimelineIndex,
+    if (!AnimationPlaybackService::tick(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex,
                                         m_animFrameIndex, elapsed, fps)) {
         return;
     }
@@ -609,14 +611,16 @@ void MainWindow::onAnimTimerTimeout() {
 
 bool MainWindow::exportAnimation(const QString& outPath) {
     return AnimationExportService::exportAnimation(
-        this,
-        m_session->timelines,
+        m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
-        m_session->layoutModels,
-        selectedTimelineFps(m_session->timelines, m_session->selectedTimelineIndex),
+        m_session->activeAtlas().layoutModels,
+        selectedTimelineFps(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex),
         outPath,
-        [this](bool loading) { setLoading(loading); },
-        [this](const QString& status) { m_statusLabel->setText(status); });
+        {
+            [this](bool v) { setLoading(v); },
+            [this](const QString& s) { m_statusLabel->setText(s); },
+            [this](const QString& t, const QString& msg) { MessageDialog::critical(this, t, msg); }
+        });
 }
 
 void MainWindow::saveAnimationToFile() {
@@ -632,11 +636,11 @@ void MainWindow::refreshAnimationTest() {
     // Ensure all frames are in QPixmapCache before the first tick.
     // preloadTimeline() is a no-op when the timeline has not changed.
     if (m_session->selectedTimelineIndex >= 0
-            && m_session->selectedTimelineIndex < m_session->timelines.size()) {
-        const auto& selTl = m_session->timelines[m_session->selectedTimelineIndex];
+            && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
+        const auto& selTl = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex];
         const QStringList* preloadFrames = &selTl.frames;
         if (!selTl.aliasOf.isEmpty()) {
-            for (const auto& src : m_session->timelines) {
+            for (const auto& src : m_session->activeAtlas().timelines) {
                 if (src.name == selTl.aliasOf && src.aliasOf.isEmpty()) {
                     preloadFrames = &src.frames;
                     break;
@@ -650,10 +654,10 @@ void MainWindow::refreshAnimationTest() {
     bool hasFrames = false;
     bool playing = m_animPlaying;
     QPixmap pixmap = AnimationPreviewService::refresh(
-        m_session->timelines,
+        m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
         m_animFrameIndex,
-        m_session->layoutModels,
+        m_session->activeAtlas().layoutModels,
         statusText,
         hasFrames,
         playing,

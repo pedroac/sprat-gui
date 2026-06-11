@@ -23,6 +23,15 @@ public:
      */
     void centerContent();
 
+    /**
+     * @brief Scrolls the view so @p pivot (in scene/image coordinates) appears
+     * at @p screenPos (in viewport coordinates).
+     *
+     * Used for flipbook mode: keeps the pivot visually stationary when
+     * navigating between frames.
+     */
+    void alignPivotToScreenPos(QPoint pivot, QPoint screenPos);
+
     void setZoom(double zoom) override;
     void initialFit() override;
 

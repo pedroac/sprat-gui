@@ -179,6 +179,25 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
     - Group or ungroup sprites (moves files into subfolders).
   - When you switch back to Layout view, the atlas rebuilds if any changes were made while the Navigator was open.
 
+- **Multiple atlases**
+  - Open **Manage Atlases** (toolbar) to organize sprites across named atlases: add or remove atlases, rename them, and drag sprites from the sprite tree into a different atlas slot.
+  - **Right-click an atlas** in the left panel (while sprites are checked in the navigator tree) to **Move checked sprites** to that atlas — the same action as drag-and-drop.
+  - **Right-click a folder/group** in the sprite navigator for smart atlas management:
+    - **Create atlas from `<group>`** — creates a new atlas named after the folder and moves all its sprites there.
+    - **Move `<group>` to atlas** — if an atlas with the folder's name already exists, moves the sprites into it instead.
+  - **Right-click a source node → Autocreate atlases** — creates one atlas per direct subfolder of that source, each named after the subfolder.
+  - In the **Atlas Layout** workspace, the **Atlas** selector in the right-panel View group lets you switch which named atlas is active for layout.
+  - Each atlas maintains its own set of sprites and can be exported independently or together.
+
+- **Atlas Layout workspace**
+  - The Atlas Layout workspace focuses the full window on layout editing. Open it from the toolbar.
+  - The right panel contains a **Search** field (filters visible sprites by name), a **View** group (atlas selector, source resolution, zoom), a **Profiles** group (checkable list of profiles; uncheck to disable a profile for this session), and a **Pages** group (visible when the active atlas spans multiple texture pages).
+
+- **Export workspace**
+  - Click **Exportation** (toolbar) to open the export workspace, or use **Export** for a quick re-export to the last used output folder.
+  - The left pane shows a live packed-atlas preview. Use the **Atlas** selector to preview individual atlases (the actual export always processes all).
+  - The right pane selects the output folder, metadata format (transform), and scale filter. Click **Export** to run the full pipeline; click **Cancel** to return to the layout.
+
 - **Automatic layout rebuild**
   - The atlas rebuilds automatically 2 seconds after you stop making changes (adding, removing, or modifying sprites, changing the active profile or source resolution).
   - Deleting sprites removes them from the canvas immediately for instant visual feedback; the full repack runs in the background.
@@ -194,7 +213,7 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
   - ![Source resolution](README_assets/source_resolution.png)
   - ... and use the **Manage Profiles** action to edit profile rules.
   - ![Profiles](README_assets/profiles.png)
-  - The layout canvas lists all frames; search the frame list by name to filter sprites for quicker edits.
+  - The layout canvas lists all frames; use the **Search** field at the top of the Atlas Layout right panel to filter sprites by name for quicker edits.
   - ![Filter by name](README_assets/layout_filter_by_name.png)
   - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
   - ![Loaded frames](README_assets/loaded_frames.png)
@@ -265,7 +284,10 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
 - `Alt+N`: Switch to **Navigation** view.
 
 ### **Navigation View (Sprite Navigator)**
-- `Delete`: Remove selected sprites from the layout.
+- `Delete`: Remove/exclude selected sprites.
+- `Ctrl+Click`: Toggle a sprite's checkbox.
+- `Shift+Click`: Check a range of sprites from the last clicked item.
+- **Right-click** a folder/group in the Atlases workspace: context menu for creating or moving atlases.
 
 ### **Navigation & Selection (Canvases / Lists)**
 - `Space (Hold) + Mouse Drag`: Pan (move) the view.
@@ -276,9 +298,6 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
 
 ### **Layout Canvas**
 - `Alt (Hold)`: Temporarily enable **Split Mode**.
-- `Any Printable Character`: Start searching for sprites by name.
-- `Backspace`: Delete last character of search query.
-- `Escape`: Clear search query.
 - `Home` / `End`: Jump to the first / last frame in the current row.
 
 ### **Selected Frame Editor (Preview)**

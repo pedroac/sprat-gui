@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
             }
 
             // Prevent browser zoom shortcuts (Ctrl+0, Ctrl+1, etc)
-            if ((e.ctrlKey || e.metaKey) && /^[0-9\-=]/.test(key)) {
+            if ((e.ctrlKey || e.metaKey) && /^[-0-9=]/.test(key)) {
                 e.preventDefault();
             }
 

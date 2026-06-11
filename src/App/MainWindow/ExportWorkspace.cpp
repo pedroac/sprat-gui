@@ -107,6 +107,18 @@ void ExportWorkspace::setupUi() {
     auto* profilesLayout = new QVBoxLayout(profilesGroup);
     profilesLayout->setAlignment(Qt::AlignTop);
 
+    // Atlas preview selector
+    auto* previewAtlasRow = new QHBoxLayout();
+    previewAtlasRow->addWidget(new QLabel(tr("Atlas:"), profilesGroup));
+    m_previewAtlasCombo = new QComboBox(profilesGroup);
+    m_previewAtlasCombo->setToolTip(tr("Atlas to preview"));
+    connect(m_previewAtlasCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+                emit previewAtlasChanged(m_previewAtlasCombo->currentData().toInt());
+            });
+    previewAtlasRow->addWidget(m_previewAtlasCombo, 1);
+    profilesLayout->addLayout(previewAtlasRow);
+
     auto* profileRow = new QHBoxLayout();
     profileRow->addWidget(new QLabel(tr("Profile:"), profilesGroup));
     m_profileCombo = new QComboBox(profilesGroup);
@@ -229,6 +241,16 @@ void ExportWorkspace::setupUi() {
 
 void ExportWorkspace::setPreviewWidget(QWidget* preview) {
     if (!m_previewPane || !preview) return;
+    // Remove and hide any widget currently occupying the pane
+    if (QLayout* layout = m_previewPane->layout()) {
+        while (QLayoutItem* item = layout->takeAt(0)) {
+            if (QWidget* w = item->widget()) {
+                w->hide();
+                w->setParent(nullptr);
+            }
+            delete item;
+        }
+    }
     preview->setParent(m_previewPane);
     m_previewPane->layout()->addWidget(preview);
     preview->show();
@@ -240,6 +262,7 @@ void ExportWorkspace::clearPreviewWidget() {
     if (!layout) return;
     while (QLayoutItem* item = layout->takeAt(0)) {
         if (QWidget* w = item->widget()) {
+            w->hide();
             w->setParent(nullptr);
         }
         delete item;
@@ -339,6 +362,24 @@ void ExportWorkspace::populate(const QVector<SpratProfile>& profiles,
 
     m_profileCombo->blockSignals(false);
     if (m_scaleFilterCombo) m_scaleFilterCombo->blockSignals(false);
+}
+
+void ExportWorkspace::setAtlasNames(const QStringList& names, int activeSessionIndex,
+                                    const QList<int>& sessionIndices) {
+    if (!m_previewAtlasCombo) return;
+    m_previewAtlasCombo->blockSignals(true);
+    m_previewAtlasCombo->clear();
+    for (int i = 0; i < names.size(); ++i) {
+        const int sessionIdx = (i < sessionIndices.size()) ? sessionIndices[i] : i;
+        m_previewAtlasCombo->addItem(names[i], sessionIdx);
+    }
+    const int selectIdx = m_previewAtlasCombo->findData(activeSessionIndex);
+    m_previewAtlasCombo->setCurrentIndex(selectIdx >= 0 ? selectIdx : 0);
+    m_previewAtlasCombo->blockSignals(false);
+    m_previewAtlasCombo->setVisible(true);
+    // Always emit so the canvas and preview pack are initialised from the
+    // selected atlas, regardless of whether the index actually changed.
+    emit previewAtlasChanged(m_previewAtlasCombo->currentData().toInt());
 }
 
 SaveConfig ExportWorkspace::getConfig() const {

@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QGraphicsPixmapItem>
+#include <QGraphicsRectItem>
 #include <QGraphicsScene>
 #include <QLabel>
 #include <QPixmap>
@@ -12,10 +13,14 @@
 #include <QTemporaryDir>
 
 static void applyBackground(QGraphicsView* view, const AppSettings& settings) {
+    view->setBackgroundBrush(settings.workspaceColor);
+}
+
+static QBrush makeAtlasBrush(const AppSettings& settings) {
     if (settings.showCheckerboard) {
-        view->setBackgroundBrush(QBrush(createCheckerboardPixmap(settings.spriteFrameColor)));
+        return QBrush(createCheckerboardPixmap(settings.spriteFrameColor));
     } else {
-        view->setBackgroundBrush(settings.spriteFrameColor);
+        return QBrush(settings.spriteFrameColor);
     }
 }
 
@@ -27,6 +32,13 @@ PackedAtlasView::PackedAtlasView(QWidget* parent)
     setScene(m_scene);
     setDragMode(QGraphicsView::ScrollHandDrag);
     applyBackground(this, m_settings);
+
+    m_bgRectItem = new QGraphicsRectItem();
+    m_bgRectItem->setPen(Qt::NoPen);
+    m_bgRectItem->setBrush(makeAtlasBrush(m_settings));
+    m_bgRectItem->setZValue(-1);
+    m_bgRectItem->hide();
+    m_scene->addItem(m_bgRectItem);
 
     m_pixmapItem = new QGraphicsPixmapItem();
     m_pixmapItem->setTransformationMode(Qt::FastTransformation);
@@ -52,6 +64,7 @@ PackedAtlasView::PackedAtlasView(QWidget* parent)
 void PackedAtlasView::setSettings(const AppSettings& settings) {
     m_settings = settings;
     applyBackground(this, m_settings);
+    if (m_bgRectItem) m_bgRectItem->setBrush(makeAtlasBrush(m_settings));
 }
 
 void PackedAtlasView::resizeEvent(QResizeEvent* event) {
@@ -75,6 +88,7 @@ void PackedAtlasView::updateOverlayGeometry() {
 void PackedAtlasView::setIdle() {
     m_state = State::Idle;
     m_bannerLabel->hide();
+    m_bgRectItem->hide();
     m_pixmapItem->setPixmap(QPixmap());
     m_overlayLabel->setText(tr("No preview available"));
     m_overlayLabel->show();
@@ -84,8 +98,9 @@ void PackedAtlasView::setIdle() {
 void PackedAtlasView::setLoading() {
     m_state = State::Loading;
     m_bannerLabel->hide();
+    m_bgRectItem->hide();
     m_pixmapItem->setPixmap(QPixmap());
-    m_overlayLabel->setText(tr("Loading preview..."));
+    m_overlayLabel->setText(tr("Loading atlas image\u2026"));
     m_overlayLabel->show();
     m_overlayLabel->raise();
 }
@@ -93,6 +108,7 @@ void PackedAtlasView::setLoading() {
 void PackedAtlasView::setError(const QString& message) {
     m_state = State::Error;
     m_bannerLabel->hide();
+    m_bgRectItem->hide();
     m_pixmapItem->setPixmap(QPixmap());
     m_overlayLabel->setText(tr("Preview error:\n%1").arg(message));
     m_overlayLabel->show();
@@ -156,8 +172,11 @@ void PackedAtlasView::setImage(const QByteArray& pngData) {
 }
 
 void PackedAtlasView::showPixmap(const QPixmap& pixmap, const QString& bannerText) {
+    const QRectF imageRect(QPointF(0, 0), pixmap.size());
+    m_bgRectItem->setRect(imageRect);
+    m_bgRectItem->show();
     m_pixmapItem->setPixmap(pixmap);
-    m_scene->setSceneRect(QRectF(QPointF(0, 0), pixmap.size()));
+    m_scene->setSceneRect(imageRect);
     m_overlayLabel->hide();
     m_state = State::Ready;
 

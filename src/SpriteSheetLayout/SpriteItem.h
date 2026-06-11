@@ -94,6 +94,11 @@ public:
      */
     void setLabelHidden(bool hidden) { m_labelHidden = hidden; update(); }
 
+    /**
+     * @brief Sets the label display mode for this item.
+     */
+    void setLabelMode(LayoutLabelMode mode) { m_labelMode = mode; update(); }
+
 protected:
     /**
      * @brief Custom paint implementation for the sprite item.
@@ -115,5 +120,6 @@ private:
     bool m_isContextTarget = false;      ///< Whether this item is the context target
     bool m_isMatch = false;              ///< Whether this item matches the current search
     bool m_labelHidden = false;          ///< Whether to hide the sprite's name label
+    LayoutLabelMode m_labelMode = LayoutLabelMode::Name; ///< Label display mode
     int m_index = -1;                    ///< Index within the LayoutCanvas item list
 };

@@ -49,14 +49,17 @@ QString AnimationExportService::chooseOutputPath(QWidget* parent) {
 }
 
 bool AnimationExportService::exportAnimation(
-    QWidget* parent,
     const QVector<AnimationTimeline>& timelines,
     int selectedTimelineIndex,
     const QVector<LayoutModel>& layoutModels,
     int fps,
     const QString& outPath,
-    const std::function<void(bool)>& setLoading,
-    const std::function<void(const QString&)>& setStatus) {
+    ExportCallbacks callbacks) {
+    const auto& setLoading = callbacks.setLoading;
+    const auto& setStatus  = callbacks.setStatus;
+    auto showError = [&](const QString& title, const QString& msg) {
+        if (callbacks.showError) callbacks.showError(title, msg);
+    };
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -74,13 +77,12 @@ bool AnimationExportService::exportAnimation(
     bool useMagick = isGif && !converterExe.isEmpty();
     if (!useMagick && ffmpegExe.isEmpty()) {
         if (!isGif) {
-            MessageDialog::warning(parent, trAnimationExport("FFmpeg Required"), trAnimationExport("FFmpeg is required for video export."));
+            showError(trAnimationExport("FFmpeg Required"), trAnimationExport("FFmpeg is required for video export."));
             return false;
         }
         if (converterExe.isEmpty()) {
-            MessageDialog::warning(parent,
-                                 trAnimationExport("No Export Tool Found"),
-                                 trAnimationExport("No suitable export tool found (FFmpeg or ImageMagick)."));
+            showError(trAnimationExport("No Export Tool Found"),
+                      trAnimationExport("No suitable export tool found (FFmpeg or ImageMagick)."));
             return false;
         }
     }
@@ -199,7 +201,7 @@ bool AnimationExportService::exportAnimation(
     if (!proc.waitForFinished(kExportTimeoutMs)) {
         proc.kill();
         setStatus(trAnimationExport("Export timed out"));
-        MessageDialog::critical(parent, trAnimationExport("Export Failed"), trAnimationExport("Export process timed out after 5 minutes."));
+        showError(trAnimationExport("Export Failed"), trAnimationExport("Export process timed out after 5 minutes."));
         setLoading(false);
         return false;
     }
@@ -210,12 +212,12 @@ bool AnimationExportService::exportAnimation(
     Q_UNUSED(ffmpegExe);
     bool ok = false;
     #ifdef Q_OS_WASM
-        MessageDialog::information(parent, trAnimationExport("Not Supported"), trAnimationExport("Exporting to GIF/Video is not supported in the web version."));
+        showError(trAnimationExport("Not Supported"), trAnimationExport("Exporting to GIF/Video is not supported in the web version."));
     #endif
 #endif
     if (!ok) {
         setStatus(trAnimationExport("Failed to generate animation"));
-        MessageDialog::critical(parent, trAnimationExport("Export Failed"), trAnimationExport("Exporting animation failed. Check console output for details."));
+        showError(trAnimationExport("Export Failed"), trAnimationExport("Exporting animation failed. Check console output for details."));
     }
     setLoading(false);
     return ok;

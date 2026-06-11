@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QGraphicsView>
+#include <QPointF>
 #include <QWheelEvent>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QFocusEvent>
 #include <QResizeEvent>
+#include <QEnterEvent>
 
 /**
  * @class ZoomableGraphicsView
@@ -39,6 +41,14 @@ public:
     void setZoomManual(bool manual) { m_isZoomManual = manual; }
 
     /**
+     * @brief Schedules a zoom + center restore to be applied on the next
+     *        debounce-timer callback, after QGraphicsView::resizeEvent has
+     *        updated the scroll-bar ranges.  Call this right before a show()
+     *        + resize sequence so the content reappears at the saved position.
+     */
+    void setPendingRestore(double zoom, const QPointF& sceneCenter);
+
+    /**
      * @brief Centers the content and fits it to the view if necessary.
      */
     virtual void initialFit();
@@ -63,10 +73,12 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
 
     bool m_isZoomManual = false;
     bool m_isPanning = false;
     bool m_spacePressed = false;
+    bool m_hasOverrideCursor = false;
     QPoint m_lastMousePos;
 
     double m_minZoom = 0.1;
@@ -75,4 +87,6 @@ protected:
     QSize m_pendingResizeSize;
     QSize m_pendingResizeOldSize;
     bool m_inResize = false;
+    double m_pendingRestoreZoom = -1.0;
+    QPointF m_pendingRestoreCenter;
 };

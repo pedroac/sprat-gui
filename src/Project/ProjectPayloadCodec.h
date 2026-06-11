@@ -11,6 +11,10 @@ struct ProjectPayloadBuildInput {
     QString projectDir;            // Directory containing project.spart.json (used to compute portable relative folder path)
     QStringList activeFramePaths;
     bool layoutSourceIsList = false;
+    // Multi-atlas support (v4+)
+    QVector<AtlasEntry> atlases;
+    int activeAtlasIndex = 0;
+    // Active-atlas timelines kept for backward-compat serialization in the "animations" section
     QVector<AnimationTimeline> timelines;
     int selectedTimelineIndex = -1;
     QVector<int> selectedTimelineFrameRows;
@@ -43,6 +47,10 @@ struct ProjectPayloadApplyResult {
     QVector<SmartFolder> smartFolders; // Smart folders resolved from the project file
     QVector<ProjectSource> sources;    // Named sources resolved from the project file
     QStringList orphanedSpritePaths;   // Sprite paths recorded as orphaned in the project file
+    // Multi-atlas support (v4+); empty for v1-3 files (use timelines below instead)
+    QVector<AtlasEntry> atlases;
+    int activeAtlasIndex = 0;
+    // Active-atlas timelines (populated for v1-3 backward compat, and for the active atlas in v4)
     QVector<AnimationTimeline> timelines;
     int selectedTimelineIndex = -1;
     QVector<int> selectedTimelineFrameRows;

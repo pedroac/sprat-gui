@@ -54,8 +54,17 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.deduplicateMode = settings.value("settings/deduplicate_mode", out.deduplicateMode).toString();
     out.syncMode = syncModeFromString(settings.value("settings/sync_mode", syncModeToString(out.syncMode)).toString());
     out.theme = settings.value("settings/theme", out.theme).toString();
-    out.onionSkinEnabled        = settings.value("settings/onion_skin_enabled", out.onionSkinEnabled).toBool();
+    out.onionSkinOpacity        = settings.value("settings/onion_skin_opacity", out.onionSkinOpacity).toInt();
     out.propagateEditsToChecked = settings.value("settings/propagate_edits_to_checked", out.propagateEditsToChecked).toBool();
+    out.flipbookMode        = flipbookModeFromString(settings.value("settings/flipbook_mode", "none").toString());
+    out.frameZoomMode       = frameZoomModeFromString(settings.value("settings/frame_zoom_mode", "fit").toString());
+    out.layoutZoomOnChange  = layoutZoomOnChangeFromString(settings.value("settings/layout_zoom_on_change", "no_change").toString());
+    out.layoutLabelMode     = layoutLabelModeFromString(settings.value("settings/layout_label_mode", "name").toString());
+    out.exportZoomOnChange        = exportZoomOnChangeFromString(settings.value("settings/export_zoom_on_change", "fit").toString());
+    out.exportDefaultOutputFolder = settings.value("settings/export_default_output_folder",
+        QDir::homePath() + "/Sprat").toString();
+    out.exportDefaultFormat       = settings.value("settings/export_default_format",       "none").toString();
+    out.exportDefaultScaleFilter  = settings.value("settings/export_default_scale_filter", "nearest").toString();
     out.coordUnit = settings.value("settings/coord_unit", 0).toInt() == 1
                   ? CoordUnit::Percent : CoordUnit::Pixels;
     out.defaultProjectsFolder = settings.value("settings/default_projects_folder",
@@ -96,8 +105,16 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/sync_mode", syncModeToString(settings.syncMode));
     qsettings.setValue("settings/theme", settings.theme);
     qsettings.setValue("settings/default_projects_folder", settings.defaultProjectsFolder);
-    qsettings.setValue("settings/onion_skin_enabled",         settings.onionSkinEnabled);
+    qsettings.setValue("settings/onion_skin_opacity",          settings.onionSkinOpacity);
     qsettings.setValue("settings/propagate_edits_to_checked", settings.propagateEditsToChecked);
+    qsettings.setValue("settings/flipbook_mode",              flipbookModeToString(settings.flipbookMode));
+    qsettings.setValue("settings/frame_zoom_mode",            frameZoomModeToString(settings.frameZoomMode));
+    qsettings.setValue("settings/layout_zoom_on_change",      layoutZoomOnChangeToString(settings.layoutZoomOnChange));
+    qsettings.setValue("settings/layout_label_mode",          layoutLabelModeToString(settings.layoutLabelMode));
+    qsettings.setValue("settings/export_zoom_on_change",      exportZoomOnChangeToString(settings.exportZoomOnChange));
+    qsettings.setValue("settings/export_default_output_folder", settings.exportDefaultOutputFolder);
+    qsettings.setValue("settings/export_default_format",       settings.exportDefaultFormat);
+    qsettings.setValue("settings/export_default_scale_filter", settings.exportDefaultScaleFilter);
     qsettings.setValue("settings/coord_unit",
         settings.coordUnit == CoordUnit::Percent ? 1 : 0);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);

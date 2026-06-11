@@ -83,6 +83,25 @@ void PreviewCanvas::centerContent() {
     }
 }
 
+void PreviewCanvas::alignPivotToScreenPos(QPoint pivot, QPoint screenPos) {
+    // We want `pivot` (scene coords) to appear at `screenPos` (viewport coords).
+    // centerOn(target) places `target` at the viewport centre.
+    // So: target = pivot - (screenPos - viewportCentre) / scale
+    //
+    // IMPORTANT: Qt clamps centerOn to the sceneRect.  After setSprites the
+    // sceneRect equals the image bounds, which often fits entirely inside the
+    // viewport at fit-to-view zoom, leaving zero scrollable room and making
+    // centerOn a no-op.  We expand the sceneRect by one viewport-size margin
+    // in every direction so there is always room to reach the desired position.
+    const double scale = transform().m11(); // zoom factor
+    const double margin = qMax(viewport()->width(), viewport()->height()) / scale;
+    m_scene->setSceneRect(m_scene->sceneRect().adjusted(-margin, -margin, margin, margin));
+
+    const QPointF viewportCentre(viewport()->width() / 2.0, viewport()->height() / 2.0);
+    const QPointF delta = QPointF(screenPos) - viewportCentre;
+    centerOn(QPointF(pivot) - delta / scale);
+}
+
 void PreviewCanvas::initialFit() {
     ZoomableGraphicsView::initialFit();
     m_overlay->update();
@@ -132,7 +151,7 @@ void PreviewCanvas::setGhostSprites(const QList<SpritePtr>& ghosts, QPoint activ
         QPixmap pix(sprite->path);
         if (pix.isNull()) continue;
         auto* item = new QGraphicsPixmapItem(pix);
-        item->setOpacity(0.30);
+        item->setOpacity(m_settings.onionSkinOpacity / 100.0);
         item->setZValue(-0.5);  // above checkerboard (z=-1), below main sprite (z=0)
         // Offset so ghost's pivot aligns with the active sprite's pivot in scene space
         item->setPos(activePivot.x() - sprite->pivotX,

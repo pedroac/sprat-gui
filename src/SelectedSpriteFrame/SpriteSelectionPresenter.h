@@ -10,17 +10,21 @@ class QDoubleSpinBox;
 
 class SpriteSelectionPresenter {
 public:
+    struct SpriteEditorWidgets {
+        QLineEdit*      nameEdit        = nullptr;
+        QDoubleSpinBox* pivotXSpin      = nullptr;
+        QDoubleSpinBox* pivotYSpin      = nullptr;
+        QPushButton*    configPointsBtn = nullptr;
+        PreviewCanvas*  previewView     = nullptr;
+        QDoubleSpinBox* previewZoomSpin = nullptr;
+        QComboBox*      handleCombo     = nullptr;
+    };
+
     static void applySpriteSelection(
         SpritePtr sprite,
         const QString& selectedPointName,
-        QLineEdit* spriteNameEdit,
-        QDoubleSpinBox* pivotXSpin,
-        QDoubleSpinBox* pivotYSpin,
-        QPushButton* configPointsBtn,
-        PreviewCanvas* previewView,
-        QDoubleSpinBox* previewZoomSpin,
-        QComboBox* handleCombo,
-        bool useCurrentZoom = false);
+        const SpriteEditorWidgets& widgets,
+        FrameZoomMode zoomMode = FrameZoomMode::Fit);
 
     static void refreshHandleCombo(QComboBox* handleCombo, SpritePtr selectedSprite, const QString& selectedPointName);
 };

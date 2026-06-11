@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QColor>
+#include <QUuid>
 
 namespace {
 QJsonArray toJsonArray(const QVector<int>& values) {
@@ -44,7 +45,7 @@ bool isValidCliPath(const QString& path) {
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
-    root["schema_version"] = 3;
+    root["schema_version"] = 4;
     root["written_by"] = QStringLiteral("sprat-gui");
     root["written_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
 
@@ -178,6 +179,54 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     }
     animInfo["timelines"] = timelinesArr;
     root["animations"] = animInfo;
+
+    // --- v4: Multi-atlas block ---
+    if (!input.atlases.isEmpty()) {
+        root["active_atlas_index"] = input.activeAtlasIndex;
+        const QString spBase = input.sourceFolder.isEmpty() ? input.currentFolder : input.sourceFolder;
+        const QDir spBaseDir(spBase);
+        QJsonArray atlasesArr;
+        for (const auto& atlas : input.atlases) {
+            QJsonObject aObj;
+            aObj["id"]         = atlas.id;
+            aObj["name"]       = atlas.name;
+            aObj["is_neutral"] = atlas.isNeutral;
+            aObj["is_excluded"] = atlas.isExcluded;
+            aObj["output_subdir"] = atlas.outputSubdir;
+
+            // Sprite paths — excluded atlas paths are derived at runtime via syncExcludedAtlas()
+            QJsonArray spArr;
+            if (!atlas.isExcluded) {
+                for (const QString& sp : atlas.spritePaths) {
+                    if (input.portablePaths && !spBase.isEmpty()) {
+                        QString rel = spBaseDir.relativeFilePath(sp);
+                        spArr.append(rel.startsWith("..") ? sp : rel);
+                    } else {
+                        spArr.append(sp);
+                    }
+                }
+            }
+            aObj["sprite_paths"] = spArr;
+
+            // Timelines
+            QJsonArray atArr;
+            for (const auto& t : atlas.timelines) {
+                QJsonObject tObj;
+                tObj["name"] = t.name;
+                tObj["fps"]  = t.fps;
+                QJsonArray fArr;
+                for (const auto& f : t.frames) fArr.append(f);
+                tObj["frames"] = fArr;
+                if (!t.aliasOf.isEmpty()) tObj["alias_of"] = t.aliasOf;
+                if (t.hFlip) tObj["h_flip"] = true;
+                if (t.vFlip) tObj["v_flip"] = true;
+                atArr.append(tObj);
+            }
+            aObj["timelines"] = atArr;
+            atlasesArr.append(aObj);
+        }
+        root["atlases"] = atlasesArr;
+    }
 
     QJsonObject markersInfo;
     QJsonObject spritesState;
@@ -571,6 +620,96 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 if (!p.isEmpty()) out.orphanedSpritePaths.append(p);
             }
         }
+    }
+
+    // --- Multi-atlas deserialization (v4+) ---
+    // Helper: parse a JSON timelines array into AnimationTimeline objects
+    auto parseTimelines = [](const QJsonArray& arr, int legacyFps) {
+        QVector<AnimationTimeline> result;
+        result.reserve(arr.size());
+        for (const auto& tVal : arr) {
+            const QJsonObject tObj = tVal.toObject();
+            AnimationTimeline t;
+            t.name = tObj["name"].toString();
+            t.fps  = tObj["fps"].toInt(legacyFps);
+            if (t.fps <= 0) t.fps = 8;
+            const QJsonArray fArr = tObj["frames"].toArray();
+            t.frames.reserve(fArr.size());
+            for (const auto& fVal : fArr) t.frames.append(fVal.toString());
+            t.aliasOf = tObj["alias_of"].toString();
+            t.hFlip   = tObj["h_flip"].toBool(false);
+            t.vFlip   = tObj["v_flip"].toBool(false);
+            result.append(t);
+        }
+        return result;
+    };
+
+    const int schemaVersion = root["schema_version"].toInt(1);
+    const QJsonArray atlasesArr = root["atlases"].toArray();
+
+    if (schemaVersion >= 4 && !atlasesArr.isEmpty()) {
+        // v4: read full atlas structure
+        out.activeAtlasIndex = root["active_atlas_index"].toInt(0);
+        out.atlases.reserve(atlasesArr.size());
+        const QDir spDir(currentFolder);
+        for (const auto& aVal : atlasesArr) {
+            const QJsonObject aObj = aVal.toObject();
+            AtlasEntry atlas;
+            atlas.id         = aObj["id"].toString();
+            atlas.name       = aObj["name"].toString();
+            atlas.isNeutral  = aObj["is_neutral"].toBool(false);
+            atlas.isExcluded = aObj["is_excluded"].toBool(false);
+            atlas.outputSubdir = aObj["output_subdir"].toString();
+
+            // Sprite paths — excluded atlas paths are derived at runtime; skip loading them
+            if (!atlas.isExcluded) {
+                const QJsonArray spArr = aObj["sprite_paths"].toArray();
+                atlas.spritePaths.reserve(spArr.size());
+                for (const auto& spVal : spArr) {
+                    QString sp = spVal.toString();
+                    if (!sp.isEmpty() && QDir::isRelativePath(sp) && !currentFolder.isEmpty()) {
+                        sp = spDir.filePath(sp);
+                    }
+                    if (!sp.isEmpty()) atlas.spritePaths.append(sp);
+                }
+            }
+
+            atlas.timelines = parseTimelines(aObj["timelines"].toArray(), 8);
+            out.atlases.append(atlas);
+        }
+        // Compat: if no excluded atlas was stored, append one now
+        bool hasExcluded = false;
+        for (const auto& a : out.atlases) {
+            if (a.isExcluded) { hasExcluded = true; break; }
+        }
+        if (!hasExcluded) {
+            AtlasEntry excl;
+            excl.id   = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            excl.name = QStringLiteral("Excluded");
+            excl.isExcluded = true;
+            out.atlases.append(excl);
+        }
+
+        // Populate backward-compat timelines field from the active atlas
+        if (out.activeAtlasIndex >= 0 && out.activeAtlasIndex < out.atlases.size()) {
+            out.timelines = out.atlases[out.activeAtlasIndex].timelines;
+        }
+    } else {
+        // v1-3 migration: wrap existing timelines in a single neutral atlas
+        // (The caller — applyProjectPayload — will assign this atlas to the session)
+        AtlasEntry neutral;
+        neutral.id        = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        neutral.name      = QStringLiteral("Default");
+        neutral.isNeutral = true;
+        neutral.timelines = out.timelines; // already parsed above
+        out.atlases.append(neutral);
+
+        AtlasEntry excl;
+        excl.id   = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        excl.name = QStringLiteral("Excluded");
+        excl.isExcluded = true;
+        out.atlases.append(excl);
+        out.activeAtlasIndex = 0;
     }
 
     return out;

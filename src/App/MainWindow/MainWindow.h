@@ -11,25 +11,24 @@
 #include <QPair>
 #include <QMutex>
 #include <QElapsedTimer>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QPointer>
 #include <QUndoStack>
-#include <functional>
 #include <memory>
 #include <vector>
 
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
 #include "TimelineListWidget.h"
-#include "CliToolInstaller.h"
-#include "LayoutRunner.h"
 #include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
 #include "ExportWorkspace.h"
 #include "SpratProfilesConfig.h"
 #include "models.h"
 #include "SettingsDialog.h"
+#include "NavigatorPanel.h"
+#include "FrameAnimationWorkspace.h"
+#include "SpriteEditorPanel.h"
+#include "AnimationPreviewPanel.h"
+#include "TimelineEditorPanel.h"
 
 // Forward declarations for Qt classes
 class QComboBox;
@@ -79,7 +78,9 @@ class AnimationCanvas;
 class SourceFolderWatcher;
 class ElidedLabel;
 class PackedAtlasView;
-class AtlasLayoutWorkspace;
+class LayoutOrchestrator;
+class CliSetupController;
+#include "ProjectController.h"
 #ifdef Q_OS_WASM
 class WasmFolderBrowserDialog;
 #endif
@@ -101,7 +102,7 @@ public:
         Cancel
     };
 
-    enum class Workspace { Atlas, FrameAnimation, Exportation, AtlasLayout };
+    enum class Workspace { Atlas, FrameAnimation, Exportation, AtlasesManagement };
 
     /**
      * @brief Constructor for MainWindow.
@@ -199,20 +200,6 @@ private slots:
     void onRunLayout(bool quiet = false);
 
     /**
-     * @brief Handles when layout process finishes execution.
-     * 
-     * @param result Result of the layout process
-     */
-    void onLayoutFinished(const LayoutResult& result);
-
-    /**
-     * @brief Handles errors from layout process.
-     * 
-     * @param error Description of the error
-     */
-    void onLayoutError(const QString& error);
-
-    /**
      * @brief Handles autosave of the current project.
      */
     void autosaveProject();
@@ -243,8 +230,8 @@ private slots:
     void schedulePreviewPack(const QString& profileName, const QString& scaleFilter);
     void runPreviewPack();
     void onPreviewPackFinished();
-    void showAtlasLayoutWorkspace();
-    void leaveAtlasLayoutWorkspace();
+    void showAtlasesManagementWorkspace();
+    void leaveAtlasesManagementWorkspace();
     void switchToAtlasWorkspace();
     void switchToFrameAnimWorkspace();
 
@@ -259,21 +246,8 @@ private slots:
     void onProcessError(QProcess::ProcessError error);
 #endif
 
-    // === CLI Tool Management Events ===
     /**
-     * @brief Handles when CLI tool installation finishes.
-     *
-     * @param exitCode Exit code of the installation process
-     * @param exitStatus Exit status of the installation process
-     */
-#ifndef SPRAT_EMBEDDED_CLI
-    void onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus);
-#else
-    void onInstallFinished(int exitCode, int exitStatus);
-#endif
-
-    /**
-     * @brief Handles download progress of CLI tools.
+     * @brief Handles download progress of CLI tools (UI update only).
      *
      * @param bytesReceived Bytes received so far
      * @param bytesTotal Total bytes to receive
@@ -492,6 +466,7 @@ private slots:
 
 private:
     struct ExportResult;
+    struct PackPreviewResult;
 
 private slots:
     // === Undo/Redo ===
@@ -510,6 +485,7 @@ private slots:
     void onFrameExtractionFinished();
     void onExportFinished();
     void handleExportResult(const ExportResult& result);
+    void handlePackPreviewResult(const PackPreviewResult& result);
     void onTransparencyProcessingFinished();
 
     // === CLI Installation Logging ===
@@ -576,9 +552,7 @@ private:
     /**
      * @brief Schedules a debounced layout rebuild (1000 ms).
      *
-     * Call this instead of onRunLayout() for user-triggered changes.
-     * If the Navigator view is active, sets m_layoutDirty and defers
-     * the rebuild until the user switches back to Layout view.
+     * Delegates to m_layoutOrchestrator->schedule().
      *
      * @param immediate If true, rebuild immediately without debounce
      * @param skipCapture If true, skip capturing sprite positions (already captured elsewhere)
@@ -586,31 +560,14 @@ private:
     void scheduleLayoutRebuild(bool immediate = false, bool skipCapture = false);
 
     /**
-     * @brief Animates sprites from captured old positions to the given new positions,
-     * then invokes onFinished. If no animation is needed, onFinished is called immediately.
-     */
-    void animateSpritesToNewPositions(const QMap<QString, QPointF>& newPositions,
-                                      const QVector<QRectF>& newAtlasRects,
-                                      const QVector<LayoutModel>& newModels,
-                                      std::function<void()> onFinished);
-
-    /**
      * @brief Gets the layout parser folder path.
      */
     QString layoutParserFolder() const;
 
     /**
-     * @brief Builds the layout input (either sourceFolderPath or imagePathList) for the next run.
-     *
-     * Uses m_session->sources when populated; falls back to the legacy
-     * sourceFolder / layoutSourcePath / layoutSourceIsList approach.
-     */
-    LayoutRunConfig buildLayoutInput() const;
-
-    /**
      * @brief Returns a sanitized subfolder name for a source being merged.
      *
-     * Derived from m_pendingImportUrl (if set) or the basename of sourcePath.
+     * Derived from the pending import URL (if set) or the basename of sourcePath.
      * The returned name is guaranteed unique among existing source subfolders.
      */
     QString computeSourceSubfolderName(const QString& sourcePath) const;
@@ -635,13 +592,19 @@ private:
     /**
      * @brief Registers a newly loaded archive, image, or URL as a ProjectSource.
      *
-     * If m_pendingImportUrl is set, it takes precedence over sourcePath (URL case).
-     * For Replace, existing sources are cleared first. For Merge, the new source is appended.
-     * cachedFolderPath, when provided, overrides the default (sourceFolder for Replace,
-     * empty for Merge).
+     * If a pending import URL is set on the ProjectController, it takes precedence
+     * over sourcePath (URL case). For Replace, existing sources are cleared first.
+     * For Merge, the new source is appended. cachedFolderPath, when provided,
+     * overrides the default (sourceFolder for Replace, empty for Merge).
      */
     void registerLoadedSource(const QString& sourcePath, DropAction action,
                               const QString& cachedFolderPath = QString());
+
+    /**
+     * @brief Routes activeFramePaths that have no atlas owner into the neutral atlas.
+     * On Replace, clears the neutral atlas sprite paths first.
+     */
+    void syncFramePathsToNeutralAtlas(DropAction action);
 
     /**
      * @brief Ensures frame list input is valid.
@@ -722,27 +685,6 @@ private:
      */
     void updateManualFrameLabel();
 
-    /**
-     * @brief Handles profile failure.
-     *
-     * @param failedProfile Name of failed profile
-     */
-    void handleProfileFailure(const QString& failedProfile);
-
-    /**
-     * @brief Handles sprite dimensions exceed error with auto-retry.
-     *
-     * @param failedProfile Name of failed profile
-     */
-    void handleDimensionsError(const QString& failedProfile);
-
-    /**
-     * @brief Checks if a profile is enabled.
-     * 
-     * @param profile Name of profile to check
-     * @return bool True if profile is enabled
-     */
-    bool isProfileEnabled(const QString& profile) const;
 
     /**
      * @brief Initializes the source folder watcher based on sync mode.
@@ -828,26 +770,10 @@ private:
     void updateRecentProjectsMenu();
 
     /**
-     * @brief Checks CLI tools availability.
+     * @brief Checks CLI tools availability (delegates to m_cliSetup).
      */
     void checkCliTools();
     void updateCliDiagnostics();
-
-    /**
-     * @brief Resolves CLI binaries and checks for missing ones.
-     * 
-     * @param missing List to store missing binaries
-     * @return bool True if all binaries are resolved
-     */
-    bool resolveCliBinaries(QStringList& missing);
-
-    /**
-     * @brief Shows dialog for missing CLI tools.
-     * 
-     * @param missing List of missing binaries
-     */
-    void showMissingCliDialog(const QStringList& missing);
-    void showCliExecutionError(const QString& tool);
 
     /**
      * @brief Confirms the action to take when a file/folder is dropped.
@@ -875,7 +801,7 @@ private:
     void updateMainContentView();
 
     /**
-     * @brief Installs CLI tools.
+     * @brief Installs CLI tools (delegates to m_cliSetup).
      */
     void installCliTools();
 
@@ -1052,11 +978,21 @@ private:
      */
     void refreshHandleCombo();
     void refreshSpriteTree();
+    void updateNavigatorAtlasCombo();
+    void syncExcludedAtlas();
+    void addToExcludedFiles(const QString& absPath);
+    void removeFromExcludedFiles(const QString& absPath);
 
     /**
      * @brief Updates the Aliases button label to reflect the current alias count.
      */
     void updateAliasesButton();
+
+    /** Moves @p paths from atlas @p srcIdx to atlas @p tgtIdx.
+     *  Normalizes paths, removes from source, deduplicates in target,
+     *  handles excluded-atlas sync and cleans up source layoutModels.
+     *  Does NOT emit atlasesChanged() or update the UI. */
+    void moveAtlasSprites(const QStringList& paths, int srcIdx, int tgtIdx);
 
     // Navigator context menu helpers
     QStringList collectCheckedSpritePaths() const;
@@ -1163,9 +1099,10 @@ public:
      * @brief Handles settings button click.
      */
     void onSettingsClicked();
-    void onSettingsStylesClicked();
     void onSettingsSpritesheetClicked();
     void onSettingsFramesEditorClicked();
+    void onSettingsAtlasLayoutClicked();
+    void onSettingsExportationClicked();
 #ifndef Q_OS_WASM
     void onSettingsCliToolsClicked();
 #endif
@@ -1216,27 +1153,7 @@ public:
      */
     void loadTarFile(const QString& tarPath, DropAction action);
 
-    struct FrameDetectionResult {
-        QVector<QRect> frames;
-        QColor backgroundColor;
-    };
-
-    /**
-     * @brief Detects frames in an image using spratframes.
-     * 
-     * @param imagePath Path to the image file
-     * @return FrameDetectionResult Detected frames and background color
-     */
-    FrameDetectionResult detectFramesInImage(const QString& imagePath);
-
-    /**
-     * @brief Generates spratframes format from frame rectangles.
-     * 
-     * @param frames Frame rectangles
-     * @param imagePath Path to the source image
-     * @return QString spratframes format string
-     */
-    QString generateSpratFramesFormat(const QVector<QRect>& frames, const QString& imagePath);
+    // detectFramesInImage, generateSpratFramesFormat, applyTransparencyToImage moved to ProjectController
 
     /**
      * @brief Handles layout for a single image used as a frame.
@@ -1280,15 +1197,35 @@ private:
     QWidget* m_welcomePage;
     ExportWorkspace* m_exportWorkspace = nullptr;
     bool m_exportWorkspaceActive = false;
-    bool m_frameAnimFirstLoad = true;
-    AtlasLayoutWorkspace* m_atlasLayoutWorkspace = nullptr;
-    bool m_atlasLayoutWorkspaceActive = false;
+    bool       m_frameAnimFirstLoad     = true;
+    QList<int> m_atlasSplitterHSizes;   // saved before orientation→Vertical; restored on return
+    double     m_savedPreviewZoom = -1.0;
+    QPointF    m_savedPreviewCenter;    // scene-coord center saved alongside zoom
+    class AtlasesManagementWorkspace* m_atlasesManagementWorkspace = nullptr;
+    bool m_atlasesManagementWorkspaceActive = false;
     PackedAtlasView*           m_packedAtlasView          = nullptr;
-    QFutureWatcher<QPair<QByteArray,QString>> m_previewPackWatcher;
+    LayoutCanvas*              m_exportLayoutCanvas       = nullptr;
+    struct PackPreviewResult {
+        QByteArray imageData;
+        QString    errorMsg;
+        QByteArray layoutUsed;      // empty on cache hit; used to update cache
+        QString    scaleFilterUsed;
+        int        dilateUsed = -1;
+        QVector<LayoutModel> layoutModels;  // populated on non-cache-hit runs; empty otherwise
+    };
+    QFutureWatcher<PackPreviewResult> m_previewPackWatcher;
     QTimer*                    m_previewPackDebounceTimer  = nullptr;
     std::atomic<bool>          m_previewPackCanceled{false};
     QString                    m_previewPackProfile;
     QString                    m_previewPackScaleFilter;
+    QByteArray                 m_cachedPackedImage;
+    QByteArray                 m_cachedPackLayout;
+    QString                    m_cachedPackScaleFilter;
+    int                        m_cachedPackDilate = -1;
+    std::shared_ptr<std::atomic<bool>> m_previewPackLayoutUpdateCanceled;
+    QVector<LayoutModel>       m_cachedPackModels;           // layout from last successful preview pack
+    QString                    m_cachedPackModelsProfile;    // profile name the cached models were built for
+    int                        m_exportPreviewAtlasIndex = -1; // -1 = all atlases
     Workspace m_activeWorkspace = Workspace::Atlas;
     QLabel* m_welcomeLabel;
     QPushButton* m_recentProjectBtn;
@@ -1303,17 +1240,30 @@ private:
     QPlainTextEdit* m_cliInfoText = nullptr;
     QMenu* m_viewMenu = nullptr;
 
+    // Navigator panel (wraps tree + filter + atlas combo)
+    NavigatorPanel* m_navigatorPanel      = nullptr;
+    FrameAnimationWorkspace* m_frameAnimWorkspace = nullptr;
+    // Sprite editor panel (wraps selected-sprite controls + preview canvas)
+    SpriteEditorPanel* m_spriteEditorPanel = nullptr;
+    // Animation preview panel (wraps animation canvas + playback controls)
+    AnimationPreviewPanel* m_animPreviewPanel = nullptr;
+    // Timeline editor panel (wraps timeline list + selected-timeline editor)
+    TimelineEditorPanel* m_timelineEditorPanel = nullptr;
+
     // Atlas view stack (Layout / Navigator)
     QStackedWidget* m_atlasViewStack      = nullptr;
+    QWidget*        m_editorContent       = nullptr;  // Frame editor panel (right slot of atlasSplitter)
     NavigatorTreeWidget* m_spriteTree      = nullptr;
     QLineEdit*      m_spriteFilterEdit    = nullptr;
     QLabel*         m_spriteFilterResultLabel = nullptr;
     QCheckBox*      m_showHiddenToggleBtn = nullptr;
     bool            m_showHiddenItems     = false;
+    QWidget*        m_navigatorAtlasRow   = nullptr;  // Atlas combo row (FrameAnim workspace only)
+    QComboBox*      m_navigatorAtlasCombo = nullptr;
     QAction*        m_atlasWorkspaceAction            = nullptr;
     QAction*        m_frameAnimWorkspaceAction        = nullptr;
     QAction*        m_exportationWorkspaceAction      = nullptr;
-    QAction*        m_atlasLayoutWorkspaceAction      = nullptr;
+    QAction*        m_atlasesManagementWorkspaceAction = nullptr;
 
     // Layout Canvas Area
     LayoutCanvas* m_canvas = nullptr;
@@ -1321,7 +1271,7 @@ private:
     QComboBox* m_profileCombo = nullptr;
     QPushButton* m_addProfilesBtn = nullptr;
     QComboBox* m_sourceResolutionCombo = nullptr;
-    QDoubleSpinBox* m_layoutZoomSpin = nullptr;
+    double          m_layoutZoom     = 100.0;
     QTimer* m_sourceResolutionDebounceTimer = nullptr;
 
     // Timelines Area
@@ -1329,7 +1279,7 @@ private:
     QLineEdit* m_timelineNameEdit;
     TimelineTreeWidget* m_timelineList;
     QWidget* m_timelineEditorContainer;
-    QGroupBox* m_selectedTimelineGroup;
+    QWidget* m_selectedTimelineGroup = nullptr;
     QWidget* m_timelineDropArea;
     QLabel* m_timelineDragHintLabel;
     TimelineListWidget* m_timelineFramesList;
@@ -1368,6 +1318,7 @@ private:
     QPushButton* m_animPrevBtn;
     QPushButton* m_animPlayPauseBtn;
     QPushButton* m_animNextBtn;
+    QToolButton* m_animOverlayBtn  = nullptr;  // Toggles pivot/marker overlay on animation canvas
     QSpinBox* m_timelineFpsSpin;
     QLabel* m_animStatusLabel;
     AnimationCanvas* m_animCanvas = nullptr;
@@ -1386,18 +1337,16 @@ private:
 
     // === Data Models ===
     ProjectSession* m_session;
-    
-    CliToolInstaller* m_cliToolInstaller;
+
+    CliSetupController* m_cliSetup = nullptr;
     QString m_spratLayoutBin;
     QString m_spratPackBin;
     QString m_spratConvertBin;
     QString m_spratFramesBin;
     QString m_spratUnpackBin;
-    LayoutRunner* m_layoutRunner;
     SourceFolderWatcher* m_folderWatcher = nullptr;
     QAction* m_openSourceFolderAction = nullptr;
-    QString  m_projectFilePath;            // path of the last loaded project file
-    bool     m_sourceFolderIsTemp = false; // true when sourceFolder is a QTemporaryDir
+    // m_projectFilePath and m_sourceFolderIsTemp moved to ProjectController
     SyncMode m_appliedSyncMode = SyncMode::None;
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
@@ -1423,7 +1372,7 @@ private:
     QPushButton* m_cancelLoadingButton = nullptr;
     QPlainTextEdit* m_cliInstallLog = nullptr;
     QString m_loadingUiMessage = "Loading...";
-    bool m_shouldClearSpritesFolder = false;
+    // m_shouldClearSpritesFolder moved to ProjectController
     bool m_mergeReplaceAllDuplicates = true;
     QTimer* m_watchModePeriodicCheckTimer = nullptr;
 
@@ -1438,35 +1387,10 @@ private:
     QUndoStack* m_undoStack = nullptr;
     QStringList m_recentProjects;
 
-    // === Async Loading Helpers ===
+    // === Async Loading Helpers (watchers moved to ProjectController) ===
 
-    struct ProjectLoadResult {
-        QString path;
-        QJsonObject root;
-        QString error;
-        MainWindow::DropAction action;
-        bool success;
-    };
-    QFutureWatcher<ProjectLoadResult> m_projectLoadWatcher;
-    void processProjectLoadResult(const ProjectLoadResult& result);
-
-    struct ZipDiscoveryResult {
-        QString tempPath;
-        QString zipPath;
-        QStringList selections;
-        MainWindow::DropAction action;
-        bool canceled;
-        QString error;
-    };
-    QFutureWatcher<ZipDiscoveryResult> m_zipDiscoveryWatcher;
-    void processZipDiscoveryResult(const ZipDiscoveryResult& result);
-
-    struct FrameDetectionTaskResult {
-        QString imagePath;
-        MainWindow::DropAction action;
-        FrameDetectionResult detection;
-    };
-    QFutureWatcher<FrameDetectionTaskResult> m_frameDetectionWatcher;
+    void processProjectLoadResult(const ProjectController::ProjectLoadResult& result);
+    void processZipDiscoveryResult(const ProjectController::ZipDiscoveryResult& result);
 
 public:
     struct SessionUndoState {
@@ -1477,12 +1401,12 @@ public:
         QVector<ProjectSource> sources;
         QStringList activeFramePaths;
         QString frameListPath;
-        QVector<LayoutModel> layoutModels;
+        QVector<AtlasEntry> atlases;
+        int activeAtlasIndex = 0;
         QString cachedLayoutOutput;
         double cachedLayoutScale = 1.0;
         QString lastSuccessfulProfile;
         bool lastRunUsedTrim = false;
-        QVector<AnimationTimeline> timelines;
         int selectedTimelineIndex = -1;
         QString selectedPointName;
         QStringList selectedSpritePaths;
@@ -1509,26 +1433,9 @@ public:
 private:
 
     std::optional<PendingSessionUndoCommand> m_pendingSessionUndoCommand;
-    void processFrameDetectionResult(const FrameDetectionTaskResult& result);
-
-    struct TarExtractionResult {
-        QString tempPath;
-        QString tarPath;
-        MainWindow::DropAction action;
-        bool success;
-    };
-    QFutureWatcher<TarExtractionResult> m_tarExtractionWatcher;
-    void processTarExtractionResult(const TarExtractionResult& result);
-
-    struct FrameExtractionResult {
-        QString tempPath;
-        QString sourcePath;
-        MainWindow::DropAction action;
-        QColor backgroundColor;
-        bool success;
-    };
-    QFutureWatcher<FrameExtractionResult> m_frameExtractionWatcher;
-    void processFrameExtractionResult(const FrameExtractionResult& result);
+    void processFrameDetectionResult(const ProjectController::FrameDetectionTaskResult& result);
+    void processTarExtractionResult(const ProjectController::TarExtractionResult& result);
+    void processFrameExtractionResult(const ProjectController::FrameExtractionResult& result);
 
     struct ExportResult {
         QString savedDestination;
@@ -1538,34 +1445,17 @@ private:
     };
     QFutureWatcher<ExportResult> m_exportWatcher;
     QFutureWatcher<void> m_transparencyWatcher;  // For background transparency processing
-    QNetworkAccessManager* m_importNetworkManager = nullptr;
-    QPointer<QNetworkReply> m_activeImportReply;
-    std::vector<std::unique_ptr<QTemporaryDir>> m_importTempDirs;
-    QString m_pendingImportUrl; // Set before finishImportedPath(); consumed by registerLoadedSource()
 
     QMutex m_toolMutex;
-    QString m_runningLayoutProfile;
     QWidget* m_canvasOverlay = nullptr;  // Semi-transparent overlay for canvas during loading
-    QMap<QString, QPointF> m_oldSpritePositions;   // Sprite scene pos before layout rebuild
-    QMap<QString, QRect>   m_oldSpritePackedRects; // sprite->rect (packed size) before rebuild
-    QMap<QString, bool>    m_oldSpriteRotated;     // sprite->rotated flag before rebuild
-    bool m_enableSpriteAnimation = true;
-    QPointer<QVariantAnimation> m_spriteAnimation;  // currently running sprite transition
-    QStringList m_spriteAnimationPaths;             // sprite paths with hidden labels in m_spriteAnimation
-    bool m_layoutRunPending = false;
-    bool m_layoutRunPendingQuiet = false;  // quiet flag for deferred pending run
-    bool m_layoutDirty = false;            // rebuild needed but Navigator view is active
-    int  m_layoutGeneration = 0;           // incremented on each successful layout completion
-    bool m_layoutRebuildPaused = false;    // rebuild paused because user is hovering over canvas
-    int m_pendingChangeCount = 0;
     QString m_currentProfile;
     QString m_currentResolution;
-    static constexpr int kLayoutBufferFullThreshold = 20;
-    QTimer* m_layoutDebounceTimer = nullptr;
-    bool m_layoutFailureDialogShown = false;
-    bool m_retryWithoutTrimOnFailure = false;
-    QStringList m_profilesTriedForCurrentLoad; // profiles already tried for the current load/run attempt
-    bool m_centerPivotsOnNextLayout = false;   // true when a fresh content load should force-center all pivots
+
+    // Layout orchestrator — owns all layout scheduling, animation, and profile fallback logic
+    LayoutOrchestrator* m_layoutOrchestrator = nullptr;
+
+    // Project controller — owns async watcher state, project-file path, and source-management helpers
+    ProjectController* m_projectController = nullptr;
     QTimer* m_autosaveTimer = nullptr;
     QTimer* m_resizeDebounceTimer = nullptr;
     QSize m_pendingResizeSize;

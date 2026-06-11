@@ -1,7 +1,10 @@
 #include "MainWindow.h"
+#include "LayoutOrchestrator.h"
+#include "CliSetupController.h"
 #include "AnimationCanvas.h"
 #include "PackedAtlasView.h"
-#include "AtlasLayoutWorkspace.h"
+#include "LayoutParser.h"
+#include "AtlasesManagementWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -46,6 +49,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QScrollBar>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QMimeData>
@@ -211,10 +215,12 @@ void MainWindow::loadAutosavedProject() {
     const QString sourceMode = layoutInfo["source_mode"].toString();
     QStringList framePaths;
     for (const auto& frameVal : layoutInfo["frame_paths"].toArray()) {
-        const QString framePath = frameVal.toString().trimmed();
-        if (!framePath.isEmpty()) {
-            framePaths.append(framePath);
+        QString framePath = frameVal.toString().trimmed();
+        if (framePath.isEmpty()) continue;
+        if (QDir::isRelativePath(framePath) && !folder.isEmpty()) {
+            framePath = QDir(folder).filePath(framePath);
         }
+        framePaths.append(framePath);
     }
     if (sourceMode == "list" && !framePaths.isEmpty()) {
         m_session->activeFramePaths = framePaths;
@@ -368,7 +374,7 @@ QString MainWindow::createManagedImportFile(const QString& suggestedName, const 
     }
     file.close();
 
-    m_importTempDirs.push_back(std::move(tempDir));
+    if (m_projectController) m_projectController->addImportTempDir(std::move(tempDir));
     return filePath;
 }
 
@@ -493,12 +499,8 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
     if (action == DropAction::Cancel) {
         return true;
     }
-    if (m_isLoading || m_activeImportReply) {
+    if (m_isLoading || (m_projectController && m_projectController->activeImportReply())) {
         return false;
-    }
-
-    if (!m_importNetworkManager) {
-        m_importNetworkManager = new QNetworkAccessManager(this);
     }
 
     m_loadingUiMessage = tr("Downloading from URL...");
@@ -507,8 +509,8 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
 
     QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    QNetworkReply* reply = m_importNetworkManager->get(request);
-    m_activeImportReply = reply;
+    QNetworkReply* reply = m_projectController->importNetworkManager()->get(request);
+    m_projectController->setActiveImportReply(reply);
 
     connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
         if (total > 0) {
@@ -519,7 +521,7 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
     });
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, url, action]() {
-        m_activeImportReply.clear();
+        if (m_projectController) m_projectController->clearActiveImportReply();
         const QByteArray data = reply->readAll();
         const QString fileName = suggestedNameFromReply(url, reply);
         const bool success = (reply->error() == QNetworkReply::NoError);
@@ -584,7 +586,7 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
             return;
         }
 
-        m_pendingImportUrl = url.toString();
+        if (m_projectController) m_projectController->setPendingImportUrl(url.toString());
         finishImportedPath(path, action);
     });
 
@@ -595,11 +597,12 @@ void MainWindow::onSaveClicked() {
 #ifdef Q_OS_WASM
     return;
 #else
-    if (m_projectFilePath.isEmpty()) {
+    const QString projectFilePath = m_projectController ? m_projectController->projectFilePath() : QString();
+    if (projectFilePath.isEmpty()) {
         onSaveAsClicked();
         return;
     }
-    const QString projectDir = QFileInfo(m_projectFilePath).absolutePath();
+    const QString projectDir = QFileInfo(projectFilePath).absolutePath();
     QString error;
     if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
         m_statusLabel->setText(tr("Save failed: ") + error);
@@ -619,9 +622,10 @@ void MainWindow::onSaveClicked() {
 void MainWindow::onSaveAsClicked() {
     // Start browser in the parent of the current project folder, or the last
     // used parent, so the user naturally creates sibling project folders.
+    const QString projectFilePath2 = m_projectController ? m_projectController->projectFilePath() : QString();
     QString startDir;
-    if (!m_projectFilePath.isEmpty()) {
-        startDir = QFileInfo(QFileInfo(m_projectFilePath).absolutePath()).absolutePath();
+    if (!projectFilePath2.isEmpty()) {
+        startDir = QFileInfo(QFileInfo(projectFilePath2).absolutePath()).absolutePath();
     } else if (!m_settings.defaultProjectsFolder.isEmpty()
                && QDir(m_settings.defaultProjectsFolder).exists()) {
         startDir = m_settings.defaultProjectsFolder;
@@ -701,7 +705,8 @@ void MainWindow::onSaveAsClicked() {
         m_lastSaveConfig.syncSprites = cb->isChecked();
     }
 
-    m_projectFilePath = QDir(projectDir).filePath("project.spart.json");
+    const QString newProjectFilePath = QDir(projectDir).filePath("project.spart.json");
+    if (m_projectController) m_projectController->setProjectFilePath(newProjectFilePath);
     m_lastSaveConfig.destination = projectDir;
 
     if (m_lastSaveConfig.syncSprites) {
@@ -719,7 +724,7 @@ void MainWindow::onSaveAsClicked() {
     }
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
     if (m_undoStack) m_undoStack->setClean();
-    addToRecentProjects(m_projectFilePath);
+    addToRecentProjects(newProjectFilePath);
     updateUiState();
 }
 #endif
@@ -733,9 +738,18 @@ void MainWindow::onExportClicked() {
 }
 
 void MainWindow::onExportAsClicked() {
+    // Build the config for populate(), applying settings-based defaults for empty fields.
+    SaveConfig configForPopulate = m_lastSaveConfig;
+    if (configForPopulate.outputPath.isEmpty() && !m_settings.exportDefaultOutputFolder.isEmpty())
+        configForPopulate.outputPath = m_settings.exportDefaultOutputFolder;
+    if (configForPopulate.transform.isEmpty())
+        configForPopulate.transform = m_settings.exportDefaultFormat;
+    if (configForPopulate.scaleFilter.isEmpty())
+        configForPopulate.scaleFilter = m_settings.exportDefaultScaleFilter;
+
     QString startDir;
-    if (!m_lastSaveConfig.outputPath.isEmpty()) {
-        startDir = m_lastSaveConfig.outputPath;
+    if (!configForPopulate.outputPath.isEmpty()) {
+        startDir = configForPopulate.outputPath;
     } else if (!m_session->currentFolder.isEmpty()) {
         startDir = QFileInfo(m_session->currentFolder).dir().filePath("export");
     } else {
@@ -743,8 +757,8 @@ void MainWindow::onExportAsClicked() {
     }
 
     const QVector<SpratProfile> allProfiles = configuredProfiles();
-    const QStringList enabled = m_atlasLayoutWorkspace
-        ? m_atlasLayoutWorkspace->enabledProfiles() : QStringList();
+    const QStringList enabled = m_atlasesManagementWorkspace
+        ? m_atlasesManagementWorkspace->enabledProfiles() : QStringList();
     QVector<SpratProfile> toExport;
     for (const SpratProfile& p : allProfiles) {
         if (enabled.isEmpty() || enabled.contains(p.name.trimmed()))
@@ -752,96 +766,186 @@ void MainWindow::onExportAsClicked() {
     }
     m_exportWorkspace->populate(toExport,
                                 m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
-                                m_lastSaveConfig,
+                                configForPopulate,
                                 startDir);
     showExportWorkspace();
 }
 
-void MainWindow::showAtlasLayoutWorkspace() {
-    if (!m_atlasLayoutWorkspace || !m_atlasViewStack) return;
+void MainWindow::showAtlasesManagementWorkspace() {
+    if (!m_atlasesManagementWorkspace) return;
     if (m_exportWorkspaceActive) leaveExportWorkspace();
-    m_atlasLayoutWorkspaceActive = true;
-    m_activeWorkspace = Workspace::AtlasLayout;
-    if (m_atlasLayoutWorkspaceAction) m_atlasLayoutWorkspaceAction->setChecked(true);
-
-    // Show canvas page (page 0) in the view stack
-    m_atlasViewStack->setCurrentIndex(0);
-
-    // Reparent canvas into the workspace (editor stays in m_atlasSplitter)
-    m_atlasLayoutWorkspace->setCanvasWidget(m_atlasViewStack);
-
-    // Hide docks so they don't compete with the workspace
+    m_atlasesManagementWorkspaceActive = true;
+    m_activeWorkspace = Workspace::AtlasesManagement;
+    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
+    if (m_atlasesManagementWorkspaceAction)
+        m_atlasesManagementWorkspaceAction->setChecked(true);
     if (m_atlasDock)     m_atlasDock->hide();
     if (m_animationDock) m_animationDock->hide();
-
+    if (m_session) {
+        syncFramePathsToNeutralAtlas(DropAction::Merge);
+        m_atlasesManagementWorkspace->setSources(m_session->sources);
+        m_atlasesManagementWorkspace->setAtlases(
+            m_session->atlases, m_session->activeAtlasIndex);
+    }
     m_mainStack->setCurrentIndex(2);
     m_mainStack->show();
 }
 
-void MainWindow::leaveAtlasLayoutWorkspace() {
-    m_atlasLayoutWorkspaceActive = false;
-
-    // Detach canvas from workspace pane (sets parent to nullptr)
-    if (m_atlasLayoutWorkspace)
-        m_atlasLayoutWorkspace->clearCanvasWidget();
-
-    // Restore canvas to the left slot of the original splitter
-    if (m_atlasSplitter && m_atlasViewStack)
-        m_atlasSplitter->insertWidget(0, m_atlasViewStack);
-
-    m_mainStack->setCurrentIndex(0); // reset; updateUiState restores correct page
+void MainWindow::leaveAtlasesManagementWorkspace() {
+    m_atlasesManagementWorkspaceActive = false;
+    // If Layout mode is active, the canvas was moved into the workspace.
+    // Restore it to its original dock container before hiding the workspace.
+    if (m_atlasesManagementWorkspace &&
+            m_atlasesManagementWorkspace->viewMode() == AtlasesManagementWorkspace::ViewMode::Layout) {
+        if (m_canvas) m_canvas->setDimFilter(QString());
+        m_atlasesManagementWorkspace->clearCanvasWidget();
+        if (m_canvas && m_atlasViewStack && m_atlasViewStack->widget(0)) {
+            QWidget* cc = m_atlasViewStack->widget(0);
+            m_canvas->setParent(cc);
+            if (auto* l = cc->layout()) l->addWidget(m_canvas);
+            m_canvas->show();
+        }
+    }
+    // Reset to the neutral atlas so updateUiState() checks the correct atlas
+    // when returning to the Sprites workspace. A newly-selected atlas whose
+    // layout has not been built yet would otherwise make hasModels=false,
+    // causing the welcome page to appear with all workspace actions disabled.
+    if (m_session)
+        m_session->activeAtlasIndex = m_session->neutralAtlasIndex();
+    // Cancel any atlas-specific layout run in flight so that its result is
+    // not written into the neutral atlas's layout models after the reset.
+    if (m_layoutOrchestrator) {
+        m_layoutOrchestrator->stopAndClearPending();
+    }
+    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Horizontal);
+    m_mainStack->setCurrentIndex(0);
     updateUiState();
 }
 
 void MainWindow::switchToAtlasWorkspace() {
     if (m_exportWorkspaceActive) leaveExportWorkspace();
-    if (m_atlasLayoutWorkspaceActive) leaveAtlasLayoutWorkspace();
+    const bool fromAtlasManagement = m_atlasesManagementWorkspaceActive;
+    if (m_atlasesManagementWorkspaceActive) leaveAtlasesManagementWorkspace();
     m_activeWorkspace = Workspace::Atlas;
+    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
     if (m_atlasWorkspaceAction) m_atlasWorkspaceAction->setChecked(true);
     if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1);
+    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Horizontal);
+    if (m_editorContent) m_editorContent->show();
+    // Restore the horizontal panel sizes saved before we flipped to vertical for
+    // Frame Animation.  Without this, Qt's reshuffled size array leaves the
+    // navigator too wide (or too narrow) after every workspace round-trip.
+    if (m_atlasSplitter) {
+        const QList<int> sizes = m_atlasSplitterHSizes.isEmpty()
+            ? QList<int>{270, 1030} : m_atlasSplitterHSizes;
+        m_atlasSplitter->setSizes(sizes);
+    }
+    // The show() + setSizes() above trigger resize events that feed into
+    // ZoomableGraphicsView's debounced resizeEvent.  Restore the saved zoom and
+    // scroll position from before the workspace switch; the debounce timer will
+    // apply them once QGraphicsView::resizeEvent has updated the scroll-bar
+    // ranges.  Fall back to initialFit() if no state was saved.
+    if (m_previewView) {
+        if (m_savedPreviewZoom > 0.0) {
+            m_previewView->setPendingRestore(m_savedPreviewZoom, m_savedPreviewCenter);
+            m_savedPreviewZoom = -1.0;
+        } else {
+            m_previewView->setZoomManual(false);
+        }
+    }
     if (m_animationDock) m_animationDock->hide();
+    if (m_navigatorPanel) {
+        m_navigatorPanel->setAtlasComboVisible(false);
+        m_navigatorPanel->setShowHiddenVisible(true);
+        m_navigatorPanel->setCheckboxesEnabled(true);
+        refreshSpriteTree();
+    } else {
+        if (m_navigatorAtlasRow)   m_navigatorAtlasRow->setVisible(false);
+        if (m_showHiddenToggleBtn) m_showHiddenToggleBtn->setVisible(true);
+    }
+    // Rebuild the layout for the Sprites workspace context when returning from
+    // the Atlas Management workspace, so the full sprite set is displayed and
+    // activeFramePaths reflects any atlas assignment changes.
+    if (fromAtlasManagement)
+        scheduleLayoutRebuild(true);
 }
 
 void MainWindow::switchToFrameAnimWorkspace() {
     if (m_exportWorkspaceActive) leaveExportWorkspace();
-    if (m_atlasLayoutWorkspaceActive) leaveAtlasLayoutWorkspace();
+    if (m_atlasesManagementWorkspaceActive) leaveAtlasesManagementWorkspace();
     m_activeWorkspace = Workspace::FrameAnimation;
+    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
     if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1);
+    // Save horizontal sizes before the orientation flip so they can be
+    // restored when returning to the Atlas workspace.
+    if (m_atlasSplitter && m_atlasSplitter->orientation() == Qt::Horizontal)
+        m_atlasSplitterHSizes = m_atlasSplitter->sizes();
+    // Save PreviewCanvas view state before the orientation change + hide trigger
+    // resize events that would corrupt the scroll position.
+    if (m_previewView) {
+        m_savedPreviewZoom   = m_previewView->zoom();
+        m_savedPreviewCenter = m_previewView->viewportCenterInScene();
+    }
+    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Vertical);
+    if (m_editorContent) m_editorContent->hide();
     if (m_animationDock) m_animationDock->show();
+    if (m_navigatorPanel) {
+        m_navigatorPanel->setAtlasComboVisible(true);
+        m_navigatorPanel->setShowHiddenVisible(false);
+        m_navigatorPanel->setCheckboxesEnabled(false);
+    } else {
+        if (m_navigatorAtlasRow)   m_navigatorAtlasRow->setVisible(true);
+        if (m_showHiddenToggleBtn) m_showHiddenToggleBtn->setVisible(false);
+    }
+    updateNavigatorAtlasCombo();
+    refreshSpriteTree();
+    refreshTimelineList();
+    refreshAnimationTest();
+    // If the active atlas has not been packed yet (e.g. after atlas reassignment),
+    // trigger a rebuild so layoutModels are filled and refreshSpriteTree runs again.
+    scheduleLayoutRebuild(true);
     if (m_frameAnimFirstLoad) {
         m_frameAnimFirstLoad = false;
-        resizeDocks({m_atlasDock, m_animationDock}, {200, 500}, Qt::Vertical);
+        resizeDocks({m_atlasDock, m_animationDock}, {270, 730}, Qt::Horizontal);
     }
 }
 
 void MainWindow::showExportWorkspace() {
-    if (m_atlasLayoutWorkspaceActive) leaveAtlasLayoutWorkspace();
+    if (m_atlasesManagementWorkspaceActive) leaveAtlasesManagementWorkspace();
     m_exportWorkspaceActive = true;
     m_activeWorkspace = Workspace::Exportation;
+    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
     if (m_exportationWorkspaceAction) m_exportationWorkspaceAction->setChecked(true);
     if (m_atlasDock)     m_atlasDock->hide();
     if (m_animationDock) m_animationDock->hide();
     if (m_debugDock)     m_debugDock->hide();
-    if (m_packedAtlasView && m_exportWorkspace) {
-        m_exportWorkspace->setViewport(m_packedAtlasView);
+    if (m_exportWorkspace && m_session) {
+        QStringList atlasNames;
+        QList<int>  sessionIndices;
+        for (int i = 0; i < m_session->atlases.size(); ++i) {
+            const auto& a = m_session->atlases[i];
+            if (a.isExcluded) continue;           // Excluded atlas is never exported
+            if (a.spritePaths.isEmpty()) continue; // Empty atlases have nothing to export
+            atlasNames.append(a.name);
+            sessionIndices.append(i);
+        }
+        // setAtlasNames fires previewAtlasChanged (via setCurrentIndex), which sets
+        // m_exportPreviewAtlasIndex and calls schedulePreviewPack for the selected atlas.
+        // No explicit schedulePreviewPack call needed here.
+        m_exportWorkspace->setAtlasNames(atlasNames, m_session->activeAtlasIndex, sessionIndices);
     }
     m_mainStack->setCurrentIndex(1);
     m_mainStack->show();
-    // Give keyboard focus to the preview view so zoom hotkeys (Ctrl+/-/0/1) work immediately
-    if (m_packedAtlasView) m_packedAtlasView->setFocus();
-    // Kick off preview with the currently selected profile/scale filter
-    if (m_exportWorkspace) {
-        const SaveConfig cfg = m_exportWorkspace->getConfig();
-        const QString profileName = cfg.profiles.isEmpty() ? QString() : cfg.profiles.first();
-        schedulePreviewPack(profileName, cfg.scaleFilter);
-    }
 }
 
 void MainWindow::leaveExportWorkspace() {
     m_exportWorkspaceActive = false;
+    m_exportPreviewAtlasIndex = -1;  // Reset atlas filter for next visit
     m_activeWorkspace = Workspace::Atlas;
+    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
     if (m_atlasWorkspaceAction) m_atlasWorkspaceAction->setChecked(true);
     if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1); // restore Navigation
+    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Horizontal);
     // Cancel any in-flight preview generation
     m_previewPackCanceled = true;
     if (m_previewPackDebounceTimer) m_previewPackDebounceTimer->stop();
@@ -849,6 +953,11 @@ void MainWindow::leaveExportWorkspace() {
     if (m_packedAtlasView) {
         m_packedAtlasView->setParent(this);
         m_packedAtlasView->hide();
+    }
+    if (m_exportLayoutCanvas) {
+        m_exportLayoutCanvas->setLoadingHint(false);
+        m_exportLayoutCanvas->setParent(this);
+        m_exportLayoutCanvas->hide();
     }
     m_mainStack->setCurrentIndex(0);  // reset; updateUiState restores correct page
     updateUiState();                  // restores docks and stack for current project state
@@ -868,7 +977,14 @@ void MainWindow::schedulePreviewPack(const QString& profileName, const QString& 
 
 void MainWindow::runPreviewPack() {
     if (!m_exportWorkspaceActive || !m_cliReady) return;
-    if (m_session->activeFramePaths.isEmpty() && m_session->layoutSourcePath.isEmpty()) return;
+
+    // When a specific atlas is selected use only its sprites; otherwise use all.
+    const bool hasAtlasFilter = m_exportPreviewAtlasIndex >= 0
+        && m_exportPreviewAtlasIndex < m_session->atlases.size();
+    const QStringList atlasScopedPaths = hasAtlasFilter
+        ? m_session->atlases[m_exportPreviewAtlasIndex].spritePaths
+        : m_session->activeFramePaths;
+    if (atlasScopedPaths.isEmpty() && m_session->layoutSourcePath.isEmpty()) return;
 
     // Signal any in-flight task to exit early, then reset for the new task
     m_previewPackCanceled = true;
@@ -879,7 +995,7 @@ void MainWindow::runPreviewPack() {
     const QString scaleFilter      = m_previewPackScaleFilter;
     const QString layoutBin        = m_spratLayoutBin;
     const QString packBin          = m_spratPackBin;
-    const QStringList framePaths   = m_session->activeFramePaths;
+    const QStringList framePaths   = atlasScopedPaths;
     const QString layoutSourcePath = m_session->layoutSourcePath;
     const QString cachedLayout     = m_session->cachedLayoutOutput;
     const double  cachedLayoutScale = m_session->cachedLayoutScale;
@@ -888,11 +1004,55 @@ void MainWindow::runPreviewPack() {
     const QVector<SpratProfile> profiles = configuredProfiles();
     std::atomic<bool>* canceledPtr = &m_previewPackCanceled;
 
-    if (m_packedAtlasView) m_packedAtlasView->setLoading();
+    const QByteArray cachedImage       = m_cachedPackedImage;
+    const QByteArray cachedPackLayout  = m_cachedPackLayout;
+    const QString    cachedSF          = m_cachedPackScaleFilter;
+    const int        cachedDilate      = m_cachedPackDilate;
 
-    using PreviewResult = QPair<QByteArray, QString>; // {imageData, errorMsg}
+    // Per-task cancellation flag for the queued layout-update callback.
+    // Cancelling the old flag prevents a stale callback from a previous task
+    // overwriting the canvas after a profile change.
+    if (m_previewPackLayoutUpdateCanceled)
+        m_previewPackLayoutUpdateCanceled->store(true);
+    m_previewPackLayoutUpdateCanceled = std::make_shared<std::atomic<bool>>(false);
+    const auto layoutUpdateCanceled    = m_previewPackLayoutUpdateCanceled;
+    LayoutCanvas* const exportLC       = m_exportLayoutCanvas;
+    const QString layoutParserFolderPath = layoutParserFolder();
+    const QString currentFolderPath    = m_session->currentFolder;
+    const ExportZoomOnChange exportZoomMode = m_settings.exportZoomOnChange;
 
-    auto task = [=]() -> PreviewResult {
+    if (m_exportLayoutCanvas && m_canvas) {
+        QVector<LayoutModel> models;
+        if (m_exportPreviewAtlasIndex >= 0
+                && m_exportPreviewAtlasIndex < m_session->atlases.size()) {
+            // Show only the selected atlas's current layout while packing.
+            models = m_session->atlases[m_exportPreviewAtlasIndex].layoutModels;
+        } else {
+            const bool cachedModelsOk = !m_cachedPackModels.isEmpty()
+                && m_cachedPackModelsProfile == profileName;
+            models = cachedModelsOk ? m_cachedPackModels : m_canvas->models();
+        }
+        m_exportLayoutCanvas->setModels(models);
+        if (m_exportWorkspace) m_exportWorkspace->setViewport(m_exportLayoutCanvas);
+        switch (exportZoomMode) {
+        case ExportZoomOnChange::Fit:
+            m_exportLayoutCanvas->setZoomManual(false);
+            m_exportLayoutCanvas->initialFit();
+            break;
+        case ExportZoomOnChange::Reset100:
+            m_exportLayoutCanvas->setZoomManual(false);
+            m_exportLayoutCanvas->setZoom(1.0);
+            break;
+        case ExportZoomOnChange::NoChange:
+        default:
+            break;
+        }
+        m_exportLayoutCanvas->setLoadingHint(true);
+    } else if (m_packedAtlasView) {
+        m_packedAtlasView->setLoading();
+    }
+
+    auto task = [=]() -> PackPreviewResult {
         // Find effective profile definition
         SpratProfile effectiveProfile;
         for (const SpratProfile& p : profiles) {
@@ -910,7 +1070,7 @@ void MainWindow::runPreviewPack() {
         if (!framePaths.isEmpty()) {
             frameListFile.setFileTemplate(
                 QDir::temp().filePath("sprat-preview-frames-XXXXXX.txt"));
-            if (!frameListFile.open()) return {{}, tr("Could not create temporary frame list")};
+            if (!frameListFile.open()) return {{}, tr("Could not create temporary frame list"), {}, {}, -1};
             {
                 QTextStream out(&frameListFile);
                 for (const QString& p : framePaths) out << p << "\n";
@@ -955,7 +1115,7 @@ void MainWindow::runPreviewPack() {
             QByteArray layoutStderr;
             if (!this->runTool(layoutBin, layoutArgs, nullptr, &layoutData, &layoutStderr)) {
                 const QString msg = QString::fromUtf8(layoutStderr).trimmed();
-                return {{}, msg.isEmpty() ? tr("Layout generation failed") : msg};
+                return {{}, msg.isEmpty() ? tr("Layout generation failed") : msg, {}, {}, -1};
             }
         }
 
@@ -963,10 +1123,44 @@ void MainWindow::runPreviewPack() {
 
         if (layoutData.isEmpty() || !layoutData.contains("atlas ")) return {};
 
+        const int dilate = effectiveProfile.dilate;
+        if (!cachedImage.isEmpty()
+            && layoutData == cachedPackLayout
+            && scaleFilter == cachedSF
+            && dilate == cachedDilate) {
+            return {cachedImage, {}, {}, {}, -1, {}};  // cache hit — layout unchanged
+        }
+
+        // Parse layout models and push them to the UI immediately so the placeholder
+        // shows the correct sprite arrangement for this profile before sprat-pack finishes.
+        const QVector<LayoutModel> previewModels = LayoutParser::parse(
+            QString::fromUtf8(layoutData), layoutParserFolderPath, currentFolderPath);
+        if (!canceledPtr->load() && exportLC) {
+            QMetaObject::invokeMethod(exportLC,
+                [exportLC, previewModels, layoutUpdateCanceled, exportZoomMode]() {
+                    if (!layoutUpdateCanceled->load()) {
+                        exportLC->setModels(previewModels);
+                        switch (exportZoomMode) {
+                        case ExportZoomOnChange::Fit:
+                            exportLC->initialFit();
+                            break;
+                        case ExportZoomOnChange::Reset100:
+                            exportLC->setZoom(1.0);
+                            break;
+                        case ExportZoomOnChange::NoChange:
+                        default:
+                            break;
+                        }
+                    }
+                }, Qt::QueuedConnection);
+        }
+
+        if (canceledPtr->load()) return {};
+
         // Run spratpack with layout data as stdin
         QStringList packArgs;
-        if (effectiveProfile.dilate > 0)
-            packArgs << "--dilate" << QString::number(effectiveProfile.dilate);
+        if (dilate > 0)
+            packArgs << "--dilate" << QString::number(dilate);
         if (!scaleFilter.isEmpty() && scaleFilter != QLatin1String("nearest"))
             packArgs << "--scale-filter" << scaleFilter;
 
@@ -974,27 +1168,78 @@ void MainWindow::runPreviewPack() {
         QByteArray packStderr;
         if (!this->runTool(packBin, packArgs, &layoutData, &packOutput, &packStderr)) {
             const QString msg = QString::fromUtf8(packStderr).trimmed();
-            return {{}, msg.isEmpty() ? tr("Packing failed") : msg};
+            return {{}, msg.isEmpty() ? tr("Packing failed") : msg, {}, {}, -1};
         }
 
-        return {packOutput, {}};
+        return {packOutput, {}, layoutData, scaleFilter, dilate, previewModels};
     };
 
+#ifdef Q_OS_WASM
+    // WASM has no real background threads (Asyncify/JSPI, not pthreads).
+    // Run the task on the next event-loop tick to keep the UI responsive,
+    // then handle the result directly — same pattern as runExport().
+    QTimer::singleShot(0, this, [this, task]() {
+        PackPreviewResult result = task();
+        handlePackPreviewResult(result);
+    });
+#else
     m_previewPackWatcher.setFuture(QtConcurrent::run(task));
+#endif
 }
 
 void MainWindow::onPreviewPackFinished() {
+    handlePackPreviewResult(m_previewPackWatcher.result());
+}
+
+void MainWindow::handlePackPreviewResult(const PackPreviewResult& result) {
     if (!m_exportWorkspaceActive || m_previewPackCanceled.load()) return;
     if (!m_packedAtlasView) return;
-    const auto result = m_previewPackWatcher.result();
-    const QByteArray& imageData = result.first;
-    const QString& errorMsg     = result.second;
-    if (imageData.isEmpty()) {
-        m_packedAtlasView->setError(
-            errorMsg.isEmpty() ? tr("Preview generation failed") : errorMsg);
-    } else {
-        m_packedAtlasView->setImage(imageData);
+
+    // Update PNG cache when a real pack ran (non-empty layoutUsed means it wasn't a cache hit)
+    if (!result.imageData.isEmpty() && !result.layoutUsed.isEmpty()) {
+        m_cachedPackedImage     = result.imageData;
+        m_cachedPackLayout      = result.layoutUsed;
+        m_cachedPackScaleFilter = result.scaleFilterUsed;
+        m_cachedPackDilate      = result.dilateUsed;
     }
+    // Update layout model cache from the already-parsed result (avoids re-parsing here)
+    if (!result.layoutModels.isEmpty()) {
+        m_cachedPackModels        = result.layoutModels;
+        m_cachedPackModelsProfile = m_previewPackProfile;
+    }
+
+    // Capture layout canvas zoom/scroll before the swap so the packed atlas
+    // continues from the exact same view position (seamless transition).
+    // Always capture regardless of isZoomManual — initialFit() already computed
+    // the correct fit zoom even though the manual flag stays false.
+    const double savedZoom    = m_exportLayoutCanvas ? m_exportLayoutCanvas->zoom()    : 0.0;
+    const int    savedScrollH = m_exportLayoutCanvas ? m_exportLayoutCanvas->horizontalScrollBar()->value() : 0;
+    const int    savedScrollV = m_exportLayoutCanvas ? m_exportLayoutCanvas->verticalScrollBar()->value()   : 0;
+
+    // Prevent auto-fit from firing when packed atlas is re-parented into the pane
+    if (savedZoom > 0.0 && m_packedAtlasView)
+        m_packedAtlasView->setZoomManual(true);
+
+    // Swap back from layout placeholder to packed atlas view
+    if (m_exportLayoutCanvas) m_exportLayoutCanvas->setLoadingHint(false);
+    if (m_exportWorkspace && m_packedAtlasView)
+        m_exportWorkspace->setViewport(m_packedAtlasView);
+
+    if (result.imageData.isEmpty()) {
+        m_packedAtlasView->setError(
+            result.errorMsg.isEmpty() ? tr("Preview generation failed") : result.errorMsg);
+    } else {
+        m_packedAtlasView->setImage(result.imageData);
+    }
+
+    // Apply the saved zoom/scroll to preserve the view position across the swap
+    if (savedZoom > 0.0 && m_packedAtlasView) {
+        m_packedAtlasView->setZoom(savedZoom);
+        m_packedAtlasView->horizontalScrollBar()->setValue(savedScrollH);
+        m_packedAtlasView->verticalScrollBar()->setValue(savedScrollV);
+    }
+
+    if (m_packedAtlasView) m_packedAtlasView->setFocus();
 }
 
 void MainWindow::onExportWorkspaceRequested(SaveConfig config) {
@@ -1055,6 +1300,21 @@ bool MainWindow::runExport(SaveConfig config) {
         return false;
     }
 
+    // Stop any in-flight layout runner so it releases the tool mutex promptly.
+    if (m_layoutOrchestrator) {
+        m_layoutOrchestrator->stop();
+    }
+
+    // If the export-workspace preview pack is still running it holds the tool mutex.
+    // Defer the export until it finishes rather than letting the export task block
+    // silently on the mutex.
+    if (m_previewPackWatcher.isRunning()) {
+        connect(&m_previewPackWatcher, &QFutureWatcher<PackPreviewResult>::finished,
+                this, [this, config]() { runExport(config); },
+                Qt::SingleShotConnection);
+        return true;
+    }
+
     m_isCanceled = false;
     m_loadingUiMessage = tr("Saving...");
     m_statusLabel->setText(tr("Saving..."));
@@ -1067,7 +1327,7 @@ bool MainWindow::runExport(SaveConfig config) {
         if (m_cliInstallOverlayLabel) {
             m_cliInstallOverlayLabel->setText(status);
         }
-        if (m_welcomeLabel && (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty())) {
+        if (m_welcomeLabel && (m_session->activeAtlas().layoutModels.isEmpty() || m_session->activeAtlas().layoutModels.first().sprites.isEmpty())) {
             m_welcomeLabel->setText(status);
         }
         QApplication::processEvents();
@@ -1078,7 +1338,7 @@ bool MainWindow::runExport(SaveConfig config) {
             if (m_cliInstallOverlayLabel) {
                 m_cliInstallOverlayLabel->setText(status);
             }
-            if (m_welcomeLabel && (m_session->layoutModels.isEmpty() || m_session->layoutModels.first().sprites.isEmpty())) {
+            if (m_welcomeLabel && (m_session->activeAtlas().layoutModels.isEmpty() || m_session->activeAtlas().layoutModels.first().sprites.isEmpty())) {
                 m_welcomeLabel->setText(status);
             }
         }, Qt::QueuedConnection);
@@ -1092,33 +1352,106 @@ bool MainWindow::runExport(SaveConfig config) {
         return m_isCanceled.load();
     };
 
-    auto saveTask = [this, config, setStatus, shouldCancel]() {
+    // Snapshot atlas data and configured profiles for background thread safety
+    const QVector<AtlasEntry> atlasSnapshot = m_session->atlases;
+    const QStringList allFramePaths = m_session->activeFramePaths;
+    const QString layoutSourcePath = m_session->layoutSourcePath;
+    const QString sourceFolder = m_session->sourceFolder;
+    const QVector<SpratProfile> profiles = configuredProfiles();
+    const QString currentProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+    const QString deduplicateMode = m_settings.deduplicateMode;
+    const QString spratLayoutBin = m_spratLayoutBin;
+    const QString spratPackBin = m_spratPackBin;
+    const QString spratConvertBin = m_spratConvertBin;
+    const QJsonObject projectPayload = buildProjectPayload(config, m_session, true);
+
+    auto saveTask = [this, config, atlasSnapshot, allFramePaths, layoutSourcePath,
+                     sourceFolder, profiles, currentProfile, deduplicateMode,
+                     spratLayoutBin, spratPackBin, spratConvertBin,
+                     projectPayload, setStatus, shouldCancel]() {
         ExportResult result;
-        
+
         auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& step, const QByteArray* input, QByteArray* output) {
-            // Error output is discarded here but we could pass another QByteArray to runTool if needed
             return this->runTool(tool, args, input, output, nullptr);
         };
 
-        result.success = ProjectSaveService::save(
-            config,
-            m_session->layoutSourcePath,
-            m_session->activeFramePaths,
-            m_session->sourceFolder,
-            configuredProfiles(),
-            m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
-            m_spratLayoutBin,
-            m_spratPackBin,
-            m_spratConvertBin,
-            buildProjectPayload(config, m_session, true),
-            result.savedDestination,
-            result.error,
-            m_settings.deduplicateMode,
-            nullptr, // setLoading handled by finished slot
-            setStatus,
-            shouldCancel,
-            runToolBound
-        );
+        // Collect non-empty atlases for per-atlas export
+        QVector<AtlasEntry> atlasesToExport;
+        for (const auto& atlas : atlasSnapshot) {
+            if (!atlas.spritePaths.isEmpty()) {
+                atlasesToExport.append(atlas);
+            }
+        }
+
+        // Single-atlas (neutral-only) or empty project: use legacy path (backward compat)
+        const bool multiAtlas = atlasesToExport.size() > 1
+            || (!atlasesToExport.isEmpty() && !atlasesToExport.first().isNeutral);
+        if (!multiAtlas) {
+            result.success = ProjectSaveService::save(
+                config,
+                layoutSourcePath,
+                allFramePaths,
+                sourceFolder,
+                profiles,
+                currentProfile,
+                spratLayoutBin,
+                spratPackBin,
+                spratConvertBin,
+                projectPayload,
+                result.savedDestination,
+                result.error,
+                deduplicateMode,
+                {nullptr, setStatus, shouldCancel, runToolBound}
+            );
+        } else {
+            // Multi-atlas: export each atlas to its own subdirectory
+            bool first = true;
+            for (const auto& atlas : atlasesToExport) {
+                if (shouldCancel()) { result.canceled = true; break; }
+
+                SaveConfig atlasConfig = config;
+                if (!atlas.outputSubdir.isEmpty()) {
+                    atlasConfig.outputPath = QDir(config.outputPath).filePath(atlas.outputSubdir);
+                    atlasConfig.destination = atlasConfig.outputPath;
+                }
+
+                // Write project JSON only on first atlas call
+                const QJsonObject payload = first ? projectPayload : QJsonObject();
+                first = false;
+
+                setStatus(tr("Exporting '%1'...").arg(atlas.name));
+
+                QString atlasDestination, atlasError;
+                const bool ok = ProjectSaveService::save(
+                    atlasConfig,
+                    layoutSourcePath,
+                    atlas.spritePaths,
+                    sourceFolder,
+                    profiles,
+                    currentProfile,
+                    spratLayoutBin,
+                    spratPackBin,
+                    spratConvertBin,
+                    payload,
+                    atlasDestination,
+                    atlasError,
+                    deduplicateMode,
+                    {nullptr, setStatus, shouldCancel, runToolBound}
+                );
+                if (!ok) {
+                    result.success = false;
+                    result.error = atlasError;
+                    break;
+                }
+                if (result.savedDestination.isEmpty()) {
+                    result.savedDestination = atlasDestination;
+                }
+            }
+            if (!result.canceled && result.error.isEmpty()) {
+                result.success = true;
+            }
+        }
+
         if (!result.success && shouldCancel()) {
             result.canceled = true;
         }
@@ -1201,12 +1534,15 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.sourceFolder = session->sourceFolder;
     input.sources = session->sources;
     input.orphanedSpritePaths = session->orphanedSpritePaths;
-    input.projectDir = m_projectFilePath.isEmpty()
+    const QString pFilePath = m_projectController ? m_projectController->projectFilePath() : QString();
+    input.projectDir = pFilePath.isEmpty()
         ? QString()
-        : QFileInfo(m_projectFilePath).absolutePath();
+        : QFileInfo(pFilePath).absolutePath();
     input.activeFramePaths = session->activeFramePaths;
     input.layoutSourceIsList = session->layoutSourceIsList;
-    input.timelines = session->timelines;
+    input.atlases = session->atlases;
+    input.activeAtlasIndex = session->activeAtlasIndex;
+    input.timelines = session->activeAtlas().timelines;
     input.selectedTimelineIndex = session->selectedTimelineIndex;
     QVector<int> selectedTimelineRows;
     const QList<QListWidgetItem*> selectedFrameItems = m_timelineFramesList ? m_timelineFramesList->selectedItems() : QList<QListWidgetItem*>();
@@ -1226,7 +1562,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     }
     input.primarySelectedSpritePath = session->selectedSprite ? session->selectedSprite->path : QString();
     input.selectedPointName = session->selectedPointName;
-    input.layoutModels = session->layoutModels;
+    input.layoutModels = session->activeAtlas().layoutModels;
     input.layoutOutput = session->cachedLayoutOutput;
     input.layoutScale = session->cachedLayoutScale;
     input.profile = m_profileCombo->currentData().toString();
@@ -1240,7 +1576,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
         input.sourceResolutionWidth = sourceResolutionWidth;
         input.sourceResolutionHeight = sourceResolutionHeight;
     }
-    input.layoutZoom = m_layoutZoomSpin->value() / 100.0;
+    input.layoutZoom = m_layoutZoom / 100.0;
     input.previewZoom = m_previewZoomSpin->value() / 100.0;
     input.animationZoom = m_animZoomSpin->value() / 100.0;
     input.dockState = saveState();
@@ -1295,39 +1631,36 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
         return;
     }
 
-    if (m_projectLoadWatcher.isRunning()) {
+    if (m_projectController->isProjectLoadRunning()) {
         return;
     }
 
     m_loadingUiMessage = tr("Loading project...");
     setLoading(true);
 
-    auto loadTask = [path, action]() {
-        ProjectLoadResult result;
-        result.path = path;
-        result.action = action;
-        result.success = ProjectFileLoader::load(path, result.root, result.error);
-        return result;
-    };
-
 #ifdef Q_OS_WASM
     // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously
     // via a deferred timer so the loading overlay paints before we block.
-    QTimer::singleShot(0, this, [this, loadTask]() {
-        processProjectLoadResult(loadTask());
+    const ProjectController::DropAction pcAction = static_cast<ProjectController::DropAction>(action);
+    QTimer::singleShot(0, this, [this, path, pcAction]() {
+        ProjectController::ProjectLoadResult result;
+        result.path = path;
+        result.action = pcAction;
+        result.success = ProjectFileLoader::load(path, result.root, result.error);
+        processProjectLoadResult(result);
     });
 #else
-    m_projectLoadWatcher.setFuture(QtConcurrent::run(loadTask));
+    m_projectController->launchProjectLoad(path, static_cast<ProjectController::DropAction>(action));
 #endif
 }
 
 void MainWindow::onProjectLoadFinished() {
-    processProjectLoadResult(m_projectLoadWatcher.result());
+    processProjectLoadResult(m_projectController->projectLoadResult());
 }
 
-void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
+void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadResult& result) {
     const QString path = result.path;
-    const DropAction action = result.action;
+    const DropAction action = static_cast<DropAction>(result.action);
 
     if (!result.success) {
         if (path.endsWith(".zip", Qt::CaseInsensitive)) {
@@ -1347,8 +1680,8 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
     addToRecentProjects(path);
 
     // Track project file path and prefer sprites subfolder
-    m_projectFilePath = path;
-    m_sourceFolderIsTemp = false;
+    if (m_projectController) m_projectController->setProjectFilePath(path);
+    if (m_projectController) m_projectController->setSourceFolderIsTemp(false);
 
     QJsonObject root = result.root;
     const int projectVersion = root["version"].toInt(1);
@@ -1376,8 +1709,8 @@ void MainWindow::processProjectLoadResult(const ProjectLoadResult& result) {
         if (QDir(spritesDir).exists()) {
             m_session->sourceFolder = spritesDir;
         }
-        m_sourceFolderIsTemp = true;
-        m_session->addTempDir(std::move(tempDir));
+        if (m_projectController) m_projectController->setSourceFolderIsTemp(true);
+        m_projectController->addTempDir(std::move(tempDir));
     } else {
         // Prefer a pre-existing sprites subfolder next to the project file
         const QString spritesDir = QDir(projectDir).filePath("sprites");
@@ -1504,7 +1837,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         return false;
     }
 
-    if (m_zipDiscoveryWatcher.isRunning()) {
+    if (m_projectController->isZipDiscoveryRunning()) {
         return false;
     }
 
@@ -1523,7 +1856,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     setLoading(true);
 
     if (action == DropAction::Replace) {
-        m_session->clearTempDirs();
+        m_projectController->clearTempDirs();
     }
     auto tempDir = std::make_unique<QTemporaryDir>();
     if (!tempDir->isValid()) {
@@ -1532,13 +1865,16 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         return false;
     }
     QString tempPath = tempDir->path();
-    m_session->addTempDir(std::move(tempDir));
+    m_projectController->addTempDir(std::move(tempDir));
 
-    auto zipTask = [this, zipPath, tempPath, action]() {
-        ZipDiscoveryResult result;
+    const ProjectController::DropAction pcAction = static_cast<ProjectController::DropAction>(action);
+
+#ifdef Q_OS_WASM
+    auto zipTaskWasm = [this, zipPath, tempPath, pcAction]() {
+        ProjectController::ZipDiscoveryResult result;
         result.tempPath = tempPath;
         result.zipPath = zipPath;
-        result.action = action;
+        result.action = pcAction;
         result.canceled = false;
 
         QString error;
@@ -1558,21 +1894,19 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         }
         return result;
     };
-
-#ifdef Q_OS_WASM
     // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
-    processZipDiscoveryResult(zipTask());
+    processZipDiscoveryResult(zipTaskWasm());
 #else
-    m_zipDiscoveryWatcher.setFuture(QtConcurrent::run(zipTask));
+    m_projectController->launchZipDiscovery(zipPath, pcAction, tempPath);
 #endif
     return true;
 }
 
 void MainWindow::onZipDiscoveryFinished() {
-    processZipDiscoveryResult(m_zipDiscoveryWatcher.result());
+    processZipDiscoveryResult(m_projectController->zipDiscoveryResult());
 }
 
-void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
+void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscoveryResult& result) {
     if (result.canceled) {
         setLoading(false);
         m_statusLabel->setText(tr("ZIP extraction canceled"));
@@ -1580,7 +1914,7 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
     }
     const QString tempPath = result.tempPath;
     const QString zipPath = result.zipPath;
-    const DropAction action = result.action;
+    const DropAction action = static_cast<DropAction>(result.action);
     QStringList imageDirectories = result.selections;
 
     if (imageDirectories.isEmpty()) {
@@ -1714,18 +2048,18 @@ void MainWindow::processZipDiscoveryResult(const ZipDiscoveryResult& result) {
             QDir().mkpath(m_session->sourceFolder);
         }
 
-        if (m_sourceFolderIsTemp) {
-            m_projectFilePath.clear();
+        if (m_projectController && m_projectController->isSourceFolderTemp()) {
+            m_projectController->setProjectFilePath(QString());
         }
-        m_sourceFolderIsTemp = false;
+        if (m_projectController) m_projectController->setSourceFolderIsTemp(false);
         if (!m_session->frameListPath.isEmpty()) {
             QFile::remove(m_session->frameListPath);
             m_session->frameListPath.clear();
         }
         m_session->sourceFolder.clear();
-        m_session->clearSourceFolderTempDir();
+        m_projectController->clearSourceFolderTempDir();
         ensureSourceFolder();
-        m_session->timelines.clear();
+        m_session->activeAtlas().timelines.clear();
         m_session->selectedTimelineIndex = -1;
         // Clear selection state when loading new images to avoid stale pointers
         m_session->selectedSprite.reset();
@@ -1773,7 +2107,7 @@ void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
     const QString oldFolder = m_session->sourceFolder;
     m_session->sourceFolder = newSpritesPath;
     m_session->currentFolder = newSpritesPath;
-    m_sourceFolderIsTemp = false;
+    if (m_projectController) m_projectController->setSourceFolderIsTemp(false);
 
     // Rewrite activeFramePaths to reference the new sprites location
     if (!oldFolder.isEmpty() && !m_session->activeFramePaths.isEmpty()) {
@@ -1798,7 +2132,7 @@ void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
     }
 
     // Release old temp dir if applicable
-    m_session->clearSourceFolderTempDir();
+    m_projectController->clearSourceFolderTempDir();
 
     // The cached layout may reference paths inside the now-deleted temp dir.
     // Clear it so the next save runs spratlayout fresh against the promoted paths.
@@ -1821,11 +2155,10 @@ void MainWindow::applyProjectPayload() {
 
     QJsonObject root = m_session->pendingProjectPayload;
     m_session->pendingProjectPayload = QJsonObject();
-    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->layoutModels);
+    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->activeAtlas().layoutModels);
 
-    if (m_layoutZoomSpin) {
-        m_layoutZoomSpin->setValue(applied.layoutZoom * 100.0);
-    }
+    m_layoutZoom = applied.layoutZoom * 100.0;
+    onLayoutZoomChanged(m_layoutZoom);
     if (m_previewZoomSpin) {
         m_previewZoomSpin->setValue(applied.previewZoom * 100.0);
     }
@@ -1880,27 +2213,56 @@ void MainWindow::applyProjectPayload() {
         }
     }
 
-    QStringList missing;
-    resolveCliBinaries(missing);
-    QString storedVersion = CliToolsConfig::loadInstalledCliVersion();
-    m_cliReady = missing.isEmpty()
-                 && !storedVersion.isEmpty()
-                 && storedVersion == QString(SPRAT_CLI_VERSION);
+    if (m_cliSetup) {
+        bool allFound = m_cliSetup->resolveQuietly();
+        // Update local mirror from controller
+        m_cliPaths = m_cliSetup->paths();
+        m_spratLayoutBin  = m_cliPaths.layoutBinary;
+        m_spratPackBin    = m_cliPaths.packBinary;
+        m_spratConvertBin = m_cliPaths.convertBinary;
+        m_spratFramesBin  = m_cliPaths.framesBinary;
+        m_spratUnpackBin  = m_cliPaths.unpackBinary;
+        if (m_layoutOrchestrator) m_layoutOrchestrator->updateLayoutBinary(m_spratLayoutBin);
+        QString storedVersion = CliToolsConfig::loadInstalledCliVersion();
+        m_cliReady = allFound
+                     && !storedVersion.isEmpty()
+                     && storedVersion == QString(SPRAT_CLI_VERSION);
+    }
     m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI tools not ready"));
     updateUiState();
 
-    m_session->timelines = applied.timelines;
+    // Restore atlas structure
+    if (!applied.atlases.isEmpty()) {
+        // Preserve runtime layoutModels generated by the layout tool for the active atlas
+        const QVector<LayoutModel> runtimeModels = m_session->activeAtlas().layoutModels;
+        m_session->atlases = applied.atlases;
+        m_session->activeAtlasIndex = qBound(0, applied.activeAtlasIndex,
+                                              m_session->atlases.size() - 1);
+        // Re-attach runtime layout models
+        m_session->activeAtlas().layoutModels = runtimeModels;
+        // For v1-3 migration: neutral atlas spritePaths was left empty; populate from activeFramePaths
+        {
+            const int neutralIdx = m_session->neutralAtlasIndex();
+            AtlasEntry& neutral = m_session->atlases[neutralIdx];
+            if (neutral.spritePaths.isEmpty() && !m_session->activeFramePaths.isEmpty()) {
+                neutral.spritePaths = m_session->activeFramePaths;
+            }
+        }
+        emit m_session->atlasesChanged();
+    }
+    // Always restore the active atlas's timelines (already populated for both v4 and v1-3)
+    m_session->activeAtlas().timelines = applied.timelines;
     m_session->selectedTimelineIndex = (applied.selectedTimelineIndex >= 0
-        && applied.selectedTimelineIndex < m_session->timelines.size())
+        && applied.selectedTimelineIndex < m_session->activeAtlas().timelines.size())
         ? applied.selectedTimelineIndex
-        : (m_session->timelines.isEmpty() ? -1 : 0);
+        : (m_session->activeAtlas().timelines.isEmpty() ? -1 : 0);
 
     refreshTimelineList();
     if (m_session->selectedTimelineIndex >= 0) {
         m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
     }
 
-    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size() && !applied.selectedTimelineFrameRows.isEmpty()) {
+    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size() && !applied.selectedTimelineFrameRows.isEmpty()) {
         for (int row : applied.selectedTimelineFrameRows) {
             if (row >= 0 && row < m_timelineFramesList->count()) {
                 if (QListWidgetItem* item = m_timelineFramesList->item(row)) {
@@ -1926,15 +2288,15 @@ void MainWindow::applyProjectPayload() {
     }
 
     m_animFrameIndex = qMax(0, applied.animationFrameIndex);
-    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size()) {
-        const int frameCount = m_session->timelines[m_session->selectedTimelineIndex].frames.size();
+    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
+        const int frameCount = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames.size();
         if (frameCount > 0) {
             m_animFrameIndex = qBound(0, m_animFrameIndex, frameCount - 1);
         } else {
             m_animFrameIndex = 0;
         }
     }
-    if (applied.animationPlaying && m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->timelines.size()) {
+    if (applied.animationPlaying && m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
         onAnimPlayPauseClicked();
     } else if (m_animPlaying) {
         onAnimPlayPauseClicked();

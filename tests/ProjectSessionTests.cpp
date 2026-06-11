@@ -6,7 +6,7 @@ void ProjectSessionTests::testInitialState() {
     ProjectSession session;
     QVERIFY(session.isEmpty());
     QCOMPARE(session.currentFolder, QString(""));
-    QCOMPARE(session.timelines.size(), 0);
+    QCOMPARE(session.activeAtlas().timelines.size(), 0);
     QVERIFY(session.selectedSprite == nullptr);
 }
 

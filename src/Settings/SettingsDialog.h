@@ -8,20 +8,22 @@ class QCheckBox;
 class QComboBox;
 class QGroupBox;
 class QScrollArea;
+class QSpinBox;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
 public:
     enum class Section {
-        Styles,
         Spritesheet,
         FramesEditor,
+        AtlasLayout,
+        Exportation,
 #ifndef Q_OS_WASM
         CliTools
 #endif
     };
 
-    explicit SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent = nullptr, Section section = Section::Styles);
+    explicit SettingsDialog(const AppSettings& settings, const CliPaths& cliPaths, QWidget* parent = nullptr, Section section = Section::FramesEditor);
     AppSettings getSettings() const;
     CliPaths getCliPaths() const;
 
@@ -46,12 +48,13 @@ private:
 
     AppSettings m_settings;
     CliPaths m_cliPaths;
-    Section m_initialSection = Section::Styles;
+    Section m_initialSection = Section::FramesEditor;
 
     QScrollArea* m_scrollArea = nullptr;
-    QGroupBox* m_stylesGroup = nullptr;
     QGroupBox* m_spritesheetGroup = nullptr;
     QGroupBox* m_framesEditorGroup = nullptr;
+    QGroupBox* m_atlasLayoutGroup = nullptr;
+    QGroupBox* m_exportationGroup = nullptr;
 #ifndef Q_OS_WASM
     QGroupBox* m_cliGroup = nullptr;
 #endif
@@ -74,6 +77,18 @@ private:
     QPushButton* m_syncNowBtn;
 
     // Frames Editor controls
-    QCheckBox* m_onionSkinCheck = nullptr;
+    QSpinBox* m_onionSkinOpacitySpin = nullptr;
     QCheckBox* m_propagateEditsCheck = nullptr;
+    QComboBox* m_flipbookModeCombo = nullptr;
+    QComboBox* m_frameZoomModeCombo = nullptr;
+
+    // Atlas Layout controls
+    QComboBox* m_layoutZoomOnChangeCombo = nullptr;
+    QComboBox* m_layoutLabelModeCombo = nullptr;
+
+    // Exportation controls
+    QComboBox* m_exportZoomOnChangeCombo = nullptr;
+    QLineEdit* m_exportDefaultFolderEdit = nullptr;
+    QComboBox* m_exportDefaultFormatCombo = nullptr;
+    QComboBox* m_exportDefaultScaleFilterCombo = nullptr;
 };

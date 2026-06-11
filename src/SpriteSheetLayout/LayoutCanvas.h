@@ -8,6 +8,7 @@
 
 class QFocusEvent;
 class QGraphicsRectItem;
+class QLabel;
 
 /**
  * @class LayoutCanvas
@@ -58,6 +59,22 @@ public:
      * @brief Applies visual settings to the canvas.
      */
     void setSettings(const AppSettings& settings);
+
+    /**
+     * @brief Shows or hides the "Loading preview…" banner overlay.
+     */
+    void setLoadingHint(bool loading);
+
+    /**
+     * @brief Puts the canvas in display-only mode: no borders, no labels,
+     *        no selection, no context menu, no key interaction.
+     */
+    void setDisplayOnly(bool displayOnly);
+
+    /**
+     * @brief Returns the current layout models.
+     */
+    const QVector<LayoutModel>& models() const { return m_models; }
 
     /**
      * @brief Enables or disables split mode.
@@ -113,6 +130,23 @@ public:
      * Used to hide labels during animations to avoid visual artifacts.
      */
     void setSpriteItemLabelHidden(const QString& spritePath, bool hidden);
+
+    /**
+     * @brief Sets the active search query and updates the canvas highlighting.
+     *
+     * Sprites whose name contains the query (case-insensitive) are highlighted
+     * and selected.  Pass an empty string to clear the search.
+     */
+    void setSearchQuery(const QString& query);
+
+    /**
+     * @brief Dims sprites whose name does not match the query.
+     *
+     * Non-matching sprites are rendered at reduced opacity.  Pass an empty
+     * string to restore all sprites to full opacity.  The filter persists
+     * across layout rebuilds.
+     */
+    void setDimFilter(const QString& query);
 
     /**
      * @brief Locks the scene rect to its current bounding rect, preventing auto-resize.
@@ -182,6 +216,11 @@ signals:
     void removeFramesRequested(const QStringList& paths);
 
     /**
+     * @brief Emitted when the user has chosen to remove frames smaller than the given dimensions.
+     */
+    void removeSmallFramesRequested(int minW, int minH);
+
+    /**
      * @brief Emitted when a sprite should be split into two sub-images.
      */
     void splitSpriteRequested(SpritePtr sprite, Qt::Orientation orientation, int localPos);
@@ -210,7 +249,6 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
-    void drawForeground(QPainter* painter, const QRectF& rect) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
@@ -227,7 +265,7 @@ private:
 
     QGraphicsScene* m_scene;
     QString m_searchQuery;
-    QRect m_searchCloseRect;
+    QString m_dimFilter;
 
     QVector<LayoutModel> m_models;
     QVector<QPoint> m_modelOffsets;
@@ -251,4 +289,7 @@ private:
     QGraphicsLineItem*  m_splitLineItem = nullptr;
     int                 m_splitItemIndex = -1;
     Qt::Orientation     m_splitOrientation = Qt::Horizontal;
+
+    bool    m_displayOnly   = false;
+    QLabel* m_loadingBanner = nullptr;
 };

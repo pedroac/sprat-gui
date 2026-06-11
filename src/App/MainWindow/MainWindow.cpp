@@ -1,6 +1,9 @@
 #include "MainWindow.h"
+#include "LayoutOrchestrator.h"
+#include "CliSetupController.h"
+#include "ProjectController.h"
 #include "PackedAtlasView.h"
-#include "AtlasLayoutWorkspace.h"
+#include "AtlasesManagementWorkspace.h"
 #include "UndoCommands.h"
 #include "AnimationCanvas.h"
 #include "MarkersDialog.h"
@@ -120,9 +123,9 @@ void MainWindow::removeSource(int index) {
     const QVector<ProjectSource> savedSources       = m_session->sources;
     const QVector<SmartFolder>   savedSmartFolders  = m_session->smartFolders;
     const QStringList            savedActivePaths   = m_session->activeFramePaths;
-    const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+    const QVector<AnimationTimeline> savedTimelines = m_session->activeAtlas().timelines;
     const int savedTimelineIdx = m_session->selectedTimelineIndex;
-    const QVector<LayoutModel>   savedLayoutModels  = m_session->layoutModels;
+    const QVector<LayoutModel>   savedLayoutModels  = m_session->activeAtlas().layoutModels;
 
     const ProjectSource removed = m_session->sources.at(index);
     const bool hasSmartFolder   = (index < m_session->smartFolders.size());
@@ -160,7 +163,7 @@ void MainWindow::removeSource(int index) {
     const QSet<QString> targetSet(toRemove.begin(), toRemove.end());
     for (const QString& p : toRemove)
         m_session->activeFramePaths.removeAll(p);
-    for (auto& model : m_session->layoutModels) {
+    for (auto& model : m_session->activeAtlas().layoutModels) {
         model.sprites.erase(
             std::remove_if(model.sprites.begin(), model.sprites.end(),
                 [&targetSet](const SpritePtr& s) {
@@ -170,15 +173,15 @@ void MainWindow::removeSource(int index) {
     }
 
     // Remove sprites from timelines; drop timelines that become empty.
-    for (auto& tl : m_session->timelines) {
+    for (auto& tl : m_session->activeAtlas().timelines) {
         for (int i = tl.frames.size() - 1; i >= 0; --i) {
             if (targetSet.contains(tl.frames[i]))
                 tl.frames.removeAt(i);
         }
     }
-    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
-        if (m_session->timelines[i].frames.isEmpty()) {
-            m_session->timelines.removeAt(i);
+    for (int i = m_session->activeAtlas().timelines.size() - 1; i >= 0; --i) {
+        if (m_session->activeAtlas().timelines[i].frames.isEmpty()) {
+            m_session->activeAtlas().timelines.removeAt(i);
             if (m_session->selectedTimelineIndex > i)
                 --m_session->selectedTimelineIndex;
             else if (m_session->selectedTimelineIndex == i)
@@ -199,7 +202,7 @@ void MainWindow::removeSource(int index) {
     // Callbacks for the undo command.
     auto postExecuteRedo = [this]() {
         if (m_session->sources.isEmpty() || m_session->activeFramePaths.isEmpty()) {
-            m_session->layoutModels.clear();
+            m_session->activeAtlas().layoutModels.clear();
             m_session->activeFramePaths.clear();
             m_session->layoutSourcePath.clear();
             m_session->layoutSourceIsList = false;
@@ -221,9 +224,9 @@ void MainWindow::removeSource(int index) {
             &m_session->sources,
             &m_session->smartFolders,
             &m_session->activeFramePaths,
-            &m_session->timelines,
+            &m_session->activeAtlas().timelines,
             &m_session->selectedTimelineIndex,
-            &m_session->layoutModels,
+            &m_session->activeAtlas().layoutModels,
             index,
             removed,
             removedSF,
@@ -279,7 +282,7 @@ void MainWindow::onSyncSourceRequested(int sourceIndex) {
             }
         } else if (src.type == SourceType::Folder) {
             // Layout sprites from this folder whose files no longer exist
-            for (const auto& model : m_session->layoutModels) {
+            for (const auto& model : m_session->activeAtlas().layoutModels) {
                 for (const auto& sprite : model.sprites) {
                     if (!sprite || !sprite->path.startsWith(src.originalPath)) continue;
                     if (!QFileInfo::exists(sprite->path)
@@ -362,7 +365,7 @@ void MainWindow::onSyncSourceRequested(int sourceIndex) {
     // Case 2: sprites that still exist on disk are loaded in the layout
     QStringList liveSpritePaths;
     if (!hasCachedFiles) {
-        for (const auto& model : m_session->layoutModels) {
+        for (const auto& model : m_session->activeAtlas().layoutModels) {
             for (const auto& sprite : model.sprites) {
                 if (!sprite) continue;
                 const bool fromCache  = !src.cachedFolderPath.isEmpty()
@@ -543,7 +546,7 @@ void MainWindow::onSyncLayoutRequested(int sourceIndex) {
     switch (src.type) {
     case SourceType::Folder: {
         int present = 0, missing = 0;
-        for (const auto& model : m_session->layoutModels) {
+        for (const auto& model : m_session->activeAtlas().layoutModels) {
             for (const auto& sprite : model.sprites) {
                 if (!sprite || !sprite->path.startsWith(src.originalPath)) continue;
                 if (QFileInfo::exists(sprite->path)) ++present;
@@ -641,7 +644,7 @@ void MainWindow::onSyncLayoutRequested(int sourceIndex) {
     switch (src.type) {
     case SourceType::Folder:
         ok = true;
-        for (const auto& model : m_session->layoutModels) {
+        for (const auto& model : m_session->activeAtlas().layoutModels) {
             for (const auto& sprite : model.sprites) {
                 if (!sprite || !sprite->path.startsWith(src.originalPath)) continue;
                 if (!QFileInfo::exists(sprite->path)) {
@@ -683,11 +686,11 @@ void MainWindow::onSyncLayoutRequested(int sourceIndex) {
 }
 
 bool MainWindow::syncLayoutToImage(const ProjectSource& src, QString& error) {
-    if (m_session->layoutModels.isEmpty()) {
+    if (m_session->activeAtlas().layoutModels.isEmpty()) {
         error = tr("No layout to export.");
         return false;
     }
-    const LayoutModel& model = m_session->layoutModels.first();
+    const LayoutModel& model = m_session->activeAtlas().layoutModels.first();
     if (model.atlasWidth <= 0 || model.atlasHeight <= 0) {
         error = tr("Invalid atlas dimensions.");
         return false;
@@ -711,7 +714,7 @@ bool MainWindow::syncLayoutToImage(const ProjectSource& src, QString& error) {
 
 bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
     QStringList framePaths;
-    for (const auto& model : m_session->layoutModels) {
+    for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             if (sprite && sprite->path.startsWith(src.cachedFolderPath))
                 framePaths.append(sprite->path);
@@ -722,202 +725,52 @@ bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
         return false;
     }
 
-    const int fps = (!m_session->timelines.isEmpty())
-                    ? m_session->timelines.first().fps : 8;
+    const int fps = (!m_session->activeAtlas().timelines.isEmpty())
+                    ? m_session->activeAtlas().timelines.first().fps : 8;
     AnimationTimeline tl;
     tl.fps    = fps;
     tl.frames = framePaths;
 
-    auto setLoadingFn = [this](bool v) { setLoading(v); };
-    auto setStatusFn  = [this](const QString& s) { m_statusLabel->setText(s); };
-
     const bool ok = AnimationExportService::exportAnimation(
-        this, {tl}, 0, m_session->layoutModels, fps,
-        src.originalPath, setLoadingFn, setStatusFn);
+        {tl}, 0, m_session->activeAtlas().layoutModels, fps,
+        src.originalPath,
+        {
+            [this](bool v) { setLoading(v); },
+            [this](const QString& s) { m_statusLabel->setText(s); }
+        });
     if (!ok) error = tr("GIF export failed (ImageMagick required).");
     return ok;
 }
 
+void MainWindow::syncFramePathsToNeutralAtlas(DropAction action) {
+    if (m_projectController)
+        m_projectController->syncFramePathsToNeutralAtlas(
+            static_cast<ProjectController::DropAction>(action));
+}
+
 void MainWindow::registerLoadedSource(const QString& sourcePath, DropAction action,
                                       const QString& cachedFolderPath) {
-    if (!m_session) return;
-
-    ProjectSource src;
-    if (!m_pendingImportUrl.isEmpty()) {
-        const QUrl url(m_pendingImportUrl);
-        QString baseName = QFileInfo(url.path()).fileName();
-        if (baseName.isEmpty()) baseName = url.host();
-        if (baseName.isEmpty()) baseName = m_pendingImportUrl;
-        src.name = makeUniqueSourceName(baseName);
-        src.type = SourceType::Url;
-        src.originalPath = m_pendingImportUrl;
-        m_pendingImportUrl.clear();
-    } else {
-        src.name = makeUniqueSourceName(QFileInfo(sourcePath).fileName());
-        const QString lower = sourcePath.toLower();
-        src.type = (lower.endsWith(".zip") || lower.endsWith(".tar")
-                    || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
-                    || lower.endsWith(".tar.bz2") || lower.endsWith(".tar.xz"))
-                   ? SourceType::Archive : SourceType::SingleImage;
-        src.originalPath = sourcePath;
-    }
-
-    if (!cachedFolderPath.isEmpty()) {
-        src.cachedFolderPath = cachedFolderPath;
-    } else {
-        src.cachedFolderPath = (action == DropAction::Replace) ? m_session->sourceFolder : QString();
-    }
-
-    if (action == DropAction::Replace) {
-        m_session->sources.clear();
-    } else {
-        // For Merge, sync if a source with the same path/URL already exists.
-        for (const ProjectSource& existing : m_session->sources) {
-            if (existing.originalPath == src.originalPath) {
-                // Strip any paths that were just copied into the duplicate subfolder
-                // and delete that subfolder so no orphan files linger.
-                if (!src.cachedFolderPath.isEmpty()) {
-                    const QString cleanedCache = QDir::cleanPath(src.cachedFolderPath);
-                    m_session->activeFramePaths.erase(
-                        std::remove_if(m_session->activeFramePaths.begin(),
-                                       m_session->activeFramePaths.end(),
-                                       [&cleanedCache](const QString& p) {
-                                           const QString cp = QDir::cleanPath(p);
-                                           return cp.startsWith(cleanedCache + QLatin1Char('/'))
-                                                  || cp == cleanedCache;
-                                       }),
-                        m_session->activeFramePaths.end());
-                    QDir(src.cachedFolderPath).removeRecursively();
-                }
-                onRunLayout(true);
-                return;
-            }
-        }
-    }
-    m_session->sources.append(src);
+    if (m_projectController)
+        m_projectController->registerLoadedSource(
+            sourcePath,
+            static_cast<ProjectController::DropAction>(action),
+            cachedFolderPath);
 }
 
 QString MainWindow::computeSourceSubfolderName(const QString& sourcePath) const {
-    QString name;
-    if (!m_pendingImportUrl.isEmpty()) {
-        const QUrl url(m_pendingImportUrl);
-        name = QFileInfo(url.path()).fileName();
-        if (name.isEmpty()) name = url.host();
-        if (name.isEmpty()) name = QStringLiteral("url-import");
-        // Strip query/fragment-derived junk after '.'
-        name = QFileInfo(name).baseName();
-    } else {
-        name = QFileInfo(sourcePath).baseName();
-    }
-    name = sanitizeSubfolderName(name);
-
-    // Ensure the subfolder name is unique so that different sources never share
-    // the same on-disk directory (each source is its own namespace).
-    if (m_session && !m_session->sourceFolder.isEmpty()) {
-        auto isUsed = [this](const QString& n) {
-            return QDir(QDir(m_session->sourceFolder).filePath(n)).exists();
-        };
-        if (isUsed(name)) {
-            int i = 2;
-            QString candidate;
-            do {
-                candidate = name + QLatin1Char('_') + QString::number(i++);
-            } while (isUsed(candidate) && i < 100);
-            name = candidate;
-        }
-    }
-    return name;
+    return m_projectController ? m_projectController->computeSourceSubfolderName(sourcePath) : QString();
 }
 
 QString MainWindow::makeUniqueSourceName(const QString& baseName) const {
-    if (!m_session) return baseName;
-    auto isUsed = [this](const QString& n) {
-        for (const ProjectSource& s : m_session->sources)
-            if (s.name == n) return true;
-        return false;
-    };
-    if (!isUsed(baseName)) return baseName;
-    int i = 2;
-    QString candidate;
-    do {
-        candidate = baseName + QLatin1Char('_') + QString::number(i++);
-    } while (isUsed(candidate) && i < 100);
-    return candidate;
+    return m_projectController ? m_projectController->makeUniqueSourceName(baseName) : baseName;
 }
 
 QStringList MainWindow::copyFramesToSourceSubfolder(const QStringList& frames,
                                                     const QString& subfolderPath,
                                                     bool overwriteDuplicates) {
-    QDir dstDir(subfolderPath);
-    dstDir.mkpath(QStringLiteral("."));
-
-    const QString originalRootPath = m_session->currentFolder;
-    QDir originalRootDir(originalRootPath);
-
-    QStringList result;
-    result.reserve(frames.size());
-
-    for (const QString& path : frames) {
-        const QFileInfo srcInfo(path);
-        const QString absPath = srcInfo.absoluteFilePath();
-
-        // Already inside the destination subfolder — keep as-is
-        const QString canonicalDst = QDir(subfolderPath).canonicalPath();
-        if (!canonicalDst.isEmpty() && absPath.startsWith(canonicalDst + QLatin1Char('/'))) {
-            result.append(absPath);
-            continue;
-        }
-
-        // Compute relative path to preserve subfolder structure
-        QString relPath;
-        if (!originalRootPath.isEmpty() && absPath.startsWith(originalRootPath)) {
-            relPath = originalRootDir.relativeFilePath(absPath);
-        } else {
-            relPath = srcInfo.fileName();
-        }
-
-        QString dst = dstDir.filePath(relPath);
-        const QFileInfo dstInfo(dst);
-
-        // Create intermediate subdirectories
-        const QString dstDirPath = dstInfo.absolutePath();
-        if (!QDir(dstDirPath).exists()) {
-            QDir().mkpath(dstDirPath);
-        }
-
-        // Handle existing files
-        if (dstInfo.exists()) {
-            if (overwriteDuplicates) {
-                QFile::remove(dst);
-            } else {
-                const QString baseName = dstInfo.completeBaseName();
-                const QString suffix   = dstInfo.suffix();
-                bool resolved = false;
-                for (int i = 1; i <= 99; ++i) {
-                    const QString candidate = QDir(dstDirPath).filePath(
-                        QStringLiteral("%1_%2.%3").arg(baseName).arg(i).arg(suffix));
-                    if (!QFileInfo::exists(candidate)) {
-                        dst = candidate;
-                        resolved = true;
-                        break;
-                    }
-                }
-                if (!resolved) {
-                    qWarning() << "copyFramesToSourceSubfolder: unresolvable conflict for" << relPath;
-                    result.append(absPath);
-                    continue;
-                }
-            }
-        }
-
-        if (QFile::copy(absPath, dst)) {
-            result.append(dst);
-        } else {
-            qWarning() << "copyFramesToSourceSubfolder: copy failed" << absPath << "->" << dst;
-            result.append(absPath);
-        }
-    }
-    return result;
+    return m_projectController
+               ? m_projectController->copyFramesToSourceSubfolder(frames, subfolderPath, overwriteDuplicates)
+               : frames;
 }
 
 void MainWindow::openSettingsDialogForSection(SettingsDialog::Section section) {
@@ -927,6 +780,7 @@ void MainWindow::openSettingsDialogForSection(SettingsDialog::Section section) {
     if (dlg.exec() == QDialog::Accepted) {
         m_settings = dlg.getSettings();
         m_cliPaths = dlg.getCliPaths();
+        if (m_cliSetup) m_cliSetup->setCliBaseDir(m_cliPaths.baseDir);
         applySettings();
         CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
         checkCliTools();
@@ -1020,6 +874,78 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 newPoints,
                 [this]() {
                     m_previewView->overlay()->updateLayout();
+                    if (m_animCanvas && m_animCanvas->overlay())
+                        m_animCanvas->overlay()->updateLayout();
+                    refreshHandleCombo();
+                },
+                std::move(coTargets)
+            ));
+        });
+    }
+
+    if (m_animCanvas && m_animCanvas->overlay()) {
+        connect(m_animCanvas->overlay(), &EditorOverlayItem::pivotDragFinished,
+                this, [this](int oldX, int oldY, int newX, int newY) {
+            if (!m_session->selectedSprite) return;
+            const CoordUnit unit = m_settings.coordUnit;
+            const QSize activeSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
+            const double relX = (unit == CoordUnit::Percent && activeSize.width() > 0)
+                ? (double(newX) * 100.0 / activeSize.width())
+                : double(newX);
+            const double relY = (unit == CoordUnit::Percent && activeSize.height() > 0)
+                ? (double(newY) * 100.0 / activeSize.height())
+                : double(newY);
+            QVector<SetPivotCommand::CoTarget> coTargets;
+            if (m_settings.propagateEditsToChecked) {
+                for (const auto& sprite : m_session->selectedSprites) {
+                    if (sprite && sprite != m_session->selectedSprite) {
+                        const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
+                        if (unit == CoordUnit::Percent) {
+                            const QSize coSize = spriteCoordinateSpaceSize(sprite);
+                            sprite->pivotX = coSize.width() > 0
+                                ? qRound(relX * coSize.width() / 100.0)
+                                : newX;
+                            sprite->pivotY = coSize.height() > 0
+                                ? qRound(relY * coSize.height() / 100.0)
+                                : newY;
+                        } else {
+                            sprite->pivotX = newX;
+                            sprite->pivotY = newY;
+                        }
+                        const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
+                        if (oldPos != newPos) {
+                            coTargets.append({sprite, oldPos, newPos});
+                        }
+                    }
+                }
+            }
+            AnimationPreviewService::invalidateBounds();
+            updateOnionSkinDisplay();
+            m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
+                                                  oldX, oldY, newX, newY, true,
+                                                  std::move(coTargets)));
+        });
+        connect(m_animCanvas->overlay(), &EditorOverlayItem::markerDragFinished,
+                this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
+            if (!m_session->selectedSprite) return;
+            QVector<SetMarkersCommand::CoTarget> coTargets;
+            if (m_settings.propagateEditsToChecked) {
+                for (const auto& sprite : m_session->selectedSprites) {
+                    if (sprite && sprite != m_session->selectedSprite) {
+                        const QVector<NamedPoint> oldCoPoints = sprite->points;
+                        sprite->points = newPoints;
+                        coTargets.append({sprite, oldCoPoints, sprite->points});
+                    }
+                }
+            }
+            m_undoStack->push(new SetMarkersCommand(
+                m_session->selectedSprite,
+                oldPoints,
+                newPoints,
+                [this]() {
+                    m_previewView->overlay()->updateLayout();
+                    if (m_animCanvas && m_animCanvas->overlay())
+                        m_animCanvas->overlay()->updateLayout();
                     refreshHandleCombo();
                 },
                 std::move(coTargets)
@@ -1046,11 +972,78 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setAcceptDrops(true);
 #endif
 
-    m_layoutRunner = new LayoutRunner(this);
-    m_layoutRunner->setMutex(&m_toolMutex);
-    connect(m_layoutRunner, &LayoutRunner::finished, this, &MainWindow::onLayoutFinished);
-    connect(m_layoutRunner, &LayoutRunner::errorOccurred, this, &MainWindow::onLayoutError);
-    connect(m_layoutRunner, &LayoutRunner::logMessage, this, &MainWindow::appendCliLog);
+    // Create LayoutOrchestrator
+    {
+        LayoutOrchestrator::Config cfg;
+        cfg.session         = m_session;
+        cfg.canvas          = m_canvas;
+        cfg.profileCombo    = m_profileCombo;
+        cfg.resolutionCombo = m_sourceResolutionCombo;
+        cfg.atlasViewStack       = m_atlasViewStack;
+        cfg.atlasMgmtWorkspace   = m_atlasesManagementWorkspace;
+        cfg.layoutBinary         = m_spratLayoutBin;
+        cfg.activeFramesAreInSourceFolder = [this]() { return activeFramesAreInSourceFolder(); };
+        cfg.copyActiveFramesToSourceFolder = [this](bool overwrite) { copyActiveFramesToSourceFolder(overwrite); };
+        cfg.selectedProfileDefinition = [this](SpratProfile& out) { return selectedProfileDefinition(out); };
+        cfg.layoutParserFolder = [this]() { return layoutParserFolder(); };
+        cfg.sourceFolderMatchesActiveFrames = [this]() { return sourceFolderMatchesActiveFrames(); };
+        cfg.configuredProfiles = [this]() { return configuredProfiles(); };
+        m_layoutOrchestrator = new LayoutOrchestrator(cfg, this);
+
+        // Sync initial settings
+        m_layoutOrchestrator->setSyncMode(m_settings.syncMode);
+        m_layoutOrchestrator->setDeduplicateMode(m_settings.deduplicateMode);
+        m_layoutOrchestrator->setLayoutZoomOnChange(m_settings.layoutZoomOnChange);
+        m_layoutOrchestrator->setCLIReady(m_cliReady);
+        m_layoutOrchestrator->setMergeReplaceAllDuplicates(m_mergeReplaceAllDuplicates);
+        m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
+
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::statusMessageChanged,
+                this, [this](const QString& msg) { if (m_statusLabel) m_statusLabel->setText(msg); });
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::loadingStateChanged,
+                this, &MainWindow::setLoading);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::spriteTreeRefreshNeeded,
+                this, &MainWindow::refreshSpriteTree);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::uiUpdateNeeded,
+                this, &MainWindow::updateUiState);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::mainContentViewUpdateNeeded,
+                this, &MainWindow::updateMainContentView);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::openSourceFolderActionUpdateNeeded,
+                this, &MainWindow::updateOpenSourceFolderAction);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::cliDiagnosticsUpdateNeeded,
+                this, &MainWindow::updateCliDiagnostics);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::activeFrameListUpdateNeeded,
+                this, &MainWindow::populateActiveFrameListFromModel);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::initSourceFolderWatcherNeeded,
+                this, &MainWindow::initializeSourceFolderWatcher);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::manualFrameLabelUpdateNeeded,
+                this, &MainWindow::updateManualFrameLabel);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::pendingProjectPayloadReady,
+                this, &MainWindow::applyProjectPayload);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::selectSpritesByPathsRequested,
+                this, [this](const QStringList& paths, const QString& primary) {
+                    if (m_canvas) m_canvas->selectSpritesByPaths(paths, primary);
+                });
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::tempDirsCleanupNeeded,
+                this, [this]() { if (m_projectController) m_projectController->clearTempDirs(); });
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::atlasDimsUpdated,
+                this, [this](const QString& text) {
+                    if (m_atlasDimsLabel) {
+                        m_atlasDimsLabel->setText(text);
+                        m_atlasDimsLabel->setVisible(true);
+                    }
+                });
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::profileFallbackRequested,
+                this, [this](const QString& profile) {
+                    if (!m_profileCombo) return;
+                    const QSignalBlocker blocker(m_profileCombo);
+                    m_profileCombo->setCurrentIndex(m_profileCombo->findData(profile));
+                    m_currentProfile = profile;
+                    if (m_layoutOrchestrator) m_layoutOrchestrator->setCurrentProfile(profile);
+                });
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::cliReadyCheckNeeded,
+                this, &MainWindow::checkCliTools);
+    }
 
     m_folderWatcher = new SourceFolderWatcher(this);
     connect(m_folderWatcher, &SourceFolderWatcher::filesAdded,
@@ -1063,15 +1056,53 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 #ifndef SPRAT_EMBEDDED_CLI
     m_process = new QProcess(this);
 #endif
-    m_cliToolInstaller = new CliToolInstaller(this);
 #ifndef SPRAT_EMBEDDED_CLI
     connect(m_process, &QProcess::finished, this, &MainWindow::onProcessFinished);
     connect(m_process, &QProcess::errorOccurred, this, &MainWindow::onProcessError);
 #endif
-    connect(m_cliToolInstaller, &CliToolInstaller::installFinished, this, &MainWindow::onInstallFinished);
-    connect(m_cliToolInstaller, &CliToolInstaller::installStarted, this, &MainWindow::showCliInstallOverlay);
-    connect(m_cliToolInstaller, &CliToolInstaller::downloadProgress, this, &MainWindow::onDownloadProgress);
-    connect(m_cliToolInstaller, &CliToolInstaller::installLog, this, &MainWindow::onCliInstallLog);
+
+    // Create CliSetupController
+    m_cliSetup = new CliSetupController(this, this);
+    connect(m_cliSetup, &CliSetupController::statusMessageChanged,
+            this, [this](const QString& msg) { if (m_statusLabel) m_statusLabel->setText(msg); });
+    connect(m_cliSetup, &CliSetupController::cliReady, this, [this]() {
+        m_cliReady = true;
+        if (m_layoutOrchestrator) m_layoutOrchestrator->setCLIReady(true);
+        updateUiState();
+        scheduleLayoutRebuild(true);
+    });
+    connect(m_cliSetup, &CliSetupController::cliFailed, this, [this]() {
+        m_cliReady = false;
+        if (m_layoutOrchestrator) m_layoutOrchestrator->setCLIReady(false);
+        updateUiState();
+    });
+    connect(m_cliSetup, &CliSetupController::binaryPathsResolved, this, [this](const CliPaths& paths) {
+        m_spratLayoutBin  = paths.layoutBinary;
+        m_spratPackBin    = paths.packBinary;
+        m_spratConvertBin = paths.convertBinary;
+        m_spratFramesBin  = paths.framesBinary;
+        m_spratUnpackBin  = paths.unpackBinary;
+        if (m_layoutOrchestrator) m_layoutOrchestrator->updateLayoutBinary(paths.layoutBinary);
+        if (m_projectController) {
+            m_projectController->setFramesBinary(paths.framesBinary);
+            m_projectController->setConvertBinary(paths.convertBinary);
+            m_projectController->setUnpackBinary(paths.unpackBinary);
+        }
+    });
+    connect(m_cliSetup, &CliSetupController::installOverlayShowNeeded,
+            this, &MainWindow::showCliInstallOverlay);
+    connect(m_cliSetup, &CliSetupController::installOverlayHideNeeded,
+            this, &MainWindow::hideCliInstallOverlay);
+    connect(m_cliSetup, &CliSetupController::installProgress,
+            this, &MainWindow::onDownloadProgress);
+    connect(m_cliSetup, &CliSetupController::installLog,
+            this, &MainWindow::onCliInstallLog);
+    connect(m_cliSetup, &CliSetupController::installFinished,
+            this, [this](bool success) {
+                // overlay hide is handled by installOverlayHideNeeded signal
+                Q_UNUSED(success)
+            });
+
     QTimer::singleShot(AppConstants::kCliStartupDelayMs, this, &MainWindow::checkCliTools);
     m_animTimer = new QTimer(this);
     connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
@@ -1107,11 +1138,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     m_autosaveTimer->start(AppConstants::kAutosaveIntervalMs);
 
-    connect(&m_projectLoadWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onProjectLoadFinished);
-    connect(&m_zipDiscoveryWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onZipDiscoveryFinished);
-    connect(&m_frameDetectionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameDetectionFinished);
-    connect(&m_tarExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onTarExtractionFinished);
-    connect(&m_frameExtractionWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onFrameExtractionFinished);
+    // Create ProjectController and wire its signals to MainWindow processing slots
+    m_projectController = new ProjectController(m_session, this);
+    connect(m_projectController, &ProjectController::projectLoadFinished,
+            this, &MainWindow::onProjectLoadFinished);
+    connect(m_projectController, &ProjectController::zipDiscoveryFinished,
+            this, &MainWindow::onZipDiscoveryFinished);
+    connect(m_projectController, &ProjectController::frameDetectionFinished,
+            this, &MainWindow::onFrameDetectionFinished);
+    connect(m_projectController, &ProjectController::tarExtractionFinished,
+            this, &MainWindow::onTarExtractionFinished);
+    connect(m_projectController, &ProjectController::frameExtractionFinished,
+            this, &MainWindow::onFrameExtractionFinished);
+    connect(m_projectController, &ProjectController::runLayoutQuietNeeded,
+            this, [this]() { onRunLayout(true); });
+
     connect(&m_exportWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onExportFinished);
 
     m_isRestoringProject = false;
@@ -1183,8 +1224,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 
     // Clean up temporary folders before closing
-    if (m_session) {
-        m_session->clearTempDirs();
+    if (m_projectController) {
+        m_projectController->clearTempDirs();
     }
 
     // Allow the close event to proceed
@@ -1207,11 +1248,9 @@ MainWindow::~MainWindow() {
     m_isCanceled = true;
 
     // Ensure all background tasks are stopped/finished before we destroy members
-    m_zipDiscoveryWatcher.waitForFinished();
-    m_projectLoadWatcher.waitForFinished();
-    m_frameDetectionWatcher.waitForFinished();
-    m_tarExtractionWatcher.waitForFinished();
-    m_frameExtractionWatcher.waitForFinished();
+    if (m_projectController) {
+        m_projectController->cancelAll();
+    }
     m_exportWatcher.waitForFinished();
 
     if (m_autosaveTimer) {
@@ -1227,7 +1266,7 @@ MainWindow::~MainWindow() {
     // Explicitly clean up temporary folders (from ZIP extraction, etc.)
     // when the app is closing (as a safety measure in case closeEvent wasn't called)
     if (m_session) {
-        m_session->clearTempDirs();
+        m_projectController->clearTempDirs();
     }
 }
 
@@ -1339,7 +1378,7 @@ bool MainWindow::ensureFrameListInput() {
 
 void MainWindow::populateActiveFrameListFromModel() {
     m_session->activeFramePaths.clear();
-    for (const auto& model : m_session->layoutModels) {
+    for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             m_session->activeFramePaths.append(sprite->path);
         }
@@ -1362,7 +1401,7 @@ void MainWindow::updateManualFrameLabel() {
 // ---------------------------------------------------------------------------
 bool MainWindow::hasDuplicateTimelineName(const QString& timelineName) const {
     if (!m_session) return false;
-    for (const auto& timeline : m_session->timelines) {
+    for (const auto& timeline : m_session->activeAtlas().timelines) {
         if (timeline.name == timelineName) {
             return true;
         }
@@ -1470,18 +1509,18 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
         m_session->lastSuccessfulProfile.clear();
     }
 
-    if (m_atlasLayoutWorkspace) {
-        QStringList names, labels;
-        for (const SpratProfile& p : profiles) {
-            const QString name = p.name.trimmed();
-            if (!name.isEmpty() && !names.contains(name)) {
-                names  << name;
-                labels << (p.label.trimmed().isEmpty() ? name : p.label.trimmed());
-            }
+    QStringList profileNames, profileLabels;
+    for (const SpratProfile& p : profiles) {
+        const QString name = p.name.trimmed();
+        if (!name.isEmpty() && !profileNames.contains(name)) {
+            profileNames  << name;
+            profileLabels << (p.label.trimmed().isEmpty() ? name : p.label.trimmed());
         }
-        const QStringList prevEnabled = m_atlasLayoutWorkspace->enabledProfiles();
-        m_atlasLayoutWorkspace->setProfiles(names, labels, m_currentProfile,
-            prevEnabled.isEmpty() ? names : prevEnabled);
+    }
+
+    if (m_atlasesManagementWorkspace) {
+        const QStringList prevEnabled = m_atlasesManagementWorkspace->enabledProfiles();
+        m_atlasesManagementWorkspace->setProfiles(profileNames, profileLabels, m_currentProfile, prevEnabled);
     }
 }
 
@@ -1592,10 +1631,144 @@ void MainWindow::onAddFramesRequested() {
 }
 
 
+void MainWindow::syncExcludedAtlas() {
+    if (!m_session) return;
+    const int excIdx = m_session->excludedAtlasIndex();
+    if (excIdx < 0 || excIdx >= m_session->atlases.size()) return;
+    AtlasEntry& excl = m_session->atlases[excIdx];
+    excl.spritePaths.clear();
+
+    // Collect excluded paths from sources
+    for (const auto& src : m_session->sources) {
+        const QString base = QDir::cleanPath(
+            src.cachedFolderPath.isEmpty() ? src.originalPath : src.cachedFolderPath);
+        for (const QString& rel : src.excludedFiles)
+            excl.spritePaths.append(base + '/' + rel);
+    }
+    // Collect excluded paths from smart folders (legacy)
+    for (const auto& sf : m_session->smartFolders) {
+        for (const QString& rel : sf.excludedFiles) {
+            const QString abs = sf.path + '/' + rel;
+            if (!excl.spritePaths.contains(abs))
+                excl.spritePaths.append(abs);
+        }
+    }
+
+    // Remove excluded sprites from every non-excluded atlas
+    const QSet<QString> exclSet(excl.spritePaths.begin(), excl.spritePaths.end());
+    for (auto& a : m_session->atlases) {
+        if (a.isExcluded) continue;
+        a.spritePaths.erase(
+            std::remove_if(a.spritePaths.begin(), a.spritePaths.end(),
+                [&exclSet](const QString& sp) {
+                    return exclSet.contains(QFileInfo(sp).absoluteFilePath())
+                        || exclSet.contains(sp);
+                }),
+            a.spritePaths.end());
+    }
+}
+
+void MainWindow::addToExcludedFiles(const QString& absPath) {
+    const QString cleaned = QDir::cleanPath(absPath);
+    for (auto& src : m_session->sources) {
+        const QString base = QDir::cleanPath(
+            src.cachedFolderPath.isEmpty() ? src.originalPath : src.cachedFolderPath);
+        if (cleaned.startsWith(base + '/')) {
+            const QString rel = cleaned.mid(base.length() + 1);
+            if (!src.excludedFiles.contains(rel)) src.excludedFiles.append(rel);
+            return;
+        }
+    }
+    for (auto& sf : m_session->smartFolders) {
+        if (!sf.path.isEmpty() && cleaned.startsWith(sf.path + '/')) {
+            const QString rel = cleaned.mid(sf.path.length() + 1);
+            if (!sf.excludedFiles.contains(rel)) sf.excludedFiles.append(rel);
+            return;
+        }
+    }
+}
+
+void MainWindow::removeFromExcludedFiles(const QString& absPath) {
+    const QString cleaned = QDir::cleanPath(absPath);
+    for (auto& src : m_session->sources) {
+        const QString base = QDir::cleanPath(
+            src.cachedFolderPath.isEmpty() ? src.originalPath : src.cachedFolderPath);
+        if (cleaned.startsWith(base + '/')) {
+            src.excludedFiles.removeAll(cleaned.mid(base.length() + 1));
+            return;
+        }
+    }
+    for (auto& sf : m_session->smartFolders) {
+        if (!sf.path.isEmpty() && cleaned.startsWith(sf.path + '/')) {
+            sf.excludedFiles.removeAll(cleaned.mid(sf.path.length() + 1));
+            return;
+        }
+    }
+}
+
 void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     if (paths.isEmpty()) {
         return;
     }
+
+    // In AtlasesManagement Layout mode, "remove" means move to the neutral (Default)
+    // atlas. If this already IS the neutral atlas, remove from the session entirely.
+    // Both operations mirror Navigation-mode behaviour and bypass the undo stack.
+    if (m_activeWorkspace == Workspace::AtlasesManagement
+        && m_atlasesManagementWorkspace
+        && m_atlasesManagementWorkspace->viewMode() == AtlasesManagementWorkspace::ViewMode::Layout
+        && m_session) {
+
+        const int srcIdx = m_session->activeAtlasIndex;
+        if (srcIdx >= 0 && srcIdx < m_session->atlases.size()) {
+            AtlasEntry& src = m_session->atlases[srcIdx];
+
+            // Only act on paths that belong to this atlas.
+            QStringList targets;
+            for (const QString& p : paths)
+                if (src.spritePaths.contains(p))
+                    targets.append(p);
+
+            if (!targets.isEmpty()) {
+                // Exclude sprites: persist to excludedFiles and sync the excluded atlas.
+                for (const QString& p : targets)
+                    addToExcludedFiles(p);
+                syncExcludedAtlas();
+
+                // Deselect any excluded sprite.
+                if (m_session->selectedSprite && targets.contains(m_session->selectedSprite->path))
+                    onSpriteSelected(nullptr);
+                m_session->selectedSprites.erase(
+                    std::remove_if(m_session->selectedSprites.begin(),
+                                   m_session->selectedSprites.end(),
+                                   [&targets](const SpritePtr& s) {
+                                       return s && targets.contains(s->path);
+                                   }),
+                    m_session->selectedSprites.end());
+
+                // Strip from activeFramePaths and layoutModels.
+                for (const QString& p : targets)
+                    m_session->activeFramePaths.removeAll(p);
+                const QSet<QString> removedSet(targets.begin(), targets.end());
+                for (auto& model : src.layoutModels) {
+                    QVector<SpritePtr> kept;
+                    kept.reserve(model.sprites.size());
+                    for (const auto& s : model.sprites)
+                        if (!removedSet.contains(s->path))
+                            kept.append(s);
+                    model.sprites = std::move(kept);
+                }
+
+                emit m_session->atlasesChanged();
+                m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+                if (m_canvas) m_canvas->setModels(src.layoutModels);
+                refreshSpriteTree();
+                scheduleLayoutRebuild(true);
+            }
+        }
+        return;
+    }
+
     QStringList targets;
     for (const QString& path : paths) {
         if (m_session->activeFramePaths.contains(path)) {
@@ -1606,8 +1779,15 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         return;
     }
 
+    // Persist exclusion so sprites appear in the "Excluded" section.
+    for (const QString& p : targets)
+        addToExcludedFiles(p);
+    syncExcludedAtlas();
+    if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+        m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+
     QSet<QString> timelineNames;
-    for (const auto& timeline : m_session->timelines) {
+    for (const auto& timeline : m_session->activeAtlas().timelines) {
         for (const QString& frame : timeline.frames) {
             if (targets.contains(frame)) {
                 timelineNames.insert(timeline.name);
@@ -1635,9 +1815,9 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     );
 
     const QStringList savedActivePaths = m_session->activeFramePaths;
-    const QVector<AnimationTimeline> savedTimelines = m_session->timelines;
+    const QVector<AnimationTimeline> savedTimelines = m_session->activeAtlas().timelines;
     const int savedTimelineIdx = m_session->selectedTimelineIndex;
-    const QVector<LayoutModel> savedLayoutModels = m_session->layoutModels;
+    const QVector<LayoutModel> savedLayoutModels = m_session->activeAtlas().layoutModels;
 
     auto postExecuteRedo = [this, targets]() {
         if (m_session->activeFramePaths.isEmpty()) {
@@ -1647,7 +1827,7 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
                 QFile::remove(m_session->frameListPath);
                 m_session->frameListPath.clear();
             }
-            m_session->layoutModels.clear();
+            m_session->activeAtlas().layoutModels.clear();
             if (m_canvas) m_canvas->clearCanvas();
             m_session->selectedSprites.clear();
             m_session->selectedSprite.reset();
@@ -1685,8 +1865,8 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     // potential future divergence (e.g. adding to the exclusion list for smart folders).
     if (shouldDeleteRemovedSpritesFromSource()) {
         m_undoStack->push(new RemoveSpritesCommand(
-            &m_session->activeFramePaths, &m_session->timelines,
-            &m_session->selectedTimelineIndex, &m_session->layoutModels,
+            &m_session->activeFramePaths, &m_session->activeAtlas().timelines,
+            &m_session->selectedTimelineIndex, &m_session->activeAtlas().layoutModels,
             targets,
             savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
             [this]() { return ensureFrameListInput(); },
@@ -1697,8 +1877,8 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     }
 
     m_undoStack->push(new RemoveFramesCommand(
-        &m_session->activeFramePaths, &m_session->timelines,
-        &m_session->selectedTimelineIndex, &m_session->layoutModels,
+        &m_session->activeFramePaths, &m_session->activeAtlas().timelines,
+        &m_session->selectedTimelineIndex, &m_session->activeAtlas().layoutModels,
         targets,
         savedActivePaths, savedTimelines, savedTimelineIdx, savedLayoutModels,
         [this]() { return ensureFrameListInput(); },
@@ -1827,11 +2007,7 @@ void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orient
  * @brief Opens the settings dialog.
  */
 void MainWindow::onSettingsClicked() {
-    openSettingsDialogForSection(SettingsDialog::Section::Styles);
-}
-
-void MainWindow::onSettingsStylesClicked() {
-    openSettingsDialogForSection(SettingsDialog::Section::Styles);
+    openSettingsDialogForSection(SettingsDialog::Section::FramesEditor);
 }
 
 void MainWindow::onSettingsSpritesheetClicked() {
@@ -1840,6 +2016,14 @@ void MainWindow::onSettingsSpritesheetClicked() {
 
 void MainWindow::onSettingsFramesEditorClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::FramesEditor);
+}
+
+void MainWindow::onSettingsAtlasLayoutClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::AtlasLayout);
+}
+
+void MainWindow::onSettingsExportationClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::Exportation);
 }
 
 #ifndef Q_OS_WASM
@@ -1871,8 +2055,8 @@ void MainWindow::onManageProfiles() {
 
     if (m_exportWorkspaceActive && m_exportWorkspace) {
         // Re-populate the export workspace profile combo with the updated definitions
-        const QStringList enabled = m_atlasLayoutWorkspace
-            ? m_atlasLayoutWorkspace->enabledProfiles() : QStringList();
+        const QStringList enabled = m_atlasesManagementWorkspace
+            ? m_atlasesManagementWorkspace->enabledProfiles() : QStringList();
         QVector<SpratProfile> toExport;
         for (const SpratProfile& p : profiles) {
             if (enabled.isEmpty() || enabled.contains(p.name.trimmed()))
@@ -1897,7 +2081,7 @@ void MainWindow::onManageProfiles() {
 
 void MainWindow::updateOnionSkinDisplay() {
     if (!m_previewView || !m_session) return;
-    if (!m_settings.onionSkinEnabled) { m_previewView->setGhostSprites({}); return; }
+    if (m_settings.onionSkinOpacity == 0) { m_previewView->setGhostSprites({}); return; }
     const QPoint activePivot = m_session->selectedSprite
         ? QPoint(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY)
         : QPoint();
@@ -1916,6 +2100,9 @@ void MainWindow::applySettings() {
     }
     if (m_packedAtlasView) {
         m_packedAtlasView->setSettings(m_settings);
+    }
+    if (m_exportLayoutCanvas) {
+        m_exportLayoutCanvas->setSettings(m_settings);
     }
 
     // Update source folder watcher based on sync mode
@@ -1937,12 +2124,19 @@ void MainWindow::applySettings() {
     if (m_settings.syncMode != SyncMode::None
         && m_appliedSyncMode == SyncMode::None
         && m_session
-        && !m_session->layoutModels.isEmpty()
+        && !m_session->activeAtlas().layoutModels.isEmpty()
         && m_canvas) {
         // Sync mode enabled - rebuild immediately
         scheduleLayoutRebuild(true);
     }
     m_appliedSyncMode = m_settings.syncMode;
+
+    // Propagate settings changes to LayoutOrchestrator
+    if (m_layoutOrchestrator) {
+        m_layoutOrchestrator->setSyncMode(m_settings.syncMode);
+        m_layoutOrchestrator->setDeduplicateMode(m_settings.deduplicateMode);
+        m_layoutOrchestrator->setLayoutZoomOnChange(m_settings.layoutZoomOnChange);
+    }
 
     // Refresh folder label to add/remove the "(watching)" suffix
     if (m_session && !m_session->currentFolder.isEmpty())
@@ -2132,7 +2326,7 @@ void MainWindow::onFolderWatcherFilesModified(const QStringList& paths) {
 void MainWindow::onSyncNowRequested() {
     qInfo() << "[SyncNow] Button clicked";
     qInfo() << "[SyncNow] m_session->sourceFolder:" << m_session->sourceFolder;
-    qInfo() << "[SyncNow] m_session->sourceFolderIsTemp:" << m_sourceFolderIsTemp;
+    qInfo() << "[SyncNow] m_session->sourceFolderIsTemp:" << (m_projectController ? m_projectController->isSourceFolderTemp() : false);
 
     if (m_session->sourceFolder.isEmpty()) {
         qWarning() << "[SyncNow] Source folder is empty!";
@@ -2145,7 +2339,7 @@ void MainWindow::onSyncNowRequested() {
 }
 
 void MainWindow::performFolderSync() {
-    if (m_session->layoutModels.isEmpty()) {
+    if (m_session->activeAtlas().layoutModels.isEmpty()) {
         qWarning() << "Cannot sync: no layout models loaded";
         return;
     }
@@ -2155,11 +2349,11 @@ void MainWindow::performFolderSync() {
     if (!m_session->smartFolders.isEmpty()) {
         syncResult = FolderSyncService::detectChangesFromSmartFolders(
             m_session->smartFolders,
-            m_session->layoutModels.first().sprites);
+            m_session->activeAtlas().layoutModels.first().sprites);
     } else {
         syncResult = FolderSyncService::detectChanges(
             m_session->sourceFolder,
-            m_session->layoutModels.first().sprites);
+            m_session->activeAtlas().layoutModels.first().sprites);
     }
 
     if (!syncResult.error.isEmpty()) {
@@ -2178,11 +2372,11 @@ void MainWindow::performFolderSync() {
 
     // Merge changes into layout
     if (!FolderSyncService::mergeSyncResults(
-            m_session->layoutModels.first(), syncResult, m_session->sourceFolder)) {
+            m_session->activeAtlas().layoutModels.first(), syncResult, m_session->sourceFolder)) {
         MessageDialog::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
         return;
     }
-    ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
+    ensureUniqueSpriteNames(m_session->activeAtlas().layoutModels, m_session->sourceFolder);
 
     // Update activeFramePaths to match the modified layout
     populateActiveFrameListFromModel();
@@ -2243,7 +2437,7 @@ void MainWindow::performManualSync() {
         return;
     }
 
-    if (m_session->layoutModels.isEmpty()) {
+    if (m_session->activeAtlas().layoutModels.isEmpty()) {
         qWarning() << "[Sync] No layout models loaded";
         MessageDialog::information(this, tr("Sync"), tr("No layout loaded."));
         return;
@@ -2263,9 +2457,9 @@ void MainWindow::performManualSync() {
     }
 
     qInfo() << "[Sync] Using folder:" << m_session->sourceFolder;
-    qInfo() << "[Sync] Layout has" << m_session->layoutModels.first().sprites.size() << "sprites";
+    qInfo() << "[Sync] Layout has" << m_session->activeAtlas().layoutModels.first().sprites.size() << "sprites";
 
-    LayoutModel& layout = m_session->layoutModels.first();
+    LayoutModel& layout = m_session->activeAtlas().layoutModels.first();
     int removedCount = 0;
     int addedCount = 0;
 
@@ -2330,7 +2524,7 @@ void MainWindow::performManualSync() {
 
     qInfo() << "[Sync] Step 3: Updating layout data...";
     qInfo() << "[Sync]   Removed:" << removedCount << "Added:" << addedCount;
-    ensureUniqueSpriteNames(m_session->layoutModels, m_session->sourceFolder);
+    ensureUniqueSpriteNames(m_session->activeAtlas().layoutModels, m_session->sourceFolder);
 
     // Step 3: Update activeFramePaths and frame list
     populateActiveFrameListFromModel();
@@ -2378,7 +2572,7 @@ void MainWindow::onWatchModePeriodicCheck() {
     }
 
     // Validate session and basic state
-    if (!m_session || m_session->layoutModels.isEmpty() || m_session->sourceFolder.isEmpty()) {
+    if (!m_session || m_session->activeAtlas().layoutModels.isEmpty() || m_session->sourceFolder.isEmpty()) {
         return;
     }
 
@@ -2391,7 +2585,7 @@ void MainWindow::onWatchModePeriodicCheck() {
     }
 
     // Check for any changes: missing sprites or new files in the folder
-    const LayoutModel& layout = m_session->layoutModels.first();
+    const LayoutModel& layout = m_session->activeAtlas().layoutModels.first();
     bool needsSync = false;
 
     for (const auto& sprite : layout.sprites) {
@@ -2498,11 +2692,11 @@ void MainWindow::ensureSourceFolder() {
     auto tempDir = std::make_unique<QTemporaryDir>();
     if (tempDir->isValid()) {
         m_session->sourceFolder = tempDir->path();
-        m_sourceFolderIsTemp = true;
+        if (m_projectController) m_projectController->setSourceFolderIsTemp(true);
         // Store temp dir in session separately - it must persist while sprites
         // reference files in it. Not added to tempDirs list which is cleared
         // during layout operations.
-        m_session->setSourceFolderTempDir(std::move(tempDir));
+        if (m_projectController) m_projectController->setSourceFolderTempDir(std::move(tempDir));
     }
 }
 
@@ -2585,16 +2779,16 @@ void MainWindow::onSpritesDeleted(const QStringList& paths)
 
     // Remove from timelines, drop empty timelines
     const QSet<QString> targetSet(targets.begin(), targets.end());
-    for (auto& timeline : m_session->timelines) {
+    for (auto& timeline : m_session->activeAtlas().timelines) {
         for (int i = timeline.frames.size() - 1; i >= 0; --i) {
             if (targetSet.contains(timeline.frames[i])) {
                 timeline.frames.removeAt(i);
             }
         }
     }
-    for (int i = m_session->timelines.size() - 1; i >= 0; --i) {
-        if (m_session->timelines[i].frames.isEmpty()) {
-            m_session->timelines.removeAt(i);
+    for (int i = m_session->activeAtlas().timelines.size() - 1; i >= 0; --i) {
+        if (m_session->activeAtlas().timelines[i].frames.isEmpty()) {
+            m_session->activeAtlas().timelines.removeAt(i);
             if (m_session->selectedTimelineIndex > i) {
                 --m_session->selectedTimelineIndex;
             } else if (m_session->selectedTimelineIndex == i) {
@@ -2611,7 +2805,7 @@ void MainWindow::onSpritesDeleted(const QStringList& paths)
             m_session->frameListPath.clear();
         }
         m_session->currentFolder.clear();
-        m_session->layoutModels.clear();
+        m_session->activeAtlas().layoutModels.clear();
         if (m_canvas) m_canvas->clearCanvas();
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
@@ -2827,85 +3021,104 @@ void MainWindow::onQuickStart() {
     QString content = tr(
         "<h2>Quick Start Guide</h2>"
 
-        "<h3>Main Workflow</h3>"
+        "<h3>Workflow Overview</h3>"
         "<ol>"
-        "<li><b>Load sprites</b> &mdash; Drag and drop a folder of images onto the window, "
-        "or use <i>File &rarr; Load Images Folder</i>. You can also drop a single sprite sheet image "
-        "and the app will auto-detect individual frames inside it.</li>"
-        "<li><b>Choose a layout profile</b> &mdash; Pick a profile from the dropdown above the atlas "
-        "(e.g. <i>fast</i>, <i>balanced</i>). Profiles control atlas size limits, padding, "
-        "trim, rotation, and other packing options. You can create custom profiles in "
-        "<i>Settings &rarr; Manage Profiles</i>.</li>"
-        "<li><b>Wait for the atlas to build</b> &mdash; The layout rebuilds automatically "
-        "after you stop making changes. If you remove or add sprites the canvas updates immediately "
-        "and a full repack runs in the background.</li>"
-        "<li><b>Edit sprites</b> &mdash; Click a sprite in the atlas to select it. "
-        "The right-hand panel shows a zoomed preview where you can drag the pivot point, "
-        "add markers (points, circles, rectangles, polygons), and rename the sprite.</li>"
-        "<li><b>Create animations</b> &mdash; Open the Timelines panel, add a timeline, "
-        "then drag sprites from the atlas into it. Adjust the frame order by dragging, "
-        "set the FPS, and preview the result in the Animation panel.</li>"
-        "<li><b>Save</b> &mdash; <i>File &rarr; Save</i> (Ctrl+S) exports the atlas image, "
-        "a metadata file with sprite positions, and the full project state. "
-        "You can save to a folder or a ZIP archive.</li>"
+        "<li><b>Load sprites</b> &mdash; drag a folder, archive, or image onto the window.</li>"
+        "<li><b>Sprites workspace</b> &mdash; select sprites to edit pivots and markers.</li>"
+        "<li><b>Atlas Layout workspace</b> &mdash; choose profiles and review the packed layout.</li>"
+        "<li><b>Atlases workspace</b> &mdash; organize sprites across named atlases.</li>"
+        "<li><b>Frame Animation workspace</b> &mdash; build timelines and preview animations.</li>"
+        "<li><b>Save</b> &mdash; Ctrl+S saves the project state to <tt>.json</tt> or <tt>.zip</tt>.</li>"
+        "<li><b>Exportation workspace</b> &mdash; preview the packed atlas and export to disk.</li>"
         "</ol>"
 
-        "<h3>Loading Sprites</h3>"
-        "<p>There are several ways to get images into the project:</p>"
+        "<h3>1 &mdash; Loading Sprites</h3>"
+        "<p>Drag and drop onto the window or use <i>File &rarr; Load Images Folder</i>:</p>"
         "<ul>"
-        "<li><b>Folder</b> &mdash; A folder of individual sprite images (PNG, JPG, BMP, GIF, WebP, TGA, DDS).</li>"
-        "<li><b>Single image</b> &mdash; Drop a sprite sheet and the Frame Detection dialog will "
-        "help you slice it into individual frames.</li>"
-        "<li><b>Archive</b> &mdash; ZIP or TAR files are extracted automatically.</li>"
-        "<li><b>URL</b> &mdash; <i>File &rarr; Load URL</i> downloads an image, archive, or project from the web.</li>"
-        "<li><b>Clipboard</b> &mdash; Ctrl+V imports an image from the clipboard.</li>"
-        "<li><b>Project file</b> &mdash; Reopen a previously saved <tt>.json</tt> project with all metadata intact.</li>"
+        "<li><b>Folder</b> &mdash; individual sprite images (PNG, JPG, BMP, GIF, WebP, TGA, DDS).</li>"
+        "<li><b>Single image</b> &mdash; a sprite sheet; the Frame Detection dialog slices it into frames.</li>"
+        "<li><b>Archive</b> &mdash; ZIP or TAR extracted automatically.</li>"
+        "<li><b>URL</b> &mdash; <i>File &rarr; Load URL</i> downloads an image, archive, or project.</li>"
+        "<li><b>Clipboard</b> &mdash; Ctrl+V imports an image directly.</li>"
+        "<li><b>Project file</b> &mdash; reopens a previously saved <tt>.json</tt> with all metadata.</li>"
         "</ul>"
-        "<p>When a project already has sprites loaded, you will be asked whether to <b>Replace</b> "
-        "or <b>Merge</b> the new content.</p>"
+        "<p>If sprites are already loaded you will be asked to <b>Replace</b> or <b>Merge</b>.</p>"
+        "<p>In <i>Settings &rarr; Atlas Sprites</i> enable <b>Manual</b> or <b>Watch</b> sync "
+        "to keep the project updated when files change on disk.</p>"
 
-        "<h3>Sprites Folder &amp; Sync</h3>"
-        "<p>Each project can have a <b>sprites folder</b> on disk. "
-        "In <i>Settings &rarr; Atlas Sprites</i> you can enable folder synchronization:</p>"
+        "<h3>2 &mdash; Sprites Workspace</h3>"
+        "<p>The default workspace. The atlas canvas (left) shows the packed layout; "
+        "the right panel is the sprite editor.</p>"
         "<ul>"
-        "<li><b>Manual</b> &mdash; Press <i>Sync Now</i> to pick up new, modified, or deleted files.</li>"
-        "<li><b>Watch</b> &mdash; The app monitors the folder in real time and updates the layout automatically.</li>"
-        "</ul>"
-        "<p>This lets you edit sprites in an external image editor and see changes reflected instantly.</p>"
-
-        "<h3>Sprite Navigator</h3>"
-        "<p>Switch from <i>Layout</i> to <i>Navigator</i> view above the atlas to see a "
-        "tree of all sprites organised by folder. From the Navigator you can:</p>"
-        "<ul>"
-        "<li>Check sprites and use the right-click menu to delete, group, or ungroup them.</li>"
-        "<li>Create a timeline from a group of sprites in one click.</li>"
-        "<li>Auto-create timelines from every sub-folder at once.</li>"
-        "<li>Add new frames to any folder directly.</li>"
+        "<li>Use the <b>Layout / Navigator</b> toggle above the canvas to switch between "
+        "the packed atlas view and a folder tree of all sprites.</li>"
+        "<li>Click a sprite to select it. The right panel shows a zoomed preview where you can "
+        "rename the sprite, drag the <b>pivot point</b>, and add or edit "
+        "<b>markers</b> (point, circle, rectangle, polygon).</li>"
+        "<li>In the Navigator right-click sprites or folders to delete, group/ungroup, "
+        "add frames, or create timelines in one step.</li>"
         "</ul>"
 
-        "<h3>Animation Preview</h3>"
-        "<p>The Animation panel plays back the currently selected timeline. "
-        "Use the play/pause button or scrub frames with the arrow buttons. "
-        "Right-click the preview to export the animation as GIF, MP4, WebM, or other formats "
-        "(requires FFmpeg or ImageMagick).</p>"
-
-        "<h3>Key Features</h3>"
+        "<h3>3 &mdash; Atlas Layout Workspace</h3>"
+        "<p>Open from the toolbar. Fills the window with the layout canvas and a right panel:</p>"
         "<ul>"
-        "<li><b>Layout profiles</b> &mdash; Multiple packing configurations (atlas size, padding, "
-        "extrude, trim transparency, rotation, multipack).</li>"
-        "<li><b>Frame detection</b> &mdash; Automatically slice a sprite sheet into individual frames.</li>"
-        "<li><b>Split mode</b> &mdash; Alt+Click on a sprite to split it in two.</li>"
-        "<li><b>Pivot &amp; markers</b> &mdash; Set pivot points and attach named markers "
-        "(points, circles, rectangles, polygons) to each sprite.</li>"
-        "<li><b>Timelines</b> &mdash; Build animation sequences by ordering frames, "
-        "then preview and export them.</li>"
-        "<li><b>Folder sync</b> &mdash; Keep the project in sync with a folder on disk "
-        "(manual or live watch).</li>"
-        "<li><b>Deduplication</b> &mdash; Detect exact or perceptually identical frames "
-        "and merge them to save atlas space.</li>"
-        "<li><b>Resolution scaling</b> &mdash; Set source and target resolutions for automatic rescaling.</li>"
-        "<li><b>Multipack</b> &mdash; Automatically split into multiple atlases when sprites "
-        "exceed the maximum dimensions.</li>"
+        "<li><b>Search</b> field &mdash; type to filter visible sprites by name.</li>"
+        "<li><b>View</b> group &mdash; switch the active named atlas, set source resolution, adjust zoom.</li>"
+        "<li><b>Profiles</b> group &mdash; check or uncheck profiles to include them in the layout; "
+        "select one to make it active. Use <i>Manage&hellip;</i> to create custom profiles "
+        "(atlas size limits, padding, trim, rotation, GPU compression, and more).</li>"
+        "<li><b>Pages</b> group &mdash; appears when the active atlas spans multiple texture pages; "
+        "click a page to preview it.</li>"
+        "</ul>"
+        "<p>The layout rebuilds automatically a short time after you stop making changes.</p>"
+
+        "<h3>4 &mdash; Atlases Workspace</h3>"
+        "<p>Open <i>Manage Atlases</i> from the toolbar to organize sprites across named atlases:</p>"
+        "<ul>"
+        "<li>Add or remove atlases with the <b>Add / Remove</b> buttons; double-click to rename.</li>"
+        "<li>The sprite tree shows sprites for the selected atlas. "
+        "Use <b>Ctrl+Click</b> to toggle a sprite&rsquo;s checkbox or <b>Shift+Click</b> to check a range. "
+        "Then <b>drag</b> checked sprites onto an atlas in the left list, or "
+        "<b>right-click an atlas</b> and choose <i>Move checked sprites to &ldquo;&hellip;&rdquo;</i>.</li>"
+        "<li><b>Right-click a folder/group</b> in the sprite tree:"
+        "<ul>"
+        "<li><i>Create atlas from &ldquo;&lt;group&gt;&rdquo;</i> &mdash; creates a new atlas named after "
+        "the folder and moves all its sprites there.</li>"
+        "<li><i>Move &ldquo;&lt;group&gt;&rdquo; to atlas</i> &mdash; if an atlas with that name already "
+        "exists, moves the sprites into it instead.</li>"
+        "</ul></li>"
+        "<li><b>Right-click a source node</b> &rarr; <i>Autocreate atlases</i> &mdash; "
+        "creates one atlas per direct subfolder of that source automatically.</li>"
+        "<li>Each named atlas is exported independently and can be previewed in the "
+        "Exportation workspace.</li>"
+        "</ul>"
+
+        "<h3>5 &mdash; Frame Animation Workspace</h3>"
+        "<p>Open from the toolbar. The Timelines panel lists all animations:</p>"
+        "<ul>"
+        "<li>Add a timeline, then drag sprites from the canvas into it. Reorder frames by dragging.</li>"
+        "<li>Set the FPS and use play/pause/step controls to preview the animation.</li>"
+        "<li>Right-click the preview to export as GIF, MP4, WebM, or other formats "
+        "(requires FFmpeg or ImageMagick).</li>"
+        "<li>Use <i>Auto-create timelines</i> (right-click in the Navigator) to generate "
+        "animations automatically from naming patterns such as <tt>Run_0</tt>, <tt>Run_1</tt>, &hellip;</li>"
+        "</ul>"
+
+        "<h3>6 &mdash; Save</h3>"
+        "<p><i>File &rarr; Save</i> (Ctrl+S) saves the full project state &mdash; layout options, "
+        "sprite names, pivots, markers, timelines &mdash; to a <tt>.json</tt> file or a <tt>.zip</tt> "
+        "archive. The app autosaves every 5 minutes and offers to restore on next launch.</p>"
+
+        "<h3>7 &mdash; Exportation Workspace</h3>"
+        "<p>Open from the toolbar (or use the quick <i>Export</i> button to re-export to the last "
+        "used folder without opening the workspace).</p>"
+        "<ul>"
+        "<li>The left pane shows a <b>live packed-atlas preview</b>. "
+        "Use the <b>Atlas</b> selector to preview individual atlases "
+        "(the actual export always processes all).</li>"
+        "<li>The right pane lets you choose the <b>output folder</b>, <b>metadata format</b> "
+        "(transform), and <b>scale filter</b>.</li>"
+        "<li>Click <b>Export</b> to run the full pipeline; click <b>Cancel</b> to return.</li>"
         "</ul>"
 
         "<p>See <i>Help &rarr; Hotkeys</i> for all keyboard shortcuts.</p>"
@@ -2938,17 +3151,21 @@ void MainWindow::onShowHotkeys() {
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
         "<tr><td>Save Project</td><td><b>Ctrl+S</b></td></tr>"
+        "<tr><td>Save Project As</td><td><b>Ctrl+Shift+S</b></td></tr>"
         "<tr><td>Undo Pivot Change</td><td><b>Ctrl+Z</b></td></tr>"
         "<tr><td>Redo Pivot Change</td><td><b>Ctrl+Y</b></td></tr>"
         "<tr><td>Paste / Import from Clipboard</td><td><b>Ctrl+V</b></td></tr>"
         "<tr><td>Quit</td><td><b>Ctrl+Q</b></td></tr>"
         "</table>"
 
-        "<h3>Atlas View</h3>"
+        "<h3>Workspaces</h3>"
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Switch to Layout</td><td><b>Alt+L</b></td></tr>"
-        "<tr><td>Switch to Navigation</td><td><b>Alt+N</b></td></tr>"
+        "<tr><td>Sprites workspace</td><td><b>Alt+A</b></td></tr>"
+        "<tr><td>Frame Animation workspace</td><td><b>Alt+F</b></td></tr>"
+        "<tr><td>Atlas Layout workspace</td><td><b>Alt+L</b></td></tr>"
+        "<tr><td>Atlases workspace</td><td><b>Alt+M</b></td></tr>"
+        "<tr><td>Exportation workspace</td><td><b>Alt+E</b></td></tr>"
         "</table>"
 
         "<h3>Canvas Views (Layout, Preview, Animation)</h3>"
@@ -2969,15 +3186,17 @@ void MainWindow::onShowHotkeys() {
         "<tr><td>Extend Selection</td><td><b>Shift+Arrow Keys</b></td></tr>"
         "<tr><td>Select All Sprites</td><td><b>Ctrl+A</b></td></tr>"
         "<tr><td>Delete Selected Sprites</td><td><b>Delete</b></td></tr>"
-        "<tr><td>Search by Name</td><td>Start typing (printable characters)</td></tr>"
-        "<tr><td>Clear Search</td><td><b>Escape</b></td></tr>"
         "<tr><td>Quick Split</td><td><b>Alt+Click</b> on a sprite</td></tr>"
         "</table>"
+        "<p><i>Sprite search is done via the Search field in the Atlas Layout workspace right panel.</i></p>"
 
         "<h3>Navigation View</h3>"
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Delete Selected Sprites</td><td><b>Delete</b></td></tr>"
+        "<tr><td>Delete / Exclude Selected Sprites</td><td><b>Delete</b></td></tr>"
+        "<tr><td>Toggle Sprite Checkbox</td><td><b>Ctrl+Click</b></td></tr>"
+        "<tr><td>Check a Range of Sprites</td><td><b>Shift+Click</b></td></tr>"
+        "<tr><td>Context Menu (Atlases workspace)</td><td><b>Right-Click</b> folder/group or source</td></tr>"
         "</table>"
 
         "<h3>Timeline</h3>"
@@ -2999,6 +3218,12 @@ void MainWindow::onShowHotkeys() {
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
         "<tr><td>Play / Pause Animation</td><td><b>Space</b></td></tr>"
+        "</table>"
+
+        "<h3>Debug</h3>"
+        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
+        "<tr><td>Toggle Debug panel</td><td><b>F12</b></td></tr>"
         "</table>"
     );
 
@@ -3029,18 +3254,18 @@ MainWindow::SessionUndoState MainWindow::captureSessionUndoState() const {
     state.sources = m_session->sources;
     state.activeFramePaths = m_session->activeFramePaths;
     state.frameListPath = m_session->frameListPath;
-    state.layoutModels = m_session->layoutModels;
+    state.atlases = m_session->atlases;
+    state.activeAtlasIndex = m_session->activeAtlasIndex;
     state.cachedLayoutOutput = m_session->cachedLayoutOutput;
     state.cachedLayoutScale = m_session->cachedLayoutScale;
     state.lastSuccessfulProfile = m_session->lastSuccessfulProfile;
     state.lastRunUsedTrim = m_session->lastRunUsedTrim;
-    state.timelines = m_session->timelines;
     state.selectedTimelineIndex = m_session->selectedTimelineIndex;
     state.selectedPointName = m_session->selectedPointName;
     state.selectedSpritePaths.clear();
     for (const auto& s : m_session->selectedSprites) if (s) state.selectedSpritePaths << s->path;
     state.primarySelectedSpritePath = m_session->selectedSprite ? m_session->selectedSprite->path : QString();
-    state.sourceFolderIsTemp = m_sourceFolderIsTemp;
+    state.sourceFolderIsTemp = m_projectController ? m_projectController->isSourceFolderTemp() : false;
     return state;
 }
 
@@ -3064,23 +3289,23 @@ void MainWindow::applySessionUndoState(const SessionUndoState& state) {
     m_session->sources = state.sources;
     m_session->activeFramePaths = state.activeFramePaths;
     m_session->frameListPath = state.frameListPath;
-    m_session->layoutModels = state.layoutModels;
+    m_session->atlases = state.atlases;
+    m_session->activeAtlasIndex = state.activeAtlasIndex;
     m_session->cachedLayoutOutput = state.cachedLayoutOutput;
     m_session->cachedLayoutScale = state.cachedLayoutScale;
     m_session->lastSuccessfulProfile = state.lastSuccessfulProfile;
     m_session->lastRunUsedTrim = state.lastRunUsedTrim;
-    m_session->timelines = state.timelines;
     m_session->selectedTimelineIndex = state.selectedTimelineIndex;
     m_session->selectedPointName = state.selectedPointName;
-    m_sourceFolderIsTemp = state.sourceFolderIsTemp;
+    if (m_projectController) m_projectController->setSourceFolderIsTemp(state.sourceFolderIsTemp);
 
     // Restore selections
     m_session->selectedSprites.clear();
     for (const QString& p : state.selectedSpritePaths) {
-        SpritePtr s = spriteByPath(m_session->layoutModels, p);
+        SpritePtr s = spriteByPath(m_session->activeAtlas().layoutModels, p);
         if (s) m_session->selectedSprites.push_back(s);
     }
-    m_session->selectedSprite = spriteByPath(m_session->layoutModels, state.primarySelectedSpritePath);
+    m_session->selectedSprite = spriteByPath(m_session->activeAtlas().layoutModels, state.primarySelectedSpritePath);
 
     // Refresh UI
     updateMainContentView();

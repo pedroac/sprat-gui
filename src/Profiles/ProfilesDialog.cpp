@@ -3,6 +3,7 @@
 #include "ResolutionUtils.h"
 #include "MessageDialog.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -76,8 +77,8 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     listLayout->addWidget(m_listWidget);
 
     QHBoxLayout* listActionsLayout = new QHBoxLayout();
-    m_addButton = new QPushButton(tr("Add"), this);
-    m_removeButton = new QPushButton(tr("Remove"), this);
+    m_addButton = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), tr("Add"), this);
+    m_removeButton = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton), tr("Remove"), this);
     listActionsLayout->addWidget(m_addButton);
     listActionsLayout->addWidget(m_removeButton);
     listActionsLayout->addStretch();

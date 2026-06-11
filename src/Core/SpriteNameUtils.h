@@ -12,6 +12,10 @@
  * unique across directories. For any remaining true duplicates, append
  * _2, _3, … to the newer entries (sprites later in the vector are
  * considered newer).
+ *
+ * Uses a set-based approach so that a generated suffix (e.g. "walk_2")
+ * is guaranteed not to clash with an already-present name bearing that
+ * same suffix naturally (e.g. a file literally named "walk_2.png").
  */
 inline void ensureUniqueSpriteNames(QVector<LayoutModel>& models,
                                     const QString& sourceFolder)
@@ -26,12 +30,19 @@ inline void ensureUniqueSpriteNames(QVector<LayoutModel>& models,
 
     if (all.isEmpty()) return;
 
-    // Append _2, _3, … for any duplicate names
-    QHash<QString, int> counts;
+    // First pass: record all names that appear more than once so we only
+    // touch true duplicates and leave unique names alone.
+    QSet<QString> usedNames;
     for (auto& s : all) {
-        int& n = counts[s->name];
-        ++n;
-        if (n > 1)
-            s->name = s->name + QStringLiteral("_%1").arg(n);
+        if (usedNames.contains(s->name)) {
+            // Collision detected — find the next free suffix.
+            int suffix = 2;
+            QString candidate;
+            do {
+                candidate = s->name + QStringLiteral("_%1").arg(suffix++);
+            } while (usedNames.contains(candidate));
+            s->name = candidate;
+        }
+        usedNames.insert(s->name);
     }
 }

@@ -3,6 +3,7 @@
 #include "ZoomableGraphicsView.h"
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include "EditorOverlayItem.h"
 #include "models.h"
 
 /**
@@ -26,8 +27,28 @@ public:
 
     void setSettings(const AppSettings& settings);
 
+    /**
+     * @brief Sets the sprite shown in the overlay (pivot + markers).
+     */
+    void setOverlaySprite(SpritePtr sprite);
+
+    /**
+     * @brief Shows or hides the pivot/marker overlay.
+     */
+    void setOverlayVisible(bool visible);
+
+    /**
+     * @brief Enables or disables interactive editing on the overlay.
+     * Should be called with false during animation playback.
+     */
+    void setOverlayEditable(bool editable);
+
+    EditorOverlayItem* overlay() const { return m_overlay; }
+
 private:
-    QGraphicsScene* m_scene;
+    QGraphicsScene*      m_scene;
     QGraphicsPixmapItem* m_pixmapItem;
-    AppSettings m_settings;
+    EditorOverlayItem*   m_overlay = nullptr;
+    SpritePtr            m_overlaySprite;
+    AppSettings          m_settings;
 };

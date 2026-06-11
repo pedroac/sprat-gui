@@ -1,4 +1,5 @@
 #include "SettingsDialog.h"
+#include <QDir>
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QLabel>
@@ -11,6 +12,7 @@
 #include <QLineEdit>
 #include <QFileDialog>
 #include <QCheckBox>
+#include <QSpinBox>
 #include <QApplication>
 #include <QScrollArea>
 #include <QStyle>
@@ -24,9 +26,10 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, const CliPaths& cliP
 
 void SettingsDialog::setupUi() {
     switch (m_initialSection) {
-        case Section::Styles: setWindowTitle(tr("Style Settings")); break;
         case Section::Spritesheet: setWindowTitle(tr("Atlas Sprites Settings")); break;
         case Section::FramesEditor: setWindowTitle(tr("Frames Editor Settings")); break;
+        case Section::AtlasLayout: setWindowTitle(tr("Atlas Layout Settings")); break;
+        case Section::Exportation: setWindowTitle(tr("Exportation Settings")); break;
 #ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
 #endif
@@ -36,60 +39,6 @@ void SettingsDialog::setupUi() {
 
     QWidget* content = new QWidget(this);
     QVBoxLayout* contentLayout = new QVBoxLayout(content);
-
-    // Styles Group
-    m_stylesGroup = new QGroupBox(tr("Styles"), content);
-    QFormLayout* stylesForm = new QFormLayout(m_stylesGroup);
-
-    m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
-    m_canvasColorBtn->setToolTip(tr("Color of the workspace area outside sprites"));
-    m_canvasColorBtn->setAccessibleName(tr("Workspace color"));
-    connect(m_canvasColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_canvasColorBtn, m_settings.workspaceColor); });
-    stylesForm->addRow(tr("Workspace Background:"), m_canvasColorBtn);
-
-    m_frameColorBtn = createColorButton(m_settings.spriteFrameColor);
-    m_frameColorBtn->setToolTip(tr("Background color of sprite frames"));
-    m_frameColorBtn->setAccessibleName(tr("Sprite frame color"));
-    connect(m_frameColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_frameColorBtn, m_settings.spriteFrameColor); });
-    stylesForm->addRow(tr("Sprite Frame Background:"), m_frameColorBtn);
-
-    m_checkerboardCheck = new QCheckBox(tr("Show Transparency Checkerboard"), this);
-    m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
-    m_checkerboardCheck->setToolTip(tr("Show checkerboard pattern for transparent areas"));
-    m_checkerboardCheck->setAccessibleName(tr("Transparency checkerboard"));
-    stylesForm->addRow("", m_checkerboardCheck);
-
-    m_borderColorBtn = createColorButton(m_settings.borderColor);
-    m_borderColorBtn->setToolTip(tr("Color of borders around sprites"));
-    m_borderColorBtn->setAccessibleName(tr("Border color"));
-    connect(m_borderColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_borderColorBtn, m_settings.borderColor); });
-    stylesForm->addRow(tr("Border Color:"), m_borderColorBtn);
-
-    m_detectionSelectedColorBtn = createColorButton(m_settings.detectionSelectedColor);
-    m_detectionSelectedColorBtn->setToolTip(tr("Color for frames selected in detection dialog"));
-    m_detectionSelectedColorBtn->setAccessibleName(tr("Detection selected color"));
-    connect(m_detectionSelectedColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor); });
-    stylesForm->addRow(tr("Detection Selected Color:"), m_detectionSelectedColorBtn);
-
-    m_borderStyleCombo = new QComboBox(this);
-    m_borderStyleCombo->addItem(tr("None"), (int)Qt::NoPen);
-    m_borderStyleCombo->addItem(tr("Solid"), (int)Qt::SolidLine);
-    m_borderStyleCombo->addItem(tr("Dash"), (int)Qt::DashLine);
-    m_borderStyleCombo->addItem(tr("Dot"), (int)Qt::DotLine);
-    m_borderStyleCombo->addItem(tr("DashDot"), (int)Qt::DashDotLine);
-    m_borderStyleCombo->addItem(tr("DashDotDot"), (int)Qt::DashDotDotLine);
-
-    int index = m_borderStyleCombo->findData((int)m_settings.borderStyle);
-    if (index >= 0) {
-        m_borderStyleCombo->setCurrentIndex(index);
-    }
-
-    m_borderStyleCombo->setToolTip(tr("Visual style for sprite borders"));
-    m_borderStyleCombo->setAccessibleName(tr("Border style"));
-    stylesForm->addRow(tr("Border Style:"), m_borderStyleCombo);
-
-    contentLayout->addWidget(m_stylesGroup);
-    m_stylesGroup->setVisible(m_initialSection == Section::Styles);
 
     // Atlas Sprites Group
     m_spritesheetGroup = new QGroupBox(tr("Atlas Sprites"), content);
@@ -143,18 +92,186 @@ void SettingsDialog::setupUi() {
     m_framesEditorGroup = new QGroupBox(tr("Frames Editor"), content);
     QFormLayout* framesEditorForm = new QFormLayout(m_framesEditorGroup);
 
-    m_onionSkinCheck = new QCheckBox(tr("Enable onion skin"), this);
-    m_onionSkinCheck->setChecked(m_settings.onionSkinEnabled);
-    m_onionSkinCheck->setToolTip(tr("Show other checked frames as transparent overlays behind the active frame"));
-    framesEditorForm->addRow("", m_onionSkinCheck);
+    m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
+    m_canvasColorBtn->setToolTip(tr("Color of the workspace area outside sprites"));
+    m_canvasColorBtn->setAccessibleName(tr("Workspace color"));
+    connect(m_canvasColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_canvasColorBtn, m_settings.workspaceColor); });
+    framesEditorForm->addRow(tr("Workspace Background:"), m_canvasColorBtn);
+
+    m_frameColorBtn = createColorButton(m_settings.spriteFrameColor);
+    m_frameColorBtn->setToolTip(tr("Background color of sprite frames"));
+    m_frameColorBtn->setAccessibleName(tr("Sprite frame color"));
+    connect(m_frameColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_frameColorBtn, m_settings.spriteFrameColor); });
+    framesEditorForm->addRow(tr("Sprite Frame Background:"), m_frameColorBtn);
+
+    m_checkerboardCheck = new QCheckBox(tr("Show Transparency Checkerboard"), this);
+    m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
+    m_checkerboardCheck->setToolTip(tr("Show checkerboard pattern for transparent areas"));
+    m_checkerboardCheck->setAccessibleName(tr("Transparency checkerboard"));
+    framesEditorForm->addRow("", m_checkerboardCheck);
+
+    m_onionSkinOpacitySpin = new QSpinBox(this);
+    m_onionSkinOpacitySpin->setRange(0, 100);
+    m_onionSkinOpacitySpin->setSuffix(tr(" %"));
+    m_onionSkinOpacitySpin->setValue(m_settings.onionSkinOpacity);
+    m_onionSkinOpacitySpin->setToolTip(tr("Opacity of ghost overlays for other checked frames (0 = disabled)"));
+    framesEditorForm->addRow(tr("Onion skin opacity:"), m_onionSkinOpacitySpin);
 
     m_propagateEditsCheck = new QCheckBox(tr("Apply edits to all checked frames"), this);
     m_propagateEditsCheck->setChecked(m_settings.propagateEditsToChecked);
     m_propagateEditsCheck->setToolTip(tr("Automatically apply pivot and marker edits to all checked frames simultaneously"));
     framesEditorForm->addRow("", m_propagateEditsCheck);
 
+    m_flipbookModeCombo = new QComboBox(this);
+    m_flipbookModeCombo->addItem(tr("None"), "none");
+    m_flipbookModeCombo->addItem(tr("Same group"), "same_group");
+    m_flipbookModeCombo->addItem(tr("All frames"), "all");
+    {
+        int idx = m_flipbookModeCombo->findData(flipbookModeToString(m_settings.flipbookMode));
+        if (idx >= 0) m_flipbookModeCombo->setCurrentIndex(idx);
+    }
+    m_flipbookModeCombo->setToolTip(tr("Keep the pivot at the same screen position when navigating between frames"));
+    framesEditorForm->addRow(tr("Flipbook pivot:"), m_flipbookModeCombo);
+
+    m_frameZoomModeCombo = new QComboBox(this);
+    m_frameZoomModeCombo->addItem(tr("Fit to frame"), "fit");
+    m_frameZoomModeCombo->addItem(tr("No change (keep previous)"), "keep");
+    m_frameZoomModeCombo->addItem(tr("100%"), "reset_100");
+    {
+        int idx = m_frameZoomModeCombo->findData(frameZoomModeToString(m_settings.frameZoomMode));
+        if (idx >= 0) m_frameZoomModeCombo->setCurrentIndex(idx);
+    }
+    m_frameZoomModeCombo->setToolTip(tr("How zoom behaves when changing frames (outside flipbook mode)"));
+    framesEditorForm->addRow(tr("Zoom on frame change:"), m_frameZoomModeCombo);
+
+    // Disable zoom-on-change when flipbook is "All frames" (zoom is locked by flipbook logic).
+    auto updateZoomComboEnabled = [this]() {
+        m_frameZoomModeCombo->setEnabled(m_flipbookModeCombo->currentData().toString() != "all");
+    };
+    updateZoomComboEnabled();
+    connect(m_flipbookModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [updateZoomComboEnabled](int) { updateZoomComboEnabled(); });
+
     contentLayout->addWidget(m_framesEditorGroup);
     m_framesEditorGroup->setVisible(m_initialSection == Section::FramesEditor);
+
+    // Atlas Layout Group
+    m_atlasLayoutGroup = new QGroupBox(tr("Atlas Layout"), content);
+    QFormLayout* atlasLayoutForm = new QFormLayout(m_atlasLayoutGroup);
+
+    m_borderColorBtn = createColorButton(m_settings.borderColor);
+    m_borderColorBtn->setToolTip(tr("Color of borders around sprites"));
+    m_borderColorBtn->setAccessibleName(tr("Border color"));
+    connect(m_borderColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_borderColorBtn, m_settings.borderColor); });
+    atlasLayoutForm->addRow(tr("Border Color:"), m_borderColorBtn);
+
+    m_detectionSelectedColorBtn = createColorButton(m_settings.detectionSelectedColor);
+    m_detectionSelectedColorBtn->setToolTip(tr("Color for frames selected in detection dialog"));
+    m_detectionSelectedColorBtn->setAccessibleName(tr("Detection selected color"));
+    connect(m_detectionSelectedColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor); });
+    atlasLayoutForm->addRow(tr("Detection Selected Color:"), m_detectionSelectedColorBtn);
+
+    m_borderStyleCombo = new QComboBox(this);
+    m_borderStyleCombo->addItem(tr("None"), (int)Qt::NoPen);
+    m_borderStyleCombo->addItem(tr("Solid"), (int)Qt::SolidLine);
+    m_borderStyleCombo->addItem(tr("Dash"), (int)Qt::DashLine);
+    m_borderStyleCombo->addItem(tr("Dot"), (int)Qt::DotLine);
+    m_borderStyleCombo->addItem(tr("DashDot"), (int)Qt::DashDotLine);
+    m_borderStyleCombo->addItem(tr("DashDotDot"), (int)Qt::DashDotDotLine);
+    {
+        int idx = m_borderStyleCombo->findData((int)m_settings.borderStyle);
+        if (idx >= 0) m_borderStyleCombo->setCurrentIndex(idx);
+    }
+    m_borderStyleCombo->setToolTip(tr("Visual style for sprite borders"));
+    m_borderStyleCombo->setAccessibleName(tr("Border style"));
+    atlasLayoutForm->addRow(tr("Border Style:"), m_borderStyleCombo);
+
+    m_layoutZoomOnChangeCombo = new QComboBox(this);
+    m_layoutZoomOnChangeCombo->addItem(tr("No change (keep current)"), "no_change");
+    m_layoutZoomOnChangeCombo->addItem(tr("Fit to view"), "fit");
+    m_layoutZoomOnChangeCombo->addItem(tr("100%"), "reset_100");
+    {
+        int idx = m_layoutZoomOnChangeCombo->findData(layoutZoomOnChangeToString(m_settings.layoutZoomOnChange));
+        if (idx >= 0) m_layoutZoomOnChangeCombo->setCurrentIndex(idx);
+    }
+    m_layoutZoomOnChangeCombo->setToolTip(tr("How zoom behaves after each atlas layout rebuild"));
+    atlasLayoutForm->addRow(tr("Zoom on layout change:"), m_layoutZoomOnChangeCombo);
+
+    m_layoutLabelModeCombo = new QComboBox(this);
+    m_layoutLabelModeCombo->addItem(tr("Name"), "name");
+    m_layoutLabelModeCombo->addItem(tr("Full path"), "full_path");
+    m_layoutLabelModeCombo->addItem(tr("None"), "none");
+    {
+        int idx = m_layoutLabelModeCombo->findData(layoutLabelModeToString(m_settings.layoutLabelMode));
+        if (idx >= 0) m_layoutLabelModeCombo->setCurrentIndex(idx);
+    }
+    m_layoutLabelModeCombo->setToolTip(tr("Text shown on sprite labels in the atlas layout canvas"));
+    atlasLayoutForm->addRow(tr("Show names:"), m_layoutLabelModeCombo);
+
+    contentLayout->addWidget(m_atlasLayoutGroup);
+    m_atlasLayoutGroup->setVisible(m_initialSection == Section::AtlasLayout);
+
+    // Exportation Group
+    m_exportationGroup = new QGroupBox(tr("Exportation"), content);
+    QFormLayout* exportationForm = new QFormLayout(m_exportationGroup);
+
+    m_exportZoomOnChangeCombo = new QComboBox(this);
+    m_exportZoomOnChangeCombo->addItem(tr("Fit to view"), "fit");
+    m_exportZoomOnChangeCombo->addItem(tr("No change (keep current)"), "no_change");
+    m_exportZoomOnChangeCombo->addItem(tr("100%"), "reset_100");
+    {
+        int idx = m_exportZoomOnChangeCombo->findData(exportZoomOnChangeToString(m_settings.exportZoomOnChange));
+        if (idx >= 0) m_exportZoomOnChangeCombo->setCurrentIndex(idx);
+    }
+    m_exportZoomOnChangeCombo->setToolTip(tr("How zoom behaves after each export preview update"));
+    exportationForm->addRow(tr("Zoom on preview change:"), m_exportZoomOnChangeCombo);
+
+    // Output folder row
+    auto* exportFolderRow = new QHBoxLayout();
+    m_exportDefaultFolderEdit = new QLineEdit(m_settings.exportDefaultOutputFolder, this);
+    m_exportDefaultFolderEdit->setReadOnly(true);
+    m_exportDefaultFolderEdit->setPlaceholderText(tr("Not set"));
+    m_exportDefaultFolderEdit->setToolTip(tr("Default output folder for new exports"));
+    auto* exportFolderBtn = new QPushButton(tr("Browse..."), this);
+    exportFolderBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon));
+    connect(exportFolderBtn, &QPushButton::clicked, this, [this]() {
+        const QString current = m_exportDefaultFolderEdit->text();
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, tr("Select Default Export Folder"), current.isEmpty() ? QDir::homePath() : current);
+        if (!dir.isEmpty())
+            m_exportDefaultFolderEdit->setText(dir);
+    });
+    exportFolderRow->addWidget(m_exportDefaultFolderEdit, 1);
+    exportFolderRow->addWidget(exportFolderBtn);
+    exportationForm->addRow(tr("Default output folder:"), exportFolderRow);
+
+    m_exportDefaultFormatCombo = new QComboBox(this);
+    m_exportDefaultFormatCombo->addItem(tr("None (no metadata)"), "none");
+    m_exportDefaultFormatCombo->addItem(tr("json"), "json");
+    m_exportDefaultFormatCombo->addItem(tr("csv"), "csv");
+    m_exportDefaultFormatCombo->addItem(tr("xml"), "xml");
+    m_exportDefaultFormatCombo->addItem(tr("css"), "css");
+    {
+        int idx = m_exportDefaultFormatCombo->findData(m_settings.exportDefaultFormat);
+        if (idx >= 0) m_exportDefaultFormatCombo->setCurrentIndex(idx);
+    }
+    m_exportDefaultFormatCombo->setToolTip(tr("Default metadata format for new exports"));
+    exportationForm->addRow(tr("Default format:"), m_exportDefaultFormatCombo);
+
+    m_exportDefaultScaleFilterCombo = new QComboBox(this);
+    m_exportDefaultScaleFilterCombo->addItem(tr("Nearest (default)"), "nearest");
+    m_exportDefaultScaleFilterCombo->addItem(tr("Bilinear"),           "bilinear");
+    m_exportDefaultScaleFilterCombo->addItem(tr("Bicubic"),            "bicubic");
+    m_exportDefaultScaleFilterCombo->addItem(tr("Mitchell"),           "mitchell");
+    {
+        int idx = m_exportDefaultScaleFilterCombo->findData(m_settings.exportDefaultScaleFilter);
+        if (idx >= 0) m_exportDefaultScaleFilterCombo->setCurrentIndex(idx);
+    }
+    m_exportDefaultScaleFilterCombo->setToolTip(tr("Default scale filter for new exports"));
+    exportationForm->addRow(tr("Default scale filter:"), m_exportDefaultScaleFilterCombo);
+
+    contentLayout->addWidget(m_exportationGroup);
+    m_exportationGroup->setVisible(m_initialSection == Section::Exportation);
 
 #ifndef Q_OS_WASM
     m_cliGroup = new QGroupBox(tr("CLI Tools"), content);
@@ -233,8 +350,39 @@ void SettingsDialog::resetToDefaults() {
     updateColorButton(m_borderColorBtn, m_settings.borderColor);
     updateColorButton(m_detectionSelectedColorBtn, m_settings.detectionSelectedColor);
     m_checkerboardCheck->setChecked(m_settings.showCheckerboard);
-    if (m_onionSkinCheck) m_onionSkinCheck->setChecked(AppSettings().onionSkinEnabled);
+    if (m_onionSkinOpacitySpin) m_onionSkinOpacitySpin->setValue(AppSettings().onionSkinOpacity);
     if (m_propagateEditsCheck) m_propagateEditsCheck->setChecked(AppSettings().propagateEditsToChecked);
+    if (m_flipbookModeCombo) {
+        int idx = m_flipbookModeCombo->findData(flipbookModeToString(AppSettings().flipbookMode));
+        if (idx >= 0) m_flipbookModeCombo->setCurrentIndex(idx);
+    }
+    if (m_frameZoomModeCombo) {
+        int idx = m_frameZoomModeCombo->findData(frameZoomModeToString(AppSettings().frameZoomMode));
+        if (idx >= 0) m_frameZoomModeCombo->setCurrentIndex(idx);
+    }
+    if (m_layoutZoomOnChangeCombo) {
+        int idx = m_layoutZoomOnChangeCombo->findData(layoutZoomOnChangeToString(AppSettings().layoutZoomOnChange));
+        if (idx >= 0) m_layoutZoomOnChangeCombo->setCurrentIndex(idx);
+    }
+    if (m_layoutLabelModeCombo) {
+        int idx = m_layoutLabelModeCombo->findData(layoutLabelModeToString(AppSettings().layoutLabelMode));
+        if (idx >= 0) m_layoutLabelModeCombo->setCurrentIndex(idx);
+    }
+    if (m_exportZoomOnChangeCombo) {
+        int idx = m_exportZoomOnChangeCombo->findData(exportZoomOnChangeToString(AppSettings().exportZoomOnChange));
+        if (idx >= 0) m_exportZoomOnChangeCombo->setCurrentIndex(idx);
+    }
+    if (m_exportDefaultFolderEdit) {
+        m_exportDefaultFolderEdit->setText(QDir::homePath() + "/Sprat");
+    }
+    if (m_exportDefaultFormatCombo) {
+        int idx = m_exportDefaultFormatCombo->findData(AppSettings().exportDefaultFormat);
+        if (idx >= 0) m_exportDefaultFormatCombo->setCurrentIndex(idx);
+    }
+    if (m_exportDefaultScaleFilterCombo) {
+        int idx = m_exportDefaultScaleFilterCombo->findData(AppSettings().exportDefaultScaleFilter);
+        if (idx >= 0) m_exportDefaultScaleFilterCombo->setCurrentIndex(idx);
+    }
 
     int deduplicateIndex = m_deduplicateModeCombo->findData(m_settings.deduplicateMode);
     if (deduplicateIndex >= 0) {
@@ -258,8 +406,16 @@ AppSettings SettingsDialog::getSettings() const {
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
     s.syncMode = (SyncMode)m_syncModeCombo->currentData().toInt();
-    if (m_onionSkinCheck) s.onionSkinEnabled = m_onionSkinCheck->isChecked();
+    if (m_onionSkinOpacitySpin) s.onionSkinOpacity = m_onionSkinOpacitySpin->value();
     if (m_propagateEditsCheck) s.propagateEditsToChecked = m_propagateEditsCheck->isChecked();
+    if (m_flipbookModeCombo) s.flipbookMode = flipbookModeFromString(m_flipbookModeCombo->currentData().toString());
+    if (m_frameZoomModeCombo) s.frameZoomMode = frameZoomModeFromString(m_frameZoomModeCombo->currentData().toString());
+    if (m_layoutZoomOnChangeCombo) s.layoutZoomOnChange = layoutZoomOnChangeFromString(m_layoutZoomOnChangeCombo->currentData().toString());
+    if (m_layoutLabelModeCombo) s.layoutLabelMode = layoutLabelModeFromString(m_layoutLabelModeCombo->currentData().toString());
+    if (m_exportZoomOnChangeCombo) s.exportZoomOnChange = exportZoomOnChangeFromString(m_exportZoomOnChangeCombo->currentData().toString());
+    if (m_exportDefaultFolderEdit) s.exportDefaultOutputFolder = m_exportDefaultFolderEdit->text().trimmed();
+    if (m_exportDefaultFormatCombo) s.exportDefaultFormat = m_exportDefaultFormatCombo->currentData().toString();
+    if (m_exportDefaultScaleFilterCombo) s.exportDefaultScaleFilter = m_exportDefaultScaleFilterCombo->currentData().toString();
     return s;
 }
 
