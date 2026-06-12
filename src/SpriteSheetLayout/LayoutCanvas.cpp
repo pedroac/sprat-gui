@@ -434,17 +434,6 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
         timer.start();
         qInfo() << "[WASM] setModelsAsync task start"
                 << "sprites=" << activePaths.size();
-        // Prepare pixmaps in background
-        for (const QString& path : activePaths) {
-            if (canceled && *canceled) return;
-            
-            bool exists = false;
-            {
-                // Note: QHash is not thread-safe for reading/writing simultaneously
-                // But we are only reading m_sourcePixmaps and writing to it later in main thread or now if we had a mutex.
-                // Let's use a local cache for now and merge.
-            }
-        }
 
         // Simpler: Just ensure they are in QPixmapCache (it is thread-safe)
         for (const QString& path : activePaths) {

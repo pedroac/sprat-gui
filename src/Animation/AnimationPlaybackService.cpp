@@ -8,10 +8,6 @@
 #include "AnimationTestOps.h"
 
 namespace {
-QString trAnimationPlayback(const char* text) {
-    return QCoreApplication::translate("AnimationPlaybackService", text);
-}
-
 // Resolve the effective frame list for playback, following alias references.
 const QStringList& effectiveFrames(const QVector<AnimationTimeline>& timelines, int index) {
     static const QStringList kEmpty;

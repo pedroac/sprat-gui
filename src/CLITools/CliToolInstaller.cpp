@@ -10,6 +10,7 @@
 #include <QNetworkReply>
 
 namespace {
+#ifdef Q_OS_MACOS
 // Escape a string for safe use in shell scripts by wrapping in single quotes
 // and escaping embedded single quotes as '\''
 static QString shellQuote(const QString& s) {
@@ -20,6 +21,7 @@ static QString shellQuote(const QString& s) {
     escaped.replace("'", "'\\''");
     return "'" + escaped + "'";
 }
+#endif
 }  // namespace
 
 CliToolInstaller::CliToolInstaller(QObject* parent) 
@@ -213,6 +215,7 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
 
 void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
 #ifndef SPRAT_EMBEDDED_CLI
+    Q_UNUSED(filePath);
     QString appDir = QApplication::applicationDirPath();
     QString expectedVersion = m_cliVersion;
 

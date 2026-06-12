@@ -278,31 +278,6 @@ void MainWindow::processTarExtractionResult(const ProjectController::TarExtracti
     }
 }
 
-void MainWindow::applyTransparencyToImage(QImage& img, const QColor& backgroundColor) {
-    if (!backgroundColor.isValid()) return;
-
-    QRgb target = backgroundColor.rgb();
-    int tr = qRed(target);
-    int tg = qGreen(target);
-    int tb = qBlue(target);
-    const int tolerance = 15; // Handle JPEG artifacts
-
-    if (img.format() != QImage::Format_ARGB32) {
-        img = img.convertToFormat(QImage::Format_ARGB32);
-    }
-
-    for (int y = 0; y < img.height(); ++y) {
-        QRgb* scanLine = reinterpret_cast<QRgb*>(img.scanLine(y));
-        for (int x = 0; x < img.width(); ++x) {
-            QRgb pixel = scanLine[x];
-            if (qAbs(qRed(pixel) - tr) <= tolerance &&
-                qAbs(qGreen(pixel) - tg) <= tolerance &&
-                qAbs(qBlue(pixel) - tb) <= tolerance) {
-                scanLine[x] = 0;
-            }
-        }
-    }
-}
 
 void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction action, const QColor& backgroundColor) {
     qInfo() << "[WASM] handleSingleImageLayout start path=" << imagePath;
@@ -323,7 +298,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
 
             QImage img(imagePath);
             if (!img.isNull()) {
-                applyTransparencyToImage(img, backgroundColor);
+                m_projectController->applyTransparencyToImage(img, backgroundColor);
                 if (img.save(outputPath)) {
                     finalPath = outputPath;
                     m_projectController->addTempDir(std::move(tempDir));
@@ -335,12 +310,12 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     }
 
     if (action == DropAction::Merge) {
-        const QString subName = computeSourceSubfolderName(imagePath);
+        const QString subName = m_projectController->computeSourceSubfolderName(imagePath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
-        const QStringList copied = copyFramesToSourceSubfolder(
+        const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             {finalPath}, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        registerLoadedSource(imagePath, action, subfolderPath);
+        m_projectController->registerLoadedSource(imagePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
         if (m_layoutOrchestrator) m_layoutOrchestrator->markCenterPivotsOnNextLayout();
@@ -370,12 +345,12 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     refreshAnimationTest();
 
     // Copy the single image into its own subfolder on Replace
-    const QString subName = computeSourceSubfolderName(imagePath);
+    const QString subName = m_projectController->computeSourceSubfolderName(imagePath);
     const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
-    const QStringList copied = copyFramesToSourceSubfolder({finalPath}, subfolderPath);
+    const QStringList copied = m_projectController->copyFramesToSourceSubfolder({finalPath}, subfolderPath);
     m_session->activeFramePaths = copied;
     if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
-    registerLoadedSource(imagePath, action, subfolderPath);
+    m_projectController->registerLoadedSource(imagePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
     // After copying, update to the copied path
     QString copiedPath = m_session->activeFramePaths.isEmpty()
                          ? finalPath : m_session->activeFramePaths.first();
@@ -473,7 +448,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
                 }
                 QImage img(framePaths[i]);
                 if (!img.isNull()) {
-                    applyTransparencyToImage(img, backgroundColor);
+                    m_projectController->applyTransparencyToImage(img, backgroundColor);
                     img.save(framePaths[i]);
                 }
             }
@@ -487,14 +462,14 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
     }
     
     if (action == DropAction::Merge) {
-        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subName = m_projectController->computeSourceSubfolderName(sourcePath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
         // currentFolder must be set so relative subfolder structure is preserved
         m_session->currentFolder = tempPath;
-        const QStringList copied = copyFramesToSourceSubfolder(
+        const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             framePaths, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        registerLoadedSource(sourcePath, action, subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
     } else {
@@ -527,12 +502,12 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         // Set currentFolder to extraction root so relative subfolder structure is preserved
         m_session->currentFolder = tempPath;
         // Copy sprites into a dedicated subfolder on Replace
-        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subName = m_projectController->computeSourceSubfolderName(sourcePath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
-        m_session->activeFramePaths = copyFramesToSourceSubfolder(framePaths, subfolderPath);
+        m_session->activeFramePaths = m_projectController->copyFramesToSourceSubfolder(framePaths, subfolderPath);
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
 
-        registerLoadedSource(sourcePath, action, subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
     }
 
     if (!m_session->frameListPath.isEmpty()) {
@@ -569,13 +544,13 @@ void MainWindow::onTransparencyProcessingFinished() {
     const DropAction& action = m_pendingTransparencyAction;
 
     if (action == DropAction::Merge) {
-        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subName = m_projectController->computeSourceSubfolderName(sourcePath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
         m_session->currentFolder = tempPath;
-        const QStringList copied = copyFramesToSourceSubfolder(
+        const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             framePaths, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        registerLoadedSource(sourcePath, action, subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
         if (m_layoutOrchestrator) m_layoutOrchestrator->markCenterPivotsOnNextLayout();
@@ -610,11 +585,11 @@ void MainWindow::onTransparencyProcessingFinished() {
         // Set currentFolder to extraction root so relative subfolder structure is preserved
         m_session->currentFolder = tempPath;
         // Copy sprites into a dedicated subfolder on Replace
-        const QString subName = computeSourceSubfolderName(sourcePath);
+        const QString subName = m_projectController->computeSourceSubfolderName(sourcePath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
-        m_session->activeFramePaths = copyFramesToSourceSubfolder(framePaths, subfolderPath);
+        m_session->activeFramePaths = m_projectController->copyFramesToSourceSubfolder(framePaths, subfolderPath);
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
-        registerLoadedSource(sourcePath, action, subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
     }
 
     if (!m_session->frameListPath.isEmpty()) {

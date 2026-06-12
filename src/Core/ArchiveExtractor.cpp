@@ -49,6 +49,11 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
         destination.mkpath(".");
     }
 
+    constexpr qint64 kMaxTotalExtractSize = 4LL * 1024 * 1024 * 1024; // 4 GB total
+    constexpr int    kMaxExtractFileCount  = 100'000;
+    qint64 totalExtractedBytes = 0;
+    int    fileCount           = 0;
+
     for (;;) {
         if (canceled && *canceled) {
             error = "Canceled";
@@ -90,6 +95,13 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
         archive_entry_set_pathname(entry, PATH_TO_UTF8(fullPath));
 #endif
 
+        ++fileCount;
+        if (fileCount > kMaxExtractFileCount) {
+            error = QString("Archive contains too many entries (> %1)").arg(kMaxExtractFileCount);
+            r = ARCHIVE_FATAL;
+            break;
+        }
+
         r = archive_write_header(ext, entry);
         if (r < ARCHIVE_OK) {
             error = QString("Error writing archive header: %1").arg(archive_error_string(ext));
@@ -101,18 +113,20 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
                 r = ARCHIVE_FATAL;
                 break;
             }
-            r = copyData(a, ext);
+            r = copyData(a, ext, totalExtractedBytes, kMaxTotalExtractSize);
             if (r < ARCHIVE_OK) {
-                // If r < 0, it could be from archive_read_data_block or archive_write_data_block
-                // We try to get the most relevant error message
-                QString readErr = archive_error_string(a);
-                QString writeErr = archive_error_string(ext);
-                if (!readErr.isEmpty()) {
-                    error = QString("Error reading archive data: %1").arg(readErr);
-                } else if (!writeErr.isEmpty()) {
-                    error = QString("Error writing archive data: %1").arg(writeErr);
+                if (totalExtractedBytes > kMaxTotalExtractSize) {
+                    error = QString("Archive total uncompressed size exceeds limit (> 4 GB)");
                 } else {
-                    error = "Unknown error during data copy";
+                    const QString readErr  = archive_error_string(a);
+                    const QString writeErr = archive_error_string(ext);
+                    if (!readErr.isEmpty()) {
+                        error = QString("Error reading archive data: %1").arg(readErr);
+                    } else if (!writeErr.isEmpty()) {
+                        error = QString("Error writing archive data: %1").arg(writeErr);
+                    } else {
+                        error = "Unknown error during data copy";
+                    }
                 }
                 break;
             }
@@ -143,7 +157,6 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
 bool ArchiveExtractor::readFileFromArchive(const QString& archivePath, const QString& fileName, QByteArray& data, QString& error, bool exactMatch) {
     struct archive* a;
     struct archive_entry* entry;
-    int r;
 
     a = archive_read_new();
     archive_read_support_format_all(a);
@@ -267,10 +280,17 @@ QStringList ArchiveExtractor::listEntries(const QString& archivePath, QString& e
         return {};
     }
 
+    constexpr int kMaxListEntryCount = 100'000;
     QStringList entries;
     struct archive_entry* entry;
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
         if (archive_entry_filetype(entry) == AE_IFREG) {
+            if (entries.size() >= kMaxListEntryCount) {
+                error = QString("Archive contains too many entries (> %1)").arg(kMaxListEntryCount);
+                archive_read_close(a);
+                archive_read_free(a);
+                return {};
+            }
 #ifdef Q_OS_WIN
             entries.append(QString::fromWCharArray(archive_entry_pathname_w(entry)));
 #else
@@ -285,7 +305,8 @@ QStringList ArchiveExtractor::listEntries(const QString& archivePath, QString& e
     return entries;
 }
 
-int ArchiveExtractor::copyData(struct archive* ar, struct archive* aw) {
+int ArchiveExtractor::copyData(struct archive* ar, struct archive* aw,
+                               qint64& bytesWritten, qint64 maxBytes) {
     int r;
     const void* buff;
     size_t size;
@@ -297,6 +318,9 @@ int ArchiveExtractor::copyData(struct archive* ar, struct archive* aw) {
             return (ARCHIVE_OK);
         if (r < ARCHIVE_OK)
             return (r);
+        bytesWritten += static_cast<qint64>(size);
+        if (bytesWritten > maxBytes)
+            return (ARCHIVE_FATAL);
         r = archive_write_data_block(aw, buff, size, offset);
         if (r < ARCHIVE_OK) {
             qWarning() << "archive_write_data_block error:" << archive_error_string(aw);

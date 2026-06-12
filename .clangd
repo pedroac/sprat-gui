@@ -1,0 +1,4 @@
+CompileFlags:
+  # -mno-direct-extern-access is a GCC-only flag added by Qt6's CMake for Linux
+  # builds. Clang (and clangd) do not recognise it; strip it from the analysis.
+  Remove: [-mno-direct-extern-access]

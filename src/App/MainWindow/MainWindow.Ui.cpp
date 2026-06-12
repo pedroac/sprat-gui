@@ -48,7 +48,6 @@
 #include <QActionGroup>
 #include <QMessageBox>
 #include "NavigatorTreeWidget.h"
-#include "TimelineTreeWidget.h"
 #include "SpriteTreeUtils.h"
 #include <QUuid>
 
@@ -137,34 +136,30 @@ void MainWindow::setupUi() {
     m_exportLayoutCanvas->setSettings(m_settings);
     m_exportLayoutCanvas->setDisplayOnly(true);
 
-    connect(m_exportWorkspace, &ExportWorkspace::previewSettingsChanged,
-            this, &MainWindow::schedulePreviewPack);
-    connect(m_exportWorkspace, &ExportWorkspace::previewAtlasChanged,
-            this, [this](int sessionAtlasIndex) {
-                m_exportPreviewAtlasIndex = sessionAtlasIndex;
-                // Invalidate the pack cache so the new atlas gets a fresh pack.
-                m_cachedPackedImage.clear();
-                m_cachedPackLayout.clear();
-                if (!m_session || !m_exportLayoutCanvas) return;
-                QVector<LayoutModel> models;
-                if (sessionAtlasIndex < 0) {
-                    for (const auto& atlas : m_session->atlases)
-                        if (!atlas.isExcluded)
-                            models.append(atlas.layoutModels);
-                } else if (sessionAtlasIndex < m_session->atlases.size()) {
-                    models = m_session->atlases[sessionAtlasIndex].layoutModels;
+    connect(m_exportWorkspace, &ExportWorkspace::previewRefreshRequested,
+            this, [this](int sessionAtlasIndex, const QString& profile, const QString& sf) {
+                // Atlas-specific setup (composition): update index and canvas placeholder
+                if (m_exportCoordinator)
+                    m_exportCoordinator->setExportPreviewAtlasIndex(sessionAtlasIndex);
+                if (m_session && m_exportLayoutCanvas) {
+                    QVector<LayoutModel> models;
+                    if (sessionAtlasIndex < 0) {
+                        for (const auto& atlas : m_session->atlases)
+                            if (!atlas.isExcluded)
+                                models.append(atlas.layoutModels);
+                    } else if (sessionAtlasIndex < m_session->atlases.size()) {
+                        models = m_session->atlases[sessionAtlasIndex].layoutModels;
+                    }
+                    m_exportLayoutCanvas->setModels(models);
+                    m_exportLayoutCanvas->setZoomManual(false);
+                    m_exportLayoutCanvas->initialFit();
+                    if (m_exportWorkspaceActive)
+                        m_exportWorkspace->setViewport(m_exportLayoutCanvas);
                 }
-                m_exportLayoutCanvas->setModels(models);
-                m_exportLayoutCanvas->setZoomManual(false);
-                m_exportLayoutCanvas->initialFit();
-                if (m_exportWorkspaceActive)
-                    m_exportWorkspace->setViewport(m_exportLayoutCanvas);
-                const SaveConfig cfg = m_exportWorkspace->getConfig();
-                schedulePreviewPack(cfg.profiles.isEmpty() ? QString() : cfg.profiles.first(),
-                                    cfg.scaleFilter);
+                // Shared refresh: cancel in-progress load, invalidate cache, schedule pack
+                if (m_exportCoordinator)
+                    m_exportCoordinator->refreshPreview(profile, sf);
             });
-    connect(&m_previewPackWatcher, &QFutureWatcher<PackPreviewResult>::finished,
-            this, &MainWindow::onPreviewPackFinished);
 
     // Page 3: Atlases Management Workspace
     m_atlasesManagementWorkspace = new AtlasesManagementWorkspace(this);
@@ -582,60 +577,44 @@ void MainWindow::setupUi() {
     m_atlasViewStack->addWidget(emptyAtlasLabel);
     m_atlasViewStack->setCurrentIndex(1);
 
-    // 2. Animation Timelines panel — owned by TimelineEditorPanel
-    m_timelineEditorPanel = new TimelineEditorPanel(this);
+    // 2. Animation Timelines panel — owns all timeline business logic (Phase 7)
+    m_timelineEditorPanel = new TimelineEditorPanel(m_session, m_undoStack, this);
 
-    // Wire MainWindow's raw-pointer members to the panel's child widgets
-    m_timelineCreateEdit      = m_timelineEditorPanel->timelineCreateEdit();
-    m_timelineList            = m_timelineEditorPanel->timelineList();
-    m_timelineEditorContainer = m_timelineEditorPanel->timelineEditorContainer();
-    m_selectedTimelineGroup   = m_timelineEditorPanel->selectedTimelineGroup();
-    m_timelineNameEdit        = m_timelineEditorPanel->timelineNameEdit();
-    m_timelineFpsSpin         = m_timelineEditorPanel->timelineFpsSpin();
-    m_timelineAliasLabel      = m_timelineEditorPanel->timelineAliasLabel();
-    m_timelineFlipLabel       = m_timelineEditorPanel->timelineFlipLabel();
-    m_timelineFlipCombo       = m_timelineEditorPanel->timelineFlipCombo();
-    m_timelineDropArea        = m_timelineEditorPanel->timelineDropArea();
-    m_timelineDragHintLabel   = m_timelineEditorPanel->timelineDragHintLabel();
-    m_timelineFramesList      = m_timelineEditorPanel->timelineFramesList();
-
-    // Connect timeline-list signals
-    connect(m_timelineEditorPanel->addTimelineButton(), &QPushButton::clicked,
-            this, &MainWindow::onTimelineAddClicked);
-    connect(m_timelineCreateEdit, &QLineEdit::returnPressed,
-            this, &MainWindow::onTimelineAddClicked);
-    connect(m_timelineList, &QTreeWidget::itemSelectionChanged,
-            this, &MainWindow::onTimelineSelectionChanged);
-    connect(m_timelineList, &QWidget::customContextMenuRequested,
-            this, &MainWindow::onTimelineContextMenu);
-    connect(m_timelineList, &TimelineTreeWidget::deleteKeyPressed,
-            this, &MainWindow::onTimelineDeleteKey);
-    connect(m_timelineList, &TimelineTreeWidget::dropCompleted,
-            this, &MainWindow::onTimelineTreeDropCompleted);
-    connect(m_timelineList, &QTreeWidget::itemChanged,
-            this, &MainWindow::onTimelineItemChanged);
-
-    // Connect selected-timeline editor signals
-    connect(m_timelineNameEdit, &QLineEdit::editingFinished,
-            this, &MainWindow::onTimelineNameChanged);
-    connect(m_timelineFpsSpin, &QSpinBox::valueChanged,
-            this, &MainWindow::onTimelineFpsChanged);
-    connect(m_timelineEditorPanel->removeTimelineButton(), &QPushButton::clicked,
-            this, &MainWindow::onTimelineRemoveClicked);
-    connect(m_timelineFlipCombo, &QComboBox::currentIndexChanged,
-            this, &MainWindow::onTimelineFlipChanged);
-
-    // Connect timeline frames list signals
-    connect(m_timelineFramesList, &TimelineListWidget::frameDropped,
-            this, &MainWindow::onFrameDropped);
-    connect(m_timelineFramesList, &TimelineListWidget::frameMoved,
-            this, &MainWindow::onFrameMoved);
-    connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested,
-            this, &MainWindow::onFrameRemoveRequested);
-    connect(m_timelineFramesList, &TimelineListWidget::duplicateFrameRequested,
-            this, &MainWindow::onFrameDuplicateRequested);
-    connect(m_timelineFramesList, &QListWidget::itemSelectionChanged,
-            this, &MainWindow::onTimelineFrameSelectionChanged);
+    // Connect TimelineEditorPanel signals to MainWindow animation state
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::animPlaybackIntervalChanged, this,
+        [this](int fps) {
+            if (m_animPlaying) {
+#ifndef Q_OS_WASM
+                m_animTimer->setInterval(1000 / qMax(1, fps));
+#endif
+                m_animElapsed.restart();
+            }
+        });
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::animFrameReset, this,
+        [this]() {
+            m_animFrameIndex = 0;
+            fitAnimationToViewport();
+            refreshAnimationTest();
+        });
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::animFrameIndexSelected, this,
+        [this](int index) {
+            if (!m_animPlaying) {
+                m_animFrameIndex = index;
+                refreshAnimationTest();
+            }
+        });
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::animZoomResetAndFitRequested, this,
+        [this]() {
+            if (m_animCanvas) m_animCanvas->setZoomManual(false);
+            fitAnimationToViewport();
+            refreshAnimationTest();
+        });
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::animationDataChanged,
+        this, &MainWindow::refreshAnimationTest);
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::statusMessage, this,
+        [this](const QString& text) { if (m_statusLabel) m_statusLabel->setText(text); });
+    connect(m_timelineEditorPanel, &TimelineEditorPanel::spritesToTimelineRequested,
+        this, &MainWindow::onSpritesDroppedToTimeline);
 
     // The panel widget itself is never placed in any layout — its sub-widgets are
     // distributed directly into the animation dock. Hide it so it doesn't sit as
@@ -780,7 +759,7 @@ void MainWindow::setupUi() {
         auto* animBottomLayout = new QVBoxLayout(animBottomPanel);
         animBottomLayout->setContentsMargins(0, 0, 0, 0);
         animBottomLayout->setSpacing(0);
-        animBottomLayout->addWidget(m_timelineEditorContainer);
+        animBottomLayout->addWidget(m_timelineEditorPanel->timelineEditorContainer());
         animBottomLayout->addWidget(m_animPreviewPanel, 1);
 
         auto* animSplitter = new QSplitter(Qt::Vertical, m_animationDock);
@@ -983,6 +962,11 @@ void MainWindow::setupToolbar() {
         style->standardIcon(QStyle::SP_FileDialogListView), tr("Atlas Sprites..."));
     spritesheetAction->setToolTip(tr("Open atlas sprites settings"));
     connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
+
+    QAction* spritesNavigatorAction = settingsMenu->addAction(
+        style->standardIcon(QStyle::SP_FileDialogContentsView), tr("Sprites Navigator..."));
+    spritesNavigatorAction->setToolTip(tr("Open sprites navigator settings"));
+    connect(spritesNavigatorAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesNavigatorClicked);
 
     QAction* framesEditorAction = settingsMenu->addAction(
         style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Frames Editor..."));
@@ -1680,6 +1664,7 @@ void MainWindow::refreshSpriteTree() {
 
                 // find-or-create dim, non-checkable folder nodes within the trash subtree
                 auto findOrCreateExclFolder = [&](auto& self, QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
+                    Q_UNUSED(self);
                     QTreeWidgetItem* current = root;
                     for (const QString& part : parts) {
                         QTreeWidgetItem* found = nullptr;

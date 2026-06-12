@@ -5,6 +5,8 @@
 #include <QDateTime>
 #include <QRect>
 
+class QGraphicsPathItem;
+
 /**
  * @brief Widget for previewing and editing a single sprite.
  * 
@@ -85,6 +87,7 @@ private:
     QList<QGraphicsRectItem*> m_borderItems;
     QList<QGraphicsPixmapItem*> m_ghostItems;
     QGraphicsRectItem* m_trimRectItem = nullptr;
+    QGraphicsPathItem* m_trimDimItem = nullptr;
     EditorOverlayItem* m_overlay;
     QList<SpritePtr> m_sprites;
     AppSettings m_settings;

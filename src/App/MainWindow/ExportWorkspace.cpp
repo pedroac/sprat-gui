@@ -113,9 +113,7 @@ void ExportWorkspace::setupUi() {
     m_previewAtlasCombo = new QComboBox(profilesGroup);
     m_previewAtlasCombo->setToolTip(tr("Atlas to preview"));
     connect(m_previewAtlasCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int) {
-                emit previewAtlasChanged(m_previewAtlasCombo->currentData().toInt());
-            });
+            this, &ExportWorkspace::onAnyComboChanged);
     previewAtlasRow->addWidget(m_previewAtlasCombo, 1);
     profilesLayout->addLayout(previewAtlasRow);
 
@@ -124,11 +122,7 @@ void ExportWorkspace::setupUi() {
     m_profileCombo = new QComboBox(profilesGroup);
     m_profileCombo->setToolTip(tr("Select the output profile for this export"));
     connect(m_profileCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int) {
-                emit previewSettingsChanged(
-                    m_profileCombo->currentData().toString(),
-                    m_scaleFilterCombo ? m_scaleFilterCombo->currentData().toString() : QString());
-            });
+            this, &ExportWorkspace::onAnyComboChanged);
     profileRow->addWidget(m_profileCombo, 1);
     profilesLayout->addLayout(profileRow);
 
@@ -209,11 +203,7 @@ void ExportWorkspace::setupUi() {
     m_scaleFilterCombo->addItem(tr("Bicubic"),           QStringLiteral("bicubic"));
     m_scaleFilterCombo->addItem(tr("Mitchell"),          QStringLiteral("mitchell"));
     connect(m_scaleFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int) {
-                emit previewSettingsChanged(
-                    m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
-                    m_scaleFilterCombo->currentData().toString());
-            });
+            this, &ExportWorkspace::onAnyComboChanged);
     exportLayout->addWidget(m_scaleFilterCombo);
 
     rightLayout->addWidget(exportGroup);
@@ -314,7 +304,7 @@ void ExportWorkspace::populate(const QVector<SpratProfile>& profiles,
                                const QString& selectedProfileName,
                                const SaveConfig& lastConfig,
                                const QString& startDir) {
-    // Block signals to avoid spurious previewSettingsChanged during population
+    // Block signals to avoid spurious previewRefreshRequested during population
     m_profileCombo->blockSignals(true);
     if (m_scaleFilterCombo) m_scaleFilterCombo->blockSignals(true);
 
@@ -377,9 +367,16 @@ void ExportWorkspace::setAtlasNames(const QStringList& names, int activeSessionI
     m_previewAtlasCombo->setCurrentIndex(selectIdx >= 0 ? selectIdx : 0);
     m_previewAtlasCombo->blockSignals(false);
     m_previewAtlasCombo->setVisible(true);
-    // Always emit so the canvas and preview pack are initialised from the
+    // Always notify so the canvas and preview pack are initialised from the
     // selected atlas, regardless of whether the index actually changed.
-    emit previewAtlasChanged(m_previewAtlasCombo->currentData().toInt());
+    onAnyComboChanged();
+}
+
+void ExportWorkspace::onAnyComboChanged() {
+    const int atlasIndex = m_previewAtlasCombo ? m_previewAtlasCombo->currentData().toInt() : -1;
+    const QString profile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+    const QString sf = m_scaleFilterCombo ? m_scaleFilterCombo->currentData().toString() : QString();
+    emit previewRefreshRequested(atlasIndex, profile, sf);
 }
 
 SaveConfig ExportWorkspace::getConfig() const {

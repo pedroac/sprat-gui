@@ -1,4 +1,5 @@
 #pragma once
+#include <QStringList>
 #include <QTreeWidget>
 
 class TimelineTreeWidget : public QTreeWidget {
@@ -11,6 +12,7 @@ signals:
     void dropCompleted(int draggedTimelineIndex,
                        const QString& draggedFolderPath,
                        const QString& targetFolderPath);
+    void spritesDroppedToCreate(const QStringList& paths, const QString& targetFolderPath);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;

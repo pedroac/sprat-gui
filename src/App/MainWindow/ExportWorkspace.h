@@ -29,7 +29,7 @@ public:
      *  @param names          Display names (one per non-excluded atlas).
      *  @param activeSessionIndex  Real session atlas index to pre-select.
      *  @param sessionIndices Parallel list of real session indices stored as combo item data,
-     *                        so previewAtlasChanged carries the true session index.
+     *                        so previewRefreshRequested carries the true session index.
      */
     void setAtlasNames(const QStringList& names, int activeSessionIndex,
                        const QList<int>& sessionIndices);
@@ -39,13 +39,13 @@ public:
 signals:
     void exportRequested(SaveConfig config);
     void cancelled();
-    void previewSettingsChanged(QString profileName, QString scaleFilter);
-    /** Emitted when the user selects a different preview atlas. */
-    void previewAtlasChanged(int atlasIndex);
+    /** Emitted when any preview combo (atlas, profile, or scale filter) changes. */
+    void previewRefreshRequested(int atlasIndex, QString profileName, QString scaleFilter);
 
 private slots:
     void onZoomSpinChanged(double value);
     void onViewZoomChanged(double zoom);
+    void onAnyComboChanged();
 
 private:
     void setupUi();

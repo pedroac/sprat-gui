@@ -50,5 +50,6 @@ public:
     static QStringList listEntries(const QString& archivePath, QString& error);
 
 private:
-    static int copyData(struct archive* ar, struct archive* aw);
+    static int copyData(struct archive* ar, struct archive* aw,
+                        qint64& bytesWritten, qint64 maxBytes);
 };

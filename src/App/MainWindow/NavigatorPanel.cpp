@@ -158,6 +158,11 @@ void NavigatorPanel::setSelectionMode(QAbstractItemView::SelectionMode mode)
     if (m_spriteTree) m_spriteTree->setSelectionMode(mode);
 }
 
+void NavigatorPanel::setGroupSimilar(bool group)
+{
+    m_groupSimilar = group;
+}
+
 void NavigatorPanel::refresh(const ProjectSession* session, bool showHidden, int atlasFilter)
 {
     buildTree(session, showHidden, atlasFilter);
@@ -531,7 +536,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
             SpriteTreeUtils::buildSubTree(m_spriteTree, sourceNode, toEntries(perSource[si]),
-                folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb);
+                folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb, m_groupSimilar);
 
             // ── Hidden-folder placeholders (Sprites workspace only, showHidden ON) ──
             if (atlasFilter < 0 && showHidden && !src.hiddenFolders.isEmpty()) {
@@ -594,6 +599,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
                 trashNode->setExpanded(true);
 
                 auto findOrCreateExclFolder = [&](auto& self, QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
+                    Q_UNUSED(self);
                     QTreeWidgetItem* current = root;
                     for (const QString& part : parts) {
                         QTreeWidgetItem* found = nullptr;
@@ -646,7 +652,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         if (!unassigned.isEmpty()) {
             auto* otherNode = makeGroupNode(nullptr, tr("Other"));
             SpriteTreeUtils::buildSubTree(m_spriteTree, otherNode, toEntries(unassigned),
-                folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb);
+                folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb, m_groupSimilar);
         }
     } else {
         // Single source (or no source tracking): flat list from all sprites.
@@ -655,7 +661,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         for (const auto& sprite : allSprites)
             entries.append({sprite->path, sprite->name});
         SpriteTreeUtils::buildSubTree(m_spriteTree, nullptr, entries,
-            folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb);
+            folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb, m_groupSimilar);
     }
 
     // ── Restore tree state ───────────────────────────────────────────────────
@@ -684,6 +690,23 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
     }
 
     m_spriteTree->sortItems(0, Qt::AscendingOrder);
+
+    // ── Pin "Excluded" trash nodes to the top of their source node ───────────
+    // sortItems above sorts everything alphabetically; items like "attack" would
+    // sort before "Excluded (N)". Disable sorting and manually reposition each
+    // trash node (UserRole+2 == 3) to index 0 of its parent source node.
+    m_spriteTree->setSortingEnabled(false);
+    for (int si = 0; si < m_spriteTree->topLevelItemCount(); ++si) {
+        QTreeWidgetItem* srcNode = m_spriteTree->topLevelItem(si);
+        for (int j = 0; j < srcNode->childCount(); ++j) {
+            if (srcNode->child(j)->data(0, Qt::UserRole + 2).toInt() == 3) {
+                QTreeWidgetItem* trash = srcNode->takeChild(j);
+                srcNode->insertChild(0, trash);
+                break;
+            }
+        }
+    }
+
     m_spriteTree->blockSignals(false);
 
     if (hadItems)

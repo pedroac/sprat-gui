@@ -824,6 +824,27 @@ struct AppSettings {
      */
     QString exportDefaultScaleFilter = "nearest";
 
+    /**
+     * @brief Show a floating image preview when hovering sprite names in the navigator.
+     *
+     * Default: true
+     */
+    bool spritePreviewEnabled = true;
+
+    /**
+     * @brief Delay in seconds before the sprite preview tooltip appears.
+     *
+     * Default: 0.4
+     */
+    double spritePreviewDelay = 0.4;
+
+    /**
+     * @brief Group animation sequences under a virtual group node in the navigator.
+     *
+     * Default: true
+     */
+    bool navigatorGroupSimilar = true;
+
 };
 
 /**

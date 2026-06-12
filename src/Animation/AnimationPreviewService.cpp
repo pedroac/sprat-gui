@@ -265,6 +265,7 @@ QSize AnimationPreviewService::calculateAnimationSize(
     double zoom,
     int previewPadding)
 {
+    Q_UNUSED(previewPadding);
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return QSize(280, 180);
     }

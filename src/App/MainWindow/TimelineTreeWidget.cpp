@@ -8,7 +8,8 @@
 #include <QMimeData>
 #include <QTreeWidgetItem>
 
-static const char* kMimeType = "application/x-sprat-timeline";
+static const char* kMimeType       = "application/x-sprat-timeline";
+static const char* kSpriteMimeType = "application/x-sprat-sprite";
 
 TimelineTreeWidget::TimelineTreeWidget(QWidget* parent)
     : QTreeWidget(parent)
@@ -60,7 +61,8 @@ void TimelineTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
 
 void TimelineTreeWidget::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (event->mimeData()->hasFormat(kMimeType)) {
+    if (event->mimeData()->hasFormat(kMimeType) ||
+        event->mimeData()->hasFormat(kSpriteMimeType)) {
         event->acceptProposedAction();
     } else {
         event->ignore();
@@ -69,6 +71,12 @@ void TimelineTreeWidget::dragEnterEvent(QDragEnterEvent* event)
 
 void TimelineTreeWidget::dragMoveEvent(QDragMoveEvent* event)
 {
+    if (event->mimeData()->hasFormat(kSpriteMimeType)) {
+        // Sprites can be dropped anywhere to create new timelines
+        event->acceptProposedAction();
+        return;
+    }
+
     if (!event->mimeData()->hasFormat(kMimeType)) {
         event->ignore();
         return;
@@ -97,6 +105,28 @@ void TimelineTreeWidget::dragMoveEvent(QDragMoveEvent* event)
 
 void TimelineTreeWidget::dropEvent(QDropEvent* event)
 {
+    if (event->mimeData()->hasFormat(kSpriteMimeType)) {
+        const QStringList paths = QString::fromUtf8(
+            event->mimeData()->data(kSpriteMimeType)).split('\n', Qt::SkipEmptyParts);
+        if (paths.isEmpty()) { event->ignore(); return; }
+
+        QTreeWidgetItem* target = itemAt(event->position().toPoint());
+        QString targetFolderPath;
+        if (target) {
+            if (!target->data(0, Qt::UserRole).isValid()) {
+                // Folder node
+                targetFolderPath = folderNodePath(target);
+            } else {
+                // Leaf node — use its parent folder
+                targetFolderPath = folderNodePath(target->parent());
+            }
+        }
+
+        event->acceptProposedAction();
+        emit spritesDroppedToCreate(paths, targetFolderPath);
+        return;
+    }
+
     if (!event->mimeData()->hasFormat(kMimeType)) {
         event->ignore();
         return;

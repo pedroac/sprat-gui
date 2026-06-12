@@ -1,4 +1,5 @@
 #include "LayoutOrchestrator.h"
+#include "ILayoutContext.h"
 #include "LayoutCanvas.h"
 #include "AtlasesManagementWorkspace.h"
 #include "ProjectSession.h"
@@ -185,8 +186,8 @@ LayoutRunConfig LayoutOrchestrator::buildConfig() const {
             && m_cfg.session->sources.first().type == SourceType::Folder
             && m_syncMode != SyncMode::None
             && !m_cfg.session->sourceFolder.isEmpty()
-            && m_cfg.sourceFolderMatchesActiveFrames
-            && m_cfg.sourceFolderMatchesActiveFrames();
+            && m_cfg.context
+            && m_cfg.context->sourceFolderMatchesActiveFrames();
         if (singleFolderOptimised) {
             cfg.sourceFolderPath = m_cfg.session->sourceFolder;
         } else if (!m_cfg.session->activeFramePaths.isEmpty()) {
@@ -198,8 +199,8 @@ LayoutRunConfig LayoutOrchestrator::buildConfig() const {
     }
 
     if (m_syncMode != SyncMode::None
-            && m_cfg.sourceFolderMatchesActiveFrames
-            && m_cfg.sourceFolderMatchesActiveFrames()) {
+            && m_cfg.context
+            && m_cfg.context->sourceFolderMatchesActiveFrames()) {
         cfg.sourceFolderPath = m_cfg.session->sourceFolder;
     } else if (m_cfg.session->layoutSourceIsList && !m_cfg.session->activeFramePaths.isEmpty()) {
         cfg.imagePathList = m_cfg.session->activeFramePaths;
@@ -219,13 +220,13 @@ void LayoutOrchestrator::run(bool quiet) {
         && m_cfg.session
         && !m_cfg.session->sourceFolder.isEmpty()
         && !m_cfg.session->activeFramePaths.isEmpty()
-        && m_cfg.activeFramesAreInSourceFolder
-        && !m_cfg.activeFramesAreInSourceFolder()) {
+        && m_cfg.context
+        && !m_cfg.context->activeFramesAreInSourceFolder()) {
 
         QElapsedTimer syncTimer;
         syncTimer.start();
-        if (m_cfg.copyActiveFramesToSourceFolder)
-            m_cfg.copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
+        if (m_cfg.context)
+            m_cfg.context->copyActiveFramesToSourceFolder(m_mergeReplaceAllDuplicates);
         qInfo() << "[Performance] LayoutOrchestrator::run sync/copy took" << syncTimer.elapsed() << "ms";
     }
 
@@ -257,8 +258,8 @@ void LayoutOrchestrator::run(bool quiet) {
 
     const QString requestedProfile = m_cfg.profileCombo ? m_cfg.profileCombo->currentData().toString() : QString();
     SpratProfile selectedProfile;
-    const bool hasSelectedProfile = m_cfg.selectedProfileDefinition
-        ? m_cfg.selectedProfileDefinition(selectedProfile)
+    const bool hasSelectedProfile = m_cfg.context
+        ? m_cfg.context->selectedProfileDefinition(selectedProfile)
         : false;
 
     LayoutRunConfig config;
@@ -371,8 +372,8 @@ void LayoutOrchestrator::handleDimensionsError(const QString& failedProfile) {
     if (!m_cfg.profileCombo) return;
 
     QVector<SpratProfile> allProfiles;
-    if (m_cfg.configuredProfiles) {
-        allProfiles = m_cfg.configuredProfiles();
+    if (m_cfg.context) {
+        allProfiles = m_cfg.context->configuredProfiles();
     }
 
     bool failedHasMultipack = false;
@@ -535,7 +536,7 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
     QElapsedTimer parseTimer;
     parseTimer.start();
 
-    const QString parserFolder = m_cfg.layoutParserFolder ? m_cfg.layoutParserFolder() : QString();
+    const QString parserFolder = m_cfg.context ? m_cfg.context->layoutParserFolder() : QString();
     QVector<LayoutModel> newModels = LayoutParser::parse(layoutText, parserFolder,
                                                          m_cfg.session->currentFolder);
     qInfo() << "[WASM] LayoutParser::parse done"

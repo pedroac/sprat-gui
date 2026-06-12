@@ -11,6 +11,7 @@
 #include "models.h"
 #include "LayoutRunner.h"
 
+class ILayoutContext;
 class ProjectSession;
 class LayoutCanvas;
 class QComboBox;
@@ -35,14 +36,7 @@ public:
         QStackedWidget*              atlasViewStack  = nullptr;
         AtlasesManagementWorkspace*  atlasMgmtWorkspace = nullptr;
         QString                      layoutBinary;
-
-        // Callbacks for MainWindow methods that can't be moved yet
-        std::function<bool()>        activeFramesAreInSourceFolder;
-        std::function<void(bool)>    copyActiveFramesToSourceFolder;
-        std::function<bool(SpratProfile&)> selectedProfileDefinition;
-        std::function<QString()>     layoutParserFolder;
-        std::function<bool()>        sourceFolderMatchesActiveFrames;
-        std::function<QVector<SpratProfile>()> configuredProfiles;
+        ILayoutContext*              context         = nullptr;
     };
 
     explicit LayoutOrchestrator(const Config& cfg, QObject* parent = nullptr);

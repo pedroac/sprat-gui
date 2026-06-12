@@ -9,6 +9,7 @@
 #include "TimelineGenerationService.h"
 #include "TimelineUi.h"
 
+#include <algorithm>
 #include <functional>
 #include <QDesktopServices>
 #include <QDir>
@@ -211,8 +212,6 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     // UserRole+3 = source index, UserRole+4 = relative path within source.
     const int clickedItemType = clickedItem
         ? clickedItem->data(0, Qt::UserRole + 2).toInt() : 0;
-    const bool clickedIsHiddenPlaceholder = (clickedItemType == 1);
-    const bool clickedIsExcludedItem      = (clickedItemType == 2);
     const int  clickedSpecialSourceIdx    = (clickedItemType > 0 && clickedItem)
         ? clickedItem->data(0, Qt::UserRole + 3).toInt() : -1;
     const QString clickedSpecialRelPath   = (clickedItemType > 0 && clickedItem)
@@ -733,15 +732,15 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     QString candidateName = folderPath.isEmpty() ? defaultName : folderPath + "/" + defaultName;
 
     // Only ask for a name if there is a collision
-    if (hasDuplicateTimelineName(candidateName)) {
+    if (m_timelineEditorPanel->hasDuplicateTimelineName(candidateName)) {
         bool ok = false;
         QString promptName = QInputDialog::getText(this, tr("Create Timeline"),
                                                    tr("Timeline name (collision detected):"),
                                                    QLineEdit::Normal, defaultName, &ok);
         if (!ok || promptName.trimmed().isEmpty()) return;
-        candidateName = getUniqueTimelineName(promptName.trimmed(), folderPath);
+        candidateName = m_timelineEditorPanel->getUniqueTimelineName(promptName.trimmed(), folderPath);
 
-        if (hasDuplicateTimelineName(candidateName)) {
+        if (m_timelineEditorPanel->hasDuplicateTimelineName(candidateName)) {
             MessageDialog::warning(this, tr("Create Timeline"),
                                    tr("A timeline with the name '%1' already exists.").arg(candidateName));
             return;
@@ -757,9 +756,7 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     m_session->activeAtlas().timelines.append(timeline);
     m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
 
-    refreshTimelineList();
-    m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
-    refreshTimelineFrames();
+    m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
     refreshAnimationTest();
 
     m_undoStack->push(new TimelineAddCommand(
@@ -767,15 +764,62 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
         timeline,
         &m_session->selectedTimelineIndex,
         [this]() {
-            refreshTimelineList();
-            if (m_session->selectedTimelineIndex >= 0)
-                m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
-            else
-                onTimelineSelectionChanged();
-            refreshTimelineFrames();
+            m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
             refreshAnimationTest();
         }
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Action: Create timeline(s) from sprites dropped onto the timeline tree
+// ---------------------------------------------------------------------------
+void MainWindow::onSpritesDroppedToTimeline(const QStringList& paths,
+                                             const QString& targetFolderPath)
+{
+    if (paths.isEmpty() || !m_session) return;
+
+    // Group paths by parent directory so each folder becomes one timeline.
+    QMap<QString, QStringList> grouped;
+    for (const QString& path : paths) {
+        grouped[QFileInfo(path).absolutePath()].append(path);
+    }
+
+    // Sort paths within each group.
+    for (auto& group : grouped) {
+        std::sort(group.begin(), group.end());
+    }
+
+    const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
+    const int oldSel = m_session->selectedTimelineIndex;
+
+    for (auto it = grouped.constBegin(); it != grouped.constEnd(); ++it) {
+        QString dirName = QFileInfo(it.key()).fileName();
+        if (dirName.isEmpty()) dirName = tr("animation");
+
+        const QString uniqueName = m_timelineEditorPanel->getUniqueTimelineName(dirName, targetFolderPath);
+
+        AnimationTimeline timeline;
+        timeline.name    = uniqueName;
+        timeline.fps     = 8;
+        timeline.frames  = it.value();
+        m_session->activeAtlas().timelines.append(timeline);
+        m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
+    }
+
+    auto refreshAndSelect = [this]() {
+        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+        refreshAnimationTest();
+    };
+
+    m_undoStack->push(new TimelinesUpdateCommand(
+        &m_session->activeAtlas().timelines,
+        oldTimelines, m_session->activeAtlas().timelines,
+        oldSel, m_session->selectedTimelineIndex,
+        &m_session->selectedTimelineIndex,
+        refreshAndSelect,
+        grouped.size() > 1 ? tr("Create Timelines from Sprites")
+                           : tr("Create Timeline from Sprites")));
+    refreshAndSelect();
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,12 +1103,7 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
     const QString parentFolderPath = folderPathForTreeItem(parentGroup);
 
     auto postExecute = [this]() {
-        refreshTimelineList();
-        if (m_session->selectedTimelineIndex >= 0)
-            m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
-        else
-            onTimelineSelectionChanged();
-        refreshTimelineFrames();
+        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
         refreshAnimationTest();
     };
 
@@ -1080,7 +1119,7 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
         if (paths.isEmpty()) continue;
 
         AnimationTimeline timeline;
-        timeline.name = getUniqueTimelineName(childItem->text(0), parentFolderPath);
+        timeline.name = m_timelineEditorPanel->getUniqueTimelineName(childItem->text(0), parentFolderPath);
         timeline.fps = 8;
         timeline.frames = paths;
 
@@ -1099,9 +1138,7 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
     }
 
     if (addedCount > 0) {
-        refreshTimelineList();
-        m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
-        refreshTimelineFrames();
+        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
         refreshAnimationTest();
     }
 }
@@ -1164,13 +1201,7 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
             m_session->selectedTimelineIndex = focusIndex;
 
         auto postExecute = [this]() {
-            refreshTimelineList();
-            if (m_session->selectedTimelineIndex >= 0)
-                m_timelineList->setCurrentItem(
-                    timelineItemForIndex(m_session->selectedTimelineIndex));
-            else
-                onTimelineSelectionChanged();
-            fitAnimationToViewport();
+            m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
             refreshAnimationTest();
         };
 

@@ -1,4 +1,5 @@
 #include "NavigatorTreeWidget.h"
+#include "SpritePreviewTooltip.h"
 #include "models.h"
 
 #include <functional>
@@ -16,6 +17,72 @@ NavigatorTreeWidget::NavigatorTreeWidget(QWidget* parent)
     setDragEnabled(true);
     setDragDropMode(QAbstractItemView::DragOnly);
     setSelectionMode(QAbstractItemView::SingleSelection);
+
+    viewport()->setMouseTracking(true);
+
+    m_hoverTimer.setSingleShot(true);
+    m_hoverTimer.setInterval(400);
+    connect(&m_hoverTimer, &QTimer::timeout, this, &NavigatorTreeWidget::showPreview);
+}
+
+void NavigatorTreeWidget::setPreviewDelay(int ms) {
+    m_hoverTimer.setInterval(ms);
+}
+
+void NavigatorTreeWidget::setPreviewEnabled(bool enabled) {
+    m_previewEnabled = enabled;
+    if (!enabled) {
+        m_hoverTimer.stop();
+        m_hoveredItem = nullptr;
+        if (m_previewTooltip) m_previewTooltip->hide();
+    }
+}
+
+void NavigatorTreeWidget::mouseMoveEvent(QMouseEvent* event) {
+    QTreeWidget::mouseMoveEvent(event);
+
+    if (!m_previewEnabled) return;
+
+    QTreeWidgetItem* item = itemAt(event->pos());
+    SpritePtr sprite;
+    if (item && item->childCount() == 0) {
+        const QVariant v = item->data(0, Qt::UserRole);
+        if (v.isValid()) sprite = v.value<SpritePtr>();
+    }
+
+    if (!sprite) {
+        m_hoverTimer.stop();
+        m_hoveredItem = nullptr;
+        if (m_previewTooltip) m_previewTooltip->hide();
+        return;
+    }
+
+    m_hoverGlobalPos = event->globalPosition().toPoint();
+    if (item != m_hoveredItem) {
+        m_hoveredItem = item;
+        m_hoverTimer.stop();
+        if (m_previewTooltip) m_previewTooltip->hide();
+        m_hoverTimer.start();
+    }
+}
+
+void NavigatorTreeWidget::leaveEvent(QEvent* event) {
+    QTreeWidget::leaveEvent(event);
+    m_hoverTimer.stop();
+    m_hoveredItem = nullptr;
+    if (m_previewTooltip) m_previewTooltip->hide();
+}
+
+void NavigatorTreeWidget::showPreview() {
+    if (!m_hoveredItem) return;
+    const QVariant v = m_hoveredItem->data(0, Qt::UserRole);
+    if (!v.isValid()) return;
+    const auto sprite = v.value<SpritePtr>();
+    if (!sprite || sprite->path.isEmpty()) return;
+
+    if (!m_previewTooltip)
+        m_previewTooltip = new SpritePreviewTooltip(this);
+    m_previewTooltip->showAt(sprite->path, m_hoverGlobalPos);
 }
 
 void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
@@ -23,16 +90,13 @@ void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
     QStringList paths;
     const auto items = selectedItems();
 
-    // Helper to recursively collect sprite paths from an item and its descendants
     std::function<void(QTreeWidgetItem*)> collectSpritePaths = [&](QTreeWidgetItem* item) {
         QVariant v = item->data(0, Qt::UserRole);
         if (v.isValid()) {
-            // This is a sprite leaf
             auto sprite = v.value<SpritePtr>();
             if (sprite && !sprite->path.isEmpty())
                 paths.append(sprite->path);
         } else if (item->childCount() > 0) {
-            // This is a group node, collect from all descendants
             for (int i = 0; i < item->childCount(); ++i) {
                 collectSpritePaths(item->child(i));
             }
@@ -48,7 +112,6 @@ void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
     QMimeData* mimeData = new QMimeData;
     mimeData->setData("application/x-sprat-sprite", paths.join('\n').toUtf8());
 
-    // Build a small thumbnail pixmap
     const int thumbSize = 32;
     const int maxThumbs = qMin(paths.size(), 4);
     QPixmap pixmap(thumbSize + (maxThumbs - 1) * 6, thumbSize + (maxThumbs - 1) * 6);
@@ -75,32 +138,23 @@ void NavigatorTreeWidget::mousePressEvent(QMouseEvent* event)
         const Qt::KeyboardModifiers mods = event->modifiers();
 
         if (mods & Qt::ShiftModifier) {
-            // Range-check: set all visible items from anchor to this item as Checked.
-            // The base class call below handles standard Shift+range-select for drag/context-menu.
             QTreeWidgetItem* anchor = m_checkboxAnchor ? m_checkboxAnchor : item;
             setCheckStateRange(anchor, item, Qt::Checked);
             m_checkboxAnchor = item;
         } else if (mods & Qt::ControlModifier) {
-            // Toggle the item's checkbox.
-            // The base class call below handles standard Ctrl+multi-select for drag/context-menu.
             if (item->flags() & Qt::ItemIsUserCheckable)
                 item->setCheckState(0, item->checkState(0) == Qt::Checked ? Qt::Unchecked : Qt::Checked);
             m_checkboxAnchor = item;
         } else {
-            // Normal click: update the anchor for future Shift+clicks.
             m_checkboxAnchor = item;
         }
     }
 
-    // Always call the base class so that standard selection behaviour (single-click
-    // select, Ctrl+multi-select, Shift+range-select) is preserved.  This is what
-    // makes drag-and-drop and context-menu operations on multiple selected items work.
     QTreeWidget::mousePressEvent(event);
 }
 
 void NavigatorTreeWidget::setCheckStateRange(QTreeWidgetItem* from, QTreeWidgetItem* to, Qt::CheckState state)
 {
-    // Collect all currently visible items in visual (top-to-bottom) order.
     QList<QTreeWidgetItem*> visible;
     QTreeWidgetItemIterator it(this, QTreeWidgetItemIterator::NotHidden);
     while (*it) {

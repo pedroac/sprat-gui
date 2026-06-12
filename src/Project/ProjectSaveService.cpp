@@ -74,11 +74,11 @@ bool ProjectSaveService::save(
     const QString& deduplicateMode,
     SaveCallbacks callbacks
 ) {
+    Q_UNUSED(sourceFolder);
     const auto& setLoading     = callbacks.setLoading;
     const auto& setStatus      = callbacks.setStatus;
     const auto& shouldCancel   = callbacks.shouldCancel;
     const auto& runProcessFunc = callbacks.runProcess;
-    constexpr int kProcessTimeoutMs = 120000;
 
     struct LoadingGuard {
         const std::function<void(bool)>& setLoading;
@@ -160,7 +160,6 @@ bool ProjectSaveService::save(
     const QJsonObject layoutOptions = projectPayload["layout_options"].toObject();
     const QString cachedLayoutData = layoutInfo["output"].toString();
     const double cachedLayoutScale = layoutInfo["scale"].toDouble(1.0);
-    const double layoutOptionScale = 1.0;
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolutionText(
@@ -527,7 +526,6 @@ bool ProjectSaveService::save(
 
         if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")) {
             QString tarBin = QStandardPaths::findExecutable("tar");
-            bool extracted = false;
             if (!tarBin.isEmpty()) {
                 // In background thread, we need to handle working directory carefully if we used runProcessFunc.
                 // But runProcessFunc uses QProcess internally.

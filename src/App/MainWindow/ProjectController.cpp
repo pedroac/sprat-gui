@@ -10,7 +10,9 @@
 #include <QFileInfo>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#ifndef Q_OS_WASM
 #include <QProcess>
+#endif
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -197,6 +199,7 @@ void ProjectController::launchFrameExtraction(const QString& imagePath,
         args << imagePath << "--frames" << "-" << "--output" << tempPath;
         QByteArray framesDataBytes = framesData.toUtf8();
 
+#ifndef Q_OS_WASM
         QProcess proc;
         proc.start(unpackBin, args);
         if (!framesDataBytes.isEmpty()) {
@@ -206,6 +209,7 @@ void ProjectController::launchFrameExtraction(const QString& imagePath,
         res.success = proc.waitForFinished(60000) &&
                       proc.exitStatus() == QProcess::NormalExit &&
                       proc.exitCode() == 0;
+#endif
         return res;
     };
     m_frameExtractionWatcher.setFuture(QtConcurrent::run(task));
@@ -231,6 +235,9 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
     FrameDetectionResult result;
     if (m_framesBinary.isEmpty()) return result;
 
+#ifdef Q_OS_WASM
+    return result;
+#else
     QProcess proc;
     proc.start(m_framesBinary, QStringList() << imagePath);
     if (!proc.waitForFinished(30000)) {
@@ -286,6 +293,7 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
         }
     }
     return result;
+#endif // Q_OS_WASM
 }
 
 // ---------------------------------------------------------------------------

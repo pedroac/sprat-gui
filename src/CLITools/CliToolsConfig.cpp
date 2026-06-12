@@ -76,6 +76,9 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.defaultProjectsFolder = settings.value("settings/default_projects_folder",
         QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects")).toString();
     out.recentProjects = settings.value("recent/projects", out.recentProjects).toStringList();
+    out.spritePreviewEnabled = settings.value("settings/sprite_preview_enabled", out.spritePreviewEnabled).toBool();
+    out.spritePreviewDelay   = settings.value("settings/sprite_preview_delay",   out.spritePreviewDelay).toDouble();
+    out.navigatorGroupSimilar = settings.value("settings/navigator_group_similar", out.navigatorGroupSimilar).toBool();
     return out;
 }
 
@@ -126,6 +129,9 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/show_trim_rect", settings.showTrimRect);
     qsettings.setValue("settings/trim_rect_color", settings.trimRectColor.name(QColor::HexArgb));
     qsettings.setValue("settings/trim_rect_style", static_cast<int>(settings.trimRectStyle));
+    qsettings.setValue("settings/sprite_preview_enabled",  settings.spritePreviewEnabled);
+    qsettings.setValue("settings/sprite_preview_delay",    settings.spritePreviewDelay);
+    qsettings.setValue("settings/navigator_group_similar", settings.navigatorGroupSimilar);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

@@ -1268,8 +1268,8 @@ public:
                           QUndoCommand* parent = nullptr)
         : QUndoCommand(QObject::tr("Edit Sprite Name"), parent)
         , m_sprite(sprite)
-        , m_oldName(oldName), m_oldAliases(oldAliases)
-        , m_newName(newName), m_newAliases(newAliases)
+        , m_oldName(oldName), m_newName(newName)
+        , m_oldAliases(oldAliases), m_newAliases(newAliases)
         , m_postExecute(std::move(postExecute))
         , m_skipFirstRedo(true)
     {}

@@ -9,6 +9,7 @@ class QComboBox;
 class QGroupBox;
 class QScrollArea;
 class QSpinBox;
+class QDoubleSpinBox;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -18,6 +19,7 @@ public:
         FramesEditor,
         AtlasLayout,
         Exportation,
+        SpritesNavigator,
 #ifndef Q_OS_WASM
         CliTools
 #endif
@@ -55,6 +57,7 @@ private:
     QGroupBox* m_framesEditorGroup = nullptr;
     QGroupBox* m_atlasLayoutGroup = nullptr;
     QGroupBox* m_exportationGroup = nullptr;
+    QGroupBox* m_navigatorGroup = nullptr;
 #ifndef Q_OS_WASM
     QGroupBox* m_cliGroup = nullptr;
 #endif
@@ -83,6 +86,11 @@ private:
     QComboBox* m_frameZoomModeCombo = nullptr;
     QPushButton* m_trimRectColorBtn = nullptr;
     QComboBox* m_trimRectStyleCombo = nullptr;
+
+    // Sprites Navigator controls
+    QCheckBox*      m_spritePreviewCheck = nullptr;
+    QDoubleSpinBox* m_tooltipDelaySpin   = nullptr;
+    QCheckBox*      m_groupSimilarCheck  = nullptr;
 
     // Atlas Layout controls
     QComboBox* m_layoutZoomOnChangeCombo = nullptr;

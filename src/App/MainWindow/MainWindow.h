@@ -12,12 +12,9 @@
 #include <QMutex>
 #include <QElapsedTimer>
 #include <QUndoStack>
-#include <memory>
-#include <vector>
 
 #include "LayoutCanvas.h"
 #include "PreviewCanvas.h"
-#include "TimelineListWidget.h"
 #include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
 #include "ExportWorkspace.h"
@@ -40,7 +37,6 @@ class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class NavigatorTreeWidget;
-#include "TimelineTreeWidget.h"
 class QListWidget;
 class QLineEdit;
 class QActionGroup;
@@ -80,7 +76,9 @@ class ElidedLabel;
 class PackedAtlasView;
 class LayoutOrchestrator;
 class CliSetupController;
+#include "ILayoutContext.h"
 #include "ProjectController.h"
+#include "ExportCoordinator.h"
 #ifdef Q_OS_WASM
 class WasmFolderBrowserDialog;
 #endif
@@ -93,7 +91,7 @@ class WasmFolderBrowserDialog;
  * between different components including layout canvas, timeline editor,
  * sprite editor, and animation preview.
  */
-class MainWindow : public QMainWindow {
+class MainWindow : public QMainWindow, public ILayoutContext {
     Q_OBJECT
 public:
     enum class DropAction {
@@ -227,9 +225,9 @@ private slots:
     void showExportWorkspace();
     void leaveExportWorkspace();
     void onExportWorkspaceRequested(SaveConfig config);
+    bool runExport(SaveConfig config);
+    void refreshPreview(const QString& profileName, const QString& scaleFilter);
     void schedulePreviewPack(const QString& profileName, const QString& scaleFilter);
-    void runPreviewPack();
-    void onPreviewPackFinished();
     void showAtlasesManagementWorkspace();
     void leaveAtlasesManagementWorkspace();
     void switchToAtlasWorkspace();
@@ -338,60 +336,6 @@ private slots:
      */
     void onManageProfiles();
 
-    // === Timeline Management Events ===
-    /**
-     * @brief Handles adding a new timeline.
-     */
-    void onTimelineAddClicked();
-
-    /**
-     * @brief Handles removing the current timeline.
-     */
-    void onTimelineRemoveClicked();
-
-    /**
-     * @brief Handles changes to timeline selection.
-     */
-    void onTimelineSelectionChanged();
-
-    /**
-     * @brief Handles changes to timeline name.
-     */
-    void onTimelineNameChanged();
-
-    /**
-     * @brief Handles when a frame is dropped onto the timeline.
-     * 
-     * @param path Path of dropped frame
-     * @param index Index where frame was dropped
-     */
-    void onFrameDropped(const QString& path, int index);
-
-    /**
-     * @brief Handles when a frame is moved within the timeline.
-     * 
-     * @param from Original index
-     * @param to New index
-     */
-    void onFrameMoved(int from, int to);
-
-    /**
-     * @brief Handles request to remove selected frames.
-     */
-    void onFrameRemoveRequested();
-
-    /**
-     * @brief Handles request to duplicate a frame.
-     * 
-     * @param index Index of frame to duplicate
-     */
-    void onFrameDuplicateRequested(int index);
-
-    /**
-     * @brief Handles changes to timeline frame selection.
-     */
-    void onTimelineFrameSelectionChanged();
-
     // === Animation Events ===
     /**
      * @brief Handles changes to animation zoom level.
@@ -440,33 +384,10 @@ private slots:
     void onAnimNextClicked();
 
     /**
-     * @brief Handles changes to timeline FPS.
-     *
-     * @param fps New frames per second
-     */
-    void onTimelineFpsChanged(int fps);
-
-    /**
-     * @brief Creates an alias of the currently selected timeline.
-     */
-    void onTimelineCreateAlias();
-
-    /**
-     * @brief Handles changes to the flip combo box for alias timelines.
-     *
-     * @param index Selected flip mode index
-     */
-    void onTimelineFlipChanged(int index);
-
-    /**
      * @brief Handles animation timer timeout.
      */
     void onAnimTimerTimeout();
     void onPasteImport();
-
-private:
-    struct ExportResult;
-    struct PackPreviewResult;
 
 private slots:
     // === Undo/Redo ===
@@ -483,9 +404,6 @@ private slots:
     void onFrameDetectionFinished();
     void onTarExtractionFinished();
     void onFrameExtractionFinished();
-    void onExportFinished();
-    void handleExportResult(const ExportResult& result);
-    void handlePackPreviewResult(const PackPreviewResult& result);
     void onTransparencyProcessingFinished();
 
     // === CLI Installation Logging ===
@@ -562,49 +480,8 @@ private:
     /**
      * @brief Gets the layout parser folder path.
      */
-    QString layoutParserFolder() const;
+    QString layoutParserFolder() const override;
 
-    /**
-     * @brief Returns a sanitized subfolder name for a source being merged.
-     *
-     * Derived from the pending import URL (if set) or the basename of sourcePath.
-     * The returned name is guaranteed unique among existing source subfolders.
-     */
-    QString computeSourceSubfolderName(const QString& sourcePath) const;
-
-    /**
-     * @brief Returns baseName made unique among the existing source names.
-     *
-     * If a source named baseName already exists, suffixes _2, _3, … are tried
-     * until a free slot is found.
-     */
-    QString makeUniqueSourceName(const QString& baseName) const;
-
-    /**
-     * @brief Copies frames into sourceFolder/<subfolderPath>, returns the new destination paths.
-     *
-     * Preserves relative structure relative to m_session->currentFolder.
-     */
-    QStringList copyFramesToSourceSubfolder(const QStringList& frames,
-                                            const QString& subfolderPath,
-                                            bool overwriteDuplicates = true);
-
-    /**
-     * @brief Registers a newly loaded archive, image, or URL as a ProjectSource.
-     *
-     * If a pending import URL is set on the ProjectController, it takes precedence
-     * over sourcePath (URL case). For Replace, existing sources are cleared first.
-     * For Merge, the new source is appended. cachedFolderPath, when provided,
-     * overrides the default (sourceFolder for Replace, empty for Merge).
-     */
-    void registerLoadedSource(const QString& sourcePath, DropAction action,
-                              const QString& cachedFolderPath = QString());
-
-    /**
-     * @brief Routes activeFramePaths that have no atlas owner into the neutral atlas.
-     * On Replace, clears the neutral atlas sprite paths first.
-     */
-    void syncFramePathsToNeutralAtlas(DropAction action);
 
     /**
      * @brief Ensures frame list input is valid.
@@ -618,14 +495,14 @@ private:
      *
      * @return bool True if all active frames are in the source folder
      */
-    bool activeFramesAreInSourceFolder() const;
+    bool activeFramesAreInSourceFolder() const override;
 
     /**
      * @brief Checks if the source folder contains exactly the current active frames.
      *
      * @return bool True if the source folder image set matches the active frame list
      */
-    bool sourceFolderMatchesActiveFrames() const;
+    bool sourceFolderMatchesActiveFrames() const override;
 
     /**
      * @brief Returns whether removing sprites should also remove their backing files.
@@ -637,7 +514,7 @@ private:
      *
      * @param overwriteDuplicates If true, replace existing files with the same name; if false, rename to avoid conflicts
      */
-    void copyActiveFramesToSourceFolder(bool overwriteDuplicates = true);
+    void copyActiveFramesToSourceFolder(bool overwriteDuplicates = true) override;
 
     /**
      * @brief Clears image files from the source folder.
@@ -657,7 +534,7 @@ private:
      * 
      * @return QVector<SpratProfile> List of configured profiles
      */
-    QVector<SpratProfile> configuredProfiles();
+    QVector<SpratProfile> configuredProfiles() override;
 
     /**
      * @brief Gets the selected profile definition.
@@ -665,7 +542,7 @@ private:
      * @param out Reference to store profile definition
      * @return bool True if profile was found
      */
-    bool selectedProfileDefinition(SpratProfile& out) const;
+    bool selectedProfileDefinition(SpratProfile& out) const override;
 
     /**
      * @brief Applies configured profiles to the layout.
@@ -827,14 +704,6 @@ private:
      * @return bool True if user confirmed replacement
      */
     bool confirmLayoutReplacement();
-
-    /**
-     * @brief Runs the export pipeline with the given configuration.
-     *
-     * @param config Save configuration
-     * @return bool True if export was started successfully
-     */
-    bool runExport(SaveConfig config);
 
     /**
      * @brief Checks if a drop path is supported.
@@ -1015,29 +884,10 @@ private:
     void onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup);
     void onNavigatorAutoCreateTimelinesForSource(int sourceIndex);
 
-    // Timeline tree context menu / key / drop
-    void onTimelineContextMenu(const QPoint& pos);
-    void onTimelineDeleteKey();
-    void onTimelineTreeDropCompleted(int draggedIndex,
-                                     const QString& draggedFolder,
-                                     const QString& targetFolder);
-    void onTimelineItemChanged(QTreeWidgetItem* item, int column);
+    void onSpritesDroppedToTimeline(const QStringList& paths, const QString& targetFolderPath);
 
     // Updates m_folderLabel text; appends "(watching)" when sync mode is Watch
     void updateFolderLabel(const QString& folder);
-
-    // Helper: Check for duplicate timeline names
-    bool hasDuplicateTimelineName(const QString& timelineName) const;
-
-    // Helper: Get unique timeline name (with path)
-    QString getUniqueTimelineName(const QString& baseName, const QString& folderPath = QString());
-
-    // Timeline tree helpers
-    QString timelineItemFolderPath(QTreeWidgetItem* item) const;
-    QVector<int> collectCheckedTimelineIndices() const;
-
-    // Helper: Returns the tree item for a given m_session->timelines index, or nullptr if not found.
-    QTreeWidgetItem* timelineItemForIndex(int timelineIndex) const;
 
     /**
      * @brief Applies project payload to the UI.
@@ -1100,6 +950,7 @@ public:
      */
     void onSettingsClicked();
     void onSettingsSpritesheetClicked();
+    void onSettingsSpritesNavigatorClicked();
     void onSettingsFramesEditorClicked();
     void onSettingsAtlasLayoutClicked();
     void onSettingsExportationClicked();
@@ -1153,16 +1004,13 @@ public:
      */
     void loadTarFile(const QString& tarPath, DropAction action);
 
-    // detectFramesInImage, generateSpratFramesFormat, applyTransparencyToImage moved to ProjectController
-
     /**
      * @brief Handles layout for a single image used as a frame.
-     * 
+     *
      * @param imagePath Path to the image file
      * @param action Action to take (Replace or Merge)
      */
     void handleSingleImageLayout(const QString& imagePath, DropAction action = DropAction::Replace, const QColor& backgroundColor = QColor());
-    void applyTransparencyToImage(QImage& image, const QColor& backgroundColor);
 
     /**
      * @brief Processes frames extracted to a temporary directory.
@@ -1197,6 +1045,7 @@ private:
     QWidget* m_welcomePage;
     ExportWorkspace* m_exportWorkspace = nullptr;
     bool m_exportWorkspaceActive = false;
+    ExportCoordinator* m_exportCoordinator = nullptr;
     bool       m_frameAnimFirstLoad     = true;
     QList<int> m_atlasSplitterHSizes;   // saved before orientation→Vertical; restored on return
     double     m_savedPreviewZoom = -1.0;
@@ -1205,27 +1054,6 @@ private:
     bool m_atlasesManagementWorkspaceActive = false;
     PackedAtlasView*           m_packedAtlasView          = nullptr;
     LayoutCanvas*              m_exportLayoutCanvas       = nullptr;
-    struct PackPreviewResult {
-        QByteArray imageData;
-        QString    errorMsg;
-        QByteArray layoutUsed;      // empty on cache hit; used to update cache
-        QString    scaleFilterUsed;
-        int        dilateUsed = -1;
-        QVector<LayoutModel> layoutModels;  // populated on non-cache-hit runs; empty otherwise
-    };
-    QFutureWatcher<PackPreviewResult> m_previewPackWatcher;
-    QTimer*                    m_previewPackDebounceTimer  = nullptr;
-    std::atomic<bool>          m_previewPackCanceled{false};
-    QString                    m_previewPackProfile;
-    QString                    m_previewPackScaleFilter;
-    QByteArray                 m_cachedPackedImage;
-    QByteArray                 m_cachedPackLayout;
-    QString                    m_cachedPackScaleFilter;
-    int                        m_cachedPackDilate = -1;
-    std::shared_ptr<std::atomic<bool>> m_previewPackLayoutUpdateCanceled;
-    QVector<LayoutModel>       m_cachedPackModels;           // layout from last successful preview pack
-    QString                    m_cachedPackModelsProfile;    // profile name the cached models were built for
-    int                        m_exportPreviewAtlasIndex = -1; // -1 = all atlases
     Workspace m_activeWorkspace = Workspace::Atlas;
     QLabel* m_welcomeLabel;
     QPushButton* m_recentProjectBtn;
@@ -1274,23 +1102,6 @@ private:
     double          m_layoutZoom     = 100.0;
     QTimer* m_sourceResolutionDebounceTimer = nullptr;
 
-    // Timelines Area
-    QLineEdit* m_timelineCreateEdit;
-    QLineEdit* m_timelineNameEdit;
-    TimelineTreeWidget* m_timelineList;
-    QWidget* m_timelineEditorContainer;
-    QWidget* m_selectedTimelineGroup = nullptr;
-    QWidget* m_timelineDropArea;
-    QLabel* m_timelineDragHintLabel;
-    TimelineListWidget* m_timelineFramesList;
-    QHash<QString, QIcon> m_timelineFrameIconCache;
-    QHash<QString, QIcon> m_timelineListIconCache;
-
-    // Alias UI
-    QLabel*    m_timelineAliasLabel  = nullptr;
-    QLabel*    m_timelineFlipLabel   = nullptr;
-    QComboBox* m_timelineFlipCombo   = nullptr;
-
     // Selected Frame Editor Area
     QLineEdit*   m_spriteNameEdit   = nullptr;
     QPushButton* m_editAliasesBtn   = nullptr;
@@ -1320,7 +1131,6 @@ private:
     QPushButton* m_animPlayPauseBtn;
     QPushButton* m_animNextBtn;
     QToolButton* m_animOverlayBtn  = nullptr;  // Toggles pivot/marker overlay on animation canvas
-    QSpinBox* m_timelineFpsSpin;
     QLabel* m_animStatusLabel;
     AnimationCanvas* m_animCanvas = nullptr;
 
@@ -1438,13 +1248,6 @@ private:
     void processTarExtractionResult(const ProjectController::TarExtractionResult& result);
     void processFrameExtractionResult(const ProjectController::FrameExtractionResult& result);
 
-    struct ExportResult {
-        QString savedDestination;
-        QString error;
-        bool success;
-        bool canceled = false;
-    };
-    QFutureWatcher<ExportResult> m_exportWatcher;
     QFutureWatcher<void> m_transparencyWatcher;  // For background transparency processing
 
     QMutex m_toolMutex;

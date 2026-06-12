@@ -103,6 +103,8 @@ QRectF EditorOverlayItem::boundingRect() const {
 }
 
 void EditorOverlayItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) {
+    Q_UNUSED(option);
+    Q_UNUSED(widget);
     if (m_sprites.isEmpty()) {
         return;
     }

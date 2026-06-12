@@ -18,8 +18,8 @@ void SettingsCoordinator::apply(const AppSettings& settings, LayoutCanvas* canva
 }
 
 void SettingsCoordinator::applyTheme(const QString& theme) {
-#ifdef Q_OS_WASM
     Q_UNUSED(theme);
+#ifdef Q_OS_WASM
     return;
 #endif
     // Use the system's default theme - don't force any custom palette

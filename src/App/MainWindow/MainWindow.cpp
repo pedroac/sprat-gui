@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "NavigatorTreeWidget.h"
 #include "LayoutOrchestrator.h"
 #include "CliSetupController.h"
 #include "ProjectController.h"
@@ -97,21 +98,6 @@ bool isUnderSpratTrash(const QString& sourceFolder, const QString& path) {
 
     return absolutePath == absoluteTrashRoot
         || absolutePath.startsWith(absoluteTrashRoot + '/');
-}
-
-QString sanitizeSubfolderName(const QString& name) {
-    QString result;
-    result.reserve(name.size());
-    for (const QChar& c : name) {
-        if (c == QLatin1Char('/') || c == QLatin1Char('\\') || c == QLatin1Char(':')
-                || c == QLatin1Char('*') || c == QLatin1Char('?') || c == QLatin1Char('"')
-                || c == QLatin1Char('<') || c == QLatin1Char('>') || c == QLatin1Char('|')) {
-            result += QLatin1Char('_');
-        } else {
-            result += c;
-        }
-    }
-    return result.isEmpty() ? QStringLiteral("source") : result;
 }
 }
 
@@ -736,42 +722,13 @@ bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
         src.originalPath,
         {
             [this](bool v) { setLoading(v); },
-            [this](const QString& s) { m_statusLabel->setText(s); }
+            [this](const QString& s) { m_statusLabel->setText(s); },
+            [this](const QString& title, const QString& msg) { QMessageBox::critical(this, title, msg); }
         });
     if (!ok) error = tr("GIF export failed (ImageMagick required).");
     return ok;
 }
 
-void MainWindow::syncFramePathsToNeutralAtlas(DropAction action) {
-    if (m_projectController)
-        m_projectController->syncFramePathsToNeutralAtlas(
-            static_cast<ProjectController::DropAction>(action));
-}
-
-void MainWindow::registerLoadedSource(const QString& sourcePath, DropAction action,
-                                      const QString& cachedFolderPath) {
-    if (m_projectController)
-        m_projectController->registerLoadedSource(
-            sourcePath,
-            static_cast<ProjectController::DropAction>(action),
-            cachedFolderPath);
-}
-
-QString MainWindow::computeSourceSubfolderName(const QString& sourcePath) const {
-    return m_projectController ? m_projectController->computeSourceSubfolderName(sourcePath) : QString();
-}
-
-QString MainWindow::makeUniqueSourceName(const QString& baseName) const {
-    return m_projectController ? m_projectController->makeUniqueSourceName(baseName) : baseName;
-}
-
-QStringList MainWindow::copyFramesToSourceSubfolder(const QStringList& frames,
-                                                    const QString& subfolderPath,
-                                                    bool overwriteDuplicates) {
-    return m_projectController
-               ? m_projectController->copyFramesToSourceSubfolder(frames, subfolderPath, overwriteDuplicates)
-               : frames;
-}
 
 void MainWindow::openSettingsDialogForSection(SettingsDialog::Section section) {
     SettingsDialog dlg(m_settings, m_cliPaths, this, section);
@@ -982,12 +939,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         cfg.atlasViewStack       = m_atlasViewStack;
         cfg.atlasMgmtWorkspace   = m_atlasesManagementWorkspace;
         cfg.layoutBinary         = m_spratLayoutBin;
-        cfg.activeFramesAreInSourceFolder = [this]() { return activeFramesAreInSourceFolder(); };
-        cfg.copyActiveFramesToSourceFolder = [this](bool overwrite) { copyActiveFramesToSourceFolder(overwrite); };
-        cfg.selectedProfileDefinition = [this](SpratProfile& out) { return selectedProfileDefinition(out); };
-        cfg.layoutParserFolder = [this]() { return layoutParserFolder(); };
-        cfg.sourceFolderMatchesActiveFrames = [this]() { return sourceFolderMatchesActiveFrames(); };
-        cfg.configuredProfiles = [this]() { return configuredProfiles(); };
+        cfg.context = this;
         m_layoutOrchestrator = new LayoutOrchestrator(cfg, this);
 
         // Sync initial settings
@@ -1045,6 +997,49 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 this, &MainWindow::checkCliTools);
     }
 
+    // Create ExportCoordinator
+    {
+        ExportCoordinator::Config cfg;
+        cfg.session            = m_session;
+        cfg.layoutOrchestrator = m_layoutOrchestrator;
+        cfg.exportLayoutCanvas = m_exportLayoutCanvas;
+        cfg.packedAtlasView    = m_packedAtlasView;
+        cfg.exportWorkspace    = m_exportWorkspace;
+        cfg.layoutContext      = this;
+        cfg.runTool            = [this](const QString& tool, const QStringList& args,
+                                        const QByteArray* in, QByteArray* out, QByteArray* err) {
+            return runTool(tool, args, in, out, err);
+        };
+        cfg.buildProjectPayload = [this](const SaveConfig& config, bool portable) {
+            return buildProjectPayload(config, m_session, portable);
+        };
+        cfg.promoteSourceFolderAfterSave = [this](const QString& dest) {
+            promoteSourceFolderAfterSave(dest);
+        };
+        m_exportCoordinator = new ExportCoordinator(cfg, this);
+
+        // Sync initial settings
+        m_exportCoordinator->setAppSettings(m_settings);
+        m_exportCoordinator->setCliReady(m_cliReady);
+        m_exportCoordinator->setLayoutBinary(m_spratLayoutBin);
+        m_exportCoordinator->setPackBinary(m_spratPackBin);
+        m_exportCoordinator->setConvertBinary(m_spratConvertBin);
+
+        connect(m_exportCoordinator, &ExportCoordinator::statusChanged,
+                this, [this](const QString& msg) {
+                    m_loadingUiMessage = msg;
+                    if (m_statusLabel) m_statusLabel->setText(msg);
+                    if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(msg);
+                    if (m_welcomeLabel && m_session
+                        && (m_session->activeAtlas().layoutModels.isEmpty()
+                            || m_session->activeAtlas().layoutModels.first().sprites.isEmpty())) {
+                        m_welcomeLabel->setText(msg);
+                    }
+                });
+        connect(m_exportCoordinator, &ExportCoordinator::loadingStateChanged,
+                this, &MainWindow::setLoading);
+    }
+
     m_folderWatcher = new SourceFolderWatcher(this);
     connect(m_folderWatcher, &SourceFolderWatcher::filesAdded,
             this, &MainWindow::onFolderWatcherFilesAdded);
@@ -1068,12 +1063,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_cliSetup, &CliSetupController::cliReady, this, [this]() {
         m_cliReady = true;
         if (m_layoutOrchestrator) m_layoutOrchestrator->setCLIReady(true);
+        if (m_exportCoordinator) m_exportCoordinator->setCliReady(true);
         updateUiState();
         scheduleLayoutRebuild(true);
     });
     connect(m_cliSetup, &CliSetupController::cliFailed, this, [this]() {
         m_cliReady = false;
         if (m_layoutOrchestrator) m_layoutOrchestrator->setCLIReady(false);
+        if (m_exportCoordinator) m_exportCoordinator->setCliReady(false);
         updateUiState();
     });
     connect(m_cliSetup, &CliSetupController::binaryPathsResolved, this, [this](const CliPaths& paths) {
@@ -1083,6 +1080,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         m_spratFramesBin  = paths.framesBinary;
         m_spratUnpackBin  = paths.unpackBinary;
         if (m_layoutOrchestrator) m_layoutOrchestrator->updateLayoutBinary(paths.layoutBinary);
+        if (m_exportCoordinator) {
+            m_exportCoordinator->setLayoutBinary(paths.layoutBinary);
+            m_exportCoordinator->setPackBinary(paths.packBinary);
+            m_exportCoordinator->setConvertBinary(paths.convertBinary);
+        }
         if (m_projectController) {
             m_projectController->setFramesBinary(paths.framesBinary);
             m_projectController->setConvertBinary(paths.convertBinary);
@@ -1152,8 +1154,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this, &MainWindow::onFrameExtractionFinished);
     connect(m_projectController, &ProjectController::runLayoutQuietNeeded,
             this, [this]() { onRunLayout(true); });
-
-    connect(&m_exportWatcher, &QFutureWatcherBase::finished, this, &MainWindow::onExportFinished);
 
     m_isRestoringProject = false;
 }
@@ -1251,7 +1251,7 @@ MainWindow::~MainWindow() {
     if (m_projectController) {
         m_projectController->cancelAll();
     }
-    m_exportWatcher.waitForFinished();
+    // ExportCoordinator owns its own watchers and cleans up via QObject parent chain
 
     if (m_autosaveTimer) {
         m_autosaveTimer->stop();
@@ -1396,44 +1396,8 @@ void MainWindow::updateManualFrameLabel() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helper: Check if a timeline name already exists
-// ---------------------------------------------------------------------------
-bool MainWindow::hasDuplicateTimelineName(const QString& timelineName) const {
-    if (!m_session) return false;
-    for (const auto& timeline : m_session->activeAtlas().timelines) {
-        if (timeline.name == timelineName) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: Get a unique timeline name with optional path prefix
-// ---------------------------------------------------------------------------
-QString MainWindow::getUniqueTimelineName(const QString& baseName, const QString& folderPath) {
-    QString fullName = baseName;
-    if (!folderPath.isEmpty()) {
-        fullName = folderPath + "/" + baseName;
-    }
-
-    // If no collision, return as-is
-    if (!hasDuplicateTimelineName(fullName)) {
-        return fullName;
-    }
-
-    // If collision exists, try appending numbers
-    for (int i = 1; i <= 1000; ++i) {
-        QString candidateName = fullName + "_" + QString::number(i);
-        if (!hasDuplicateTimelineName(candidateName)) {
-            return candidateName;
-        }
-    }
-
-    // Fallback (shouldn't happen)
-    return fullName + "_unique";
-}
+// hasDuplicateTimelineName and getUniqueTimelineName moved to TimelineEditorPanel (Phase 7).
+// MainWindow wrappers delegate to the panel via MainWindow.TimelineEditor.cpp.
 
 QVector<SpratProfile> MainWindow::configuredProfiles() {
     QString error;
@@ -1903,7 +1867,6 @@ void MainWindow::onSplitSpriteRequested(SpritePtr sprite, Qt::Orientation orient
     // Trim offsets
     int l = sprite->trimmed ? sprite->trimRect.x()      : 0;
     int t = sprite->trimmed ? sprite->trimRect.y()      : 0;
-    int r = sprite->trimmed ? sprite->trimRect.width()  : 0;
     int b = sprite->trimmed ? sprite->trimRect.height() : 0;
     int trimmedH = originalImage.height() - t - b;
 
@@ -2014,6 +1977,10 @@ void MainWindow::onSettingsSpritesheetClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::Spritesheet);
 }
 
+void MainWindow::onSettingsSpritesNavigatorClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::SpritesNavigator);
+}
+
 void MainWindow::onSettingsFramesEditorClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::FramesEditor);
 }
@@ -2068,8 +2035,8 @@ void MainWindow::onManageProfiles() {
                                     QString());
         // Refresh the preview with the updated profile settings
         const SaveConfig cfg = m_exportWorkspace->getConfig();
-        schedulePreviewPack(cfg.profiles.isEmpty() ? QString() : cfg.profiles.first(),
-                            cfg.scaleFilter);
+        refreshPreview(cfg.profiles.isEmpty() ? QString() : cfg.profiles.first(),
+                       cfg.scaleFilter);
     } else if (!m_session->layoutSourcePath.isEmpty()
                && m_profileCombo
                && !m_profileCombo->currentData().toString().trimmed().isEmpty()) {
@@ -2104,6 +2071,14 @@ void MainWindow::applySettings() {
     if (m_exportLayoutCanvas) {
         m_exportLayoutCanvas->setSettings(m_settings);
     }
+    if (m_spriteTree) {
+        m_spriteTree->setPreviewEnabled(m_settings.spritePreviewEnabled);
+        m_spriteTree->setPreviewDelay(static_cast<int>(m_settings.spritePreviewDelay * 1000.0));
+    }
+    if (m_navigatorPanel) {
+        m_navigatorPanel->setGroupSimilar(m_settings.navigatorGroupSimilar);
+        refreshSpriteTree();
+    }
 
     // Update source folder watcher based on sync mode
     if (m_settings.syncMode == SyncMode::None) {
@@ -2136,6 +2111,11 @@ void MainWindow::applySettings() {
         m_layoutOrchestrator->setSyncMode(m_settings.syncMode);
         m_layoutOrchestrator->setDeduplicateMode(m_settings.deduplicateMode);
         m_layoutOrchestrator->setLayoutZoomOnChange(m_settings.layoutZoomOnChange);
+    }
+
+    // Propagate settings changes to ExportCoordinator
+    if (m_exportCoordinator) {
+        m_exportCoordinator->setAppSettings(m_settings);
     }
 
     // Refresh folder label to add/remove the "(watching)" suffix

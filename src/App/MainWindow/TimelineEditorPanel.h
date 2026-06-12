@@ -1,30 +1,36 @@
 #pragma once
 #include <QWidget>
+#include <QHash>
+#include <QIcon>
+#include <QStringList>
 
 class QLineEdit;
 class QLabel;
 class QComboBox;
 class QPushButton;
 class QSpinBox;
+class QUndoStack;
+class QTreeWidgetItem;
 class TimelineTreeWidget;
 class TimelineListWidget;
+class ProjectSession;
 
 /**
  * @class TimelineEditorPanel
- * @brief Widget that owns all timeline-related controls.
+ * @brief Widget that owns all timeline-related controls and business logic.
  *
  * Contains two visually separate sections joined by an internal vertical
  * splitter:
  *   - Top: timeline-list area (create-name field + TimelineTreeWidget)
  *   - Bottom: selected-timeline editor (name/FPS/flip/alias) + frame list
  *
- * All signal connections to MainWindow slots are made by MainWindow via the
- * accessor methods after construction.
+ * After Phase 7, all timeline business logic lives here. MainWindow connects
+ * to the signals emitted by this panel to update the animation preview.
  */
 class TimelineEditorPanel : public QWidget {
     Q_OBJECT
 public:
-    explicit TimelineEditorPanel(QWidget* parent = nullptr);
+    explicit TimelineEditorPanel(ProjectSession* session, QUndoStack* undoStack, QWidget* parent = nullptr);
 
     // ── Accessors for the timeline-list section ───────────────────────────────
     QLineEdit*          timelineCreateEdit() const { return m_timelineCreateEdit; }
@@ -50,7 +56,60 @@ public:
     QPushButton*        addTimelineButton()        const { return m_addBtn; }
     QPushButton*        removeTimelineButton()     const { return m_removeBtn; }
 
+    // ── Public methods ────────────────────────────────────────────────────────
+    void refreshTimelineList();
+    void refreshTimelineFrames();
+    /** Refreshes the list, sets the current item to the given index (or clears
+     *  selection if index < 0), then lets onTimelineSelectionChanged() fire. */
+    void selectTimeline(int index);
+
+    void onTimelineAddClicked();
+    void onTimelineRemoveClicked();
+    void onTimelineSelectionChanged();
+    void onGenerateTimelinesFromFrames();
+
+    bool    hasDuplicateTimelineName(const QString& name) const;
+    QString getUniqueTimelineName(const QString& baseName, const QString& folderPath = QString()) const;
+
+    /** Returns the tree item whose UserRole data equals @p index, or nullptr. */
+    QTreeWidgetItem* timelineItemForIndex(int index) const;
+
+signals:
+    /** MainWindow: update timer interval if currently playing. */
+    void animPlaybackIntervalChanged(int fps);
+    /** MainWindow: set m_animFrameIndex = 0, fitAnimationToViewport, refreshAnimationTest. */
+    void animFrameReset();
+    /** MainWindow: set m_animFrameIndex = index, refreshAnimationTest (only when not playing). */
+    void animFrameIndexSelected(int index);
+    /** MainWindow: setZoomManual(false), fitAnimationToViewport, refreshAnimationTest. */
+    void animZoomResetAndFitRequested();
+    /** MainWindow: refreshAnimationTest only. */
+    void animationDataChanged();
+    /** MainWindow: m_statusLabel->setText(text). */
+    void statusMessage(const QString& text);
+    /** MainWindow: onSpritesDroppedToTimeline(paths, targetFolder). */
+    void spritesToTimelineRequested(const QStringList& paths, const QString& targetFolder);
+
+private slots:
+    void onTimelineNameChanged();
+    void onTimelineFpsChanged(int fps);
+    void onTimelineCreateAlias();
+    void onTimelineFlipChanged(int index);
+    void onTimelineContextMenu(const QPoint& pos);
+    void onTimelineDeleteKey();
+    void onTimelineTreeDropCompleted(int draggedIndex, const QString& draggedFolder, const QString& targetFolder);
+    void onTimelineItemChanged(QTreeWidgetItem* item, int column);
+    void onFrameDropped(const QString& path, int index);
+    void onFrameMoved(int from, int to);
+    void onFrameDuplicateRequested(int index);
+    void onFrameRemoveRequested();
+    void onTimelineFrameSelectionChanged();
+    void onCreateTimelineFromDroppedPaths();
+
 private:
+    /** Refreshes the list, restores current item, refreshes frames, emits animationDataChanged. */
+    void refreshAndSelect();
+
     // Timeline list section
     QWidget*            m_listArea            = nullptr;
     QLineEdit*          m_timelineCreateEdit  = nullptr;
@@ -69,4 +128,15 @@ private:
     QWidget*            m_timelineDropArea        = nullptr;
     QLabel*             m_timelineDragHintLabel   = nullptr;
     TimelineListWidget* m_timelineFramesList      = nullptr;
+
+    // Session + undo
+    ProjectSession* m_session   = nullptr;
+    QUndoStack*     m_undoStack = nullptr;
+
+    // Pending paths for creating a new timeline when no timeline is selected
+    QStringList m_pendingCreateTimelinePaths;
+
+    // Icon caches
+    QHash<QString, QIcon> m_timelineFrameIconCache;
+    QHash<QString, QIcon> m_timelineListIconCache;
 };

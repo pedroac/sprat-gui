@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QCheckBox>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QApplication>
 #include <QScrollArea>
 #include <QStyle>
@@ -30,6 +31,7 @@ void SettingsDialog::setupUi() {
         case Section::FramesEditor: setWindowTitle(tr("Frames Editor Settings")); break;
         case Section::AtlasLayout: setWindowTitle(tr("Atlas Layout Settings")); break;
         case Section::Exportation: setWindowTitle(tr("Exportation Settings")); break;
+        case Section::SpritesNavigator: setWindowTitle(tr("Sprites Navigator Settings")); break;
 #ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
 #endif
@@ -294,6 +296,32 @@ void SettingsDialog::setupUi() {
     contentLayout->addWidget(m_exportationGroup);
     m_exportationGroup->setVisible(m_initialSection == Section::Exportation);
 
+    // Sprites Navigator Group
+    m_navigatorGroup = new QGroupBox(tr("Sprites Navigator"), content);
+    QFormLayout* navigatorForm = new QFormLayout(m_navigatorGroup);
+
+    m_spritePreviewCheck = new QCheckBox(tr("Show tooltip"), this);
+    m_spritePreviewCheck->setChecked(m_settings.spritePreviewEnabled);
+    m_spritePreviewCheck->setToolTip(tr("Show a floating image preview when hovering a sprite name"));
+    navigatorForm->addRow("", m_spritePreviewCheck);
+
+    m_tooltipDelaySpin = new QDoubleSpinBox(this);
+    m_tooltipDelaySpin->setRange(0.1, 5.0);
+    m_tooltipDelaySpin->setSingleStep(0.1);
+    m_tooltipDelaySpin->setDecimals(1);
+    m_tooltipDelaySpin->setSuffix(tr(" s"));
+    m_tooltipDelaySpin->setValue(m_settings.spritePreviewDelay);
+    m_tooltipDelaySpin->setToolTip(tr("Delay before the image preview appears"));
+    navigatorForm->addRow(tr("Tooltip delay:"), m_tooltipDelaySpin);
+
+    m_groupSimilarCheck = new QCheckBox(tr("Group similar"), this);
+    m_groupSimilarCheck->setChecked(m_settings.navigatorGroupSimilar);
+    m_groupSimilarCheck->setToolTip(tr("Group consecutive numbered frames into animation sequence nodes"));
+    navigatorForm->addRow("", m_groupSimilarCheck);
+
+    contentLayout->addWidget(m_navigatorGroup);
+    m_navigatorGroup->setVisible(m_initialSection == Section::SpritesNavigator);
+
 #ifndef Q_OS_WASM
     m_cliGroup = new QGroupBox(tr("CLI Tools"), content);
     QFormLayout* cliForm = new QFormLayout(m_cliGroup);
@@ -414,6 +442,9 @@ void SettingsDialog::resetToDefaults() {
     if (borderIndex >= 0) {
         m_borderStyleCombo->setCurrentIndex(borderIndex);
     }
+    if (m_spritePreviewCheck) m_spritePreviewCheck->setChecked(AppSettings().spritePreviewEnabled);
+    if (m_tooltipDelaySpin)   m_tooltipDelaySpin->setValue(AppSettings().spritePreviewDelay);
+    if (m_groupSimilarCheck)  m_groupSimilarCheck->setChecked(AppSettings().navigatorGroupSimilar);
     if (m_trimRectColorBtn) updateColorButton(m_trimRectColorBtn, AppSettings().trimRectColor);
     if (m_trimRectStyleCombo) {
         int idx = m_trimRectStyleCombo->findData((int)AppSettings().trimRectStyle);
@@ -443,6 +474,9 @@ AppSettings SettingsDialog::getSettings() const {
     if (m_exportDefaultFormatCombo) s.exportDefaultFormat = m_exportDefaultFormatCombo->currentData().toString();
     if (m_exportDefaultScaleFilterCombo) s.exportDefaultScaleFilter = m_exportDefaultScaleFilterCombo->currentData().toString();
     if (m_trimRectStyleCombo) s.trimRectStyle = (Qt::PenStyle)m_trimRectStyleCombo->currentData().toInt();
+    if (m_spritePreviewCheck) s.spritePreviewEnabled = m_spritePreviewCheck->isChecked();
+    if (m_tooltipDelaySpin)   s.spritePreviewDelay   = m_tooltipDelaySpin->value();
+    if (m_groupSimilarCheck)  s.navigatorGroupSimilar = m_groupSimilarCheck->isChecked();
     return s;
 }
 

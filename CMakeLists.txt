@@ -228,16 +228,19 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.Events.cpp
     src/App/MainWindow/MainWindow.LayoutFlow.cpp
     src/App/MainWindow/MainWindow.Marker.cpp
-    src/App/MainWindow/MainWindow.TimelineEditor.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
     src/App/MainWindow/MainWindow.Navigator.cpp
     src/App/MainWindow/NavigatorTreeWidget.h
     src/App/MainWindow/NavigatorTreeWidget.cpp
+    src/App/MainWindow/SpritePreviewTooltip.h
+    src/App/MainWindow/SpritePreviewTooltip.cpp
     src/App/MainWindow/TimelineTreeWidget.h
     src/App/MainWindow/TimelineTreeWidget.cpp
     src/App/MainWindow/MainWindow.h
     src/App/MainWindow/LayoutOrchestrator.h
     src/App/MainWindow/LayoutOrchestrator.cpp
+    src/App/MainWindow/ExportCoordinator.h
+    src/App/MainWindow/ExportCoordinator.cpp
     src/App/MainWindow/ProjectController.h
     src/App/MainWindow/ProjectController.cpp
     src/App/WasmFileDialog.cpp

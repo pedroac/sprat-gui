@@ -16,7 +16,8 @@ void buildSubTree(
     const QIcon& folderIcon,
     const QIcon& animGroupIcon,
     bool checkable,
-    const std::function<void(QTreeWidgetItem*, const QString&, const QString&)>& makeLeaf)
+    const std::function<void(QTreeWidgetItem*, const QString&, const QString&)>& makeLeaf,
+    bool groupSimilar)
 {
     using Entry = QPair<QString, QString>;
 
@@ -93,7 +94,7 @@ void buildSubTree(
 
         QSet<QString> groupedPaths;
         QMap<QString, QVector<Entry>> groupMembers; // seed name → frame-ordered entries
-        if (!skipSingleGroup) {
+        if (groupSimilar && !skipSingleGroup) {
             for (const auto& seed : seeds) {
                 if (seed.frames.size() <= 1) continue;
                 QVector<Entry> members;

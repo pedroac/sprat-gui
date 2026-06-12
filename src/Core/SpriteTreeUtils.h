@@ -31,6 +31,9 @@ namespace SpriteTreeUtils {
  * @param makeLeaf      Callback invoked for each leaf item.
  *                      Receives (parentItem, absolutePath, leafDisplayName).
  *                      Must create the item as a child of parentItem.
+ * @param groupSimilar  When true (default), consecutive numbered frames are grouped
+ *                      under a virtual animation-sequence node. When false, all items
+ *                      are rendered as individual leaf nodes.
  */
 void buildSubTree(
     QTreeWidget* tree,
@@ -39,7 +42,8 @@ void buildSubTree(
     const QIcon& folderIcon,
     const QIcon& animGroupIcon,
     bool checkable,
-    const std::function<void(QTreeWidgetItem*, const QString&, const QString&)>& makeLeaf
+    const std::function<void(QTreeWidgetItem*, const QString&, const QString&)>& makeLeaf,
+    bool groupSimilar = true
 );
 
 } // namespace SpriteTreeUtils

@@ -74,6 +74,9 @@ public:
     /** Apply a text filter to the tree without rebuilding it. */
     void applyFilter(const QString& text);
 
+    /** Enable or disable grouping of similar (animation-sequence) sprites under a parent node. */
+    void setGroupSimilar(bool group);
+
 signals:
     /** Emitted when the user selects a different atlas in the combo. */
     void atlasIndexChanged(int sessionAtlasIndex);
@@ -96,4 +99,5 @@ private:
     QWidget*             m_atlasRow          = nullptr;
     QComboBox*           m_atlasCombo        = nullptr;
     bool                 m_checkboxesEnabled = true;
+    bool                 m_groupSimilar      = true;
 };

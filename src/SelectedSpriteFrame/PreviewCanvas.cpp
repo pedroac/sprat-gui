@@ -1,6 +1,7 @@
 #include "PreviewCanvas.h"
 #include <QFileInfo>
 #include <QGraphicsPixmapItem>
+#include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QImage>
 #include <QMenu>
@@ -62,6 +63,11 @@ void PreviewCanvas::updateTrimRectItem() {
         delete m_trimRectItem;
         m_trimRectItem = nullptr;
     }
+    if (m_trimDimItem) {
+        m_scene->removeItem(m_trimDimItem);
+        delete m_trimDimItem;
+        m_trimDimItem = nullptr;
+    }
     if (!m_settings.showTrimRect || m_sprites.isEmpty()) {
         m_overlay->setTrimRect(QRect());
         return;
@@ -69,6 +75,19 @@ void PreviewCanvas::updateTrimRectItem() {
 
     const QRect trimRect = cachedTrimRect();
     if (!trimRect.isValid()) return;
+
+    // Dim the area outside the trim rect using an OddEven-filled path "frame"
+    if (!m_imageItems.isEmpty()) {
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        path.addRect(m_imageItems.first()->boundingRect());
+        path.addRect(trimRect);
+        m_trimDimItem = new QGraphicsPathItem(path);
+        m_trimDimItem->setPen(Qt::NoPen);
+        m_trimDimItem->setBrush(QColor(0, 0, 0, 90));
+        m_trimDimItem->setZValue(0.4);
+        m_scene->addItem(m_trimDimItem);
+    }
 
     QPen pen(m_settings.trimRectColor, 1, m_settings.trimRectStyle);
     pen.setCosmetic(true);
@@ -92,6 +111,7 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
     for (auto* item : m_ghostItems) { m_scene->removeItem(item); delete item; }
     m_ghostItems.clear();
     if (m_trimRectItem) { m_scene->removeItem(m_trimRectItem); delete m_trimRectItem; m_trimRectItem = nullptr; }
+    if (m_trimDimItem) { m_scene->removeItem(m_trimDimItem); delete m_trimDimItem; m_trimDimItem = nullptr; }
 
     if (!sprites.isEmpty()) {
         QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);

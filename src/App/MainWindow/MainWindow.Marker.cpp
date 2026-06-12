@@ -13,28 +13,10 @@
 #include <QImageReader>
 
 namespace {
-static double toDisplay(int px, int dim, CoordUnit unit, int origin = 0) {
-    const int adjusted = px - origin;
-    return (unit == CoordUnit::Percent && dim > 0)
-        ? adjusted * 100.0 / dim : double(adjusted);
-}
 static int fromDisplay(double v, int dim, CoordUnit unit, int origin = 0) {
     const int raw = (unit == CoordUnit::Percent && dim > 0)
         ? qRound(v * dim / 100.0) : qRound(v);
     return raw + origin;
-}
-}
-
-namespace {
-SpritePtr spriteByPath(const QVector<LayoutModel>& models, const QString& path) {
-    for (const auto& model : models) {
-        for (const auto& sprite : model.sprites) {
-            if (sprite && sprite->path == path) {
-                return sprite;
-            }
-        }
-    }
-    return SpritePtr();
 }
 }
 

@@ -3,6 +3,7 @@
 #include "CliSetupController.h"
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
+#include "ViewUtils.h"
 #endif
 #include "AnimationCanvas.h"
 
@@ -109,7 +110,9 @@ void MainWindow::onCancelLoading() {
     if (m_projectController) {
         m_projectController->cancelAll();
     }
-    m_exportWatcher.cancel();
+    if (m_exportCoordinator) {
+        m_exportCoordinator->cancelExport();
+    }
 
     m_statusLabel->setText(tr("Operation canceled"));
     setLoading(false);
@@ -232,7 +235,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         ensureSourceFolder();
 
         // Each merged folder gets its own subfolder so sources stay isolated.
-        const QString subName = computeSourceSubfolderName(folderPath);
+        const QString subName = m_projectController->computeSourceSubfolderName(folderPath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
         QDir dstRoot(subfolderPath);
         dstRoot.mkpath(QStringLiteral("."));
@@ -268,7 +271,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         m_session->layoutSourceIsList = false;
 
         ProjectSource src;
-        src.name = makeUniqueSourceName(QFileInfo(folderPath).fileName());
+        src.name = m_projectController->makeUniqueSourceName(QFileInfo(folderPath).fileName());
         src.type = SourceType::Folder;
         src.originalPath = folderPath;
         src.cachedFolderPath = subfolderPath;
@@ -314,7 +317,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         ensureSourceFolder();
 
         // Copy into a dedicated subfolder so all sources are consistently isolated.
-        const QString subName = computeSourceSubfolderName(folderPath);
+        const QString subName = m_projectController->computeSourceSubfolderName(folderPath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
         QDir dstRoot(subfolderPath);
         dstRoot.mkpath(QStringLiteral("."));
@@ -419,10 +422,13 @@ void MainWindow::onAddSourceFile() {
 
 #ifndef SPRAT_EMBEDDED_CLI
 void MainWindow::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    Q_UNUSED(exitCode);
+    Q_UNUSED(exitStatus);
     // General process finished handler if needed
 }
 
 void MainWindow::onProcessError(QProcess::ProcessError error) {
+    Q_UNUSED(error);
     // General process error handler
 }
 #endif

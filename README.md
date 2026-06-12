@@ -1,6 +1,8 @@
 # Sprat-gui
 
-GUI frontend for `sprat-cli` to generate spritesheets and related metadata (for example animations and hitboxes).
+GUI frontend for `sprat-cli` to generate spritesheets and related metadata (for example animations and markers).
+
+[![Changelog](https://img.shields.io/badge/changelog-v0.8.0-blue)](CHANGELOG.md)
 
 Use this app if you need to:
 
@@ -13,8 +15,6 @@ Use this app if you need to:
 
 If your workflow is already fully automated by scripts and CI, this may be unnecessary. If you need fast visual iteration for game/UI assets, this is likely useful.
 
-![Sprat GUI](README_assets/sprat-gui.png)
-
 ## What it does (and why you might need it)
 
 - **Frame detection (spratframes integration)**  
@@ -24,7 +24,9 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   Generates atlas layout data from your image folder, so you avoid hand-maintained packing metadata.
 
 - **Sprite editing (pivot + markers)**  
-  Lets you place gameplay/UI anchors directly on frames, reducing downstream guesswork in engine integration and capturing marker positions for collision zones or entity spawn points (e.g., muzzle origins for bullets).
+  Lets you place gameplay/UI anchors directly on frames, reducing downstream guesswork in engine integration and capturing marker positions for collision zones or entity spawn points (e.g., muzzle origins for bullets). 
+  - **Onion Skinning**: View semi-transparent ghost overlays of other selected frames to align pivots and markers precisely across a sequence.
+  - **Flipbook Mode**: Keeps the pivot visually stationary on screen while navigating between frames, allowing for smooth alignment and animation previewing during editing.
 
 - **Timeline authoring**  
   Supports manual frame ordering and automatic timeline generation from names like `Run (0)`, `Run (1)`, etc.
@@ -63,8 +65,8 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   - `spratlayout`
   - `spratpack`
   - `spratconvert` (optional for format transforms)
-  - libsquish (bundled in sprat-cli for DXT texture compression)
   *(If the app detects them missing it will offer to download and build them for you.)*
+  *(libsquish is bundled in sprat-cli and built alongside it for DXT texture compression.)*
   - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratframes`, `spratlayout`, `spratpack`, and `spratconvert` from it, or let you point Settings directly at those binaries.
 - Optional export tools:
   - ImageMagick (`magick` or `convert`) for GIF
@@ -139,7 +141,7 @@ Run:
 ## Quick start
 
 1. Launch the app.
-2. Verify CLI tool paths in **Settings → CLI Tools** (the app prompts to install them if missing); optionally enable **Deduplicate identical sprites** in **Settings → Spritesheet**.
+2. Verify CLI tool paths in **Settings → CLI Tools** (the app prompts to install them if missing); optionally enable **Deduplicate identical sprites** in **Settings → Atlas Sprites**.
 3. Click **Load Images Folder** and select your frames directory.
 4. Adjust layout options (profile/padding/trim) and use **Manage Profiles** to configure per-profile output processing (GPU compression, artifact reduction).
 5. Select sprites to edit pivots/markers.
@@ -149,27 +151,15 @@ Run:
 
 For a guided introduction, open **Help → Quick Start** inside the app. For a full list of keyboard shortcuts, open **Help → Hotkeys**.
 
-## UI workflow
+## Workspaces
 
-- **CLI tools configuration / missing detection**
-  - On first launch, if the required Sprat binaries are missing, the app displays a "CLI missing" status and prompts you to either point to existing binaries or download/install them automatically into `~/.local/bin`.
-  - You can manually configure binary paths anytime in **Settings → CLI Tools**.
-  - ![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
+The application is organized into dedicated workspaces, each focusing on a specific part of the asset creation pipeline. You can switch between them using the **Workspace** menu or keyboard shortcuts.
 
-- **Visual customization & Synchronization**
-  - **Styles**: Configure workspace and sprite frame background colors, toggle the transparency checkerboard, and set the color and style (Solid, Dash, etc.) of sprite borders in **Settings → Styles**.
-  - **Synchronization**: Choose between **None**, **Manual** (sync on demand), or **Watch** (live file system monitoring) in **Settings → Spritesheet** to keep your project in sync with the source images folder.
-
-- **Profile management with output processing**
-  - Use **Manage Profiles** to create and configure layout profiles.
-  - Each profile supports per-target output processing:
-    - **GPU Compression**: Choose None, DXT1 (RGB, no alpha), or DXT5 (RGBA) for hardware texture compression. Output is saved as `.dds` when enabled.
-    - **Dilate (Artifact Reduction)**: Apply pixel dilation passes (0–16) to bleed opaque pixels into transparent neighbors, reducing dark halos around trimmed sprites.
-  - These settings are profile-specific; different targets can use different compression formats.
-  - **Global Deduplicate**: Enable deduplication in Settings using **Exact** (byte-for-byte identical) or **Perceptual** (visually similar) modes to create aliases for duplicate sprites during layout generation.
+### **Sprites Workspace** (`Alt+A`)
+The default workspace for importing assets, managing the sprite tree, and editing individual frame metadata (pivots and markers). Use this for the initial setup and fine-tuning of your sprites.
 
 - **Sprite Navigator**
-  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organised by folder. Use `Alt+L` / `Alt+N` to switch quickly via keyboard.
+  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organized by folder. Use `Alt+L` / `Alt+N` to switch quickly via keyboard.
   - Check sprites individually or by folder; right-click for context actions or press `Delete` to remove selected sprites:
     - Delete selected sprites.
     - Add frames to a folder.
@@ -179,79 +169,95 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
     - Group or ungroup sprites (moves files into subfolders).
   - When you switch back to Layout view, the atlas rebuilds if any changes were made while the Navigator was open.
 
-- **Multiple atlases**
-  - Open **Manage Atlases** (toolbar) to organize sprites across named atlases: add or remove atlases, rename them, and drag sprites from the sprite tree into a different atlas slot.
-  - **Right-click an atlas** in the left panel (while sprites are checked in the navigator tree) to **Move checked sprites** to that atlas — the same action as drag-and-drop.
-  - **Right-click a folder/group** in the sprite navigator for smart atlas management:
-    - **Create atlas from `<group>`** — creates a new atlas named after the folder and moves all its sprites there.
-    - **Move `<group>` to atlas** — if an atlas with the folder's name already exists, moves the sprites into it instead.
-  - **Right-click a source node → Autocreate atlases** — creates one atlas per direct subfolder of that source, each named after the subfolder.
-  - In the **Atlas Layout** workspace, the **Atlas** selector in the right-panel View group lets you switch which named atlas is active for layout.
-  - Each atlas maintains its own set of sprites and can be exported independently or together.
+- **Atlas Layout**
+  - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
+  - The atlas rebuilds automatically 1 second after you stop making changes.
+  - Search field at the top of the right panel filters sprites by name for quicker edits.
 
-- **Atlas Layout workspace**
-  - The Atlas Layout workspace focuses the full window on layout editing. Open it from the toolbar.
-  - The right panel contains a **Search** field (filters visible sprites by name), a **View** group (atlas selector, source resolution, zoom), a **Profiles** group (checkable list of profiles; uncheck to disable a profile for this session), and a **Pages** group (visible when the active atlas spans multiple texture pages).
+- **Selected Frame Editor**
+  - Click any sprite in the atlas or Navigator to open its editor in the right panel.
+  - Place and adjust **pivots** (origin/anchor points) and **markers** (named points for collision zones, spawn origins, etc.) directly on the frame image.
+  - **Onion Skinning**: displays semi-transparent ghost overlays of neighbouring frames so you can align pivots and markers consistently across a sequence.
+  - **Flipbook Mode**: keeps the pivot visually stationary while you step between frames, making it easier to spot drift across an animation.
+  - See [UI workflow](#ui-workflow) for configuration options (opacity, zoom-on-frame-change, flipbook scope).
 
-- **Export workspace**
-  - Click **Exportation** (toolbar) to open the export workspace, or use **Export** for a quick re-export to the last used output folder.
-  - The left pane shows a live packed-atlas preview. Use the **Atlas** selector to preview individual atlases (the actual export always processes all).
-  - The right pane selects the output folder, metadata format (transform), and scale filter. Click **Export** to run the full pipeline; click **Cancel** to return to the layout.
+![Sprites workspace](README_assets/sprites_workspace.png)
 
-- **Automatic layout rebuild**
-  - The atlas rebuilds automatically 2 seconds after you stop making changes (adding, removing, or modifying sprites, changing the active profile or source resolution).
-  - Deleting sprites removes them from the canvas immediately for instant visual feedback; the full repack runs in the background.
-  - If 20 or more changes accumulate quickly, a full rebuild starts right away with a loading overlay.
-  - While you are interacting with the layout (clicking, selecting, scrolling), the rebuild timer is deferred until you stop.
-  - If a rebuild is already running when new changes arrive, it is cancelled safely and restarted after the 2-second pause.
+### **Atlases Workspace** (`Alt+M`)
+Advanced management for projects with multiple texture atlases. Drag and drop sprites between named atlases, manage per-atlas profiles, and organize large asset sets.
+
+- **Manage Atlases**: organize sprites across named atlases: add or remove atlases, rename them, and drag sprites from the sprite tree into a different atlas slot.
+- **Right-click actions**:
+  - Move checked sprites to an atlas.
+  - Create atlas from group/folder.
+  - Autocreate atlases from source subfolders.
+
+![Atlases workspace](README_assets/atlases_workspace.png)
+
+### **Frame Animation Workspace** (`Alt+F`)
+Focuses on timeline authoring and animation preview. It provides a dedicated animation panel and test area while keeping the sprite tree accessible for building sequences.
+
+- **Animation authoring**
+  - Timelines panel lists all animations with detailed info: `<name> | <frames count> frames | <fps> fps`.
+  - The **Selected Timeline** group provides controls to rename, adjust FPS, and manage the frame sequence ("tape").
+  - Drag frames from the layout into the timeline; reorder via drag-and-drop or context actions; duplicate/remove frames with toolbar buttons.
+
+- **Animation test area**
+  - Play/pause/step controls plus timeline FPS and zoom controls.
+  - Supports wheel scrolling, `Ctrl+Wheel` zoom, and panning (`Middle Mouse Drag` or `Space + Left Drag`).
+  - Use “Save Animation…” (right-click preview) after choosing ImageMagick/FFmpeg toolchains.
+
+![Frame Animation workspace](README_assets/frame_animation_workspace.png)
+
+### **Exportation Workspace** (`Alt+E`)
+A full-screen preview and configuration area for final output. Preview exactly how your atlases will be packed and choose your metadata format before exporting to disk.
+
+- Click **Exportation** (toolbar) to open the export workspace, or use **Export** for a quick re-export to the last used output folder.
+- The left pane shows a live packed-atlas preview. Use the **Atlas** selector to preview individual atlases.
+- The right pane selects the output folder, metadata format (transform), and scale filter. Click **Export** to run the full pipeline.
+- 
+![Exportation workspace](README_assets/exportation_workspace.png)
+
+
+## UI workflow
+
+- **CLI tools configuration / missing detection**
+  - On first launch, if the required Sprat binaries are missing, the app displays a "CLI missing" status and prompts you to either point to existing binaries or download/install them automatically into `~/.local/bin`.
+  - You can manually configure binary paths anytime in **Settings → CLI Tools**.
+
+![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
+
+- **Visual customization & Synchronization**
+  - **Frames Editor Settings**: Configure workspace and sprite frame background colors, toggle the transparency checkerboard, and set sprite border styles in **Settings → Frames Editor**.
+    - **Onion skin opacity**: Adjust the transparency of ghost overlays (0–100%).
+    - **Flipbook pivot**: Choose which frames trigger flipbook alignment (None, Same Group, or All).
+    - **Zoom on frame change**: Configure zoom behavior when switching frames (Fit to frame, 100%, or Keep previous).
+  - **Atlas Sprites Settings**: Choose between **None**, **Manual** (sync on demand), or **Watch** (live file system monitoring) in **Settings → Atlas Sprites** to keep your project in sync with the source images folder.
+
+- **Profile management with output processing**
+  - Use **Manage Profiles** to create and configure layout profiles.
+  - Each profile supports per-target output processing:
+    - **GPU Compression**: Choose None, DXT1 (RGB, no alpha), or DXT5 (RGBA) for hardware texture compression. Output is saved as `.dds` when enabled.
+    - **Dilate (Artifact Reduction)**: Apply pixel dilation passes (0–16) to bleed opaque pixels into transparent neighbors, reducing dark halos around trimmed sprites.
+  - These settings are profile-specific; different targets can use different compression formats.
+  - **Global Deduplicate**: Enable deduplication in Settings using **Exact** (byte-for-byte identical) or **Perceptual** (visually similar) modes to create aliases for duplicate sprites during layout generation.
 
 - **Loading frame folders**
   - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.
   - When loading a ZIP with multiple image directories, the app prompts you to choose the folder to import.
-  - ![Load ZIP folder selector](README_assets/load_zip_folder_selector.png)
-  - Use the profile selector to switch layout behavior, choose source resolution when needed, ...
-  - ![Source resolution](README_assets/source_resolution.png)
-  - ... and use the **Manage Profiles** action to edit profile rules.
-  - ![Profiles](README_assets/profiles.png)
-  - The layout canvas lists all frames; use the **Search** field at the top of the Atlas Layout right panel to filter sprites by name for quicker edits.
-  - ![Filter by name](README_assets/layout_filter_by_name.png)
-  - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
-  - ![Loaded frames](README_assets/loaded_frames.png)
+
+![Load ZIP folder selector](README_assets/load_zip_folder_selector.png)
 
 - **Frames detection**
   - When you drag and drop a single image file (like a sprite sheet or a strip), the app automatically runs `spratframes` to detect individual frames.
   - A dedicated dialog opens showing the identified frames. You can select exactly which ones to import.
-  - ![Frames detector](README_assets/frames_detector.png)
   - **Splitting frames**: If the automatic detection merges two or more frames, use the **Split Mode** (right-click a frame or use the toolbar in the detection dialog) to manually divide them.
-  - ![Split mode](README_assets/split_mode.png)
   - Click on a frame to place a splitting line; the view supports zoom for exact placement (CTRL + mouse wheel).
-  - ![Splitting](README_assets/splitting.png)
   - Once satisfied, accept the detection to extract and load the frames into your project.
-  - ![Split accepted frames](README_assets/splitted_accepted_frames.png)
 
-- **Sprite sheet layout editing**
-  - Select a sprite to see its preview details; use zoom/scroll controls inside the preview canvas.
-  - Rename the sprite, adjust its pivot (X/Y spins), or switch between markers (point/circle/rectangle/polygon) via the handle dropdown.
-  - Markers show handles for precision; add/edit points, circles, rectangles, or polygons using the markers dialog and context menus—marker info is also copied to clipboard.
-  - ![Point marker example](README_assets/markers_point_bullet.png)
-  - ![Marker points](README_assets/selected_frame_editor_point_bullet.png)
-  - ![Polygon marker example](README_assets/markers_polygon_knife.png)
-  - ![Marker polygon](README_assets/selected_frame_editor_polygon_knife.png)
-  - ![Markers example](README_assets/markers_knife_head_body.png)
-  - ![Selected frame editor](README_assets/selected_frame_editor_knife_head_body.png)
-  - Right-click pivot/marker handles to open context actions, including **Apply to Selected Frames** (applies from the active source sprite to the current multi-selection in the layout canvas).
-  - ![Apply pivot to selected](README_assets/apply_pivot_to_selected.png)
-
-- **Animation authoring**
-  - Timelines panel lists all animations with detailed info: `<name> | <frames count> frames | <fps> fps`.
-  - List items display an icon preview using the middle frame of the sequence.
-  - The **Selected Timeline** group provides controls to rename, adjust FPS, and manage the frame sequence ("tape").
-  - Drag frames from the layout into the timeline; reorder via drag-and-drop or context actions; duplicate/remove frames with toolbar buttons.
-  - Animation test area exposes play/pause/step controls plus timeline FPS and zoom controls.
-  - The animation test area auto-sizes to the widest/tallest frame in the current timeline, keeps frames fully visible, and uses scrollbars when content exceeds the viewport.
-  - Animation test preview supports wheel scrolling, `Ctrl+Wheel` zoom, and panning (`Middle Mouse Drag` or `Space + Left Drag`).
-  - Use “Save Animation…” (right-click preview) after choosing ImageMagick/FFmpeg toolchains.
-  - ![Animation panel](README_assets/animation.png)
+![Frames detector](README_assets/frames_detector.png)
+![Split mode](README_assets/split_mode.png)
+![Splitting](README_assets/splitting.png)
 
 - **Sources management**
   - Open **Sources** (toolbar or menu) to view, rename, and manage all image sources in the project.
@@ -265,13 +271,11 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
   - Save projects as `.json` or `.zip` and pick exactly which data blocks to persist.
   - Use load actions to resume layout, timelines, and editor context from a saved project.
   - **Autosave**: The application automatically saves a recovery snapshot of your project every 5 minutes. If the app is closed unexpectedly, it will offer to restore the autosaved state upon the next launch.
-  - ![Save dialog](README_assets/save.png)
-
 ## Keyboard and pointer controls
 
 ### **General Application**
 - `Ctrl + S`: Save project.
-- `Ctrl + Z`: Undo (layout changes, pivot/marker edits, project state).
+- `Ctrl + Z`: Undo (layout changes, pivot/marker edits, project state, timelines, groups, source management).
 - `Ctrl + Y`: Redo.
 - `Ctrl + V`: Paste / import image from clipboard.
 - `Ctrl + +` / `Ctrl + =`: Zoom In.
@@ -281,9 +285,9 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
 
 ### **Atlas View**
 - `Alt+L`: Switch to **Layout** view.
-- `Alt+N`: Switch to **Navigation** view.
+- `Alt+N`: Switch to **Navigator** view.
 
-### **Navigation View (Sprite Navigator)**
+### **Navigator (Sprite Navigator)**
 - `Delete`: Remove/exclude selected sprites.
 - `Ctrl+Click`: Toggle a sprite's checkbox.
 - `Shift+Click`: Check a range of sprites from the last clicked item.
@@ -357,6 +361,7 @@ Generation behavior:
 - `src/SelectedSpriteFrame/` — selected-frame preview/overlay/markers flow
 - `src/Animation/` — animation playback/export logic
 - `src/Animation/Timelines/` — timeline building and operations
+- `src/Animation/Test/` — animation preview test operations
 - `src/Project/` — project load/save/payload/autosave
 - `src/CLITools/` — CLI discovery/config/install helpers
 - `src/Settings/` — settings dialog/coordinator
@@ -419,11 +424,11 @@ The web version shares most functionality with the desktop build. The following 
   Forks are encouraged (for example, a GTK+ frontend variant) as long as they clearly document compatibility and maintenance scope.
 
 - **AI-assisted work**
-  Development on this project has been assisted with Codex, Gemini, and Claude Code; all changes are reviewed and manually adjusted since AI output is not perfect.
+  Development on this project has been assisted with Gemini and Claude Code; all changes are reviewed and manually adjusted since AI output is not perfect.
 
 ## Attribution
 
-- Screenshots using the “Adventurer Girl – Free Sprite” pack by pzUGH from OpenGameArt (https://opengameart.org/content/adventurer-girl-free-sprite), reused under the original license.
+- Screenshots using the [“Adventurer Girl – Free Sprite”](https://opengameart.org/content/adventurer-girl-free-sprite) pack by pzUGH from OpenGameArt, reused under the original license.
 - Core CLI tooling comes from the [`sprat-cli`](https://github.com/pedroac/sprat-cli) repository.
 
 ## License
