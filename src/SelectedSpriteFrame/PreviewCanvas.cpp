@@ -1,6 +1,8 @@
 #include "PreviewCanvas.h"
+#include <QFileInfo>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsRectItem>
+#include <QImage>
 #include <QMenu>
 #include <QAction>
 #include <QClipboard>
@@ -18,6 +20,67 @@ PreviewCanvas::PreviewCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     connect(m_overlay, &EditorOverlayItem::pivotChanged, this, &PreviewCanvas::pivotChanged);
 }
 
+// ---------------------------------------------------------------------------
+// Trim rect helpers
+// ---------------------------------------------------------------------------
+
+QRect PreviewCanvas::computeTrimRect(const QImage& img) {
+    if (img.isNull()) return QRect();
+    const int w = img.width();
+    const int h = img.height();
+    int top = h, bottom = -1, left = w, right = -1;
+    for (int y = 0; y < h; ++y) {
+        const QRgb* line = reinterpret_cast<const QRgb*>(img.constScanLine(y));
+        for (int x = 0; x < w; ++x) {
+            if (qAlpha(line[x]) > 0) {
+                if (y < top)    top    = y;
+                if (y > bottom) bottom = y;
+                if (x < left)   left   = x;
+                if (x > right)  right  = x;
+            }
+        }
+    }
+    if (bottom < 0) return QRect(); // fully transparent
+    return QRect(QPoint(left, top), QPoint(right, bottom));
+}
+
+QRect PreviewCanvas::cachedTrimRect() {
+    if (m_sprites.isEmpty()) return QRect();
+    const QString path = m_sprites.first()->path;
+    const QDateTime ts = QFileInfo(path).lastModified();
+    if (m_trimCache.path != path || m_trimCache.timestamp != ts) {
+        m_trimCache.path      = path;
+        m_trimCache.timestamp = ts;
+        m_trimCache.rect      = computeTrimRect(QImage(path).convertToFormat(QImage::Format_ARGB32));
+    }
+    return m_trimCache.rect;
+}
+
+void PreviewCanvas::updateTrimRectItem() {
+    if (m_trimRectItem) {
+        m_scene->removeItem(m_trimRectItem);
+        delete m_trimRectItem;
+        m_trimRectItem = nullptr;
+    }
+    if (!m_settings.showTrimRect || m_sprites.isEmpty()) {
+        m_overlay->setTrimRect(QRect());
+        return;
+    }
+
+    const QRect trimRect = cachedTrimRect();
+    if (!trimRect.isValid()) return;
+
+    QPen pen(m_settings.trimRectColor, 1, m_settings.trimRectStyle);
+    pen.setCosmetic(true);
+    m_trimRectItem = new QGraphicsRectItem(trimRect);
+    m_trimRectItem->setPen(pen);
+    m_trimRectItem->setBrush(Qt::NoBrush);
+    m_trimRectItem->setZValue(0.5); // above sprite (z=0), below overlay
+    m_scene->addItem(m_trimRectItem);
+
+    m_overlay->setTrimRect(trimRect);
+}
+
 void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
     m_sprites = sprites;
     m_overlay->setSprites(sprites);
@@ -28,6 +91,7 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
     m_borderItems.clear();
     for (auto* item : m_ghostItems) { m_scene->removeItem(item); delete item; }
     m_ghostItems.clear();
+    if (m_trimRectItem) { m_scene->removeItem(m_trimRectItem); delete m_trimRectItem; m_trimRectItem = nullptr; }
 
     if (!sprites.isEmpty()) {
         QPen borderPen(m_settings.borderColor, 2, m_settings.borderStyle);
@@ -62,7 +126,7 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
         }
         
         m_scene->setSceneRect(totalRect);
-        
+
         if (!sprites.isEmpty()) {
              QPixmap pix(sprites.first()->path);
              m_overlay->setSceneSize(pix.size());
@@ -70,6 +134,8 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
     } else {
         m_scene->setSceneRect(QRectF());
     }
+
+    updateTrimRectItem();
 }
 
 void PreviewCanvas::setZoom(double zoom) {
@@ -178,4 +244,6 @@ void PreviewCanvas::setSettings(const AppSettings& settings) {
             item->setPen(borderPen);
         }
     }
+
+    updateTrimRectItem();
 }

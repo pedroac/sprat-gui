@@ -38,6 +38,13 @@ public:
      */
     void setSceneSize(const QSize& size);
 
+    /**
+     * @brief Sets the trim rect used by the alignment context menu.
+     *
+     * Pass an invalid QRect() to use full-image coordinates (default).
+     */
+    void setTrimRect(const QRect& rect);
+
 signals:
     /**
      * @brief Emitted when the pivot is moved.
@@ -70,6 +77,7 @@ protected:
 private:
     QList<SpritePtr> m_sprites;
     QSize m_sceneSize;
+    QRect m_trimRect; // invalid = use full-image coordinates
     QString m_selectedMarkerName;
     int m_selectedVertexIndex = -1;
 

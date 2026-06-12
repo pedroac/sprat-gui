@@ -45,6 +45,10 @@ void EditorOverlayItem::setSceneSize(const QSize& size) {
     update();
 }
 
+void EditorOverlayItem::setTrimRect(const QRect& rect) {
+    m_trimRect = rect;
+}
+
 void EditorOverlayItem::setSelectedMarker(const QString& name) {
     if (m_selectedMarkerName != name) {
         m_selectedMarkerName = name;
@@ -379,13 +383,20 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
             if (sel) {
                 const int oldPivotX = activeSprite->pivotX;
                 const int oldPivotY = activeSprite->pivotY;
+                const bool useTrim    = m_trimRect.isValid();
+                const int alignLeft   = useTrim ? m_trimRect.left()                           : 0;
+                const int alignRight  = useTrim ? m_trimRect.left()  + m_trimRect.width()     : m_sceneSize.width();
+                const int alignHCenter= useTrim ? m_trimRect.left()  + m_trimRect.width()  / 2: m_sceneSize.width()  / 2;
+                const int alignTop    = useTrim ? m_trimRect.top()                            : 0;
+                const int alignBottom = useTrim ? m_trimRect.top()   + m_trimRect.height()    : m_sceneSize.height();
+                const int alignVCenter= useTrim ? m_trimRect.top()   + m_trimRect.height() / 2: m_sceneSize.height() / 2;
                 for (auto& sprite : m_sprites) {
-                    if (sel == left) sprite->pivotX = 0;
-                    else if (sel == right) sprite->pivotX = m_sceneSize.width();
-                    else if (sel == hcenter) sprite->pivotX = m_sceneSize.width() / 2;
-                    else if (sel == top) sprite->pivotY = 0;
-                    else if (sel == bottom) sprite->pivotY = m_sceneSize.height();
-                    else if (sel == vcenter) sprite->pivotY = m_sceneSize.height() / 2;
+                    if      (sel == left)    sprite->pivotX = alignLeft;
+                    else if (sel == right)   sprite->pivotX = alignRight;
+                    else if (sel == hcenter) sprite->pivotX = alignHCenter;
+                    else if (sel == top)     sprite->pivotY = alignTop;
+                    else if (sel == bottom)  sprite->pivotY = alignBottom;
+                    else if (sel == vcenter) sprite->pivotY = alignVCenter;
                 }
                 emit pivotChanged(activeSprite->pivotX, activeSprite->pivotY);
                 update();

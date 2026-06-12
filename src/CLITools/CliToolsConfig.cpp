@@ -67,6 +67,12 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.exportDefaultScaleFilter  = settings.value("settings/export_default_scale_filter", "nearest").toString();
     out.coordUnit = settings.value("settings/coord_unit", 0).toInt() == 1
                   ? CoordUnit::Percent : CoordUnit::Pixels;
+    out.showTrimRect = settings.value("settings/show_trim_rect", out.showTrimRect).toBool();
+    if (settings.contains("settings/trim_rect_color")) {
+        out.trimRectColor = QColor(settings.value("settings/trim_rect_color").toString());
+    }
+    out.trimRectStyle = static_cast<Qt::PenStyle>(
+        settings.value("settings/trim_rect_style", static_cast<int>(out.trimRectStyle)).toInt());
     out.defaultProjectsFolder = settings.value("settings/default_projects_folder",
         QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("Sprat Projects")).toString();
     out.recentProjects = settings.value("recent/projects", out.recentProjects).toStringList();
@@ -117,6 +123,9 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/export_default_scale_filter", settings.exportDefaultScaleFilter);
     qsettings.setValue("settings/coord_unit",
         settings.coordUnit == CoordUnit::Percent ? 1 : 0);
+    qsettings.setValue("settings/show_trim_rect", settings.showTrimRect);
+    qsettings.setValue("settings/trim_rect_color", settings.trimRectColor.name(QColor::HexArgb));
+    qsettings.setValue("settings/trim_rect_style", static_cast<int>(settings.trimRectStyle));
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

@@ -81,6 +81,8 @@ private:
     QCheckBox* m_propagateEditsCheck = nullptr;
     QComboBox* m_flipbookModeCombo = nullptr;
     QComboBox* m_frameZoomModeCombo = nullptr;
+    QPushButton* m_trimRectColorBtn = nullptr;
+    QComboBox* m_trimRectStyleCombo = nullptr;
 
     // Atlas Layout controls
     QComboBox* m_layoutZoomOnChangeCombo = nullptr;

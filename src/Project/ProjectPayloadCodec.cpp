@@ -318,6 +318,9 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     settings["show_borders"] = input.appSettings.showBorders;
     settings["border_color"] = input.appSettings.borderColor.name(QColor::HexArgb);
     settings["border_style"] = static_cast<int>(input.appSettings.borderStyle);
+    settings["show_trim_rect"] = input.appSettings.showTrimRect;
+    settings["trim_rect_color"] = input.appSettings.trimRectColor.name(QColor::HexArgb);
+    settings["trim_rect_style"] = static_cast<int>(input.appSettings.trimRectStyle);
     if (!input.portablePaths) {
         settings["cli_spratlayout"] = input.cliPaths.layoutBinary;
         settings["cli_spratpack"] = input.cliPaths.packBinary;
@@ -486,6 +489,12 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             out.appSettings.borderColor = QColor(borderColor);
         }
         out.appSettings.borderStyle = static_cast<Qt::PenStyle>(settings["border_style"].toInt(static_cast<int>(out.appSettings.borderStyle)));
+        out.appSettings.showTrimRect = settings["show_trim_rect"].toBool(out.appSettings.showTrimRect);
+        const QString trimRectColor = settings["trim_rect_color"].toString();
+        if (!trimRectColor.isEmpty()) {
+            out.appSettings.trimRectColor = QColor(trimRectColor);
+        }
+        out.appSettings.trimRectStyle = static_cast<Qt::PenStyle>(settings["trim_rect_style"].toInt(static_cast<int>(out.appSettings.trimRectStyle)));
         // Validate CLI paths to prevent arbitrary binary execution
         QString layoutPath = settings["cli_spratlayout"].toString();
         if (isValidCliPath(layoutPath)) {

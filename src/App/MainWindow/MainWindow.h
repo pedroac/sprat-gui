@@ -1308,6 +1308,7 @@ private:
         const Sprite* sprite = nullptr;
         QString markerName;
         CoordUnit unit = CoordUnit::Pixels;
+        bool showTrimRect = false;
         double x = 0.0;
         double y = 0.0;
     };

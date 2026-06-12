@@ -152,6 +152,27 @@ void SettingsDialog::setupUi() {
     connect(m_flipbookModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [updateZoomComboEnabled](int) { updateZoomComboEnabled(); });
 
+    m_trimRectColorBtn = createColorButton(m_settings.trimRectColor);
+    m_trimRectColorBtn->setToolTip(tr("Color of the trim area boundary rectangle"));
+    m_trimRectColorBtn->setAccessibleName(tr("Trim rect color"));
+    connect(m_trimRectColorBtn, &QPushButton::clicked, this, [this]() { pickColor(m_trimRectColorBtn, m_settings.trimRectColor); });
+    framesEditorForm->addRow(tr("Trim Rect Color:"), m_trimRectColorBtn);
+
+    m_trimRectStyleCombo = new QComboBox(this);
+    m_trimRectStyleCombo->addItem(tr("None"), (int)Qt::NoPen);
+    m_trimRectStyleCombo->addItem(tr("Solid"), (int)Qt::SolidLine);
+    m_trimRectStyleCombo->addItem(tr("Dash"), (int)Qt::DashLine);
+    m_trimRectStyleCombo->addItem(tr("Dot"), (int)Qt::DotLine);
+    m_trimRectStyleCombo->addItem(tr("DashDot"), (int)Qt::DashDotLine);
+    m_trimRectStyleCombo->addItem(tr("DashDotDot"), (int)Qt::DashDotDotLine);
+    {
+        int idx = m_trimRectStyleCombo->findData((int)m_settings.trimRectStyle);
+        if (idx >= 0) m_trimRectStyleCombo->setCurrentIndex(idx);
+    }
+    m_trimRectStyleCombo->setToolTip(tr("Visual style for the trim area boundary"));
+    m_trimRectStyleCombo->setAccessibleName(tr("Trim rect style"));
+    framesEditorForm->addRow(tr("Trim Rect Style:"), m_trimRectStyleCombo);
+
     contentLayout->addWidget(m_framesEditorGroup);
     m_framesEditorGroup->setVisible(m_initialSection == Section::FramesEditor);
 
@@ -393,6 +414,11 @@ void SettingsDialog::resetToDefaults() {
     if (borderIndex >= 0) {
         m_borderStyleCombo->setCurrentIndex(borderIndex);
     }
+    if (m_trimRectColorBtn) updateColorButton(m_trimRectColorBtn, AppSettings().trimRectColor);
+    if (m_trimRectStyleCombo) {
+        int idx = m_trimRectStyleCombo->findData((int)AppSettings().trimRectStyle);
+        if (idx >= 0) m_trimRectStyleCombo->setCurrentIndex(idx);
+    }
 
     int syncIndex = m_syncModeCombo->findData((int)m_settings.syncMode);
     if (syncIndex >= 0) {
@@ -416,6 +442,7 @@ AppSettings SettingsDialog::getSettings() const {
     if (m_exportDefaultFolderEdit) s.exportDefaultOutputFolder = m_exportDefaultFolderEdit->text().trimmed();
     if (m_exportDefaultFormatCombo) s.exportDefaultFormat = m_exportDefaultFormatCombo->currentData().toString();
     if (m_exportDefaultScaleFilterCombo) s.exportDefaultScaleFilter = m_exportDefaultScaleFilterCombo->currentData().toString();
+    if (m_trimRectStyleCombo) s.trimRectStyle = (Qt::PenStyle)m_trimRectStyleCombo->currentData().toInt();
     return s;
 }
 

@@ -52,16 +52,17 @@
 #include "SpriteTreeUtils.h"
 #include <QUuid>
 
-static double toDisplay(int px, int dim, CoordUnit unit) {
+static double toDisplay(int px, int dim, CoordUnit unit, int origin = 0) {
+    const int adjusted = px - origin;
     return (unit == CoordUnit::Percent && dim > 0)
-        ? px * 100.0 / dim : double(px);
+        ? adjusted * 100.0 / dim : double(adjusted);
 }
 
 namespace {
-void setCoordinateSpinValue(QDoubleSpinBox* spin, int px, int dim, CoordUnit unit) {
+void setCoordinateSpinValue(QDoubleSpinBox* spin, int px, int dim, CoordUnit unit, int origin = 0) {
     if (!spin) return;
     spin->blockSignals(true);
-    spin->setValue(toDisplay(px, dim, unit));
+    spin->setValue(toDisplay(px, dim, unit, origin));
     spin->blockSignals(false);
 }
 }
@@ -688,6 +689,18 @@ void MainWindow::setupUi() {
     connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &MainWindow::onPreviewZoomChanged);
 
+    {
+        auto* btn = m_spriteEditorPanel->showTrimRectBtn();
+        btn->setChecked(m_settings.showTrimRect);
+        connect(btn, &QPushButton::toggled, this, [this](bool checked) {
+            m_settings.showTrimRect = checked;
+            CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+            m_previewView->setSettings(m_settings);
+            clearCoordinateFieldOverride();
+            syncCoordinateSpinsFromSelection();
+        });
+    }
+
     // 4. Animation Preview panel — owned by AnimationPreviewPanel
     m_animPreviewPanel = new AnimationPreviewPanel(this);
 
@@ -1234,6 +1247,7 @@ void MainWindow::storeCoordinateFieldOverride() {
     m_coordinateFieldOverride.sprite = m_session->selectedSprite.get();
     m_coordinateFieldOverride.markerName = m_session->selectedPointName;
     m_coordinateFieldOverride.unit = m_settings.coordUnit;
+    m_coordinateFieldOverride.showTrimRect = m_settings.showTrimRect;
     m_coordinateFieldOverride.x = m_pivotXSpin->value();
     m_coordinateFieldOverride.y = m_pivotYSpin->value();
 }
@@ -1244,7 +1258,8 @@ bool MainWindow::coordinateFieldOverrideApplies() const {
         && m_session->selectedSprite
         && m_coordinateFieldOverride.sprite == m_session->selectedSprite.get()
         && m_coordinateFieldOverride.markerName == m_session->selectedPointName
-        && m_coordinateFieldOverride.unit == m_settings.coordUnit;
+        && m_coordinateFieldOverride.unit == m_settings.coordUnit
+        && m_coordinateFieldOverride.showTrimRect == m_settings.showTrimRect;
 }
 
 void MainWindow::syncPivotSpinsFromSprite() {
@@ -1264,8 +1279,18 @@ void MainWindow::syncCoordinateSpinsFromSelection() {
     }
 
     const QSize spriteSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
-    const int spriteWidth = spriteSize.width();
-    const int spriteHeight = spriteSize.height();
+    int spriteWidth = spriteSize.width();
+    int spriteHeight = spriteSize.height();
+    int originX = 0, originY = 0;
+    if (m_settings.showTrimRect && m_previewView) {
+        const QRect tr = m_previewView->cachedTrimRect();
+        if (tr.isValid()) {
+            originX     = tr.left();
+            originY     = tr.top();
+            spriteWidth  = tr.width();
+            spriteHeight = tr.height();
+        }
+    }
     const bool hasDimensions = spriteWidth > 0 && spriteHeight > 0;
     const CoordUnit displayUnit = hasDimensions ? m_settings.coordUnit : CoordUnit::Pixels;
 
@@ -1273,10 +1298,14 @@ void MainWindow::syncCoordinateSpinsFromSelection() {
         m_coordUnitCombo->setEnabled(hasDimensions);
     }
     if (m_pivotXSpin) {
+        m_pivotXSpin->blockSignals(true);
         m_pivotXSpin->setDecimals(displayUnit == CoordUnit::Percent ? 1 : 0);
+        m_pivotXSpin->blockSignals(false);
     }
     if (m_pivotYSpin) {
+        m_pivotYSpin->blockSignals(true);
         m_pivotYSpin->setDecimals(displayUnit == CoordUnit::Percent ? 1 : 0);
+        m_pivotYSpin->blockSignals(false);
     }
 
     if (coordinateFieldOverrideApplies()) {
@@ -1290,8 +1319,8 @@ void MainWindow::syncCoordinateSpinsFromSelection() {
     }
 
     if (m_session->selectedPointName.isEmpty()) {
-        setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit);
-        setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit);
+        setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit, originX);
+        setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit, originY);
         return;
     }
 
@@ -1299,13 +1328,13 @@ void MainWindow::syncCoordinateSpinsFromSelection() {
         if (point.name != m_session->selectedPointName) {
             continue;
         }
-        setCoordinateSpinValue(m_pivotXSpin, point.x, spriteWidth, displayUnit);
-        setCoordinateSpinValue(m_pivotYSpin, point.y, spriteHeight, displayUnit);
+        setCoordinateSpinValue(m_pivotXSpin, point.x, spriteWidth, displayUnit, originX);
+        setCoordinateSpinValue(m_pivotYSpin, point.y, spriteHeight, displayUnit, originY);
         return;
     }
 
-    setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit);
-    setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit);
+    setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit, originX);
+    setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit, originY);
 }
 
 // Recursively compute tristate check state for every folder node from the

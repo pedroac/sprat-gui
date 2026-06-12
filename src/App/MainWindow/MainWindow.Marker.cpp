@@ -13,13 +13,15 @@
 #include <QImageReader>
 
 namespace {
-static double toDisplay(int px, int dim, CoordUnit unit) {
+static double toDisplay(int px, int dim, CoordUnit unit, int origin = 0) {
+    const int adjusted = px - origin;
     return (unit == CoordUnit::Percent && dim > 0)
-        ? px * 100.0 / dim : double(px);
+        ? adjusted * 100.0 / dim : double(adjusted);
 }
-static int fromDisplay(double v, int dim, CoordUnit unit) {
-    return (unit == CoordUnit::Percent && dim > 0)
+static int fromDisplay(double v, int dim, CoordUnit unit, int origin = 0) {
+    const int raw = (unit == CoordUnit::Percent && dim > 0)
         ? qRound(v * dim / 100.0) : qRound(v);
+    return raw + origin;
 }
 }
 
@@ -76,10 +78,20 @@ void MainWindow::onPivotSpinChanged() {
 
     const auto unit = m_settings.coordUnit;
     const QSize activeSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
-    const int  sw   = activeSize.width();
-    const int  sh   = activeSize.height();
-    const int  newX = fromDisplay(m_pivotXSpin->value(), sw, unit);
-    const int  newY = fromDisplay(m_pivotYSpin->value(), sh, unit);
+    int sw = activeSize.width();
+    int sh = activeSize.height();
+    int ox = 0, oy = 0;
+    if (m_settings.showTrimRect && m_previewView) {
+        const QRect tr = m_previewView->cachedTrimRect();
+        if (tr.isValid()) {
+            ox = tr.left();
+            oy = tr.top();
+            sw = tr.width();
+            sh = tr.height();
+        }
+    }
+    const int  newX = fromDisplay(m_pivotXSpin->value(), sw, unit, ox);
+    const int  newY = fromDisplay(m_pivotYSpin->value(), sh, unit, oy);
 
     if (m_session->selectedPointName.isEmpty()) {
         // Pivot
@@ -92,10 +104,10 @@ void MainWindow::onPivotSpinChanged() {
                 if (sprite && sprite != m_session->selectedSprite) {
                     const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
                     const QSize coSize = spriteCoordinateSpaceSize(sprite);
-                    sprite->pivotX = fromDisplay(m_pivotXSpin->value(),
-                                                 coSize.width(), unit);
-                    sprite->pivotY = fromDisplay(m_pivotYSpin->value(),
-                                                 coSize.height(), unit);
+                    const int csw = (m_settings.showTrimRect && sw > 0) ? sw : coSize.width();
+                    const int csh = (m_settings.showTrimRect && sh > 0) ? sh : coSize.height();
+                    sprite->pivotX = fromDisplay(m_pivotXSpin->value(), csw, unit, ox);
+                    sprite->pivotY = fromDisplay(m_pivotYSpin->value(), csh, unit, oy);
                     const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
                     if (oldPos != newPos) {
                         coTargets.append({sprite, oldPos, newPos});
@@ -138,10 +150,10 @@ void MainWindow::onPivotSpinChanged() {
                 if (!coSprite || coSprite == sprite) continue;
                 const QVector<NamedPoint> oldCoPoints = coSprite->points;
                 const QSize coSize = spriteCoordinateSpaceSize(coSprite);
-                const int cx = fromDisplay(m_pivotXSpin->value(),
-                                           coSize.width(), unit);
-                const int cy = fromDisplay(m_pivotYSpin->value(),
-                                           coSize.height(), unit);
+                const int csw = (m_settings.showTrimRect && sw > 0) ? sw : coSize.width();
+                const int csh = (m_settings.showTrimRect && sh > 0) ? sh : coSize.height();
+                const int cx = fromDisplay(m_pivotXSpin->value(), csw, unit, ox);
+                const int cy = fromDisplay(m_pivotYSpin->value(), csh, unit, oy);
                 for (auto& p : coSprite->points) {
                     if (p.name != m_session->selectedPointName) continue;
                     if (p.kind == MarkerKind::Polygon && !p.polygonPoints.isEmpty()) {

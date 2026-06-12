@@ -746,6 +746,27 @@ struct AppSettings {
     CoordUnit coordUnit = CoordUnit::Pixels;
 
     /**
+     * @brief Whether to show the trimmed-content boundary rectangle in the frame editor.
+     *
+     * Default: false
+     */
+    bool showTrimRect = false;
+
+    /**
+     * @brief Color of the trim rect overlay.
+     *
+     * Default: QColor(255, 140, 0) - orange
+     */
+    QColor trimRectColor = QColor(255, 140, 0);
+
+    /**
+     * @brief Border style of the trim rect overlay.
+     *
+     * Default: Qt::DashLine
+     */
+    Qt::PenStyle trimRectStyle = Qt::DashLine;
+
+    /**
      * @brief Flipbook pivot-lock mode for the frame editor.
      *
      * When non-None, the viewport is scrolled on frame navigation so the

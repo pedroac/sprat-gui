@@ -28,6 +28,7 @@ public:
     QLineEdit*      spriteNameEdit()       const { return m_spriteNameEdit; }
     QPushButton*    editAliasesBtn()       const { return m_editAliasesBtn; }
     QDoubleSpinBox* previewZoomSpin()      const { return m_previewZoomSpin; }
+    QPushButton*    showTrimRectBtn()      const { return m_showTrimRectBtn; }
     QComboBox*      handleCombo()          const { return m_handleCombo; }
     QDoubleSpinBox* pivotXSpin()           const { return m_pivotXSpin; }
     QDoubleSpinBox* pivotYSpin()           const { return m_pivotYSpin; }
@@ -42,6 +43,7 @@ private:
     QLineEdit*      m_spriteNameEdit       = nullptr;
     QPushButton*    m_editAliasesBtn       = nullptr;
     QDoubleSpinBox* m_previewZoomSpin      = nullptr;
+    QPushButton*    m_showTrimRectBtn      = nullptr;
     QComboBox*      m_handleCombo          = nullptr;
     QDoubleSpinBox* m_pivotXSpin           = nullptr;
     QDoubleSpinBox* m_pivotYSpin           = nullptr;

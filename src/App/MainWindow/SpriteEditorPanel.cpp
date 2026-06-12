@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QFrame>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -38,20 +39,8 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
     m_multiSelectionLabel->setVisible(false);
     box->addWidget(m_multiSelectionLabel);
 
-    // ── Name row: Name edit + Aliases button + Zoom label + Zoom spin ────────
-    auto* nameRow = new QHBoxLayout();
-    nameRow->addWidget(new QLabel(tr("Name:"), this));
-
-    m_spriteNameEdit = new QLineEdit(this);
-    m_spriteNameEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_spriteNameEdit->setEnabled(false);
-    nameRow->addWidget(m_spriteNameEdit);
-
-    m_editAliasesBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView), "", this);
-    m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases (alternative names that share markers and pivots)"));
-    m_editAliasesBtn->setEnabled(false);
-    nameRow->addWidget(m_editAliasesBtn);
+    // ── Viewport row: visual-only options (not stored in exportation) ─────────
+    auto* viewportRow = new QHBoxLayout();
 
     // Zoom icon label
     {
@@ -67,7 +56,7 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
         auto* zoomLabel = new QLabel(this);
         zoomLabel->setPixmap(pix);
         zoomLabel->setToolTip(tr("Zoom"));
-        nameRow->addWidget(zoomLabel);
+        viewportRow->addWidget(zoomLabel);
     }
 
     m_previewZoomSpin = new QDoubleSpinBox(this);
@@ -75,11 +64,37 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
     m_previewZoomSpin->setValue(200.0);
     m_previewZoomSpin->setSuffix("%");
     m_previewZoomSpin->setSingleStep(10.0);
-    nameRow->addWidget(m_previewZoomSpin);
-    box->addLayout(nameRow);
+    viewportRow->addWidget(m_previewZoomSpin);
 
-    // ── Pivot / handle row ───────────────────────────────────────────────────
-    auto* pivotRow = new QHBoxLayout();
+    m_showTrimRectBtn = new QPushButton(tr("Trim"), this);
+    m_showTrimRectBtn->setCheckable(true);
+    m_showTrimRectBtn->setToolTip(tr("Show the trimmed-content boundary rectangle"));
+    m_showTrimRectBtn->setAccessibleName(tr("Show trim rect"));
+    viewportRow->addWidget(m_showTrimRectBtn);
+
+    viewportRow->addStretch();
+    box->addLayout(viewportRow);
+
+    // ── Sprite row: Name configs | separator | Markers config (stored in exportation) ──
+    auto* spriteRow = new QHBoxLayout();
+
+    spriteRow->addWidget(new QLabel(tr("Name:"), this));
+
+    m_spriteNameEdit = new QLineEdit(this);
+    m_spriteNameEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_spriteNameEdit->setEnabled(false);
+    spriteRow->addWidget(m_spriteNameEdit);
+
+    m_editAliasesBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_FileDialogContentsView), "", this);
+    m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases (alternative names that share markers and pivots)"));
+    m_editAliasesBtn->setEnabled(false);
+    spriteRow->addWidget(m_editAliasesBtn);
+
+    auto* separator = new QFrame(this);
+    separator->setFrameShape(QFrame::VLine);
+    separator->setFrameShadow(QFrame::Sunken);
+    spriteRow->addWidget(separator);
 
     // Crosshair icon for pivot/handle label
     {
@@ -98,49 +113,48 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
         auto* handleLabel = new QLabel(this);
         handleLabel->setPixmap(pix);
         handleLabel->setToolTip(tr("Selected marker: the pivot point, a named point, or a named area."));
-        pivotRow->addWidget(handleLabel);
+        spriteRow->addWidget(handleLabel);
     }
 
     m_handleCombo = new QComboBox(this);
     m_handleCombo->addItem(tr("pivot"));
     m_handleCombo->setToolTip(tr("Select pivot or a named marker to edit"));
     m_handleCombo->setAccessibleName(tr("Handle selector"));
-    pivotRow->addWidget(m_handleCombo);
+    spriteRow->addWidget(m_handleCombo);
 
-    pivotRow->addWidget(new QLabel(tr("X:"), this));
+    spriteRow->addWidget(new QLabel(tr("X:"), this));
     m_pivotXSpin = new QDoubleSpinBox(this);
     m_pivotXSpin->setEnabled(false);
     m_pivotXSpin->setDecimals(0);
     m_pivotXSpin->setRange(0, 9999);
     m_pivotXSpin->setToolTip(tr("Pivot X: horizontal origin for sprite rotation"));
     m_pivotXSpin->setAccessibleName(tr("Pivot X"));
-    pivotRow->addWidget(m_pivotXSpin);
+    spriteRow->addWidget(m_pivotXSpin);
 
-    pivotRow->addWidget(new QLabel(tr("Y:"), this));
+    spriteRow->addWidget(new QLabel(tr("Y:"), this));
     m_pivotYSpin = new QDoubleSpinBox(this);
     m_pivotYSpin->setEnabled(false);
     m_pivotYSpin->setDecimals(0);
     m_pivotYSpin->setRange(0, 9999);
     m_pivotYSpin->setToolTip(tr("Pivot Y: vertical origin for sprite rotation"));
     m_pivotYSpin->setAccessibleName(tr("Pivot Y"));
-    pivotRow->addWidget(m_pivotYSpin);
+    spriteRow->addWidget(m_pivotYSpin);
 
     m_coordUnitCombo = new QComboBox(this);
     m_coordUnitCombo->addItem(tr("px"), int(CoordUnit::Pixels));
     m_coordUnitCombo->addItem(tr("%"),  int(CoordUnit::Percent));
     m_coordUnitCombo->setEnabled(false);
     m_coordUnitCombo->setToolTip(tr("Coordinate unit: pixels or percent of sprite dimensions"));
-    pivotRow->addWidget(m_coordUnitCombo);
+    spriteRow->addWidget(m_coordUnitCombo);
 
     m_configPointsBtn = new QPushButton(
         QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView), "", this);
     m_configPointsBtn->setToolTip(tr("Manage Markers: define named points on this sprite, such as hitboxes, spawn positions, or attachment points"));
     m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     m_configPointsBtn->setEnabled(false);
-    pivotRow->addWidget(m_configPointsBtn);
+    spriteRow->addWidget(m_configPointsBtn);
 
-    pivotRow->addStretch();
-    box->addLayout(pivotRow);
+    box->addLayout(spriteRow);
 
     // ── Preview canvas ───────────────────────────────────────────────────────
     m_previewView = new PreviewCanvas(this);
