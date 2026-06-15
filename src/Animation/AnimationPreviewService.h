@@ -18,7 +18,9 @@ public:
         QString& statusText,
         bool& hasFrames,
         bool& playing,
-        QTimer* timer);
+        QTimer* timer,
+        bool onionSkin = false,
+        int onionOpacity = 30);
 
     static QSize calculateAnimationSize(
         const QVector<AnimationTimeline>& timelines,
@@ -40,4 +42,11 @@ public:
     // Invalidate the cached canvas bounds so the next refresh() recomputes
     // them.  Call whenever any sprite pivot changes.
     static void invalidateBounds();
+
+    // Return the cached composite-canvas left/top extents (pixels from the
+    // pivot alignment point to the left/top edge of the canvas).  Valid after
+    // the most recent refresh() call.  Used to align the overlay item so that
+    // its item-local coordinate system matches sprite-local coordinates.
+    static int cachedBoundsLeft();
+    static int cachedBoundsTop();
 };

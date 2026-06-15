@@ -3,9 +3,11 @@
 #include "models.h"
 #include "EditorOverlayItem.h"
 #include <QDateTime>
+#include <QFutureWatcher>
 #include <QRect>
 
 class QGraphicsPathItem;
+class QGraphicsItem;
 
 /**
  * @brief Widget for previewing and editing a single sprite.
@@ -16,6 +18,7 @@ class PreviewCanvas : public ZoomableGraphicsView {
     Q_OBJECT
 public:
     explicit PreviewCanvas(QWidget* parent = nullptr);
+    ~PreviewCanvas() override;
 
     /**
      * @brief Sets the sprites to display (usually just one).
@@ -74,6 +77,16 @@ signals:
      */
     void pivotChanged(int x, int y);
 
+    /**
+     * @brief Emitted when the user requests copying markers (Ctrl+C).
+     */
+    void copyMarkersRequested();
+
+    /**
+     * @brief Emitted when the user requests pasting markers (Ctrl+V).
+     */
+    void pasteMarkersRequested();
+
 protected:
     void keyPressEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -81,6 +94,7 @@ protected:
 private:
     static QRect computeTrimRect(const QImage& img);
     void updateTrimRectItem();
+    void updateGridItem();
 
     QGraphicsScene* m_scene;
     QList<QGraphicsPixmapItem*> m_imageItems;
@@ -88,6 +102,7 @@ private:
     QList<QGraphicsPixmapItem*> m_ghostItems;
     QGraphicsRectItem* m_trimRectItem = nullptr;
     QGraphicsPathItem* m_trimDimItem = nullptr;
+    QGraphicsItem*     m_gridItem = nullptr;
     EditorOverlayItem* m_overlay;
     QList<SpritePtr> m_sprites;
     AppSettings m_settings;
@@ -98,4 +113,10 @@ private:
         QRect rect;
     };
     TrimCache m_trimCache;
+
+    // Watches an in-flight background trim-rect computation.  Used only to
+    // detect whether a computation is already running (isRunning) and to cancel
+    // it when sprites change (cancel).  Results are delivered back to the main
+    // thread via QMetaObject::invokeMethod; a path guard discards stale results.
+    QFutureWatcher<QRect> m_trimWatcher;
 };

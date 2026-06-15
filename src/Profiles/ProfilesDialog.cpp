@@ -71,6 +71,8 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     QVBoxLayout* listLayout = new QVBoxLayout();
     m_listWidget = new QListWidget(this);
     m_listWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_listWidget->setDragDropMode(QAbstractItemView::InternalMove);
+    m_listWidget->setDefaultDropAction(Qt::MoveAction);
     for (const SpratProfile& profile : m_profiles) {
         m_listWidget->addItem(profile.label.isEmpty() ? profile.name : profile.label);
     }
@@ -100,6 +102,10 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
 
     m_nameEdit = new QLineEdit(this);
     generalLayout->addRow(tr("Name:"), m_nameEdit);
+    connect(m_nameEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        const bool dup = m_currentRow >= 0 && hasDuplicateName(text.trimmed(), m_currentRow);
+        m_nameEdit->setStyleSheet(dup ? QStringLiteral("border: 1px solid #c0392b;") : QString());
+    });
 
     m_labelEdit = new QLineEdit(this);
     m_labelEdit->setPlaceholderText(tr("Optional readable name shown in the UI"));
@@ -233,6 +239,12 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     connect(m_useMaxHeightCheck, &QCheckBox::toggled, m_maxHeightSpin, &QSpinBox::setEnabled);
     connect(m_presetCombo, &QComboBox::currentTextChanged, this, [this](const QString&) {
         refreshThreadsEnabledState();
+    });
+    connect(m_listWidget->model(), &QAbstractItemModel::rowsMoved,
+            this, [this](const QModelIndex&, int srcFirst, int, const QModelIndex&, int dest) {
+        saveEditorsToProfile(m_currentRow);
+        m_profiles.move(srcFirst, dest > srcFirst ? dest - 1 : dest);
+        m_currentRow = m_listWidget->currentRow();
     });
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, &ProfilesDialog::accept);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);

@@ -6,6 +6,8 @@ class QLineEdit;
 class QPushButton;
 class QDoubleSpinBox;
 class QComboBox;
+class QSpinBox;
+class QToolButton;
 class PreviewCanvas;
 class ElidedLabel;
 
@@ -29,11 +31,14 @@ public:
     QPushButton*    editAliasesBtn()       const { return m_editAliasesBtn; }
     QDoubleSpinBox* previewZoomSpin()      const { return m_previewZoomSpin; }
     QPushButton*    showTrimRectBtn()      const { return m_showTrimRectBtn; }
+    QPushButton*    onionSkinBtn()         const { return m_onionSkinBtn; }
+    QPushButton*    showGridBtn()          const { return m_showGridBtn; }
     QComboBox*      handleCombo()          const { return m_handleCombo; }
     QDoubleSpinBox* pivotXSpin()           const { return m_pivotXSpin; }
     QDoubleSpinBox* pivotYSpin()           const { return m_pivotYSpin; }
     QComboBox*      coordUnitCombo()       const { return m_coordUnitCombo; }
     QPushButton*    configPointsBtn()      const { return m_configPointsBtn; }
+    QToolButton*    markerTemplatesBtn()   const { return m_markerTemplatesBtn; }
     PreviewCanvas*  previewCanvas()        const { return m_previewView; }
     ElidedLabel*    spriteNameFooterLabel() const { return m_spriteNameFooterLabel; }
     QLabel*         spriteDimsLabel()      const { return m_spriteDimsLabel; }
@@ -44,11 +49,14 @@ private:
     QPushButton*    m_editAliasesBtn       = nullptr;
     QDoubleSpinBox* m_previewZoomSpin      = nullptr;
     QPushButton*    m_showTrimRectBtn      = nullptr;
+    QPushButton*    m_onionSkinBtn         = nullptr;
+    QPushButton*    m_showGridBtn          = nullptr;
     QComboBox*      m_handleCombo          = nullptr;
     QDoubleSpinBox* m_pivotXSpin           = nullptr;
     QDoubleSpinBox* m_pivotYSpin           = nullptr;
     QComboBox*      m_coordUnitCombo       = nullptr;
     QPushButton*    m_configPointsBtn      = nullptr;
+    QToolButton*    m_markerTemplatesBtn   = nullptr;
     PreviewCanvas*  m_previewView          = nullptr;
     ElidedLabel*    m_spriteNameFooterLabel = nullptr;
     QLabel*         m_spriteDimsLabel      = nullptr;

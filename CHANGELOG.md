@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Frame Animation workspace: onion skin now defaults to off
+- Sprites workspace: trim rect now defaults to on
+- Atlas Sprites: deduplication mode now defaults to Exact instead of None
+
+## [0.8.0] - 2026-06-15
+
 ### Added
 - **Sources dialog** redesigned with per-source "Sync Layout to Source" and "Sync Source to Layout" buttons
 - **Sync Layout to Source**: writes current layout sprites back to the original source file — repacks archives (ZIP), re-renders PNG atlases, and re-exports GIFs from the current pivot/marker state
@@ -16,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missing-file detection: if individual files are absent inside an existing source, the user is offered to restore them from the project cache or locate a replacement folder
 - `ArchiveExtractor::listEntries` utility for enumerating archive contents without extraction
 - Enable/disable logic for sync buttons based on source type and cached copy availability (URL sources always disabled)
+- ProfilesDialog: real-time duplicate name detection highlights the Name field with a red border before accepting
+- MarkersDialog: tooltips on all coordinate, radius, and dimension spinboxes now show the field's purpose and valid range
+
+### Changed
+- CLI execution error dialog now shows the binary path and platform-specific diagnostic steps (`ldd` on Linux, `xattr` Gatekeeper removal on macOS, DLL guidance on Windows)
+- ExportDiffDialog minimum size increased to 600×400 (default 660×460); a summary line ("New: X · Will overwrite: Y") now appears above the file tree
+- Export workspace preview pane shows "Generating preview…" while atlas packing is in progress instead of the static "No preview available" placeholder
+- Multi-selection indicator in the sprite editor now appears in both propagation modes: "changes apply to all" when propagation is on, "changes apply to current frame only" when off
+- CLI install overlay switches to an indeterminate progress bar and shows "Building CLI tools…" once the download reaches 100%, so users see that extraction/compilation is ongoing
+- Animation export missing-tools warning now includes platform-specific install commands (apt/dnf/brew/winget) instead of a generic message
+
+### Fixed
+- Export menu "Export" action now shows the overwrite confirmation dialog (ExportDiffDialog) before writing, matching the behaviour of the Exportation workspace button
+- Cancel button on the loading overlay now reports "Installation canceled" or "Layout canceled" instead of the generic "Operation canceled"
+- Silent failure when copying sprite files to the project folder during save: errors are now logged with source and destination paths
 
 ## [0.7.0]
 

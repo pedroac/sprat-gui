@@ -10,6 +10,7 @@
 #include <QFutureWatcher>
 #include <QPair>
 #include <QMutex>
+#include <functional>
 #include <QElapsedTimer>
 #include <QUndoStack>
 
@@ -288,6 +289,13 @@ private slots:
     void onHandleComboChanged(int index);
 
     /**
+     * @brief Handles changes to the animation-panel handle combo box.
+     *
+     * @param index Selected index
+     */
+    void onAnimHandleComboChanged(int index);
+
+    /**
      * @brief Handles changes to the coordinate unit combo box (px / %).
      */
     void onCoordUnitChanged();
@@ -296,6 +304,15 @@ private slots:
      * @brief Handles request to configure points.
      */
     void onPointsConfigClicked();
+
+    // === Marker Copy/Paste & Templates ===
+    void onCopyMarkersRequested();
+    void onPasteMarkersRequested();
+    void onSaveMarkerTemplate();
+    void onApplyMarkerTemplate(const MarkerTemplate& tmpl);
+    void onDeleteMarkerTemplate(const QString& name);
+    void refreshMarkerTemplatesMenu();
+    void applyMarkersToSelection(const QVector<NamedPoint>& points);
 
     /**
      * @brief Handles marker selection from canvas.
@@ -387,6 +404,12 @@ private slots:
      * @brief Handles animation timer timeout.
      */
     void onAnimTimerTimeout();
+
+    /**
+     * @brief Called when the background animation export task finishes.
+     */
+    void onAnimExportFinished();
+    void onGifSyncFinished();
     void onPasteImport();
 
 private slots:
@@ -726,7 +749,7 @@ private:
     QString createManagedImportFile(const QString& suggestedName, const QByteArray& data, QString& error);
     QString createManagedImportImageFile(const QImage& image, QString& error);
     bool syncLayoutToImage(const ProjectSource& src, QString& error);
-    bool syncLayoutToGif(const ProjectSource& src, QString& error);
+    void syncLayoutToGif(const ProjectSource& src, std::function<void(bool, const QString&)> onDone);
     void finishImportedPath(const QString& path, DropAction action);
     void openSettingsDialogForSection(SettingsDialog::Section section);
 
@@ -846,6 +869,11 @@ private:
      * @brief Refreshes handle combo box.
      */
     void refreshHandleCombo();
+
+    /**
+     * @brief Refreshes the animation-panel handle combo to match the current overlay sprite.
+     */
+    void refreshAnimHandleCombo();
     void refreshSpriteTree();
     void updateNavigatorAtlasCombo();
     void syncExcludedAtlas();
@@ -1050,6 +1078,9 @@ private:
     QList<int> m_atlasSplitterHSizes;   // saved before orientation→Vertical; restored on return
     double     m_savedPreviewZoom = -1.0;
     QPointF    m_savedPreviewCenter;    // scene-coord center saved alongside zoom
+    double     m_savedAnimZoom   = -1.0;
+    QPointF    m_savedAnimCenter;
+    double     m_savedExportZoom = -1.0;
     class AtlasesManagementWorkspace* m_atlasesManagementWorkspace = nullptr;
     bool m_atlasesManagementWorkspaceActive = false;
     PackedAtlasView*           m_packedAtlasView          = nullptr;
@@ -1131,8 +1162,15 @@ private:
     QPushButton* m_animPlayPauseBtn;
     QPushButton* m_animNextBtn;
     QToolButton* m_animOverlayBtn  = nullptr;  // Toggles pivot/marker overlay on animation canvas
+    QComboBox*   m_animHandleCombo = nullptr;  // Active handle selector for animation overlay
+    QToolButton* m_animOnionSkinBtn = nullptr; // Toggles onion skin in animation preview
     QLabel* m_animStatusLabel;
     AnimationCanvas* m_animCanvas = nullptr;
+    QFutureWatcher<bool> m_animExportWatcher;
+    QString m_animExportOutPath;
+    QFutureWatcher<bool> m_gifSyncWatcher;
+    std::function<void(bool)> m_gifSyncOnDone;
+    QFutureWatcher<QString> m_cliDiagnosticsWatcher;
 
     QAction* m_loadAction;
     QAction* m_loadProjectAction = nullptr;
@@ -1197,6 +1235,13 @@ private:
     // === Undo/Redo & Recent Projects ===
     QUndoStack* m_undoStack = nullptr;
     QStringList m_recentProjects;
+
+    // === Export Presets ===
+    QVector<ExportPreset> m_exportPresets;
+
+    // === Marker Clipboard & Templates ===
+    QVector<NamedPoint>     m_markerClipboard;
+    QVector<MarkerTemplate> m_markerTemplates;
 
     // === Async Loading Helpers (watchers moved to ProjectController) ===
 

@@ -112,6 +112,18 @@ void NavigatorTreeWidget::startDrag(Qt::DropActions /*supportedActions*/)
     QMimeData* mimeData = new QMimeData;
     mimeData->setData("application/x-sprat-sprite", paths.join('\n').toUtf8());
 
+    // If a single group node is being dragged, encode its name so the drop
+    // target can use it for atlas auto-creation.
+    if (items.size() == 1) {
+        QTreeWidgetItem* single = items.first();
+        const bool isGroup = !single->data(0, Qt::UserRole).isValid()
+                             && single->childCount() > 0
+                             && !single->data(0, Qt::UserRole + 1).isValid()
+                             && single->data(0, Qt::UserRole + 2).toInt() == 0;
+        if (isGroup)
+            mimeData->setData("application/x-sprat-group-name", single->text(0).toUtf8());
+    }
+
     const int thumbSize = 32;
     const int maxThumbs = qMin(paths.size(), 4);
     QPixmap pixmap(thumbSize + (maxThumbs - 1) * 6, thumbSize + (maxThumbs - 1) * 6);

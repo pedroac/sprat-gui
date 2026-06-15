@@ -35,12 +35,15 @@ struct ProjectPayloadBuildInput {
     double layoutZoom = 1.0;
     double previewZoom = 1.0;
     double animationZoom = 1.0;
+    double exportZoom = 0.0;   // 0 = not set; stored as a ratio (1.0 = 100%)
     QByteArray dockState;
     AppSettings appSettings;
     CliPaths cliPaths;
     SaveConfig saveConfig;
     bool portablePaths = false;  // When true, store relative paths for portable saves
     QStringList orphanedSpritePaths; // Sprite paths recorded as orphaned (no backing file)
+    QVector<ExportPreset> exportPresets;
+    QVector<MarkerTemplate> markerTemplates;
 };
 
 struct ProjectPayloadApplyResult {
@@ -65,10 +68,13 @@ struct ProjectPayloadApplyResult {
     double layoutZoom = 1.0;
     double previewZoom = 1.0;
     double animationZoom = 1.0;
+    double exportZoom = 0.0;   // 0 = not set; stored as a ratio (1.0 = 100%)
     QByteArray dockState;
     AppSettings appSettings;
     CliPaths cliPaths;
     SaveConfig saveConfig;
+    QVector<ExportPreset> exportPresets;
+    QVector<MarkerTemplate> markerTemplates;
 };
 
 class ProjectPayloadCodec {

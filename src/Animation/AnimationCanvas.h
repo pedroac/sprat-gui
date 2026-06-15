@@ -44,6 +44,7 @@ public:
     void setOverlayEditable(bool editable);
 
     EditorOverlayItem* overlay() const { return m_overlay; }
+    SpritePtr overlaySprite() const { return m_overlaySprite; }
 
 private:
     QGraphicsScene*      m_scene;

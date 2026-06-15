@@ -11,6 +11,10 @@
 #include <QMessageBox>
 #include <QTimer>
 
+#ifndef SPRAT_EMBEDDED_CLI
+#include <QtConcurrent>
+#endif
+
 #ifdef Q_OS_WIN
 #include <QCoreApplication>
 #endif
@@ -30,6 +34,11 @@ CliSetupController::CliSetupController(QWidget* dialogParent, QObject* parent)
             this, &CliSetupController::onDownloadProgress);
     connect(m_installer, &CliToolInstaller::installLog,
             this, &CliSetupController::onInstallerLog);
+
+#ifndef SPRAT_EMBEDDED_CLI
+    connect(&m_checkWatcher, &QFutureWatcher<CliVersionResult>::finished,
+            this, &CliSetupController::onVersionCheckFinished);
+#endif
 }
 
 void CliSetupController::check() {
@@ -42,8 +51,31 @@ void CliSetupController::check() {
     if (allFound) {
         emit binaryPathsResolved(m_cliPaths);
 
+#ifndef SPRAT_EMBEDDED_CLI
+        // Version checks are slow (up to 2 s each × 5 binaries).
+        // Run them on a background thread; onVersionCheckFinished() resumes on
+        // the main thread via QFutureWatcher when they complete.
+        const CliPaths paths = m_cliPaths;  // capture by value for the lambda
+        m_checkWatcher.setFuture(QtConcurrent::run([paths]() -> CliVersionResult {
+            CliVersionResult r;
+            r.layoutVersion = CliToolsConfig::checkBinaryVersion(paths.layoutBinary);
+            if (!r.layoutVersion.isEmpty()) {
+                r.packOk    = !CliToolsConfig::checkBinaryVersion(paths.packBinary).isEmpty();
+                r.convertOk = !CliToolsConfig::checkBinaryVersion(paths.convertBinary).isEmpty();
+                r.framesOk  = !CliToolsConfig::checkBinaryVersion(paths.framesBinary).isEmpty();
+                r.unpackOk  = !CliToolsConfig::checkBinaryVersion(paths.unpackBinary).isEmpty();
+            }
+            // Pre-warm slow caches so ExportWorkspace::populate() and
+            // updateCliDiagnostics() never have to block the main thread.
+            CliToolsConfig::queryTransformsDir(paths.convertBinary);
+            CliToolsConfig::queryDefaultProfilesConfig(paths.layoutBinary);
+            return r;
+        }));
+        return;  // m_inCheck stays true until onVersionCheckFinished() clears it
+#else
+        // Embedded CLI: checks are instant (return compile-time constants).
         QString currentVersion = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
-        QString requiredVersion = SPRAT_CLI_VERSION;
+        const QString requiredVersion = SPRAT_CLI_VERSION;
 
         if (currentVersion.isEmpty()) {
             m_cliReady = false;
@@ -53,8 +85,6 @@ void CliSetupController::check() {
             emit cliFailed();
             return;
         }
-
-        // Verify other binaries can also execute
         if (CliToolsConfig::checkBinaryVersion(m_cliPaths.packBinary).isEmpty()) {
             showCliExecutionError("spratpack");
             m_inCheck = false;
@@ -75,7 +105,6 @@ void CliSetupController::check() {
             m_inCheck = false;
             return;
         }
-
         if (currentVersion != requiredVersion) {
             if (CliToolsUi::askUpgrade(m_dialogParent, currentVersion, requiredVersion)) {
                 m_cliReady = false;
@@ -83,13 +112,13 @@ void CliSetupController::check() {
                 m_inCheck = false;
                 return;
             }
-            // User declined upgrade; version is confirmed readable, persist it
             CliToolsConfig::saveInstalledCliVersion(currentVersion);
         }
         m_cliReady = true;
         CliToolsConfig::saveInstalledCliVersion(currentVersion);
         emit statusMessageChanged(tr("CLI ready (%1)").arg(currentVersion));
         emit cliReady();
+#endif
     } else {
         m_cliReady = false;
         emit statusMessageChanged(tr("CLI missing"));
@@ -99,8 +128,11 @@ void CliSetupController::check() {
             emit statusMessageChanged(tr("CLI folder missing"));
         }
 #endif
+        m_deferredCheckScheduled = false;
         showMissingCliDialog(missing);
-        emit cliFailed();
+        if (!m_deferredCheckScheduled)
+            emit cliFailed();
+        m_deferredCheckScheduled = false;
     }
     m_inCheck = false;
 }
@@ -169,7 +201,13 @@ void CliSetupController::showMissingCliDialog(const QStringList& missing) {
         CliToolsConfig::saveAppSettings(CliToolsConfig::loadAppSettings(), m_cliPaths);
         QStringList stillMissing;
         if (resolveCliBinaries(stillMissing)) {
-            check();
+            // A direct call to check() here is a no-op because m_inCheck is still
+            // true (we are on the outer check()'s call stack).  Defer it so it
+            // runs after the outer check() unwinds and resets m_inCheck.
+            // Set m_deferredCheckScheduled so the outer check() suppresses the
+            // spurious cliFailed() signal it would otherwise emit.
+            m_deferredCheckScheduled = true;
+            QTimer::singleShot(0, this, &CliSetupController::check);
         } else {
             MessageDialog::warning(m_dialogParent, tr("Tools Not Found"),
                 tr("Some CLI tools were not found in the selected folder:\n%1")
@@ -186,10 +224,50 @@ void CliSetupController::showMissingCliDialog(const QStringList& missing) {
 void CliSetupController::showCliExecutionError(const QString& tool) {
     m_cliReady = false;
     emit statusMessageChanged(tr("CLI error (failed to execute %1)").arg(tool));
-    MessageDialog::critical(m_dialogParent, tr("CLI Execution Failed"),
-        tr("The CLI tool '%1' was found but failed to execute.\n"
-           "This is usually caused by missing dependencies like 'archive.dll' or 'zlib1.dll'.\n"
-           "Check logs or try installing the tools again.").arg(tool));
+
+    const auto pathFor = [this](const QString& name) -> QString {
+        if (name == QLatin1String("spratlayout"))  return m_cliPaths.layoutBinary;
+        if (name == QLatin1String("spratpack"))    return m_cliPaths.packBinary;
+        if (name == QLatin1String("spratconvert")) return m_cliPaths.convertBinary;
+        if (name == QLatin1String("spratframes"))  return m_cliPaths.framesBinary;
+        if (name == QLatin1String("spratunpack"))  return m_cliPaths.unpackBinary;
+        return {};
+    };
+    const QString path = pathFor(tool);
+
+#if defined(Q_OS_WIN)
+    const QString hint = tr("This is usually caused by missing runtime DLLs "
+                            "(e.g. archive.dll, zlib1.dll) next to the executable.\n"
+                            "Try reinstalling the CLI tools.");
+#elif defined(Q_OS_LINUX)
+    const QString hint = path.isEmpty()
+        ? tr("Check that the binary has execute permission and all shared libraries are present.\n"
+             "Try reinstalling the CLI tools.")
+        : tr("Check for missing shared libraries:\n"
+             "  ldd \"%1\"\n\n"
+             "Verify execute permission:\n"
+             "  chmod +x \"%1\"\n\n"
+             "Try reinstalling the CLI tools if the problem persists.").arg(path);
+#elif defined(Q_OS_MACOS)
+    const QString hint = path.isEmpty()
+        ? tr("The binary may be blocked by Gatekeeper or have missing dylib dependencies.\n"
+             "Try reinstalling the CLI tools.")
+        : tr("The binary may be blocked by Gatekeeper. To remove the quarantine flag, run:\n"
+             "  xattr -d com.apple.quarantine \"%1\"\n\n"
+             "Check for missing dylib dependencies:\n"
+             "  otool -L \"%1\"\n\n"
+             "Try reinstalling the CLI tools if the problem persists.").arg(path);
+#else
+    const QString hint = tr("Check that the binary has execute permission and all "
+                            "required runtime dependencies are installed.\n"
+                            "Try reinstalling the CLI tools.");
+#endif
+
+    const QString msg = path.isEmpty()
+        ? tr("'%1' was found but could not be executed.\n\n%2").arg(tool, hint)
+        : tr("'%1' was found at:\n  %2\n\nbut could not be executed.\n\n%3").arg(tool, path, hint);
+
+    MessageDialog::critical(m_dialogParent, tr("CLI Execution Failed"), msg);
 }
 
 void CliSetupController::install() {
@@ -200,6 +278,58 @@ void CliSetupController::install() {
     emit statusMessageChanged(tr("Installing CLI tools..."));
     m_installer->installCliTools();
 }
+
+#ifndef SPRAT_EMBEDDED_CLI
+void CliSetupController::onVersionCheckFinished() {
+    const CliVersionResult r = m_checkWatcher.result();
+    const QString requiredVersion = SPRAT_CLI_VERSION;
+
+    if (r.layoutVersion.isEmpty()) {
+        m_cliReady = false;
+        emit statusMessageChanged(tr("CLI error (failed to execute layout)"));
+        showCliExecutionError("spratlayout");
+        m_inCheck = false;
+        emit cliFailed();
+        return;
+    }
+    if (!r.packOk) {
+        showCliExecutionError("spratpack");
+        m_inCheck = false;
+        return;
+    }
+    if (!r.convertOk) {
+        showCliExecutionError("spratconvert");
+        m_inCheck = false;
+        return;
+    }
+    if (!r.framesOk) {
+        showCliExecutionError("spratframes");
+        m_inCheck = false;
+        return;
+    }
+    if (!r.unpackOk) {
+        showCliExecutionError("spratunpack");
+        m_inCheck = false;
+        return;
+    }
+
+    if (r.layoutVersion != requiredVersion) {
+        if (CliToolsUi::askUpgrade(m_dialogParent, r.layoutVersion, requiredVersion)) {
+            m_cliReady = false;
+            install();
+            m_inCheck = false;
+            return;
+        }
+        // User declined upgrade; persist the version they chose to keep.
+        CliToolsConfig::saveInstalledCliVersion(r.layoutVersion);
+    }
+    m_cliReady = true;
+    CliToolsConfig::saveInstalledCliVersion(r.layoutVersion);
+    emit statusMessageChanged(tr("CLI ready (%1)").arg(r.layoutVersion));
+    emit cliReady();
+    m_inCheck = false;
+}
+#endif
 
 void CliSetupController::onInstallerFinished(int exitCode,
 #ifndef SPRAT_EMBEDDED_CLI
@@ -216,6 +346,9 @@ void CliSetupController::onInstallerFinished(int exitCode,
 #endif
         emit statusMessageChanged(tr("CLI installation finished"));
         emit installFinished(true);
+#ifndef SPRAT_EMBEDDED_CLI
+        CliToolsConfig::invalidateCaches();  // ensure freshly installed binaries are re-queried
+#endif
         check();
         return;
     }

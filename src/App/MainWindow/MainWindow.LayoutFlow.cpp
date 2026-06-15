@@ -1,9 +1,9 @@
 #include "MainWindow.h"
 #include "LayoutOrchestrator.h"
-#include "AnimationCanvas.h"
 #include "AtlasesManagementWorkspace.h"
 #include "ElidedLabel.h"
 #include "UndoCommands.h"
+#include "SpriteEditorPanel.h"
 
 #include "SpriteSelectionPresenter.h"
 #include "TimelineBuilder.h"
@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <QApplication>
@@ -205,10 +206,9 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
     syncCoordinateSpinsFromSelection();
 
     if (m_editAliasesBtn) m_editAliasesBtn->setEnabled(sprite != nullptr);
+    if (m_spriteEditorPanel) m_spriteEditorPanel->markerTemplatesBtn()->setEnabled(sprite != nullptr);
     updateAliasesButton();
     updateOnionSkinDisplay();
-    if (m_animCanvas)
-        m_animCanvas->setOverlaySprite(sprite);
 }
 
 void MainWindow::updateAliasesButton() {

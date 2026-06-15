@@ -14,6 +14,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QScrollBar>
 #include <QTemporaryFile>
 #include <QTextStream>
@@ -25,6 +27,19 @@
 #include <emscripten.h>
 #endif
 
+// Returns the output subdirectory for an atlas, automatically deriving one from the
+// atlas name when multiple atlases would otherwise all write to the same root directory.
+static QString effectiveOutputSubdir(const AtlasEntry& atlas, int rootExporterCount) {
+    if (!atlas.outputSubdir.isEmpty())
+        return atlas.outputSubdir;
+    if (rootExporterCount <= 1)
+        return {};
+    if (atlas.isNeutral)
+        return QStringLiteral("sprites");
+    const QString slug = atlas.name.trimmed().toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+    return slug.isEmpty() ? QStringLiteral("atlas") : slug;
+}
+
 ExportCoordinator::ExportCoordinator(const Config& cfg, QObject* parent)
     : QObject(parent), m_cfg(cfg)
 {
@@ -32,6 +47,19 @@ ExportCoordinator::ExportCoordinator(const Config& cfg, QObject* parent)
             this, &ExportCoordinator::onExportWatcherFinished);
     connect(&m_previewPackWatcher, &QFutureWatcherBase::finished,
             this, &ExportCoordinator::onPreviewPackWatcherFinished);
+}
+
+ExportCoordinator::~ExportCoordinator()
+{
+    // Signal any running background tasks to exit at the next cancellation
+    // check point, then block until they actually finish so that captured
+    // references to our members (m_exportCanceled, m_previewPackCanceled,
+    // setStatus, shouldCancel) are never accessed after we return.
+    m_exportCanceled      = true;
+    m_previewPackCanceled->store(true);
+    if (m_previewPackDebounceTimer) m_previewPackDebounceTimer->stop();
+    m_exportWatcher.waitForFinished();
+    m_previewPackWatcher.waitForFinished();
 }
 
 void ExportCoordinator::setAppSettings(const AppSettings& settings) {
@@ -76,7 +104,7 @@ bool ExportCoordinator::isPreviewRunning() const {
 }
 
 void ExportCoordinator::cancelPreview() {
-    m_previewPackCanceled = true;
+    m_previewPackCanceled->store(true);
     if (m_previewPackDebounceTimer) m_previewPackDebounceTimer->stop();
 }
 
@@ -107,11 +135,11 @@ bool ExportCoordinator::runExport(SaveConfig config) {
 
     if (m_layoutBinary.isEmpty() || m_packBinary.isEmpty()) {
         if (!m_cliReady) {
-            MessageDialog::critical(nullptr, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
+            MessageDialog::critical(m_cfg.parentWidget, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
             return false;
         }
         if (m_cfg.session->layoutSourcePath.isEmpty()) {
-            MessageDialog::critical(nullptr, tr("Error"), tr("No layout source selected."));
+            MessageDialog::critical(m_cfg.parentWidget, tr("Error"), tr("No layout source selected."));
             return false;
         }
     }
@@ -155,27 +183,37 @@ bool ExportCoordinator::runExport(SaveConfig config) {
         return m_exportCanceled.load();
     };
 
-    // Snapshot atlas data and configured profiles for background thread safety
-    const QVector<AtlasEntry> atlasSnapshot = m_cfg.session->atlases;
-    const QStringList allFramePaths = m_cfg.session->activeFramePaths;
+    // Snapshot atlas data and configured profiles for background thread safety.
+    // Large containers are moved into the lambda capture to avoid a redundant copy.
+    QVector<AtlasEntry> atlasSnapshot = m_cfg.session->atlases;
+    QStringList allFramePaths = m_cfg.session->activeFramePaths;
     const QString layoutSourcePath = m_cfg.session->layoutSourcePath;
     const QString sourceFolder = m_cfg.session->sourceFolder;
-    const QVector<SpratProfile> profiles = m_cfg.layoutContext->configuredProfiles();
+    QVector<SpratProfile> profiles = m_cfg.layoutContext->configuredProfiles();
     const QString deduplicateMode = m_settings.deduplicateMode;
     const QString spratLayoutBin = m_layoutBinary;
     const QString spratPackBin = m_packBinary;
     const QString spratConvertBin = m_convertBinary;
-    const QJsonObject projectPayload = m_cfg.buildProjectPayload(config, true);
+    QJsonObject projectPayload = m_cfg.buildProjectPayload(config, true);
 
-    auto saveTask = [this, config, atlasSnapshot, allFramePaths, layoutSourcePath,
-                     sourceFolder, profiles, deduplicateMode,
+    auto saveTask = [this, config,
+                     atlasSnapshot   = std::move(atlasSnapshot),
+                     allFramePaths   = std::move(allFramePaths),
+                     layoutSourcePath,
+                     sourceFolder,
+                     profiles        = std::move(profiles),
+                     deduplicateMode,
                      spratLayoutBin, spratPackBin, spratConvertBin,
-                     projectPayload, setStatus, shouldCancel]() {
+                     projectPayload  = std::move(projectPayload),
+                     setStatus, shouldCancel]() {
         ExportResult result;
 
         auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& /*step*/, const QByteArray* input, QByteArray* output) {
             return m_cfg.runTool(tool, args, input, output, nullptr);
         };
+
+        QVector<ExportLogEntry> logEntries;
+        auto logEntryFn = [&logEntries](const ExportLogEntry& e) { logEntries.append(e); };
 
         // Collect non-empty atlases for per-atlas export
         QVector<AtlasEntry> atlasesToExport;
@@ -203,19 +241,31 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 result.savedDestination,
                 result.error,
                 deduplicateMode,
-                {nullptr, setStatus, shouldCancel, runToolBound}
+                {nullptr, setStatus, shouldCancel, runToolBound, logEntryFn}
             );
         } else {
             // Multi-atlas: export each atlas to its own subdirectory
+            // Count atlases with no explicit subdir so we can auto-assign subdirs
+            // when multiple atlases would otherwise collide on the same output path.
+            int rootExporterCount = 0;
+            for (const auto& a : atlasesToExport)
+                if (a.outputSubdir.isEmpty()) ++rootExporterCount;
+
             bool first = true;
             for (const auto& atlas : atlasesToExport) {
                 if (shouldCancel()) { result.canceled = true; break; }
 
                 SaveConfig atlasConfig = config;
-                if (!atlas.outputSubdir.isEmpty()) {
-                    atlasConfig.outputPath = QDir(config.outputPath).filePath(atlas.outputSubdir);
-                    atlasConfig.destination = atlasConfig.outputPath;
-                }
+                // Apply per-atlas export overrides (empty = inherit global)
+                if (!atlas.exportConfig.profiles.isEmpty())
+                    atlasConfig.profiles = atlas.exportConfig.profiles;
+                if (!atlas.exportConfig.transform.isEmpty())
+                    atlasConfig.transform = atlas.exportConfig.transform;
+                if (!atlas.exportConfig.scaleFilter.isEmpty())
+                    atlasConfig.scaleFilter = atlas.exportConfig.scaleFilter;
+                // Nest this atlas inside each profile folder rather than at the top level.
+                // ProjectSaveService writes to <outputPath>/<profile>/<atlasSubdir>/.
+                atlasConfig.atlasSubdir = effectiveOutputSubdir(atlas, rootExporterCount);
 
                 // Write project JSON only on first atlas call
                 const QJsonObject payload = first ? projectPayload : QJsonObject();
@@ -238,7 +288,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                     atlasDestination,
                     atlasError,
                     deduplicateMode,
-                    {nullptr, setStatus, shouldCancel, runToolBound}
+                    {nullptr, setStatus, shouldCancel, runToolBound, logEntryFn}
                 );
                 if (!ok) {
                     result.success = false;
@@ -257,6 +307,34 @@ bool ExportCoordinator::runExport(SaveConfig config) {
         if (!result.success && shouldCancel()) {
             result.canceled = true;
         }
+
+        // Run post-export hook command (in background thread; blocks until done)
+        const QString hookCmd = config.postExportCommand.trimmed();
+        if (result.success && !hookCmd.isEmpty()) {
+            QProcess proc;
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert(QStringLiteral("SPRAT_EXPORT_PATH"), result.savedDestination);
+            proc.setProcessEnvironment(env);
+#ifdef Q_OS_WIN
+            proc.start(QStringLiteral("cmd"), {QStringLiteral("/c"), hookCmd});
+#else
+            proc.start(QStringLiteral("sh"), {QStringLiteral("-c"), hookCmd});
+#endif
+            const bool finished = proc.waitForFinished(30000);
+            ExportLogEntry hookEntry;
+            if (!finished || proc.exitCode() != 0) {
+                hookEntry.kind = ExportLogEntry::Kind::Error;
+                hookEntry.path = finished
+                    ? tr("Post-export hook exited with code %1: %2").arg(proc.exitCode()).arg(hookCmd)
+                    : tr("Post-export hook timed out or failed to start: %1").arg(hookCmd);
+            } else {
+                hookEntry.kind = ExportLogEntry::Kind::Info;
+                hookEntry.path = tr("Post-export hook completed: %1").arg(hookCmd);
+            }
+            logEntries.append(hookEntry);
+        }
+
+        result.logEntries = std::move(logEntries);
         return result;
     };
 
@@ -273,6 +351,9 @@ bool ExportCoordinator::runExport(SaveConfig config) {
 
 void ExportCoordinator::handleExportResult(const ExportResult& result) {
     emit loadingStateChanged(false);
+
+    if (!result.logEntries.isEmpty())
+        emit exportLogReady(result.logEntries, result.savedDestination);
 
     if (result.canceled) {
         emitStatus(tr("Save canceled"));
@@ -316,13 +397,13 @@ void ExportCoordinator::handleExportResult(const ExportResult& result) {
         emitStatus(tr("Download started"));
 #endif
 #ifdef Q_OS_WASM
-        MessageDialog::information(nullptr, tr("Saved"), tr("Download started."));
+        MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Download started."));
 #else
-        MessageDialog::information(nullptr, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+        MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
 #endif
     } else {
         emitStatus(tr("Save failed"));
-        MessageDialog::critical(nullptr, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);
+        MessageDialog::critical(m_cfg.parentWidget, tr("Save Failed"), result.error.isEmpty() ? tr("An unknown error occurred during save.") : result.error);
     }
 }
 
@@ -355,9 +436,12 @@ void ExportCoordinator::doRunPreviewPack() {
         : m_cfg.session->activeFramePaths;
     if (atlasScopedPaths.isEmpty() && m_cfg.session->layoutSourcePath.isEmpty()) return;
 
-    // Signal any in-flight task to exit early, then reset for the new task
-    m_previewPackCanceled = true;
-    m_previewPackCanceled = false;
+    // Signal any in-flight task to exit early by retiring its token, then
+    // issue a fresh token for the new task.  Using a per-task shared_ptr
+    // ensures the old task sees 'true' even after m_previewPackCanceled has
+    // been replaced, eliminating the true→false race of a single shared flag.
+    m_previewPackCanceled->store(true);
+    m_previewPackCanceled = std::make_shared<std::atomic<bool>>(false);
 
     // Capture all state from the main thread before dispatching
     const QString profileName      = m_previewPackProfile;
@@ -371,7 +455,7 @@ void ExportCoordinator::doRunPreviewPack() {
     const QString lastProfile      = m_cfg.session->lastSuccessfulProfile;
     const QString deduplicateMode  = m_settings.deduplicateMode;
     const QVector<SpratProfile> profiles = m_cfg.layoutContext->configuredProfiles();
-    std::atomic<bool>* canceledPtr = &m_previewPackCanceled;
+    const auto canceledPtr = m_previewPackCanceled;
 
     const QByteArray cachedImage       = m_cachedPackedImage;
     const QByteArray cachedPackLayout  = m_cachedPackLayout;
@@ -557,7 +641,7 @@ void ExportCoordinator::doRunPreviewPack() {
 }
 
 void ExportCoordinator::handlePackPreviewResult(const PackPreviewResult& result) {
-    if (!m_exportWorkspaceActive || m_previewPackCanceled.load()) return;
+    if (!m_exportWorkspaceActive || m_previewPackCanceled->load()) return;
     if (!m_cfg.packedAtlasView) return;
 
     // Update PNG cache when a real pack ran (non-empty layoutUsed means it wasn't a cache hit)

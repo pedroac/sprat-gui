@@ -296,6 +296,8 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     bool hadItems = false;
     auto addSep = [&]() { if (hadItems) { menu.addSeparator(); hadItems = false; } };
 
+    const bool isFrameAnimWorkspace = (m_activeWorkspace == Workspace::FrameAnimation);
+
     // ── Section 0: source-specific actions (top-level source nodes only) ───
     QAction* openFolderAction   = nullptr;
     QAction* syncSourceAction   = nullptr;
@@ -314,17 +316,19 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
             openFolderAction->setData(openFolderPath);
             hadItems = true;
         }
-        if (clickedSourceIndex >= 0 && clickedSourceIndex < m_session->sources.size()) {
-            const ProjectSource& src = m_session->sources[clickedSourceIndex];
-            const bool isUrl    = (src.type == SourceType::Url);
-            const bool hasCopy  = !src.cachedFolderPath.isEmpty();
-            const bool isFolder = (src.type == SourceType::Folder);
-            syncSourceAction = menu.addAction(tr("Sync Source to Layout"));
-            syncSourceAction->setEnabled(!isUrl && (isFolder || hasCopy));
-            syncLayoutAction = menu.addAction(tr("Sync Layout to Source"));
-            syncLayoutAction->setEnabled(!isUrl && hasCopy);
+        if (!isFrameAnimWorkspace) {
+            if (clickedSourceIndex >= 0 && clickedSourceIndex < m_session->sources.size()) {
+                const ProjectSource& src = m_session->sources[clickedSourceIndex];
+                const bool isUrl    = (src.type == SourceType::Url);
+                const bool hasCopy  = !src.cachedFolderPath.isEmpty();
+                const bool isFolder = (src.type == SourceType::Folder);
+                syncSourceAction = menu.addAction(tr("Sync Source to Layout"));
+                syncSourceAction->setEnabled(!isUrl && (isFolder || hasCopy));
+                syncLayoutAction = menu.addAction(tr("Sync Layout to Source"));
+                syncLayoutAction->setEnabled(!isUrl && hasCopy);
+            }
+            removeSourceAction = menu.addAction(tr("Remove \"%1\"").arg(clickedItem->text(0)));
         }
-        removeSourceAction = menu.addAction(tr("Remove \"%1\"").arg(clickedItem->text(0)));
         hadItems = true;
         addSep();
     }
@@ -337,30 +341,33 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     QAction* hideGroupOnlyAction        = nullptr;
     QAction* deleteSelectedAction = nullptr;
 
-    if (clickedIsLeaf) {
-        if (clickedLeafIsSmartFolder) {
-            excludeFrameAction = menu.addAction(tr("Exclude from Layout"));
-        } else {
-            deleteFrameAction = menu.addAction(tr("Exclude from Layout"));
+    if (!isFrameAnimWorkspace) {
+        if (clickedIsLeaf) {
+            if (clickedLeafIsSmartFolder) {
+                excludeFrameAction = menu.addAction(tr("Exclude"));
+            } else {
+                deleteFrameAction = menu.addAction(tr("Exclude"));
+            }
+            hadItems = true;
         }
-        hadItems = true;
+        if (clickedIsGroup && !clickedIsSourceNode) {
+            hideGroupMenu           = menu.addMenu(tr("Hide..."));
+            hideGroupWithDescAction = hideGroupMenu->addAction(tr("with descendants"));
+            hideGroupOnlyAction     = hideGroupMenu->addAction(tr("group only"));
+            hadItems = true;
+        }
+        if (hasChecked) {
+            deleteSelectedAction = menu.addAction(tr("Exclude selected"));
+            hadItems = true;
+        }
     }
-    if (clickedIsGroup && !clickedIsSourceNode) {
-        hideGroupMenu           = menu.addMenu(tr("Hide..."));
-        hideGroupWithDescAction = hideGroupMenu->addAction(tr("with descendants"));
-        hideGroupOnlyAction     = hideGroupMenu->addAction(tr("group only"));
-        hadItems = true;
-    }
-    if (hasChecked)                             { deleteSelectedAction = menu.addAction(tr("Exclude selected from Layout")); hadItems = true; }
 
-    // ── Section 2: add frames (not applicable to source nodes) ────────────
+    // ── Section 2: add frames (groups and source nodes) ──────────────────
     QAction* addFramesAction = nullptr;
-    if (!clickedIsSourceNode) {
+    if (clickedIsGroup) {
         addSep();
-        const QString addLabel = clickedIsGroup
-            ? tr("Add frames into '%1'...").arg(clickedItem->text(0))
-            : tr("Add frames...");
-        addFramesAction = menu.addAction(addLabel);
+        addFramesAction = menu.addAction(
+            tr("Add frames into '%1'...").arg(clickedItem->text(0)));
         hadItems = true;
     }
 
@@ -378,21 +385,6 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
         if (clickedGroupHasGroups || clickedIsSourceNode) { autoCreateTimelinesAction  = menu.addAction(tr("Auto-create timelines"));               hadItems = true; }
         if (hasChecked)                             { createTimelineFromSelectedAction = menu.addAction(tr("Create timeline from selected frames")); hadItems = true; }
         if (hasChecked && hasTimeline)              { addToTimelineAction              = menu.addAction(tr("Add selected to current timeline"));    hadItems = true; }
-    }
-
-    // ── Add Source submenu (always present, bottom of menu) ───────────────
-    QAction* addSourceFolderAction  = nullptr;
-    QAction* addSourceImageAction   = nullptr;
-    QAction* addSourceArchiveAction = nullptr;
-    QAction* addSourceUrlAction     = nullptr;
-    {
-        addSep();
-        QMenu* addSourceMenu   = menu.addMenu(tr("Add Source"));
-        addSourceFolderAction  = addSourceMenu->addAction(tr("Folder..."));
-        addSourceImageAction   = addSourceMenu->addAction(tr("Image..."));
-        addSourceArchiveAction = addSourceMenu->addAction(tr("Archive..."));
-        addSourceUrlAction     = addSourceMenu->addAction(tr("URL..."));
-        hadItems = true;
     }
 
     // ── Dispatch ──────────────────────────────────────────────────────────
@@ -418,26 +410,6 @@ void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
     }
     else if (chosen == createTimelineFromSelectedAction)                  onNavigatorCreateTimeline(checkedPaths, nullptr);
     else if (chosen == addToTimelineAction)                               onNavigatorAddToTimeline(checkedPaths);
-    else if (chosen == addSourceFolderAction)  onLoadFolder();
-    else if (chosen == addSourceImageAction) {
-        const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
-        const QString path = QFileDialog::getOpenFileName(
-            this, tr("Add Image"), m_session ? m_session->currentFolder : QString(), filter);
-        if (!path.isEmpty()) {
-            const DropAction action = confirmDropAction(path);
-            if (action != DropAction::Cancel) loadImageWithFrameDetection(path, action);
-        }
-    }
-    else if (chosen == addSourceArchiveAction) {
-        const QString filter = tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)");
-        const QString path = QFileDialog::getOpenFileName(
-            this, tr("Add Archive"), m_session ? m_session->currentFolder : QString(), filter);
-        if (!path.isEmpty()) {
-            const DropAction action = confirmDropAction(path);
-            if (action != DropAction::Cancel) loadProject(path, action);
-        }
-    }
-    else if (chosen == addSourceUrlAction) onLoadFromUrl();
 }
 
 // ---------------------------------------------------------------------------

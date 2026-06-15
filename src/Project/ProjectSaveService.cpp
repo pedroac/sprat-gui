@@ -90,16 +90,9 @@ bool ProjectSaveService::save(
         }
     };
 
-    QFileInfo destInfo(config.destination);
+    // Use zip mode only when the destination path is explicitly a .zip file.
+    // Never auto-convert a non-existent folder path to a zip.
     bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
-    if (!isZip) {
-        if (destInfo.exists() && destInfo.isDir()) {
-            isZip = false;
-        } else {
-            config.destination += ".zip";
-            isZip = true;
-        }
-    }
 
     QTemporaryDir tempZipDir;
     QString workingPath;
@@ -117,13 +110,19 @@ bool ProjectSaveService::save(
         }
     }
 
-    // For folder exports, remove stale profile folders first.
+    // For folder exports, remove stale output directories first.
     if (!isZip) {
         const QDir wd(workingPath);
         for (const QString& profileNameRaw : config.profiles) {
             const QString profileName = profileNameRaw.trimmed();
-            if (!profileName.isEmpty()) {
+            if (profileName.isEmpty()) continue;
+            if (config.atlasSubdir.isEmpty()) {
+                // Single atlas: wipe the whole profile folder.
                 QDir(wd.filePath(profileName)).removeRecursively();
+            } else {
+                // Multi-atlas: only wipe this atlas's subfolder within the profile.
+                QDir(QDir(wd.filePath(profileName)).filePath(config.atlasSubdir))
+                    .removeRecursively();
             }
         }
     }
@@ -399,7 +398,14 @@ bool ProjectSaveService::save(
         const double profileScale = qBound(0.01, effectiveProfile.scale, 1.0);
         const bool profileTrimTransparent = effectiveProfile.trimTransparent;
 
-        QDir profileDir(destDir.filePath(profileName));
+        // When atlasSubdir is set, nest the atlas inside the profile folder:
+        //   <destination>/<profileName>/<atlasSubdir>/
+        // Otherwise use the flat layout:
+        //   <destination>/<profileName>/
+        const QString profileDirPath = config.atlasSubdir.isEmpty()
+            ? destDir.filePath(profileName)
+            : QDir(destDir.filePath(profileName)).filePath(config.atlasSubdir);
+        QDir profileDir(profileDirPath);
         if (!profileDir.exists()) {
             if (!profileDir.mkpath(".")) {
                 error = QString(trPS("Could not create profile directory: %1")).arg(profileName);
@@ -525,23 +531,13 @@ bool ProjectSaveService::save(
         }
 
         if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")) {
-            QString tarBin = QStandardPaths::findExecutable("tar");
-            if (!tarBin.isEmpty()) {
-                // In background thread, we need to handle working directory carefully if we used runProcessFunc.
-                // But runProcessFunc uses QProcess internally.
-                // We'll use a specific tar command if we can.
-                // This part is a bit tricky with the runProcessFunc abstraction.
-                // Let's assume for now that tar works or save the .tar.
-                QFile imgFile(profileDir.filePath("spritesheet.tar"));
-                if (imgFile.open(QIODevice::WriteOnly)) {
-                    imgFile.write(imageData);
-                    imgFile.close();
-                }
-            } else {
-                QFile imgFile(profileDir.filePath("spritesheet.tar"));
-                if (imgFile.open(QIODevice::WriteOnly)) {
-                    imgFile.write(imageData);
-                    imgFile.close();
+            QFile imgFile(profileDir.filePath("spritesheet.tar"));
+            if (imgFile.open(QIODevice::WriteOnly)) {
+                imgFile.write(imageData);
+                imgFile.close();
+                if (callbacks.logEntry) {
+                    QFileInfo fi(imgFile.fileName());
+                    callbacks.logEntry({ExportLogEntry::Kind::FileWritten, imgFile.fileName(), fi.size()});
                 }
             }
         } else {
@@ -552,6 +548,10 @@ bool ProjectSaveService::save(
                 return false;
             }
             imgFile.close();
+            if (callbacks.logEntry) {
+                QFileInfo fi(imgFile.fileName());
+                callbacks.logEntry({ExportLogEntry::Kind::FileWritten, imgFile.fileName(), fi.size()});
+            }
         }
 
         // Save combined layout, markers and animations (absolute paths — for spratconvert)
@@ -561,7 +561,29 @@ bool ProjectSaveService::save(
         if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
         combinedInput.append(animContent.toUtf8());
 
-        if (config.transform != "none" && !spratConvertBin.isEmpty()) {
+        if (config.transform == QStringLiteral("raw")) {
+            struct RawFile { QString name; QByteArray data; };
+            const RawFile rawFiles[] = {
+                { QStringLiteral("layout.txt"),     layoutData              },
+                { QStringLiteral("markers.txt"),    markersContent.toUtf8() },
+                { QStringLiteral("animations.txt"), animContent.toUtf8()    },
+            };
+            for (const auto& rf : rawFiles) {
+                QFile f(profileDir.filePath(rf.name));
+                if (!f.open(QIODevice::WriteOnly) || f.write(rf.data) < 0) {
+                    error = QString(trPS("Could not write %1 for profile '%2'."))
+                                .arg(rf.name, profileName);
+                    return false;
+                }
+                f.close();
+                if (callbacks.logEntry) {
+                    const QFileInfo fi(f.fileName());
+                    callbacks.logEntry({ExportLogEntry::Kind::FileWritten, f.fileName(), fi.size()});
+                }
+            }
+        }
+
+        if (config.transform != "none" && config.transform != "raw" && !spratConvertBin.isEmpty()) {
             updateStatus(QString(trPS("Formatting output for profile '%1'...")).arg(profileName));
             if (checkCanceled()) {
                 return false;
@@ -580,6 +602,10 @@ bool ProjectSaveService::save(
                 error = QString(trPS("Format conversion failed for profile '%1'")).arg(profileName);
                 return false;
             }
+            if (callbacks.logEntry)
+                callbacks.logEntry({ExportLogEntry::Kind::Info,
+                    QString(trPS("Format '%1' written to %2")).arg(config.transform,
+                                                                    profileDir.absolutePath()), -1});
             if (checkCanceled()) {
                 return false;
             }
@@ -597,6 +623,10 @@ bool ProjectSaveService::save(
 
         if (!ArchiveExtractor::createZip(workingPath, absDest, error)) {
             return false;
+        }
+        if (callbacks.logEntry) {
+            QFileInfo fi(absDest);
+            callbacks.logEntry({ExportLogEntry::Kind::FileWritten, absDest, fi.size()});
         }
     }
 

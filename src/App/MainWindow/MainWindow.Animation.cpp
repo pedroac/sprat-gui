@@ -9,10 +9,14 @@
 #include "AnimationPreviewService.h"
 #include "AnimationTimelineOps.h"
 #include "SpriteSelectionPresenter.h"
+#include "TimelineListWidget.h"
 
 #include <QDoubleSpinBox>
 #include <QApplication>
+#include <QMetaObject>
 #include <QStyle>
+#include <QtConcurrent>
+#include <QToolButton>
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
@@ -105,7 +109,10 @@ void MainWindow::onAnimNextClicked() {
 
 void MainWindow::syncSelectedSpriteToAnimFrame() {
     if (m_session->selectedTimelineIndex < 0 ||
-        m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) return;
+        m_session->selectedTimelineIndex >= m_session->activeAtlas().timelines.size()) {
+        if (m_animCanvas) m_animCanvas->setOverlaySprite(nullptr);
+        return;
+    }
 
     const auto& tl = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex];
     const QStringList* frames = &tl.frames;
@@ -118,13 +125,23 @@ void MainWindow::syncSelectedSpriteToAnimFrame() {
         }
     }
 
-    if (m_animFrameIndex < 0 || m_animFrameIndex >= frames->size()) return;
+    if (m_animFrameIndex < 0 || m_animFrameIndex >= frames->size()) {
+        if (m_animCanvas) m_animCanvas->setOverlaySprite(nullptr);
+        return;
+    }
     const QString& path = (*frames)[m_animFrameIndex];
 
     for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             if (!sprite || sprite->path != path) continue;
             onSpriteSelected(sprite);
+            // The animation canvas overlay tracks the current animation frame's
+            // sprite independently of the global selection.
+            if (m_animCanvas) {
+                m_animCanvas->setOverlaySprite(sprite);
+                m_animCanvas->overlay()->setSelectedMarker(m_session->selectedPointName);
+                refreshAnimHandleCombo();
+            }
             // Also sync the navigator tree highlight so both panels agree
             if (m_spriteTree) {
                 QTreeWidgetItemIterator it(m_spriteTree);
@@ -142,9 +159,22 @@ void MainWindow::syncSelectedSpriteToAnimFrame() {
                     ++it;
                 }
             }
+            // Sync the timeline frames list so the current frame is highlighted
+            if (m_timelineEditorPanel) {
+                auto* framesList = m_timelineEditorPanel->timelineFramesList();
+                if (framesList && m_animFrameIndex < framesList->count()) {
+                    framesList->blockSignals(true);
+                    framesList->setCurrentRow(m_animFrameIndex);
+                    framesList->blockSignals(false);
+                    if (QListWidgetItem* item = framesList->item(m_animFrameIndex))
+                        framesList->scrollToItem(item, QAbstractItemView::EnsureVisible);
+                }
+            }
             return;
         }
     }
+    // Frame path not found in layout models — clear the overlay.
+    if (m_animCanvas) m_animCanvas->setOverlaySprite(nullptr);
 }
 
 void MainWindow::onAnimTimerTimeout() {
@@ -164,26 +194,55 @@ void MainWindow::onAnimTimerTimeout() {
 }
 
 bool MainWindow::exportAnimation(const QString& outPath) {
-    return AnimationExportService::exportAnimation(
-        m_session->activeAtlas().timelines,
-        m_session->selectedTimelineIndex,
-        m_session->activeAtlas().layoutModels,
-        selectedTimelineFps(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex),
-        outPath,
-        {
-            [this](bool v) { setLoading(v); },
-            [this](const QString& s) { m_statusLabel->setText(s); },
-            [this](const QString& t, const QString& msg) { MessageDialog::critical(this, t, msg); }
-        });
+    // Capture all data needed by the background task by value so there are
+    // no shared-state races with the UI thread.
+    auto timelines    = m_session->activeAtlas().timelines;
+    int  tlIndex      = m_session->selectedTimelineIndex;
+    auto layoutModels = m_session->activeAtlas().layoutModels;
+    int  fps          = selectedTimelineFps(timelines, tlIndex);
+
+    // Callbacks must post to the main thread because they touch widgets.
+    AnimationExportService::ExportCallbacks cbs;
+    cbs.setLoading = [this](bool v) {
+        QMetaObject::invokeMethod(this, [this, v]() { setLoading(v); }, Qt::QueuedConnection);
+    };
+    cbs.setStatus = [this](const QString& s) {
+        QMetaObject::invokeMethod(this, [this, s]() { m_statusLabel->setText(s); }, Qt::QueuedConnection);
+    };
+    cbs.showError = [this](const QString& t, const QString& msg) {
+        QMetaObject::invokeMethod(this, [this, t, msg]() { MessageDialog::critical(this, t, msg); }, Qt::QueuedConnection);
+    };
+
+    m_animExportOutPath = outPath;
+    setLoading(true);
+
+    // Connect once: disconnect previous connection first to avoid duplicates.
+    disconnect(&m_animExportWatcher, &QFutureWatcher<bool>::finished,
+               this, &MainWindow::onAnimExportFinished);
+    connect(&m_animExportWatcher, &QFutureWatcher<bool>::finished,
+            this, &MainWindow::onAnimExportFinished);
+
+    m_animExportWatcher.setFuture(
+        QtConcurrent::run([timelines, tlIndex, layoutModels, fps, outPath, cbs]() {
+            return AnimationExportService::exportAnimation(
+                timelines, tlIndex, layoutModels, fps, outPath, cbs);
+        }));
+
+    return true; // result delivered asynchronously via onAnimExportFinished
+}
+
+void MainWindow::onAnimExportFinished() {
+    const bool ok = m_animExportWatcher.result();
+    if (ok)
+        m_statusLabel->setText(tr("Animation saved to %1").arg(m_animExportOutPath));
+    // setLoading(false) is invoked by the export service via the queued callback.
 }
 
 void MainWindow::saveAnimationToFile() {
+    if (m_animExportWatcher.isRunning()) return; // prevent concurrent exports
     QString path = AnimationExportService::chooseOutputPath(this);
-    if (!path.isEmpty()) {
-        if (exportAnimation(path)) {
-            m_statusLabel->setText(tr("Animation saved to %1").arg(path));
-        }
-    }
+    if (!path.isEmpty())
+        exportAnimation(path);
 }
 
 void MainWindow::refreshAnimationTest() {
@@ -207,6 +266,7 @@ void MainWindow::refreshAnimationTest() {
     QString statusText;
     bool hasFrames = false;
     bool playing = m_animPlaying;
+    const bool onionSkin = m_animOnionSkinBtn && m_animOnionSkinBtn->isChecked();
     QPixmap pixmap = AnimationPreviewService::refresh(
         m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
@@ -215,7 +275,9 @@ void MainWindow::refreshAnimationTest() {
         statusText,
         hasFrames,
         playing,
-        m_animTimer);
+        m_animTimer,
+        onionSkin,
+        m_settings.onionSkinOpacity);
 
     if (playing != m_animPlaying) {
         m_animPlaying = playing;
@@ -252,4 +314,37 @@ void MainWindow::fitAnimationToViewport() {
 
 void MainWindow::refreshHandleCombo() {
     SpriteSelectionPresenter::refreshHandleCombo(m_handleCombo, m_session->selectedSprite, m_session->selectedPointName);
+    refreshAnimHandleCombo();
+}
+
+void MainWindow::refreshAnimHandleCombo() {
+    if (!m_animHandleCombo) return;
+    SpriteSelectionPresenter::refreshHandleCombo(
+        m_animHandleCombo,
+        m_animCanvas ? m_animCanvas->overlaySprite() : nullptr,
+        m_session->selectedPointName);
+}
+
+void MainWindow::onAnimHandleComboChanged(int index) {
+    if (index <= 0) {
+        m_session->selectedPointName.clear();
+    } else {
+        m_session->selectedPointName = m_animHandleCombo->itemText(index);
+    }
+
+    // Apply to both overlays
+    if (m_animCanvas && m_animCanvas->overlay())
+        m_animCanvas->overlay()->setSelectedMarker(m_session->selectedPointName);
+    if (m_previewView && m_previewView->overlay())
+        m_previewView->overlay()->setSelectedMarker(m_session->selectedPointName);
+
+    // Sync the sprite-editor handle combo
+    if (m_handleCombo) {
+        m_handleCombo->blockSignals(true);
+        const int idx = m_session->selectedPointName.isEmpty()
+                      ? 0
+                      : m_handleCombo->findText(m_session->selectedPointName);
+        m_handleCombo->setCurrentIndex(idx != -1 ? idx : 0);
+        m_handleCombo->blockSignals(false);
+    }
 }

@@ -175,6 +175,51 @@ void SettingsDialog::setupUi() {
     m_trimRectStyleCombo->setAccessibleName(tr("Trim rect style"));
     framesEditorForm->addRow(tr("Trim Rect Style:"), m_trimRectStyleCombo);
 
+    // Grid overlay controls
+    m_gridColorBtn = createColorButton(m_settings.gridColor);
+    m_gridColorBtn->setToolTip(tr("Color of the grid overlay lines (supports transparency)"));
+    m_gridColorBtn->setAccessibleName(tr("Grid color"));
+    connect(m_gridColorBtn, &QPushButton::clicked, this, [this]() { pickColorWithAlpha(m_gridColorBtn, m_settings.gridColor); });
+    framesEditorForm->addRow(tr("Grid Color:"), m_gridColorBtn);
+
+    {
+        auto* row = new QHBoxLayout();
+        m_gridCellWidthSpin = new QSpinBox(this);
+        m_gridCellWidthSpin->setRange(1, 9999);
+        m_gridCellWidthSpin->setSuffix(tr(" px"));
+        m_gridCellWidthSpin->setValue(m_settings.gridCellWidth);
+        m_gridCellWidthSpin->setToolTip(tr("Grid cell width in pixels"));
+        row->addWidget(new QLabel(tr("W:"), this));
+        row->addWidget(m_gridCellWidthSpin);
+        m_gridCellHeightSpin = new QSpinBox(this);
+        m_gridCellHeightSpin->setRange(1, 9999);
+        m_gridCellHeightSpin->setSuffix(tr(" px"));
+        m_gridCellHeightSpin->setValue(m_settings.gridCellHeight);
+        m_gridCellHeightSpin->setToolTip(tr("Grid cell height in pixels"));
+        row->addWidget(new QLabel(tr("H:"), this));
+        row->addWidget(m_gridCellHeightSpin);
+        framesEditorForm->addRow(tr("Grid Cell Size:"), row);
+    }
+
+    {
+        auto* row = new QHBoxLayout();
+        m_gridOffsetXSpin = new QSpinBox(this);
+        m_gridOffsetXSpin->setRange(0, 9999);
+        m_gridOffsetXSpin->setSuffix(tr(" px"));
+        m_gridOffsetXSpin->setValue(m_settings.gridOffsetX);
+        m_gridOffsetXSpin->setToolTip(tr("Grid horizontal offset in pixels"));
+        row->addWidget(new QLabel(tr("X:"), this));
+        row->addWidget(m_gridOffsetXSpin);
+        m_gridOffsetYSpin = new QSpinBox(this);
+        m_gridOffsetYSpin->setRange(0, 9999);
+        m_gridOffsetYSpin->setSuffix(tr(" px"));
+        m_gridOffsetYSpin->setValue(m_settings.gridOffsetY);
+        m_gridOffsetYSpin->setToolTip(tr("Grid vertical offset in pixels"));
+        row->addWidget(new QLabel(tr("Y:"), this));
+        row->addWidget(m_gridOffsetYSpin);
+        framesEditorForm->addRow(tr("Grid Offset:"), row);
+    }
+
     contentLayout->addWidget(m_framesEditorGroup);
     m_framesEditorGroup->setVisible(m_initialSection == Section::FramesEditor);
 
@@ -382,6 +427,15 @@ void SettingsDialog::pickColor(QPushButton* btn, QColor& color) {
     }
 }
 
+void SettingsDialog::pickColorWithAlpha(QPushButton* btn, QColor& color) {
+    QColor newColor = QColorDialog::getColor(color, this, tr("Select Color"),
+                                             QColorDialog::ShowAlphaChannel);
+    if (newColor.isValid()) {
+        color = newColor;
+        updateColorButton(btn, color);
+    }
+}
+
 #ifndef Q_OS_WASM
 void SettingsDialog::pickCliBaseDir() {
     QString dir = QFileDialog::getExistingDirectory(this, tr("Select CLI Tools Directory"), m_cliPaths.baseDir);
@@ -450,6 +504,11 @@ void SettingsDialog::resetToDefaults() {
         int idx = m_trimRectStyleCombo->findData((int)AppSettings().trimRectStyle);
         if (idx >= 0) m_trimRectStyleCombo->setCurrentIndex(idx);
     }
+    if (m_gridColorBtn) updateColorButton(m_gridColorBtn, AppSettings().gridColor);
+    if (m_gridCellWidthSpin)  m_gridCellWidthSpin->setValue(AppSettings().gridCellWidth);
+    if (m_gridCellHeightSpin) m_gridCellHeightSpin->setValue(AppSettings().gridCellHeight);
+    if (m_gridOffsetXSpin)    m_gridOffsetXSpin->setValue(AppSettings().gridOffsetX);
+    if (m_gridOffsetYSpin)    m_gridOffsetYSpin->setValue(AppSettings().gridOffsetY);
 
     int syncIndex = m_syncModeCombo->findData((int)m_settings.syncMode);
     if (syncIndex >= 0) {
@@ -474,6 +533,10 @@ AppSettings SettingsDialog::getSettings() const {
     if (m_exportDefaultFormatCombo) s.exportDefaultFormat = m_exportDefaultFormatCombo->currentData().toString();
     if (m_exportDefaultScaleFilterCombo) s.exportDefaultScaleFilter = m_exportDefaultScaleFilterCombo->currentData().toString();
     if (m_trimRectStyleCombo) s.trimRectStyle = (Qt::PenStyle)m_trimRectStyleCombo->currentData().toInt();
+    if (m_gridCellWidthSpin)  s.gridCellWidth  = m_gridCellWidthSpin->value();
+    if (m_gridCellHeightSpin) s.gridCellHeight = m_gridCellHeightSpin->value();
+    if (m_gridOffsetXSpin)    s.gridOffsetX    = m_gridOffsetXSpin->value();
+    if (m_gridOffsetYSpin)    s.gridOffsetY    = m_gridOffsetYSpin->value();
     if (m_spritePreviewCheck) s.spritePreviewEnabled = m_spritePreviewCheck->isChecked();
     if (m_tooltipDelaySpin)   s.spritePreviewDelay   = m_tooltipDelaySpin->value();
     if (m_groupSimilarCheck)  s.navigatorGroupSimilar = m_groupSimilarCheck->isChecked();

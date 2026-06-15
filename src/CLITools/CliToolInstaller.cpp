@@ -38,12 +38,6 @@ CliToolInstaller::CliToolInstaller(QObject* parent)
     connect(m_networkManager, &QNetworkAccessManager::finished, this, &CliToolInstaller::onDownloadFinished);
 }
 
-CliToolInstaller::~CliToolInstaller() {
-#ifndef SPRAT_EMBEDDED_CLI
-    delete m_installProcess;
-#endif
-    delete m_networkManager;
-}
 
 bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
 #ifdef SPRAT_EMBEDDED_CLI

@@ -427,6 +427,13 @@ struct AnimationTimeline {
     bool vFlip = false;
 };
 
+/** Per-atlas export overrides. Empty values mean "use the global setting." */
+struct AtlasExportConfig {
+    QStringList profiles;   ///< Override profiles (empty = use global enabled profiles)
+    QString     transform;
+    QString     scaleFilter;
+};
+
 /**
  * @struct AtlasEntry
  * @brief A named atlas within a project, owning its sprites, timelines, and layout pages.
@@ -448,6 +455,8 @@ struct AtlasEntry {
     QVector<LayoutModel> layoutModels;
     /** Relative subdir under global output path (empty = root). */
     QString outputSubdir;
+    /** Per-atlas export overrides (empty fields = use global setting). */
+    AtlasExportConfig exportConfig;
 };
 
 /**
@@ -489,6 +498,14 @@ struct SaveConfig {
     QStringList profiles;
 
     /**
+     * @brief Whether profile enablement applies globally to all atlases.
+     *
+     * When true (default), the enabled profiles in SaveConfig::profiles apply to all atlases.
+     * When false, each atlas drives its own profile selection via AtlasExportConfig::profiles.
+     */
+    bool profilesGlobal = true;
+
+    /**
      * @brief Resampling filter passed to spratpack via --scale-filter.
      *
      * One of: "nearest" (default), "bilinear", "bicubic", "mitchell".
@@ -503,6 +520,35 @@ struct SaveConfig {
      * subsequent Ctrl+S saves sync any new sprites incrementally.
      */
     bool syncSprites = false;
+
+    /**
+     * @brief Shell command to run after a successful export.
+     *
+     * Executed via the system shell (sh -c on Unix, cmd /c on Windows).
+     * The environment variable SPRAT_EXPORT_PATH is set to the export
+     * destination path.  Empty means no command is run.
+     */
+    QString postExportCommand;
+
+    /**
+     * @brief Per-atlas subdirectory nested inside each profile folder.
+     *
+     * When non-empty, ProjectSaveService writes files to
+     * <destination>/<profileName>/<atlasSubdir>/ instead of
+     * <destination>/<profileName>/.
+     * Empty means flat layout (single atlas or only one root exporter).
+     */
+    QString atlasSubdir;
+};
+
+/** A named export configuration saved within the project. */
+struct ExportPreset {
+    QString     name;
+    QString     outputPath;   // may be empty (user must re-choose)
+    QString     transform;
+    QString     scaleFilter;
+    QStringList profiles;
+    QString     postExportCommand;
 };
 
 /**
@@ -633,6 +679,22 @@ inline ExportZoomOnChange exportZoomOnChangeFromString(const QString& s) {
 }
 
 /**
+ * @struct MarkerTemplate
+ * @brief A named set of markers that can be saved and applied to sprites.
+ */
+struct MarkerTemplate {
+    QString             name;
+    QVector<NamedPoint> points;
+};
+
+struct ExportLogEntry {
+    enum class Kind { FileWritten, Info, Error };
+    Kind    kind = Kind::FileWritten;
+    QString path;      // full file path (FileWritten) or message (Info/Error)
+    qint64  size = -1; // bytes for FileWritten; -1 otherwise
+};
+
+/**
  * @struct AppSettings
  * @brief Application visual settings.
  *
@@ -696,9 +758,9 @@ struct AppSettings {
      * - exact: Detect byte-for-byte identical images (FNV-1a hash)
      * - perceptual: Detect visually similar images (dHash algorithm)
      *
-     * Default: "none"
+     * Default: "exact"
      */
-    QString deduplicateMode = "none";
+    QString deduplicateMode = "exact";
 
     /**
      * @brief Folder synchronization mode.
@@ -748,9 +810,9 @@ struct AppSettings {
     /**
      * @brief Whether to show the trimmed-content boundary rectangle in the frame editor.
      *
-     * Default: false
+     * Default: true
      */
-    bool showTrimRect = false;
+    bool showTrimRect = true;
 
     /**
      * @brief Color of the trim rect overlay.
@@ -844,6 +906,48 @@ struct AppSettings {
      * Default: true
      */
     bool navigatorGroupSimilar = true;
+
+    /**
+     * @brief Whether to show a grid overlay in the frame editor.
+     *
+     * Default: false
+     */
+    bool showGrid = false;
+
+    /**
+     * @brief Grid cell width in pixels.
+     *
+     * Default: 16
+     */
+    int gridCellWidth = 16;
+
+    /**
+     * @brief Grid cell height in pixels.
+     *
+     * Default: 16
+     */
+    int gridCellHeight = 16;
+
+    /**
+     * @brief Grid horizontal offset in pixels.
+     *
+     * Default: 0
+     */
+    int gridOffsetX = 0;
+
+    /**
+     * @brief Grid vertical offset in pixels.
+     *
+     * Default: 0
+     */
+    int gridOffsetY = 0;
+
+    /**
+     * @brief Color of the grid overlay lines.
+     *
+     * Default: QColor(255, 255, 255, 80) — semi-transparent white
+     */
+    QColor gridColor = QColor(255, 255, 255, 80);
 
 };
 

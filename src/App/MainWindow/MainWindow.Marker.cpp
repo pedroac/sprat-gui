@@ -1,16 +1,21 @@
 #include "MainWindow.h"
 #include "UndoCommands.h"
 
+#include "AnimationCanvas.h"
 #include "MarkersDialog.h"
 #include "AnimationPreviewService.h"
 #include "CliToolsConfig.h"
+#include "SpriteEditorPanel.h"
 #include <algorithm>
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QInputDialog>
 #include <QLabel>
+#include <QMenu>
 #include <QSet>
 #include <QImageReader>
+#include <QToolButton>
 
 namespace {
 static int fromDisplay(double v, int dim, CoordUnit unit, int origin = 0) {
@@ -188,6 +193,18 @@ void MainWindow::onHandleComboChanged(int index) {
         syncCoordinateSpinsFromSelection();
     }
 
+    // Keep animation overlay and combo in sync
+    if (m_animCanvas && m_animCanvas->overlay())
+        m_animCanvas->overlay()->setSelectedMarker(m_session->selectedPointName);
+    if (m_animHandleCombo) {
+        m_animHandleCombo->blockSignals(true);
+        const int idx = m_session->selectedPointName.isEmpty()
+                      ? 0
+                      : m_animHandleCombo->findText(m_session->selectedPointName);
+        m_animHandleCombo->setCurrentIndex(idx != -1 ? idx : 0);
+        m_animHandleCombo->blockSignals(false);
+    }
+
     m_statusLabel->setText(m_session->selectedPointName.isEmpty()
         ? tr("Selected: ") + (m_session->selectedSprite ? m_session->selectedSprite->name : tr("none"))
         : tr("Selected Marker: ") + m_session->selectedPointName);
@@ -274,21 +291,28 @@ void MainWindow::onPointsConfigClicked() {
 void MainWindow::onMarkerSelectedFromCanvas(const QString& name) {
     clearCoordinateFieldOverride();
     m_session->selectedPointName = name;
+
+    // Sync both handle combos
+    auto syncCombo = [&](QComboBox* combo) {
+        if (!combo) return;
+        combo->blockSignals(true);
+        if (!name.isEmpty()) {
+            const int idx = combo->findText(name);
+            if (idx != -1) combo->setCurrentIndex(idx);
+        } else {
+            combo->setCurrentIndex(0);
+        }
+        combo->blockSignals(false);
+    };
+    syncCombo(m_handleCombo);
+    syncCombo(m_animHandleCombo);
+
     if (!name.isEmpty()) {
         m_statusLabel->setText(tr("Selected Marker: ") + name);
-        const int idx = m_handleCombo->findText(name);
-        if (idx != -1) {
-            m_handleCombo->blockSignals(true);
-            m_handleCombo->setCurrentIndex(idx);
-            m_handleCombo->blockSignals(false);
-        }
         syncCoordinateSpinsFromSelection();
         return;
     }
-    m_statusLabel->setText(tr("Selected: ") + m_session->selectedSprite->name);
-    m_handleCombo->blockSignals(true);
-    m_handleCombo->setCurrentIndex(0);
-    m_handleCombo->blockSignals(false);
+    m_statusLabel->setText(tr("Selected: ") + (m_session->selectedSprite ? m_session->selectedSprite->name : tr("none")));
     if (m_session->selectedSprite)
         syncCoordinateSpinsFromSelection();
 }
@@ -317,4 +341,91 @@ void MainWindow::onCoordUnitChanged() {
     m_settings.coordUnit = newUnit;
     CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
     syncCoordinateSpinsFromSelection();
+}
+
+// ---------------------------------------------------------------------------
+// applyMarkersToSelection — shared helper for paste and template apply
+// ---------------------------------------------------------------------------
+void MainWindow::applyMarkersToSelection(const QVector<NamedPoint>& points) {
+    if (!m_session->selectedSprite) return;
+    const QVector<NamedPoint> old = m_session->selectedSprite->points;
+    m_session->selectedSprite->points = points;
+    QVector<SetMarkersCommand::CoTarget> coTargets;
+    auto addCoTarget = [&](const SpritePtr& s) {
+        const QVector<NamedPoint> prev = s->points;
+        s->points = points;
+        coTargets.append({s, prev, s->points});
+    };
+    if (m_settings.propagateEditsToChecked)
+        for (const auto& s : m_session->selectedSprites)
+            if (s && s != m_session->selectedSprite) addCoTarget(s);
+    m_undoStack->push(new SetMarkersCommand(
+        m_session->selectedSprite, old, points,
+        [this]() { m_previewView->overlay()->updateLayout(); refreshHandleCombo(); },
+        std::move(coTargets)));
+    m_previewView->overlay()->updateLayout();
+    refreshHandleCombo();
+}
+
+// ---------------------------------------------------------------------------
+// Copy/paste handlers
+// ---------------------------------------------------------------------------
+void MainWindow::onCopyMarkersRequested() {
+    if (!m_session->selectedSprite) return;
+    m_markerClipboard = m_session->selectedSprite->points;
+}
+
+void MainWindow::onPasteMarkersRequested() {
+    if (!m_session->selectedSprite || m_markerClipboard.isEmpty()) return;
+    applyMarkersToSelection(m_markerClipboard);
+}
+
+// ---------------------------------------------------------------------------
+// Template handlers
+// ---------------------------------------------------------------------------
+void MainWindow::onSaveMarkerTemplate() {
+    if (!m_session->selectedSprite) return;
+    bool ok;
+    QString name = QInputDialog::getText(this, tr("Save Marker Template"),
+        tr("Template name:"), QLineEdit::Normal, {}, &ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+    MarkerTemplate tmpl{name.trimmed(), m_session->selectedSprite->points};
+    auto it = std::find_if(m_markerTemplates.begin(), m_markerTemplates.end(),
+        [&](const MarkerTemplate& t){ return t.name == tmpl.name; });
+    if (it != m_markerTemplates.end()) *it = tmpl; else m_markerTemplates.append(tmpl);
+    refreshMarkerTemplatesMenu();
+}
+
+void MainWindow::onApplyMarkerTemplate(const MarkerTemplate& tmpl) {
+    if (!m_session->selectedSprite) return;
+    applyMarkersToSelection(tmpl.points);
+}
+
+void MainWindow::onDeleteMarkerTemplate(const QString& name) {
+    m_markerTemplates.erase(
+        std::remove_if(m_markerTemplates.begin(), m_markerTemplates.end(),
+            [&](const MarkerTemplate& t){ return t.name == name; }),
+        m_markerTemplates.end());
+    refreshMarkerTemplatesMenu();
+}
+
+void MainWindow::refreshMarkerTemplatesMenu() {
+    if (!m_spriteEditorPanel) return;
+    auto* btn = m_spriteEditorPanel->markerTemplatesBtn();
+    if (!btn) return;
+    auto* menu = btn->menu();
+    if (!menu) { menu = new QMenu(btn); btn->setMenu(menu); }
+    menu->clear();
+    menu->addAction(tr("Save current markers as template\xe2\x80\xa6"), this, &MainWindow::onSaveMarkerTemplate);
+    if (!m_markerTemplates.isEmpty()) {
+        menu->addSeparator();
+        for (const auto& t : m_markerTemplates)
+            menu->addAction(tr("Apply: %1").arg(t.name), this,
+                [this, t]() { onApplyMarkerTemplate(t); });
+        menu->addSeparator();
+        auto* del = menu->addMenu(tr("Delete template"));
+        for (const auto& t : m_markerTemplates)
+            del->addAction(t.name, this,
+                [this, n = t.name]() { onDeleteMarkerTemplate(n); });
+    }
 }

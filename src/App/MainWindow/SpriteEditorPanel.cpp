@@ -15,6 +15,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QStyle>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,19 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
     m_showTrimRectBtn->setToolTip(tr("Show the trimmed-content boundary rectangle"));
     m_showTrimRectBtn->setAccessibleName(tr("Show trim rect"));
     viewportRow->addWidget(m_showTrimRectBtn);
+
+    m_onionSkinBtn = new QPushButton(tr("Onion"), this);
+    m_onionSkinBtn->setCheckable(true);
+    m_onionSkinBtn->setChecked(true);
+    m_onionSkinBtn->setToolTip(tr("Toggle onion skin: show adjacent frames as ghost overlays"));
+    m_onionSkinBtn->setAccessibleName(tr("Onion skin"));
+    viewportRow->addWidget(m_onionSkinBtn);
+
+    m_showGridBtn = new QPushButton(tr("Grid"), this);
+    m_showGridBtn->setCheckable(true);
+    m_showGridBtn->setToolTip(tr("Show a configurable grid overlay on the frame editor canvas"));
+    m_showGridBtn->setAccessibleName(tr("Show grid"));
+    viewportRow->addWidget(m_showGridBtn);
 
     viewportRow->addStretch();
     box->addLayout(viewportRow);
@@ -153,6 +167,13 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
     m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     m_configPointsBtn->setEnabled(false);
     spriteRow->addWidget(m_configPointsBtn);
+
+    m_markerTemplatesBtn = new QToolButton(this);
+    m_markerTemplatesBtn->setText(tr("\u25be"));
+    m_markerTemplatesBtn->setToolTip(tr("Marker templates: save/apply named marker sets"));
+    m_markerTemplatesBtn->setPopupMode(QToolButton::InstantPopup);
+    m_markerTemplatesBtn->setEnabled(false);
+    spriteRow->addWidget(m_markerTemplatesBtn);
 
     box->addLayout(spriteRow);
 

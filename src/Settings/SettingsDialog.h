@@ -35,6 +35,7 @@ signals:
 
 private slots:
     void pickColor(QPushButton* btn, QColor& color);
+    void pickColorWithAlpha(QPushButton* btn, QColor& color);
     void resetToDefaults();
 #ifndef Q_OS_WASM
     void pickCliBaseDir();
@@ -86,6 +87,11 @@ private:
     QComboBox* m_frameZoomModeCombo = nullptr;
     QPushButton* m_trimRectColorBtn = nullptr;
     QComboBox* m_trimRectStyleCombo = nullptr;
+    QPushButton* m_gridColorBtn = nullptr;
+    QSpinBox* m_gridCellWidthSpin = nullptr;
+    QSpinBox* m_gridCellHeightSpin = nullptr;
+    QSpinBox* m_gridOffsetXSpin = nullptr;
+    QSpinBox* m_gridOffsetYSpin = nullptr;
 
     // Sprites Navigator controls
     QCheckBox*      m_spritePreviewCheck = nullptr;

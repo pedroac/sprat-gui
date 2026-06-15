@@ -11,6 +11,7 @@
 #include <memory>
 #include "models.h"
 
+class QWidget;
 class ProjectSession;
 class LayoutCanvas;
 class PackedAtlasView;
@@ -33,6 +34,7 @@ public:
         QString error;
         bool    success  = false;
         bool    canceled = false;
+        QVector<ExportLogEntry> logEntries;
     };
 
     struct PackPreviewResult {
@@ -45,6 +47,7 @@ public:
     };
 
     struct Config {
+        QWidget*            parentWidget       = nullptr;
         ProjectSession*     session            = nullptr;
         LayoutOrchestrator* layoutOrchestrator = nullptr;
         LayoutCanvas*       exportLayoutCanvas = nullptr;
@@ -62,6 +65,7 @@ public:
     };
 
     explicit ExportCoordinator(const Config& cfg, QObject* parent = nullptr);
+    ~ExportCoordinator() override;
 
     // --- Settings ---
     void setAppSettings(const AppSettings& settings);
@@ -86,6 +90,7 @@ public:
 signals:
     void statusChanged(QString msg);
     void loadingStateChanged(bool loading);
+    void exportLogReady(QVector<ExportLogEntry> entries, QString destination);
 
 private slots:
     void onExportWatcherFinished();
@@ -109,7 +114,7 @@ private:
     QFutureWatcher<ExportResult>       m_exportWatcher;
     QFutureWatcher<PackPreviewResult>  m_previewPackWatcher;
     QTimer*                            m_previewPackDebounceTimer = nullptr;
-    std::atomic<bool>                  m_previewPackCanceled{false};
+    std::shared_ptr<std::atomic<bool>> m_previewPackCanceled{std::make_shared<std::atomic<bool>>(false)};
     std::atomic<bool>                  m_exportCanceled{false};
     QString                            m_previewPackProfile;
     QString                            m_previewPackScaleFilter;

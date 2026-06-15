@@ -5,7 +5,16 @@
 #include "CliToolsConfig.h"  // for CliPaths
 
 #ifndef SPRAT_EMBEDDED_CLI
+#include <QFutureWatcher>
 #include <QProcess>
+
+struct CliVersionResult {
+    QString layoutVersion;  // empty = failed to execute
+    bool packOk    = false;
+    bool convertOk = false;
+    bool framesOk  = false;
+    bool unpackOk  = false;
+};
 #endif
 
 class CliToolInstaller;
@@ -59,6 +68,7 @@ signals:
 private slots:
 #ifndef SPRAT_EMBEDDED_CLI
     void onInstallerFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    void onVersionCheckFinished();
 #else
     void onInstallerFinished(int exitCode, int exitStatus);
 #endif
@@ -74,6 +84,10 @@ private:
     CliToolInstaller* m_installer     = nullptr;
     CliPaths          m_cliPaths;
     bool              m_cliReady      = false;
-    bool              m_inCheck       = false;
+    bool              m_inCheck               = false;
+    bool              m_deferredCheckScheduled = false;
     QString           m_installLogContent;
+#ifndef SPRAT_EMBEDDED_CLI
+    QFutureWatcher<CliVersionResult> m_checkWatcher;
+#endif
 };

@@ -97,6 +97,10 @@ private:
     int m_dragOriginalRadius = 0;
     QVector<QPoint> m_dragOriginalPoly;
     bool m_suppressNextViewContextMenu = false;
+    int m_snapGrid = 0;
+    bool m_lockToActiveHandle = false;
+
+    static int snapCoord(int v, int g) { return g > 0 ? qRound(double(v) / g) * g : v; }
 
     // Float drag state — tracks sub-pixel position during drag; rounded and committed on release
     QPointF m_pivotDragFloat;
@@ -104,6 +108,10 @@ private:
     double  m_markerDragFloatRadius = 0.0;
     QRectF  m_markerDragFloatRect;
     QVector<QPointF> m_markerDragFloatPoly;
+
+    // boundingRect cache — dirtied whenever sprites or geometry change
+    mutable QRectF m_cachedBoundingRect;
+    mutable bool   m_boundingRectDirty = true;
 
     // Helpers
     void drawPivot(QPainter* painter, double x, double y);
@@ -118,6 +126,27 @@ private:
     void updateHoverCursor(const QPointF& pos);
     
 public:
+    /**
+     * @brief Moves the selected marker (or pivot) by (dx, dy) pixels.
+     * Respects the snap grid and emits the appropriate drag-finished signal.
+     */
+    void nudge(int dx, int dy);
+
+    /**
+     * @brief Sets the snap grid size in pixels (0 = disabled).
+     */
+    void setSnapGrid(int grid) { m_snapGrid = grid; }
+
+    /**
+     * @brief When enabled, only the currently selected handle can be dragged.
+     *
+     * Clicking near other markers or the pivot will not switch the active handle
+     * or start a drag. Use this to prevent accidental edits in contexts (such as
+     * the animation preview) where the active handle is chosen explicitly via a
+     * combo box rather than by clicking on canvas.
+     */
+    void setLockToActiveHandle(bool lock) { m_lockToActiveHandle = lock; }
+
     /**
      * @brief Selects a marker by name.
      * @param name The name of the marker.

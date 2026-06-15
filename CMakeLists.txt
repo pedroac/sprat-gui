@@ -285,6 +285,8 @@ set(PROJECT_SOURCES
     src/App/MainWindow/PackedAtlasView.h
     src/App/MainWindow/ExportWorkspace.cpp
     src/App/MainWindow/ExportWorkspace.h
+    src/App/MainWindow/ExportDiffDialog.h
+    src/App/MainWindow/ExportDiffDialog.cpp
     src/App/MainWindow/AtlasesManagementWorkspace.cpp
     src/App/MainWindow/AtlasesManagementWorkspace.h
     src/App/MainWindow/NavigatorPanel.h
@@ -539,6 +541,7 @@ if(BUILD_TESTING)
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        Qt6::Concurrent
         Qt6::Network
         Qt6::Test
         LibArchive::LibArchive

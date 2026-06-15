@@ -194,6 +194,17 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             aObj["is_excluded"] = atlas.isExcluded;
             aObj["output_subdir"] = atlas.outputSubdir;
 
+            QJsonObject eoObj;
+            {
+                QJsonArray profArr;
+                for (const QString& p : atlas.exportConfig.profiles)
+                    profArr.append(p);
+                eoObj["profiles"]     = profArr;
+            }
+            eoObj["transform"]    = atlas.exportConfig.transform;
+            eoObj["scale_filter"] = atlas.exportConfig.scaleFilter;
+            aObj["export_override"] = eoObj;
+
             // Sprite paths — excluded atlas paths are derived at runtime via syncExcludedAtlas()
             QJsonArray spArr;
             if (!atlas.isExcluded) {
@@ -307,6 +318,8 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     uiOpts["layout_zoom"] = input.layoutZoom;
     uiOpts["preview_zoom"] = input.previewZoom;
     uiOpts["animation_zoom"] = input.animationZoom;
+    if (input.exportZoom > 0.0)
+        uiOpts["export_zoom"] = input.exportZoom;
     if (!input.dockState.isEmpty()) {
         uiOpts["dock_state"] = QString::fromLatin1(input.dockState.toBase64());
     }
@@ -337,8 +350,52 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
         profilesArr.append(profileName);
     }
     saveOpts["profiles"] = profilesArr;
+    saveOpts["profiles_global"] = input.saveConfig.profilesGlobal;
     saveOpts["sync_sprites"] = input.saveConfig.syncSprites;
+    if (!input.saveConfig.postExportCommand.isEmpty())
+        saveOpts["post_export_command"] = input.saveConfig.postExportCommand;
     root["save_options"] = saveOpts;
+
+    QJsonArray presetsArr;
+    for (const ExportPreset& p : input.exportPresets) {
+        QJsonObject po;
+        po["name"]         = p.name;
+        po["output_path"]  = p.outputPath;
+        po["transform"]    = p.transform;
+        po["scale_filter"] = p.scaleFilter;
+        if (!p.postExportCommand.isEmpty())
+            po["post_export_command"] = p.postExportCommand;
+        QJsonArray prArr;
+        for (const QString& pr : p.profiles) prArr.append(pr);
+        po["profiles"] = prArr;
+        presetsArr.append(po);
+    }
+    root["export_presets"] = presetsArr;
+
+    QJsonArray templArr;
+    for (const MarkerTemplate& tmpl : input.markerTemplates) {
+        QJsonObject to;
+        to["name"] = tmpl.name;
+        QJsonArray pts;
+        for (const NamedPoint& p : tmpl.points) {
+            QJsonObject po;
+            po["name"]   = p.name;
+            po["kind"]   = static_cast<int>(p.kind);
+            po["x"]      = p.x;
+            po["y"]      = p.y;
+            po["radius"] = p.radius;
+            po["w"]      = p.w;
+            po["h"]      = p.h;
+            QJsonArray poly;
+            for (const QPoint& pt : p.polygonPoints)
+                poly.append(QJsonObject{{"x", pt.x()}, {"y", pt.y()}});
+            po["polygon"] = poly;
+            pts.append(po);
+        }
+        to["points"] = pts;
+        templArr.append(to);
+    }
+    root["marker_templates"] = templArr;
 
     root["complete"] = true;
     return root;
@@ -471,6 +528,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.layoutZoom = uiOpts["layout_zoom"].toDouble(1.0);
     out.previewZoom = uiOpts["preview_zoom"].toDouble(1.0);
     out.animationZoom = uiOpts["animation_zoom"].toDouble(1.0);
+    out.exportZoom = uiOpts["export_zoom"].toDouble(0.0);
     out.dockState = QByteArray::fromBase64(uiOpts["dock_state"].toString().toLatin1());
 
     QJsonObject settings = root["settings"].toObject();
@@ -521,7 +579,45 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     for (const auto& pVal : profilesArr) {
         out.saveConfig.profiles.append(pVal.toString());
     }
-    out.saveConfig.syncSprites = saveOpts["sync_sprites"].toBool(false);
+    out.saveConfig.profilesGlobal     = saveOpts["profiles_global"].toBool(true);
+    out.saveConfig.syncSprites        = saveOpts["sync_sprites"].toBool(false);
+    out.saveConfig.postExportCommand  = saveOpts["post_export_command"].toString();
+
+    for (const auto& pv : root["export_presets"].toArray()) {
+        QJsonObject po = pv.toObject();
+        ExportPreset p;
+        p.name               = po["name"].toString();
+        p.outputPath         = po["output_path"].toString();
+        p.transform          = po["transform"].toString();
+        p.scaleFilter        = po["scale_filter"].toString();
+        p.postExportCommand  = po["post_export_command"].toString();
+        for (const auto& prv : po["profiles"].toArray())
+            p.profiles.append(prv.toString());
+        if (!p.name.isEmpty()) out.exportPresets.append(p);
+    }
+
+    for (const auto& tv : root["marker_templates"].toArray()) {
+        const QJsonObject to = tv.toObject();
+        MarkerTemplate tmpl;
+        tmpl.name = to["name"].toString();
+        for (const auto& pv : to["points"].toArray()) {
+            const QJsonObject po = pv.toObject();
+            NamedPoint p;
+            p.name   = po["name"].toString();
+            p.kind   = static_cast<MarkerKind>(po["kind"].toInt());
+            p.x      = po["x"].toInt();
+            p.y      = po["y"].toInt();
+            p.radius = po["radius"].toInt(8);
+            p.w      = po["w"].toInt(16);
+            p.h      = po["h"].toInt(16);
+            for (const auto& ptv : po["polygon"].toArray()) {
+                const QJsonObject pt = ptv.toObject();
+                p.polygonPoints.append({pt["x"].toInt(), pt["y"].toInt()});
+            }
+            tmpl.points.append(p);
+        }
+        if (!tmpl.name.isEmpty()) out.markerTemplates.append(tmpl);
+    }
 
     auto sourceTypeFromString = [](const QString& s) -> SourceType {
         if (s == QStringLiteral("single_image")) return SourceType::SingleImage;
@@ -669,6 +765,22 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             atlas.isNeutral  = aObj["is_neutral"].toBool(false);
             atlas.isExcluded = aObj["is_excluded"].toBool(false);
             atlas.outputSubdir = aObj["output_subdir"].toString();
+
+            {
+                QJsonObject eo = aObj["export_override"].toObject();
+                // Deserialize profiles array; fall back to legacy single "profile" field
+                const QJsonArray profArr = eo["profiles"].toArray();
+                if (!profArr.isEmpty()) {
+                    for (const auto& pv : profArr)
+                        atlas.exportConfig.profiles.append(pv.toString());
+                } else {
+                    const QString legacyProfile = eo["profile"].toString();
+                    if (!legacyProfile.isEmpty())
+                        atlas.exportConfig.profiles.append(legacyProfile);
+                }
+                atlas.exportConfig.transform   = eo["transform"].toString();
+                atlas.exportConfig.scaleFilter = eo["scale_filter"].toString();
+            }
 
             // Sprite paths — excluded atlas paths are derived at runtime; skip loading them
             if (!atlas.isExcluded) {

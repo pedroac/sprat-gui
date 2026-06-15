@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "SpriteEditorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "LayoutOrchestrator.h"
 #include "CliSetupController.h"
@@ -36,6 +37,7 @@
 #include "WasmFolderBrowserDialog.h"
 #endif
 #include <algorithm>
+#include <memory>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDir>
@@ -62,6 +64,7 @@
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QThread>
+#include <QSpinBox>
 #include <QUndoStack>
 #include <QShortcut>
 #include <QToolButton>
@@ -405,10 +408,20 @@ void MainWindow::onSyncSourceRequested(int sourceIndex) {
             break;
         }
         case SourceType::SingleImage:
-            if (src.originalPath.endsWith(".gif", Qt::CaseInsensitive))
-                ok = syncLayoutToGif(src, error);
-            else
-                ok = syncLayoutToImage(src, error);
+            if (src.originalPath.endsWith(".gif", Qt::CaseInsensitive)) {
+                syncLayoutToGif(src, [this, src](bool gifOk, const QString& gifError) {
+                    if (gifOk) {
+                        m_statusLabel->setText(tr("Source recreated: %1").arg(
+                            QFileInfo(src.originalPath).fileName()));
+                        onRunLayout(true);
+                    } else {
+                        MessageDialog::warning(this, tr("Recreate Source Failed"),
+                            gifError.isEmpty() ? tr("Could not recreate the source.") : gifError);
+                    }
+                });
+                return; // result delivered asynchronously via onGifSyncFinished
+            }
+            ok = syncLayoutToImage(src, error);
             break;
         default:
             break;
@@ -652,10 +665,18 @@ void MainWindow::onSyncLayoutRequested(int sourceIndex) {
     case SourceType::SingleImage:
         if (src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
                 && !src.cachedFolderPath.isEmpty()) {
-            ok = syncLayoutToGif(src, error);
-        } else {
-            ok = syncLayoutToImage(src, error);
+            syncLayoutToGif(src, [this, src](bool gifOk, const QString& gifError) {
+                if (gifOk) {
+                    m_statusLabel->setText(tr("Sync Layout: saved to '%1'").arg(
+                        QFileInfo(src.originalPath).fileName()));
+                } else {
+                    MessageDialog::warning(this, tr("Sync Layout Failed"),
+                        gifError.isEmpty() ? tr("Unknown error.") : gifError);
+                }
+            });
+            return; // result delivered asynchronously via onGifSyncFinished
         }
+        ok = syncLayoutToImage(src, error);
         break;
 
     default:
@@ -698,7 +719,14 @@ bool MainWindow::syncLayoutToImage(const ProjectSource& src, QString& error) {
     return true;
 }
 
-bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
+void MainWindow::syncLayoutToGif(const ProjectSource& src,
+                                  std::function<void(bool, const QString&)> onDone)
+{
+    if (m_gifSyncWatcher.isRunning()) {
+        onDone(false, tr("GIF sync already in progress."));
+        return;
+    }
+
     QStringList framePaths;
     for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
@@ -707,8 +735,8 @@ bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
         }
     }
     if (framePaths.isEmpty()) {
-        error = tr("No frames found for this GIF source.");
-        return false;
+        onDone(false, tr("No frames found for this GIF source."));
+        return;
     }
 
     const int fps = (!m_session->activeAtlas().timelines.isEmpty())
@@ -716,17 +744,50 @@ bool MainWindow::syncLayoutToGif(const ProjectSource& src, QString& error) {
     AnimationTimeline tl;
     tl.fps    = fps;
     tl.frames = framePaths;
+    auto layoutModels = m_session->activeAtlas().layoutModels;
+    auto outPath      = src.originalPath;
 
-    const bool ok = AnimationExportService::exportAnimation(
-        {tl}, 0, m_session->activeAtlas().layoutModels, fps,
-        src.originalPath,
-        {
-            [this](bool v) { setLoading(v); },
-            [this](const QString& s) { m_statusLabel->setText(s); },
-            [this](const QString& title, const QString& msg) { QMessageBox::critical(this, title, msg); }
-        });
-    if (!ok) error = tr("GIF export failed (ImageMagick required).");
-    return ok;
+    AnimationExportService::ExportCallbacks cbs;
+    cbs.setLoading = [this](bool v) {
+        QMetaObject::invokeMethod(this, [this, v]() { setLoading(v); }, Qt::QueuedConnection);
+    };
+    cbs.setStatus = [this](const QString& s) {
+        QMetaObject::invokeMethod(this, [this, s]() { m_statusLabel->setText(s); }, Qt::QueuedConnection);
+    };
+    cbs.showError = [this](const QString& t, const QString& msg) {
+        QMetaObject::invokeMethod(this, [this, t, msg]() { MessageDialog::critical(this, t, msg); }, Qt::QueuedConnection);
+    };
+
+    // shared_ptr lets the background lambda write the error while the
+    // m_gifSyncOnDone closure reads it after the future finishes (no race).
+    auto errorOut = std::make_shared<QString>();
+    m_gifSyncOnDone = [onDone = std::move(onDone), errorOut](bool ok) {
+        onDone(ok, *errorOut);
+    };
+
+    setLoading(true);
+
+    disconnect(&m_gifSyncWatcher, &QFutureWatcher<bool>::finished,
+               this, &MainWindow::onGifSyncFinished);
+    connect(&m_gifSyncWatcher, &QFutureWatcher<bool>::finished,
+            this, &MainWindow::onGifSyncFinished);
+
+    m_gifSyncWatcher.setFuture(
+        QtConcurrent::run([tl, layoutModels, fps, outPath, cbs, errorOut]() -> bool {
+            bool ok = AnimationExportService::exportAnimation(
+                {tl}, 0, layoutModels, fps, outPath, cbs);
+            if (!ok)
+                *errorOut = QStringLiteral("GIF export failed (ImageMagick required).");
+            return ok;
+        }));
+}
+
+void MainWindow::onGifSyncFinished() {
+    const bool ok = m_gifSyncWatcher.result();
+    if (m_gifSyncOnDone) {
+        m_gifSyncOnDone(ok);
+        m_gifSyncOnDone = nullptr;
+    }
 }
 
 
@@ -783,28 +844,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 ? (double(newY) * 100.0 / activeSize.height())
                 : double(newY);
             QVector<SetPivotCommand::CoTarget> coTargets;
-            if (m_settings.propagateEditsToChecked) {
-                for (const auto& sprite : m_session->selectedSprites) {
-                    if (sprite && sprite != m_session->selectedSprite) {
-                        const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
-                        if (unit == CoordUnit::Percent) {
-                            const QSize coSize = spriteCoordinateSpaceSize(sprite);
-                            sprite->pivotX = coSize.width() > 0
-                                ? qRound(relX * coSize.width() / 100.0)
-                                : newX;
-                            sprite->pivotY = coSize.height() > 0
-                                ? qRound(relY * coSize.height() / 100.0)
-                                : newY;
-                        } else {
-                            sprite->pivotX = newX;
-                            sprite->pivotY = newY;
-                        }
-                        const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
-                        if (oldPos != newPos) {
-                            coTargets.append({sprite, oldPos, newPos});
-                        }
-                    }
+            auto addPivotCoTarget = [&](const SpritePtr& sprite) {
+                const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
+                if (unit == CoordUnit::Percent) {
+                    const QSize coSize = spriteCoordinateSpaceSize(sprite);
+                    sprite->pivotX = coSize.width() > 0
+                        ? qRound(relX * coSize.width() / 100.0)
+                        : newX;
+                    sprite->pivotY = coSize.height() > 0
+                        ? qRound(relY * coSize.height() / 100.0)
+                        : newY;
+                } else {
+                    sprite->pivotX = newX;
+                    sprite->pivotY = newY;
                 }
+                const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
+                if (oldPos != newPos) coTargets.append({sprite, oldPos, newPos});
+            };
+            if (m_settings.propagateEditsToChecked) {
+                for (const auto& sprite : m_session->selectedSprites)
+                    if (sprite && sprite != m_session->selectedSprite)
+                        addPivotCoTarget(sprite);
             }
             AnimationPreviewService::invalidateBounds();
             updateOnionSkinDisplay();
@@ -843,44 +903,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     if (m_animCanvas && m_animCanvas->overlay()) {
         connect(m_animCanvas->overlay(), &EditorOverlayItem::pivotDragFinished,
                 this, [this](int oldX, int oldY, int newX, int newY) {
-            if (!m_session->selectedSprite) return;
-            const CoordUnit unit = m_settings.coordUnit;
-            const QSize activeSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
-            const double relX = (unit == CoordUnit::Percent && activeSize.width() > 0)
-                ? (double(newX) * 100.0 / activeSize.width())
-                : double(newX);
-            const double relY = (unit == CoordUnit::Percent && activeSize.height() > 0)
-                ? (double(newY) * 100.0 / activeSize.height())
-                : double(newY);
-            QVector<SetPivotCommand::CoTarget> coTargets;
-            if (m_settings.propagateEditsToChecked) {
-                for (const auto& sprite : m_session->selectedSprites) {
-                    if (sprite && sprite != m_session->selectedSprite) {
-                        const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
-                        if (unit == CoordUnit::Percent) {
-                            const QSize coSize = spriteCoordinateSpaceSize(sprite);
-                            sprite->pivotX = coSize.width() > 0
-                                ? qRound(relX * coSize.width() / 100.0)
-                                : newX;
-                            sprite->pivotY = coSize.height() > 0
-                                ? qRound(relY * coSize.height() / 100.0)
-                                : newY;
-                        } else {
-                            sprite->pivotX = newX;
-                            sprite->pivotY = newY;
-                        }
-                        const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
-                        if (oldPos != newPos) {
-                            coTargets.append({sprite, oldPos, newPos});
-                        }
-                    }
-                }
-            }
+            // Use the animation frame's sprite directly — independent of the
+            // global selection so that navigator clicks never affect the wrong frame.
+            const SpritePtr sprite = m_animCanvas->overlaySprite();
+            if (!sprite) return;
             AnimationPreviewService::invalidateBounds();
             updateOnionSkinDisplay();
-            m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
+            m_undoStack->push(new SetPivotCommand(sprite,
                                                   oldX, oldY, newX, newY, true,
-                                                  std::move(coTargets)));
+                                                  {}));
+            // Rebuild the composite with the new pivot so the overlay is
+            // repositioned immediately and the stored coords stay consistent.
+            refreshAnimationTest();
         });
         connect(m_animCanvas->overlay(), &EditorOverlayItem::markerDragFinished,
                 this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
@@ -1000,6 +1034,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Create ExportCoordinator
     {
         ExportCoordinator::Config cfg;
+        cfg.parentWidget       = this;
         cfg.session            = m_session;
         cfg.layoutOrchestrator = m_layoutOrchestrator;
         cfg.exportLayoutCanvas = m_exportLayoutCanvas;
@@ -1038,6 +1073,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 });
         connect(m_exportCoordinator, &ExportCoordinator::loadingStateChanged,
                 this, &MainWindow::setLoading);
+        connect(m_exportCoordinator, &ExportCoordinator::exportLogReady,
+                this, [this](const QVector<ExportLogEntry>& entries, const QString& dest) {
+                    if (m_exportWorkspace)
+                        m_exportWorkspace->showExportLog(entries, dest);
+                });
     }
 
     m_folderWatcher = new SourceFolderWatcher(this);
@@ -1253,10 +1293,8 @@ MainWindow::~MainWindow() {
     }
     // ExportCoordinator owns its own watchers and cleans up via QObject parent chain
 
-    if (m_autosaveTimer) {
+    if (m_autosaveTimer)
         m_autosaveTimer->stop();
-        delete m_autosaveTimer;
-    }
 
     if (m_session && !m_session->frameListPath.isEmpty()) {
         QFile::remove(m_session->frameListPath);
@@ -1485,6 +1523,7 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
     if (m_atlasesManagementWorkspace) {
         const QStringList prevEnabled = m_atlasesManagementWorkspace->enabledProfiles();
         m_atlasesManagementWorkspace->setProfiles(profileNames, profileLabels, m_currentProfile, prevEnabled);
+        m_atlasesManagementWorkspace->setProfilesGlobal(m_lastSaveConfig.profilesGlobal);
     }
 }
 
@@ -2048,7 +2087,12 @@ void MainWindow::onManageProfiles() {
 
 void MainWindow::updateOnionSkinDisplay() {
     if (!m_previewView || !m_session) return;
-    if (m_settings.onionSkinOpacity == 0) { m_previewView->setGhostSprites({}); return; }
+    const bool enabled = m_spriteEditorPanel
+        && m_spriteEditorPanel->onionSkinBtn()->isChecked();
+    if (!enabled || m_settings.onionSkinOpacity == 0) {
+        m_previewView->setGhostSprites({});
+        return;
+    }
     const QPoint activePivot = m_session->selectedSprite
         ? QPoint(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY)
         : QPoint();
@@ -2125,12 +2169,13 @@ void MainWindow::applySettings() {
     updateOpenSourceFolderAction();
     updateOnionSkinDisplay();
 
-    // Refresh multi-selection label: message only applies when propagation is on
+    // Refresh multi-selection label
     if (m_multiSelectionLabel && m_session) {
         const int n = m_session->selectedSprites.size();
-        if (n > 1 && m_settings.propagateEditsToChecked) {
-            m_multiSelectionLabel->setText(
-                tr("%1 sprites selected — pivot and marker changes apply to all").arg(n));
+        if (n > 1) {
+            m_multiSelectionLabel->setText(m_settings.propagateEditsToChecked
+                ? tr("%1 sprites selected — pivot and marker changes apply to all").arg(n)
+                : tr("%1 sprites selected — changes apply to current frame only").arg(n));
             m_multiSelectionLabel->setVisible(true);
         } else {
             m_multiSelectionLabel->setVisible(false);

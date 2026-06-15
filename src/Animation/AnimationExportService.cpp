@@ -1,13 +1,13 @@
 #include "AnimationExportService.h"
 #include "MessageDialog.h"
 
-#include <QApplication>
 #include <QCoreApplication>
 #include <QFile>
+#include <QHash>
 #include <QFileDialog>
+#include <QImage>
 #include <QMessageBox>
 #include <QPainter>
-#include <QPixmapCache>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -26,9 +26,28 @@ QString AnimationExportService::chooseOutputPath(QWidget* parent) {
     }
 
     if (ffmpegExe.isEmpty() && magickExe.isEmpty()) {
+#if defined(Q_OS_WIN)
+        const QString hint = trAnimationExport(
+            "Install one of:\n"
+            "  \u2022 FFmpeg       \u2014 winget install ffmpeg\n"
+            "  \u2022 ImageMagick  \u2014 winget install ImageMagick");
+#elif defined(Q_OS_LINUX)
+        const QString hint = trAnimationExport(
+            "Install one of:\n"
+            "  \u2022 FFmpeg       \u2014 sudo apt install ffmpeg\n"
+            "  \u2022 ImageMagick  \u2014 sudo apt install imagemagick");
+#elif defined(Q_OS_MACOS)
+        const QString hint = trAnimationExport(
+            "Install one of:\n"
+            "  \u2022 FFmpeg       \u2014 brew install ffmpeg\n"
+            "  \u2022 ImageMagick  \u2014 brew install imagemagick");
+#else
+        const QString hint = trAnimationExport(
+            "Install FFmpeg or ImageMagick using your system package manager.");
+#endif
         MessageDialog::warning(parent,
-                             trAnimationExport("Missing Tools"),
-                             trAnimationExport("To export animations, you need ImageMagick or FFmpeg installed."));
+            trAnimationExport("Missing Tools"),
+            trAnimationExport("Animation export requires ImageMagick or FFmpeg.\n\n") + hint);
         return {};
     }
 
@@ -89,14 +108,18 @@ bool AnimationExportService::exportAnimation(
 
     setLoading(true);
     setStatus(trAnimationExport("Generating animation..."));
-#ifndef Q_OS_WASM
-    QApplication::processEvents();
-#endif
 
     QTemporaryDir tempDir;
     if (!tempDir.isValid()) {
         setLoading(false);
         return false;
+    }
+
+    // Build O(1) pivot lookup to avoid O(N×M) nested search inside the frame loop.
+    QHash<QString, SpritePtr> spriteMap;
+    for (const auto& model : layoutModels) {
+        for (const auto& s : model.sprites)
+            spriteMap.insert(s->path, s);
     }
 
     struct FrameData {
@@ -110,22 +133,13 @@ bool AnimationExportService::exportAnimation(
 
     for (const QString& path : frames) {
         int px = 0, py = 0;
-        QPixmap pm;
-        if (!QPixmapCache::find(path, &pm)) {
-            pm.load(path);
-            QPixmapCache::insert(path, pm);
-        }
-        if (pm.isNull()) {
+        QImage pm(path);
+        if (pm.isNull())
             continue;
-        }
-        for (const auto& model : layoutModels) {
-            for (const auto& s : model.sprites) {
-                if (s->path == path) {
-                    px = s->pivotX;
-                    py = s->pivotY;
-                    break;
-                }
-            }
+        const auto it = spriteMap.constFind(path);
+        if (it != spriteMap.constEnd()) {
+            px = it.value()->pivotX;
+            py = it.value()->pivotY;
         }
         if (px == 0 && py == 0 && (pm.width() > 0 || pm.height() > 0)) {
             px = pm.width() / 2;
@@ -164,15 +178,11 @@ bool AnimationExportService::exportAnimation(
 
     for (int i = 0; i < frameDataList.size(); ++i) {
         const auto& fd = frameDataList[i];
-        QPixmap pm;
-        if (!QPixmapCache::find(fd.path, &pm)) {
-            pm.load(fd.path);
-            QPixmapCache::insert(fd.path, pm);
-        }
+        QImage pm(fd.path);
         QImage img(canvasW, canvasH, QImage::Format_ARGB32);
         img.fill(Qt::transparent);
         QPainter p(&img);
-        p.drawPixmap(-minX - fd.pivotX, -minY - fd.pivotY, pm);
+        p.drawImage(-minX - fd.pivotX, -minY - fd.pivotY, pm);
         p.end();
         QString framePath = tempDir.filePath(QString("frame_%1.png").arg(i, 4, 10, QChar('0')));
         if (!img.save(framePath)) {

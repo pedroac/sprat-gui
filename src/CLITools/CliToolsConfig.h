@@ -19,4 +19,9 @@ public:
     static QString loadInstalledCliVersion();
     static QStringList loadRecentProjects();
     static void saveRecentProjects(const QStringList& recent);
+
+    // Clear all in-process caches for checkBinaryVersion, queryTransformsDir and
+    // queryDefaultProfilesConfig.  Call after a CLI install so the fresh binaries
+    // are re-queried on the next check().
+    static void invalidateCaches();
 };

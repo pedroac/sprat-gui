@@ -29,6 +29,7 @@
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QtConcurrent>
 
 // === Thin stubs delegating to CliSetupController ===
 
@@ -44,12 +45,27 @@ void MainWindow::checkCliTools() {
 
 void MainWindow::updateCliDiagnostics() {
     if (!m_cliInfoText || !m_cliSetup) return;
+    // Skip if a previous update is still in progress — the result would be the same.
+    if (m_cliDiagnosticsWatcher.isRunning()) return;
+
 #ifdef Q_OS_WASM
     const QString spritesFolder = m_session ? m_session->currentFolder : QString();
 #else
     const QString spritesFolder = m_session ? m_session->sourceFolder : QString();
 #endif
-    m_cliInfoText->setPlainText(m_cliSetup->buildDiagnosticsText(spritesFolder));
+
+    // buildDiagnosticsText spawns subprocesses (waitForFinished 2 s each).
+    // Run it off the main thread; update the text widget when done.
+    CliSetupController* cliSetup = m_cliSetup; // raw ptr safe: cliSetup outlives the watcher
+    disconnect(&m_cliDiagnosticsWatcher, &QFutureWatcher<QString>::finished, this, nullptr);
+    connect(&m_cliDiagnosticsWatcher, &QFutureWatcher<QString>::finished, this, [this]() {
+        if (m_cliInfoText)
+            m_cliInfoText->setPlainText(m_cliDiagnosticsWatcher.result());
+    });
+    m_cliDiagnosticsWatcher.setFuture(
+        QtConcurrent::run([cliSetup, spritesFolder]() {
+            return cliSetup->buildDiagnosticsText(spritesFolder);
+        }));
 }
 
 void MainWindow::installCliTools() {
@@ -114,7 +130,7 @@ void MainWindow::onCancelLoading() {
         m_exportCoordinator->cancelExport();
     }
 
-    m_statusLabel->setText(tr("Operation canceled"));
+    m_statusLabel->setText(m_cliInstallInProgress ? tr("Installation canceled") : tr("Layout canceled"));
     setLoading(false);
 }
 
@@ -171,10 +187,16 @@ void MainWindow::updateCliOverlayGeometry() {
 void MainWindow::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
     if (m_cliInstallProgress) {
         if (bytesTotal > 0) {
-            m_cliInstallProgress->setRange(0, 100);
-            m_cliInstallProgress->setValue(static_cast<int>(bytesReceived * 100 / bytesTotal));
-            m_cliInstallOverlayLabel->setText(QString(tr("Downloading CLI tools (%1%)..."))
-                .arg(m_cliInstallProgress->value()));
+            const int pct = static_cast<int>(bytesReceived * 100 / bytesTotal);
+            if (pct >= 100) {
+                // Download finished — extraction/compilation begins; switch to indeterminate.
+                m_cliInstallProgress->setRange(0, 0);
+                m_cliInstallOverlayLabel->setText(tr("Building CLI tools..."));
+            } else {
+                m_cliInstallProgress->setRange(0, 100);
+                m_cliInstallProgress->setValue(pct);
+                m_cliInstallOverlayLabel->setText(tr("Downloading CLI tools (%1%)...").arg(pct));
+            }
         } else {
             m_cliInstallProgress->setRange(0, 0);
             m_cliInstallOverlayLabel->setText(tr("Downloading CLI tools..."));

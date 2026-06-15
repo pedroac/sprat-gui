@@ -1,5 +1,7 @@
 #pragma once
 #include <QAbstractItemView>
+#include <QHash>
+#include <QIcon>
 #include <QWidget>
 #include "models.h"
 
@@ -9,6 +11,7 @@ class QLineEdit;
 class QLabel;
 class QCheckBox;
 class QComboBox;
+class QPushButton;
 class QTreeWidgetItem;
 
 /**
@@ -21,11 +24,14 @@ class QTreeWidgetItem;
 class NavigatorPanel : public QWidget {
     Q_OBJECT
 public:
+    enum class FilterMode { Text, Glob, Regex };
+
     struct Config {
-        bool atlasCombo    = false;
-        bool showHidden    = false;
-        bool checkboxes    = false;
-        bool filterBar     = true;
+        bool atlasCombo       = false;
+        bool showHidden       = false;
+        bool checkboxes       = false;
+        bool filterBar        = true;
+        bool addSourceButton  = false;
         QAbstractItemView::SelectionMode selectionMode = QAbstractItemView::ExtendedSelection;
     };
 
@@ -39,6 +45,8 @@ public:
     void setCheckboxesEnabled(bool enabled);
     /** Forward selection mode to the internal tree widget. */
     void setSelectionMode(QAbstractItemView::SelectionMode mode);
+    /** Show or hide the Add Source button below the tree. */
+    void setAddSourceButtonVisible(bool visible);
 
     /**
      * @brief Rebuild the tree.
@@ -84,6 +92,11 @@ signals:
     void showHiddenChanged(bool show);
     /** Forwarded from the tree's excludeRequested signal (DEL key). */
     void excludeKeyPressed(QTreeWidgetItem* item);
+    /** Emitted when the user picks a source type from the Add Source button menu. */
+    void addSourceFolderRequested();
+    void addSourceImageRequested();
+    void addSourceArchiveRequested();
+    void addSourceUrlRequested();
 
 private slots:
     void onAtlasComboChanged(int comboIdx);
@@ -94,10 +107,13 @@ private:
 
     NavigatorTreeWidget* m_spriteTree        = nullptr;
     QLineEdit*           m_filterEdit        = nullptr;
+    QComboBox*           m_filterModeCombo   = nullptr;
     QLabel*              m_filterResult      = nullptr;
     QCheckBox*           m_showHidden        = nullptr;
     QWidget*             m_atlasRow          = nullptr;
     QComboBox*           m_atlasCombo        = nullptr;
+    QPushButton*         m_addSourceBtn      = nullptr;
     bool                 m_checkboxesEnabled = true;
     bool                 m_groupSimilar      = true;
+    QHash<QString, QIcon> m_iconCache;
 };

@@ -858,7 +858,8 @@ void LayoutOrchestrator::animateToNewPositions(
         m_spriteAnimationPaths.append(move.path);
     }
 
-    auto* anim = new QVariantAnimation(this);
+    m_spriteAnimation = new QVariantAnimation(this);
+    auto* anim = m_spriteAnimation.data();
     anim->setDuration(180);
     anim->setStartValue(0.0);
     anim->setEndValue(1.0);
@@ -904,5 +905,4 @@ void LayoutOrchestrator::animateToNewPositions(
 
     connect(anim, &QVariantAnimation::finished, anim, &QObject::deleteLater);
     anim->start();
-    m_spriteAnimation = anim;
 }

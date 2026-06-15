@@ -1,4 +1,5 @@
 #include "AnimationCanvas.h"
+#include "AnimationPreviewService.h"
 #include <QScrollBar>
 #include <QApplication>
 #include "ViewUtils.h"
@@ -33,8 +34,13 @@ void AnimationCanvas::setSettings(const AppSettings& settings) {
 void AnimationCanvas::setPixmap(const QPixmap& pixmap) {
     m_pixmapItem->setPixmap(pixmap);
     m_scene->setSceneRect(m_pixmapItem->boundingRect());
-    if (m_overlay->isVisible()) {
+    if (m_overlay->isVisible() && m_overlaySprite) {
         m_overlay->setSceneSize(pixmap.size());
+        // Reposition after every composite update so the overlay stays aligned
+        // even when the bounds change (e.g. after a pivot drag is committed).
+        m_overlay->setPos(
+            AnimationPreviewService::cachedBoundsLeft() - m_overlaySprite->pivotX,
+            AnimationPreviewService::cachedBoundsTop()  - m_overlaySprite->pivotY);
         m_overlay->updateLayout();
     }
 }
@@ -52,8 +58,16 @@ void AnimationCanvas::setOverlaySprite(SpritePtr sprite) {
         const QSize sz = m_pixmapItem->pixmap().size();
         if (!sz.isNull())
             m_overlay->setSceneSize(sz);
+        // Position the overlay so that item-local coordinates match sprite-local
+        // pixel coordinates.  The sprite is rendered at (maxLeft - pivotX, maxTop - pivotY)
+        // in the composite, so placing the overlay there makes item-local (pivotX, pivotY)
+        // map to the correct scene position (maxLeft, maxTop).
+        m_overlay->setPos(
+            AnimationPreviewService::cachedBoundsLeft() - sprite->pivotX,
+            AnimationPreviewService::cachedBoundsTop()  - sprite->pivotY);
     } else {
         m_overlay->setSprites({});
+        m_overlay->setPos(0, 0);
     }
     m_overlay->updateLayout();
 }
@@ -64,6 +78,9 @@ void AnimationCanvas::setOverlayVisible(bool visible) {
         const QSize sz = m_pixmapItem->pixmap().size();
         if (!sz.isNull())
             m_overlay->setSceneSize(sz);
+        m_overlay->setPos(
+            AnimationPreviewService::cachedBoundsLeft() - m_overlaySprite->pivotX,
+            AnimationPreviewService::cachedBoundsTop()  - m_overlaySprite->pivotY);
         m_overlay->updateLayout();
     }
 }

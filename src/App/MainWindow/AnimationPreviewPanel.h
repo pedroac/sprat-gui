@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 
+class QComboBox;
 class QDoubleSpinBox;
 class QPushButton;
 class QLabel;
@@ -27,6 +28,8 @@ public:
     QPushButton*    playPauseButton()  const { return m_playPauseBtn; }
     QPushButton*    nextButton()       const { return m_nextBtn; }
     QToolButton*    overlayButton()    const { return m_overlayBtn; }
+    QComboBox*      handleCombo()      const { return m_handleCombo; }
+    QToolButton*    onionSkinButton()  const { return m_onionSkinBtn; }
     QDoubleSpinBox* zoomSpin()         const { return m_zoomSpin; }
     QLabel*         statusLabel()      const { return m_statusLabel; }
     AnimationCanvas* animCanvas()      const { return m_animCanvas; }
@@ -36,6 +39,8 @@ private:
     QPushButton*    m_playPauseBtn = nullptr;
     QPushButton*    m_nextBtn      = nullptr;
     QToolButton*    m_overlayBtn   = nullptr;
+    QComboBox*      m_handleCombo  = nullptr;
+    QToolButton*    m_onionSkinBtn = nullptr;
     QDoubleSpinBox* m_zoomSpin     = nullptr;
     QLabel*         m_statusLabel  = nullptr;
     AnimationCanvas* m_animCanvas  = nullptr;

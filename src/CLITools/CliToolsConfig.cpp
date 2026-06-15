@@ -79,6 +79,13 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.spritePreviewEnabled = settings.value("settings/sprite_preview_enabled", out.spritePreviewEnabled).toBool();
     out.spritePreviewDelay   = settings.value("settings/sprite_preview_delay",   out.spritePreviewDelay).toDouble();
     out.navigatorGroupSimilar = settings.value("settings/navigator_group_similar", out.navigatorGroupSimilar).toBool();
+    out.showGrid        = settings.value("settings/show_grid",         out.showGrid).toBool();
+    out.gridCellWidth   = settings.value("settings/grid_cell_width",   out.gridCellWidth).toInt();
+    out.gridCellHeight  = settings.value("settings/grid_cell_height",  out.gridCellHeight).toInt();
+    out.gridOffsetX     = settings.value("settings/grid_offset_x",     out.gridOffsetX).toInt();
+    out.gridOffsetY     = settings.value("settings/grid_offset_y",     out.gridOffsetY).toInt();
+    if (settings.contains("settings/grid_color"))
+        out.gridColor = QColor(settings.value("settings/grid_color").toString());
     return out;
 }
 
@@ -132,6 +139,12 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/sprite_preview_enabled",  settings.spritePreviewEnabled);
     qsettings.setValue("settings/sprite_preview_delay",    settings.spritePreviewDelay);
     qsettings.setValue("settings/navigator_group_similar", settings.navigatorGroupSimilar);
+    qsettings.setValue("settings/show_grid",        settings.showGrid);
+    qsettings.setValue("settings/grid_cell_width",  settings.gridCellWidth);
+    qsettings.setValue("settings/grid_cell_height", settings.gridCellHeight);
+    qsettings.setValue("settings/grid_offset_x",    settings.gridOffsetX);
+    qsettings.setValue("settings/grid_offset_y",    settings.gridOffsetY);
+    qsettings.setValue("settings/grid_color",       settings.gridColor.name(QColor::HexArgb));
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 
@@ -141,9 +154,28 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
 }
 
 #include <QProcess>
+#include <QReadWriteLock>
 #include <QRegularExpression>
 #ifdef SPRAT_EMBEDDED_CLI
 #include "EmbeddedCli.h"
+#endif
+
+#ifndef SPRAT_EMBEDDED_CLI
+// ---------------------------------------------------------------------------
+// Session-level caches for the three slow QProcess-based queries.
+// Keys are binary paths; values are the queried strings.
+// Cleared by invalidateCaches() after a CLI install.
+// ---------------------------------------------------------------------------
+namespace {
+    QReadWriteLock g_versionLock;
+    QHash<QString, QString> g_versionCache;
+
+    QReadWriteLock g_transformsLock;
+    QHash<QString, QString> g_transformsCache;
+
+    QReadWriteLock g_profilesLock;
+    QHash<QString, QString> g_profilesCache;
+} // namespace
 #endif
 
 QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
@@ -151,19 +183,33 @@ QString CliToolsConfig::checkBinaryVersion(const QString& binaryPath) {
     Q_UNUSED(binaryPath);
     return SPRAT_CLI_VERSION;
 #else
-    if (binaryPath.isEmpty()) {
-        return QString();
+    if (binaryPath.isEmpty())
+        return {};
+
+    {
+        QReadLocker rl(&g_versionLock);
+        auto it = g_versionCache.constFind(binaryPath);
+        if (it != g_versionCache.constEnd())
+            return it.value();
     }
+
     QProcess process;
     process.start(binaryPath, QStringList() << "--version");
-    if (!process.waitForFinished(2000)) {
-        return QString();
+    QString result;
+    if (process.waitForFinished(2000)) {
+        const QString output = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+        // Expected output format: "spratlayout version v0.1.0"
+        static const QRegularExpression versionRe("(v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*)");
+        const QRegularExpressionMatch match = versionRe.match(output);
+        if (match.hasMatch())
+            result = match.captured(1);
     }
-    QString output = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
-    // Expected output format: "spratlayout version v0.1.0"
-    static const QRegularExpression versionRe("(v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*)");
-    QRegularExpressionMatch match = versionRe.match(output);
-    return match.hasMatch() ? match.captured(1) : QString();
+
+    {
+        QWriteLocker wl(&g_versionLock);
+        g_versionCache.insert(binaryPath, result);
+    }
+    return result;
 #endif
 }
 
@@ -239,10 +285,25 @@ QString CliToolsConfig::queryTransformsDir(const QString& convertBinaryPath) {
     return QString::fromLocal8Bit(result.stdOut).trimmed();
 #else
     if (convertBinaryPath.isEmpty()) return {};
+
+    {
+        QReadLocker rl(&g_transformsLock);
+        auto it = g_transformsCache.constFind(convertBinaryPath);
+        if (it != g_transformsCache.constEnd())
+            return it.value();
+    }
+
     QProcess process;
     process.start(convertBinaryPath, {"--transforms-dir"});
-    if (!process.waitForFinished(2000)) return {};
-    return QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    QString result;
+    if (process.waitForFinished(2000))
+        result = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+
+    {
+        QWriteLocker wl(&g_transformsLock);
+        g_transformsCache.insert(convertBinaryPath, result);
+    }
+    return result;
 #endif
 }
 
@@ -253,10 +314,33 @@ QString CliToolsConfig::queryDefaultProfilesConfig(const QString& layoutBinaryPa
     return QString::fromLocal8Bit(result.stdOut).trimmed();
 #else
     if (layoutBinaryPath.isEmpty()) return {};
+
+    {
+        QReadLocker rl(&g_profilesLock);
+        auto it = g_profilesCache.constFind(layoutBinaryPath);
+        if (it != g_profilesCache.constEnd())
+            return it.value();
+    }
+
     QProcess process;
     process.start(layoutBinaryPath, {"--default-profiles-config"});
-    if (!process.waitForFinished(2000)) return {};
-    return QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    QString result;
+    if (process.waitForFinished(2000))
+        result = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+
+    {
+        QWriteLocker wl(&g_profilesLock);
+        g_profilesCache.insert(layoutBinaryPath, result);
+    }
+    return result;
+#endif
+}
+
+void CliToolsConfig::invalidateCaches() {
+#ifndef SPRAT_EMBEDDED_CLI
+    { QWriteLocker wl(&g_versionLock);    g_versionCache.clear();    }
+    { QWriteLocker wl(&g_transformsLock); g_transformsCache.clear(); }
+    { QWriteLocker wl(&g_profilesLock);   g_profilesCache.clear();   }
 #endif
 }
 

@@ -18,7 +18,7 @@ class CliToolInstaller : public QObject {
     Q_OBJECT
 public:
     explicit CliToolInstaller(QObject* parent = nullptr);
-    ~CliToolInstaller() override;
+    ~CliToolInstaller() override = default;
 
     bool resolveCliBinaries(QStringList& missing);
     void installCliTools();

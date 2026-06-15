@@ -116,14 +116,17 @@ void MarkersDialog::setupUi() {
     xyLayout->setContentsMargins(0, 0, 0, 0);
     xyLayout->addWidget(new QLabel(tr("X:")));
     m_xSpin = new QSpinBox(); m_xSpin->setRange(0, 9999);
+    m_xSpin->setToolTip(tr("X coordinate of the marker origin (0–9999 px)"));
     connect(m_xSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     xyLayout->addWidget(m_xSpin);
     xyLayout->addWidget(new QLabel(tr("Y:")));
     m_ySpin = new QSpinBox(); m_ySpin->setRange(0, 9999);
+    m_ySpin->setToolTip(tr("Y coordinate of the marker origin (0–9999 px)"));
     connect(m_ySpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     xyLayout->addWidget(m_ySpin);
 
     m_radiusSpin = new QSpinBox(); m_radiusSpin->setRange(1, 9999);
+    m_radiusSpin->setToolTip(tr("Radius of the circular marker (1–9999 px)"));
     connect(m_radiusSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     
     m_radiusRow = new QWidget();
@@ -138,10 +141,12 @@ void MarkersDialog::setupUi() {
     rectLayout->setContentsMargins(0, 0, 0, 0);
     rectLayout->addWidget(new QLabel(tr("W:")));
     m_wSpin = new QSpinBox(); m_wSpin->setRange(1, 9999);
+    m_wSpin->setToolTip(tr("Width of the rectangular marker (1–9999 px)"));
     connect(m_wSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     rectLayout->addWidget(m_wSpin);
     rectLayout->addWidget(new QLabel(tr("H:")));
     m_hSpin = new QSpinBox(); m_hSpin->setRange(1, 9999);
+    m_hSpin->setToolTip(tr("Height of the rectangular marker (1–9999 px)"));
     connect(m_hSpin, &QSpinBox::editingFinished, this, &MarkersDialog::onFieldChanged);
     rectLayout->addWidget(m_hSpin);
     

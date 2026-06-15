@@ -18,6 +18,7 @@
 #include "ProjectSaveService.h"
 #include "CliToolsConfig.h"
 #include "MessageDialog.h"
+#include "ExportDiffDialog.h"
 
 #include <QDockWidget>
 #include "ResolutionUtils.h"
@@ -733,6 +734,11 @@ void MainWindow::onExportClicked() {
         onExportAsClicked();
         return;
     }
+    const QVector<SpratProfile> profs = configuredProfiles();
+    if (!ExportDiffDialog::show(this, m_lastSaveConfig,
+                                m_session ? m_session->atlases : QVector<AtlasEntry>{},
+                                profs))
+        return;
     runExport(m_lastSaveConfig);
 }
 
@@ -767,6 +773,21 @@ void MainWindow::onExportAsClicked() {
                                 m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
                                 configForPopulate,
                                 startDir);
+
+    m_exportWorkspace->setPresets(m_exportPresets);
+
+    if (m_session) {
+        QList<QPair<int,AtlasExportConfig>> atlasConfigs;
+        QStringList atlasNames;
+        for (int i = 0; i < m_session->atlases.size(); ++i) {
+            const auto& a = m_session->atlases[i];
+            if (a.isExcluded || a.spritePaths.isEmpty()) continue;
+            atlasConfigs.append({i, a.exportConfig});
+            atlasNames.append(a.name.isEmpty() ? tr("Atlas %1").arg(i) : a.name);
+        }
+        m_exportWorkspace->setAtlasExportConfigs(atlasConfigs, atlasNames);
+    }
+
     showExportWorkspace();
 }
 
@@ -852,11 +873,18 @@ void MainWindow::switchToAtlasWorkspace() {
             m_previewView->setZoomManual(false);
         }
     }
+    // Save animation canvas zoom/center before hiding so they can be restored on the next
+    // switchToFrameAnimWorkspace() call. Only save if the dock is currently visible.
+    if (m_animationDock && !m_animationDock->isHidden() && m_animCanvas) {
+        m_savedAnimZoom   = m_animCanvas->zoom();
+        m_savedAnimCenter = m_animCanvas->mapToScene(m_animCanvas->viewport()->rect().center());
+    }
     if (m_animationDock) m_animationDock->hide();
     if (m_navigatorPanel) {
         m_navigatorPanel->setAtlasComboVisible(false);
         m_navigatorPanel->setShowHiddenVisible(true);
         m_navigatorPanel->setCheckboxesEnabled(true);
+        m_navigatorPanel->setAddSourceButtonVisible(true);
         refreshSpriteTree();
     } else {
         if (m_navigatorAtlasRow)   m_navigatorAtlasRow->setVisible(false);
@@ -888,10 +916,16 @@ void MainWindow::switchToFrameAnimWorkspace() {
     if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Vertical);
     if (m_editorContent) m_editorContent->hide();
     if (m_animationDock) m_animationDock->show();
+    // Restore animation canvas zoom after the dock show triggers resize events.
+    // setPendingRestore() sets m_isZoomManual=true (preventing initialFit) and defers
+    // the zoom+center restore to a 0-ms timer that fires once the dock geometry is final.
+    if (m_animCanvas && m_savedAnimZoom > 0.0)
+        m_animCanvas->setPendingRestore(m_savedAnimZoom, m_savedAnimCenter);
     if (m_navigatorPanel) {
         m_navigatorPanel->setAtlasComboVisible(true);
         m_navigatorPanel->setShowHiddenVisible(false);
         m_navigatorPanel->setCheckboxesEnabled(false);
+        m_navigatorPanel->setAddSourceButtonVisible(false);
     } else {
         if (m_navigatorAtlasRow)   m_navigatorAtlasRow->setVisible(true);
         if (m_showHiddenToggleBtn) m_showHiddenToggleBtn->setVisible(false);
@@ -917,6 +951,11 @@ void MainWindow::showExportWorkspace() {
     if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
     if (m_exportationWorkspaceAction) m_exportationWorkspaceAction->setChecked(true);
     if (m_atlasDock)     m_atlasDock->hide();
+    // Save animation canvas zoom before hiding (may be coming from FrameAnimation workspace).
+    if (m_animationDock && !m_animationDock->isHidden() && m_animCanvas) {
+        m_savedAnimZoom   = m_animCanvas->zoom();
+        m_savedAnimCenter = m_animCanvas->mapToScene(m_animCanvas->viewport()->rect().center());
+    }
     if (m_animationDock) m_animationDock->hide();
     if (m_debugDock)     m_debugDock->hide();
     if (m_exportWorkspace && m_session) {
@@ -939,6 +978,9 @@ void MainWindow::showExportWorkspace() {
 }
 
 void MainWindow::leaveExportWorkspace() {
+    // Persist the current export canvas zoom so it can be restored on the next visit.
+    if (m_exportLayoutCanvas && m_exportLayoutCanvas->zoom() > 0.0)
+        m_savedExportZoom = m_exportLayoutCanvas->zoom();
     m_exportWorkspaceActive = false;
     if (m_exportCoordinator) {
         m_exportCoordinator->setExportWorkspaceActive(false);
@@ -983,28 +1025,11 @@ void MainWindow::onExportWorkspaceRequested(SaveConfig config) {
     config.outputPath = QDir::temp().filePath(baseName + ".zip");
 #endif
 
-    // Warn if overwriting an existing export (non-ZIP destinations only)
-    const bool isZip = config.outputPath.endsWith(".zip", Qt::CaseInsensitive);
-    if (!isZip) {
-        const QDir destDir(config.outputPath);
-        bool hasProfiles = false;
-        for (const QString& p : config.profiles) {
-            if (destDir.exists(p)) {
-                hasProfiles = true;
-                break;
-            }
-        }
-        if (hasProfiles) {
-            const int answer = MessageDialog::confirmWarning(
-                this, tr("Overwrite Export?"),
-                tr("The folder \"%1\" already contains profile(s) from a previous export.\n"
-                   "Existing profile folders will be cleared and replaced.\n\n"
-                   "Continue?").arg(config.outputPath),
-                QMessageBox::Yes | QMessageBox::Cancel,
-                QMessageBox::Cancel);
-            if (answer != QMessageBox::Yes) return;  // stay in workspace
-        }
-    }
+    const QVector<SpratProfile> profs = configuredProfiles();
+    if (!ExportDiffDialog::show(this, config,
+                                m_session ? m_session->atlases : QVector<AtlasEntry>{},
+                                profs))
+        return;
 
     m_lastSaveConfig = config;
     leaveExportWorkspace();
@@ -1070,11 +1095,17 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.layoutZoom = m_layoutZoom / 100.0;
     input.previewZoom = m_previewZoomSpin->value() / 100.0;
     input.animationZoom = m_animZoomSpin->value() / 100.0;
+    // Export canvas zoom: use live canvas zoom when in export workspace, otherwise the last saved value.
+    input.exportZoom = (m_exportWorkspaceActive && m_exportLayoutCanvas && m_exportLayoutCanvas->zoom() > 0.0)
+        ? m_exportLayoutCanvas->zoom()
+        : m_savedExportZoom;
     input.dockState = saveState();
     input.appSettings = m_settings;
     input.cliPaths = m_cliPaths;
     input.saveConfig = config;
     input.portablePaths = portable;
+    input.exportPresets   = m_exportPresets;
+    input.markerTemplates = m_markerTemplates;
     return ProjectPayloadCodec::build(input);
 }
 
@@ -1653,10 +1684,18 @@ void MainWindow::applyProjectPayload() {
     if (m_previewZoomSpin) {
         m_previewZoomSpin->setValue(applied.previewZoom * 100.0);
     }
+    // Save animation zoom for deferred restore when FrameAnimation workspace is entered.
+    // Block spin-box signals so onAnimZoomChanged does not immediately call setZoom()/setZoomManual(),
+    // which would be overwritten by the setZoomManual(false) below anyway.
+    m_savedAnimZoom   = applied.animationZoom;  // ratio, e.g. 1.0 = 100%
+    m_savedAnimCenter = QPointF();              // no scroll position known yet
     if (m_animZoomSpin) {
+        m_animZoomSpin->blockSignals(true);
         m_animZoomSpin->setValue(applied.animationZoom * 100.0);
+        m_animZoomSpin->blockSignals(false);
     }
     if (m_animCanvas) m_animCanvas->setZoomManual(false);
+    m_savedExportZoom = applied.exportZoom;
     syncSourceResolutionPresetSelection(
         m_sourceResolutionCombo,
         applied.sourceResolutionWidth > 0 ? applied.sourceResolutionWidth : 1024,
@@ -1670,7 +1709,12 @@ void MainWindow::applyProjectPayload() {
 
     m_settings = applied.appSettings;
     m_lastSaveConfig = applied.saveConfig;
+    if (m_atlasesManagementWorkspace)
+        m_atlasesManagementWorkspace->setProfilesGlobal(m_lastSaveConfig.profilesGlobal);
+    m_exportPresets   = applied.exportPresets;
+    m_markerTemplates = applied.markerTemplates;
     applySettings();
+    refreshMarkerTemplatesMenu();
 
     // Restore smart folders from project payload
     if (!applied.smartFolders.isEmpty()) {
@@ -1826,7 +1870,8 @@ void MainWindow::copySpriteToProjectFolder(const QString& projectDir) {
         const QString dst = dstRoot.filePath(rel);
         QDir().mkpath(QFileInfo(dst).absolutePath());
         if (!QFileInfo::exists(dst)) {
-            QFile::copy(abs, dst);
+            if (!QFile::copy(abs, dst))
+                qWarning() << "[syncNewSpritesToProjectFolder] Failed to copy" << abs << "to" << dst;
         }
     }
 

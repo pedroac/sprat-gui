@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QDir>
@@ -113,7 +114,8 @@ void AtlasesManagementWorkspace::setupUi() {
     splitter->addWidget(m_centerStack);
 
     // --- Right panel ---
-    auto* rightPanel = new QWidget(splitter);
+    m_rightPanel = new QWidget(splitter);
+    auto* rightPanel = m_rightPanel;
     rightPanel->setMinimumWidth(180);
     rightPanel->setMaximumWidth(280);
     auto* rightLayout = new QVBoxLayout(rightPanel);
@@ -172,20 +174,47 @@ void AtlasesManagementWorkspace::setupUi() {
 
     // Resolution row
     auto* resRow = new QHBoxLayout();
-    resRow->addWidget(new QLabel(tr("Resolution:"), rightPanel));
+    resRow->addWidget(new QLabel(tr("Source Resolution:"), rightPanel));
     m_resolutionCombo = new QComboBox(rightPanel);
     resRow->addWidget(m_resolutionCombo, 1);
     rightLayout->addLayout(resRow);
+
+    // Pack efficiency stats (shown when layout data is available)
+    m_statsLabel = new QLabel(rightPanel);
+    m_statsLabel->setWordWrap(true);
+    m_statsLabel->setStyleSheet(QStringLiteral("color: #888; font-size: 11px;"));
+    m_statsLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    m_statsLabel->setVisible(false);
+    rightLayout->addWidget(m_statsLabel);
 
     // Profiles group
     auto* profilesGroup = new QGroupBox(tr("Profiles"), rightPanel);
     auto* profilesLayout = new QVBoxLayout(profilesGroup);
     profilesLayout->setContentsMargins(8, 8, 8, 8);
+    profilesLayout->setSpacing(4);
+
+    // "From Default" checkbox — hidden for the Default (neutral) atlas
+    m_profilesGlobalCheckBox = new QCheckBox(tr("From Default"), profilesGroup);
+    m_profilesGlobalCheckBox->setChecked(true);
+    m_profilesGlobalCheckBox->setToolTip(tr(
+        "When checked, this atlas uses the Default atlas profile selection.\n"
+        "When unchecked, this atlas has its own profile selection."));
+    profilesLayout->addWidget(m_profilesGlobalCheckBox);
+
+    // Combobox shown when "From Default" is checked on a non-Default atlas
+    m_profileCombo = new QComboBox(profilesGroup);
+    profilesLayout->addWidget(m_profileCombo);
+
+    // Checklist shown for the Default atlas or when "From Default" is unchecked
     m_profileList = new QListWidget(profilesGroup);
+    m_profileList->setVisible(false);
     profilesLayout->addWidget(m_profileList);
-    auto* manageBtn = new QPushButton(tr("Manage..."), profilesGroup);
-    profilesLayout->addWidget(manageBtn);
-    connect(manageBtn, &QPushButton::clicked, this, &AtlasesManagementWorkspace::manageProfilesRequested);
+
+    // Manage button — shown only in combobox mode
+    m_manageBtn = new QPushButton(tr("Manage..."), profilesGroup);
+    profilesLayout->addWidget(m_manageBtn);
+    connect(m_manageBtn, &QPushButton::clicked, this, &AtlasesManagementWorkspace::manageProfilesRequested);
+
     rightLayout->addWidget(profilesGroup);
 
     rightLayout->addStretch();
@@ -212,11 +241,11 @@ void AtlasesManagementWorkspace::setupUi() {
             this, [this](QTreeWidgetItem* /*item*/) {
         const int srcRow = m_atlasList->currentRow();
         if (srcRow < 0 || srcRow >= m_atlases.size()) return;
-        QStringList paths;
+        QSet<QString> pathSet;
         std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* node) {
             auto sprite = node->data(0, Qt::UserRole).value<SpritePtr>();
             if (sprite && !sprite->path.isEmpty()) {
-                if (!paths.contains(sprite->path)) paths << sprite->path;
+                pathSet.insert(sprite->path);
             } else {
                 for (int i = 0; i < node->childCount(); ++i)
                     collect(node->child(i));
@@ -225,7 +254,8 @@ void AtlasesManagementWorkspace::setupUi() {
         // Collect from all visually selected items (not just the current item).
         for (auto* selected : m_navigator->tree()->selectedItems())
             collect(selected);
-        if (paths.isEmpty()) return;
+        if (pathSet.isEmpty()) return;
+        QStringList paths(pathSet.cbegin(), pathSet.cend());
         if (m_atlases[srcRow].isExcluded) {
             for (int i = 0; i < m_atlases.size(); ++i) {
                 if (m_atlases[i].isNeutral) {
@@ -256,22 +286,62 @@ void AtlasesManagementWorkspace::setupUi() {
         if (!m_syncing) emit resolutionChanged(m_resolutionCombo->currentText());
     });
 
+    connect(m_profilesGlobalCheckBox, &QCheckBox::toggled, this, [this](bool global) {
+        if (m_syncing) return;
+        setProfilesGlobal(global);
+        emit profilesGlobalChanged(global);
+    });
+
     connect(m_profileList, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
         if (m_syncing) return;
-        if (item->checkState() == Qt::Unchecked && item == m_profileList->currentItem())
-            ensureValidProfileSelection();
-        m_syncing = true;
-        emit profileEnablementChanged(enabledProfiles());
-        m_syncing = false;
+        // Always keep at least one profile enabled.
+        if (item->checkState() == Qt::Unchecked) {
+            bool anyChecked = false;
+            for (int i = 0; i < m_profileList->count(); ++i) {
+                if (m_profileList->item(i)->checkState() == Qt::Checked) { anyChecked = true; break; }
+            }
+            if (!anyChecked) {
+                m_syncing = true;
+                item->setCheckState(Qt::Checked);
+                m_syncing = false;
+                return;
+            }
+            if (item == m_profileList->currentItem())
+                ensureValidProfileSelection();
+        }
+        if (isProfilesGlobal()) {
+            m_syncing = true;
+            emit profileEnablementChanged(enabledProfiles());
+            m_syncing = false;
+            rebuildProfileCombo();
+        } else {
+            // Per-atlas mode: push updated enablement into the selected atlas
+            const int row = m_atlasList->currentRow();
+            if (row >= 0 && row < m_atlases.size()) {
+                QStringList checked;
+                for (int i = 0; i < m_profileList->count(); ++i) {
+                    auto* it = m_profileList->item(i);
+                    if (it->checkState() == Qt::Checked)
+                        checked << it->data(Qt::UserRole).toString();
+                }
+                m_atlases[row].exportConfig.profiles = checked;
+                emit atlasExportProfilesChanged(row, checked);
+            }
+        }
+        updateProfileListEnabledStates();
     });
     connect(m_profileList, &QListWidget::currentItemChanged,
             this, [this](QListWidgetItem* current, QListWidgetItem*) {
         if (m_syncing || !current) return;
-        if (current->checkState() == Qt::Unchecked) {
-            ensureValidProfileSelection();
-            return;
-        }
+        if (current->checkState() == Qt::Unchecked)
+            current->setCheckState(Qt::Checked);  // itemChanged handles enablement signals
         emit selectedProfileChanged(current->data(Qt::UserRole).toString());
+    });
+
+    connect(m_profileCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        if (m_syncing || idx < 0) return;
+        emit selectedProfileChanged(m_profileCombo->itemData(idx).toString());
     });
 }
 
@@ -328,6 +398,60 @@ void AtlasesManagementWorkspace::refreshSpriteList(const QVector<AtlasEntry>& al
     // Rebuild the navigator tree for the currently selected atlas.
     if (m_session && m_navigator)
         m_navigator->refresh(m_session, false, m_atlasList->currentRow());
+
+    updateStatsLabel();
+}
+
+void AtlasesManagementWorkspace::updateStatsLabel() {
+    if (!m_statsLabel) return;
+
+    const int row = m_atlasList ? m_atlasList->currentRow() : -1;
+    if (row < 0 || row >= m_atlases.size()) {
+        m_statsLabel->setVisible(false);
+        return;
+    }
+
+    const AtlasEntry& atlas = m_atlases[row];
+    if (atlas.isExcluded || atlas.layoutModels.isEmpty()) {
+        m_statsLabel->setVisible(false);
+        return;
+    }
+
+    qint64 totalArea = 0;
+    qint64 usedArea  = 0;
+    for (const auto& lm : atlas.layoutModels) {
+        totalArea += static_cast<qint64>(lm.atlasWidth) * lm.atlasHeight;
+        for (const auto& sprite : lm.sprites) {
+            if (sprite)
+                usedArea += static_cast<qint64>(sprite->rect.width()) * sprite->rect.height();
+        }
+    }
+
+    if (totalArea == 0) {
+        m_statsLabel->setVisible(false);
+        return;
+    }
+
+    auto fmtArea = [](qint64 px) -> QString {
+        if (px >= 1'000'000)
+            return QStringLiteral("%1 Mpx\u00B2").arg(px / 1'000'000.0, 0, 'f', 1);
+        if (px >= 1'000)
+            return QStringLiteral("%1 kpx\u00B2").arg(px / 1'000.0, 0, 'f', 1);
+        return QStringLiteral("%1 px\u00B2").arg(px);
+    };
+
+    const double efficiency = 100.0 * usedArea / totalArea;
+    const qint64 wastedArea = totalArea - usedArea;
+    const int    pageCount  = atlas.layoutModels.size();
+
+    QString text = tr("Pack: %1%").arg(efficiency, 0, 'f', 1);
+    if (pageCount > 1)
+        text += tr("  (%1 pages)").arg(pageCount);
+    text += QLatin1Char('\n');
+    text += tr("Used: %1  Wasted: %2").arg(fmtArea(usedArea), fmtArea(wastedArea));
+
+    m_statsLabel->setText(text);
+    m_statsLabel->setVisible(true);
 }
 
 int AtlasesManagementWorkspace::selectedAtlasIndex() const {
@@ -337,13 +461,61 @@ int AtlasesManagementWorkspace::selectedAtlasIndex() const {
 void AtlasesManagementWorkspace::updateRightPanel() {
     const int row = m_atlasList->currentRow();
     const bool valid = row >= 0 && row < m_atlases.size();
-    m_atlasNameEdit->setEnabled(valid && !m_atlases[row].isNeutral && !m_atlases[row].isExcluded);
-    m_removeBtn->setEnabled(valid && !m_atlases[row].isNeutral && !m_atlases[row].isExcluded);
+    const bool isExcluded = valid && m_atlases[row].isExcluded;
+
+    // Excluded atlas needs no right panel and no Layout mode.
+    if (m_rightPanel) m_rightPanel->setVisible(!isExcluded);
+    if (isExcluded) {
+        if (m_viewMode == ViewMode::Layout) {
+            onViewModeToggled(0);
+            if (m_modeGroup && m_modeGroup->button(0))
+                m_modeGroup->button(0)->setChecked(true);
+        }
+        return;
+    }
+
+    m_atlasNameEdit->setEnabled(valid && !m_atlases[row].isNeutral);
+    m_removeBtn->setEnabled(valid && !m_atlases[row].isNeutral);
     if (valid) {
         m_atlasNameEdit->blockSignals(true);
         m_atlasNameEdit->setText(m_atlases[row].name);
         m_atlasNameEdit->blockSignals(false);
     }
+    // In per-atlas mode refresh the profile checkboxes for the new selection
+    if (!isProfilesGlobal() && valid && !m_atlases[row].isNeutral)
+        loadAtlasProfilesIntoList(row);
+    updateProfilesVisibility();
+}
+
+void AtlasesManagementWorkspace::updateProfilesVisibility() {
+    const int row = m_atlasList ? m_atlasList->currentRow() : -1;
+    const bool isNeutral = (row >= 0 && row < m_atlases.size()) && m_atlases[row].isNeutral;
+    const bool globalChecked = m_profilesGlobalCheckBox && m_profilesGlobalCheckBox->isChecked();
+
+    // Default (neutral) atlas: hide the "From Default" checkbox, show checklist
+    // Non-default, From Default checked: show combobox + Manage, hide checklist
+    // Non-default, From Default unchecked: show checklist, hide combobox + Manage
+    const bool showChecklist = isNeutral || !globalChecked;
+
+    if (m_profilesGlobalCheckBox) m_profilesGlobalCheckBox->setVisible(!isNeutral);
+    if (m_profileList)  m_profileList->setVisible(showChecklist);
+    if (m_profileCombo) m_profileCombo->setVisible(!showChecklist);
+    if (m_manageBtn)    m_manageBtn->setVisible(!showChecklist);
+}
+
+void AtlasesManagementWorkspace::rebuildProfileCombo() {
+    if (!m_profileCombo || !m_profileList) return;
+    const QString current = m_profileCombo->currentData().toString();
+    m_profileCombo->blockSignals(true);
+    m_profileCombo->clear();
+    for (int i = 0; i < m_profileList->count(); ++i) {
+        auto* item = m_profileList->item(i);
+        if (item->checkState() == Qt::Checked)
+            m_profileCombo->addItem(item->text(), item->data(Qt::UserRole));
+    }
+    const int idx = m_profileCombo->findData(current);
+    m_profileCombo->setCurrentIndex(idx >= 0 ? idx : (m_profileCombo->count() > 0 ? 0 : -1));
+    m_profileCombo->blockSignals(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -431,13 +603,8 @@ bool AtlasesManagementWorkspace::eventFilter(QObject* obj, QEvent* event) {
         auto* e = static_cast<QDragMoveEvent*>(event);
         if (e->mimeData()->hasFormat(mime)) {
             QListWidgetItem* item = m_atlasList->itemAt(viewportPos(e));
-            if (item) {
-                setDragHoverRow(m_atlasList->row(item));
-                e->acceptProposedAction();
-            } else {
-                setDragHoverRow(-1);
-                e->ignore();
-            }
+            setDragHoverRow(item ? m_atlasList->row(item) : -1);
+            e->acceptProposedAction();
         }
         return true;
     }
@@ -449,12 +616,35 @@ bool AtlasesManagementWorkspace::eventFilter(QObject* obj, QEvent* event) {
         setDragHoverRow(-1);
         auto* e = static_cast<QDropEvent*>(event);
         if (e->mimeData()->hasFormat(mime)) {
+            const QStringList paths = QString::fromUtf8(
+                e->mimeData()->data(mime)).split('\n', Qt::SkipEmptyParts);
             QListWidgetItem* target = m_atlasList->itemAt(viewportPos(e));
             if (target) {
-                const int idx = m_atlasList->row(target);
-                const QStringList paths = QString::fromUtf8(
-                    e->mimeData()->data(mime)).split('\n', Qt::SkipEmptyParts);
-                emit moveSpritesRequested(paths, m_atlasList->currentRow(), idx);
+                emit moveSpritesRequested(paths, m_atlasList->currentRow(), m_atlasList->row(target));
+                e->acceptProposedAction();
+            } else if (!paths.isEmpty()) {
+                // Dropped on empty area — resolve atlas name from group name or first sprite.
+                QString atlasName;
+                if (e->mimeData()->hasFormat("application/x-sprat-group-name"))
+                    atlasName = QString::fromUtf8(
+                        e->mimeData()->data("application/x-sprat-group-name")).trimmed();
+                if (atlasName.isEmpty())
+                    atlasName = QFileInfo(paths.first()).baseName();
+
+                int existingIdx = -1;
+                for (int i = 0; i < m_atlases.size(); ++i) {
+                    if (!m_atlases[i].isExcluded && m_atlases[i].name == atlasName) {
+                        existingIdx = i;
+                        break;
+                    }
+                }
+
+                const int srcRow = m_atlasList->currentRow();
+                if (existingIdx >= 0 && srcRow >= 0)
+                    emit moveSpritesRequested(paths, srcRow, existingIdx);
+                else if (existingIdx < 0)
+                    emit createAtlasFromGroupRequested(atlasName, paths);
+                else { e->ignore(); return true; }
                 e->acceptProposedAction();
             } else {
                 e->ignore();
@@ -527,11 +717,11 @@ void AtlasesManagementWorkspace::onSpriteContextMenu(const QPoint& pos) {
 
     const auto selectedItems = m_navigator->tree()->selectedItems();
 
-    QStringList paths;
+    QSet<QString> pathSet;
     std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* item) {
         auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
         if (sprite && !sprite->path.isEmpty()) {
-            if (!paths.contains(sprite->path)) paths << sprite->path;
+            pathSet.insert(sprite->path);
         } else {
             for (int i = 0; i < item->childCount(); ++i)
                 collect(item->child(i));
@@ -545,7 +735,8 @@ void AtlasesManagementWorkspace::onSpriteContextMenu(const QPoint& pos) {
         for (auto* item : selectedItems)
             collect(item);
     }
-    if (paths.isEmpty()) return;
+    if (pathSet.isEmpty()) return;
+    QStringList paths(pathSet.cbegin(), pathSet.cend());
 
     const int srcRow = m_atlasList->currentRow();
     const bool isExcludedAtlas = (srcRow >= 0 && srcRow < m_atlases.size())
@@ -686,6 +877,15 @@ void AtlasesManagementWorkspace::setProfiles(const QStringList& names, const QSt
         item->setCheckState(enabled ? Qt::Checked : Qt::Unchecked);
     }
 
+    // If no profile matched (e.g. stale names from a different project), enable the first one.
+    {
+        bool anyChecked = false;
+        for (int i = 0; i < m_profileList->count(); ++i)
+            if (m_profileList->item(i)->checkState() == Qt::Checked) { anyChecked = true; break; }
+        if (!anyChecked && m_profileList->count() > 0)
+            m_profileList->item(0)->setCheckState(Qt::Checked);
+    }
+
     bool selected = false;
     for (int i = 0; i < m_profileList->count(); ++i) {
         QListWidgetItem* item = m_profileList->item(i);
@@ -707,7 +907,39 @@ void AtlasesManagementWorkspace::setProfiles(const QStringList& names, const QSt
     }
 
     m_profileList->blockSignals(false);
+
+    // Also populate the profile combobox (used in "From Default" mode) —
+    // built from the list's checked state so it always stays in sync.
+    if (m_profileCombo) {
+        m_profileCombo->blockSignals(true);
+        m_profileCombo->clear();
+        for (int i = 0; i < m_profileList->count(); ++i) {
+            auto* item = m_profileList->item(i);
+            if (item->checkState() == Qt::Checked)
+                m_profileCombo->addItem(item->text(), item->data(Qt::UserRole));
+        }
+        const int idx = m_profileCombo->findData(currentProfile);
+        m_profileCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+        m_profileCombo->blockSignals(false);
+    }
+
     m_syncing = false;
+
+    // In per-atlas mode: save the new global profiles then show the atlas-specific ones
+    const bool globalChecked = m_profilesGlobalCheckBox && m_profilesGlobalCheckBox->isChecked();
+    if (!globalChecked) {
+        m_savedGlobalProfiles.clear();
+        for (int i = 0; i < m_profileList->count(); ++i) {
+            if (m_profileList->item(i)->checkState() == Qt::Checked)
+                m_savedGlobalProfiles << m_profileList->item(i)->data(Qt::UserRole).toString();
+        }
+        const int row = m_atlasList ? m_atlasList->currentRow() : -1;
+        if (row >= 0 && row < m_atlases.size() && !m_atlases[row].isNeutral)
+            loadAtlasProfilesIntoList(row);
+    }
+
+    updateProfileListEnabledStates();
+    updateProfilesVisibility();
 }
 
 void AtlasesManagementWorkspace::setSelectedProfile(const QString& name) {
@@ -720,16 +952,30 @@ void AtlasesManagementWorkspace::setSelectedProfile(const QString& name) {
             break;
         }
     }
+    if (m_profileCombo) {
+        const int idx = m_profileCombo->findData(name);
+        if (idx >= 0) m_profileCombo->setCurrentIndex(idx);
+    }
     m_syncing = false;
 }
 
 QString AtlasesManagementWorkspace::selectedProfile() const {
+    const int row = m_atlasList ? m_atlasList->currentRow() : -1;
+    const bool isNeutral = (row >= 0 && row < m_atlases.size()) && m_atlases[row].isNeutral;
+    const bool globalChecked = m_profilesGlobalCheckBox && m_profilesGlobalCheckBox->isChecked();
+    // Combobox mode: non-neutral atlas with "From Default" checked
+    if (!isNeutral && globalChecked && m_profileCombo)
+        return m_profileCombo->currentData().toString();
     if (!m_profileList) return {};
     QListWidgetItem* item = m_profileList->currentItem();
     return item ? item->data(Qt::UserRole).toString() : QString{};
 }
 
 QStringList AtlasesManagementWorkspace::enabledProfiles() const {
+    // Per-atlas mode: list shows atlas-specific profiles; return the saved global state
+    if (!isProfilesGlobal())
+        return m_savedGlobalProfiles;
+
     QStringList result;
     if (!m_profileList) return result;
     for (int i = 0; i < m_profileList->count(); ++i) {
@@ -754,6 +1000,104 @@ void AtlasesManagementWorkspace::ensureValidProfileSelection() {
     }
     m_profileList->setCurrentItem(nullptr);
     m_syncing = false;
+}
+
+void AtlasesManagementWorkspace::updateProfileListEnabledStates() {
+    if (!m_profileList) return;
+    int checkedCount = 0;
+    QListWidgetItem* onlyChecked = nullptr;
+    for (int i = 0; i < m_profileList->count(); ++i) {
+        auto* item = m_profileList->item(i);
+        if (item->checkState() == Qt::Checked) {
+            ++checkedCount;
+            onlyChecked = item;
+        }
+    }
+    m_profileList->blockSignals(true);
+    for (int i = 0; i < m_profileList->count(); ++i) {
+        auto* item = m_profileList->item(i);
+        const auto flags = item->flags();
+        if (checkedCount == 1 && item == onlyChecked) {
+            item->setFlags(flags & ~Qt::ItemIsEnabled);
+            item->setToolTip(tr("At least one profile must be enabled."));
+        } else {
+            item->setFlags(flags | Qt::ItemIsEnabled);
+            item->setToolTip({});
+        }
+    }
+    m_profileList->blockSignals(false);
+}
+
+// ---------------------------------------------------------------------------
+// Profile global / per-atlas mode
+// ---------------------------------------------------------------------------
+
+void AtlasesManagementWorkspace::setProfilesGlobal(bool global) {
+    if (!m_profilesGlobalCheckBox || !m_profileList) return;
+
+    const bool wasGlobal = m_profilesGlobalCheckBox->isChecked();
+
+    if (!global && wasGlobal) {
+        // Save current list state as the global profiles before switching
+        m_savedGlobalProfiles.clear();
+        for (int i = 0; i < m_profileList->count(); ++i) {
+            if (m_profileList->item(i)->checkState() == Qt::Checked)
+                m_savedGlobalProfiles << m_profileList->item(i)->data(Qt::UserRole).toString();
+        }
+    }
+
+    m_syncing = true;
+    m_profilesGlobalCheckBox->setChecked(global);
+    m_syncing = false;
+
+    const int row = m_atlasList ? m_atlasList->currentRow() : -1;
+    const bool valid = row >= 0 && row < m_atlases.size();
+    const bool isNeutral = valid && m_atlases[row].isNeutral;
+
+    // Only modify the list on actual mode transitions; leave it alone otherwise
+    // to avoid wiping the checked state that setProfiles() just established.
+    if (!global && wasGlobal) {
+        // Switched to per-atlas: load this atlas's specific profiles.
+        // For the neutral atlas (which always manages global profiles) — leave as-is.
+        if (valid && !isNeutral)
+            loadAtlasProfilesIntoList(row);
+    } else if (global && !wasGlobal) {
+        // Switched back to global: restore the previously saved global profiles.
+        m_syncing = true;
+        m_profileList->blockSignals(true);
+        for (int i = 0; i < m_profileList->count(); ++i) {
+            const QString name = m_profileList->item(i)->data(Qt::UserRole).toString();
+            m_profileList->item(i)->setCheckState(
+                m_savedGlobalProfiles.contains(name) ? Qt::Checked : Qt::Unchecked);
+        }
+        m_profileList->blockSignals(false);
+        m_syncing = false;
+        updateProfileListEnabledStates();
+    }
+    // Same mode as before: list is already correct, nothing to do.
+
+    updateProfilesVisibility();
+}
+
+bool AtlasesManagementWorkspace::isProfilesGlobal() const {
+    const int row = m_atlasList ? m_atlasList->currentRow() : -1;
+    const bool isNeutral = (row >= 0 && row < m_atlases.size()) && m_atlases[row].isNeutral;
+    return isNeutral || (!m_profilesGlobalCheckBox || m_profilesGlobalCheckBox->isChecked());
+}
+
+void AtlasesManagementWorkspace::loadAtlasProfilesIntoList(int atlasRow) {
+    if (atlasRow < 0 || atlasRow >= m_atlases.size() || !m_profileList) return;
+    const QStringList& atlasProfiles = m_atlases[atlasRow].exportConfig.profiles;
+    m_syncing = true;
+    m_profileList->blockSignals(true);
+    for (int i = 0; i < m_profileList->count(); ++i) {
+        const QString name = m_profileList->item(i)->data(Qt::UserRole).toString();
+        m_profileList->item(i)->setCheckState(
+            atlasProfiles.contains(name) ? Qt::Checked : Qt::Unchecked);
+    }
+    m_profileList->blockSignals(false);
+    m_syncing = false;
+    updateProfileListEnabledStates();
 }
 
 // ---------------------------------------------------------------------------

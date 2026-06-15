@@ -5,8 +5,10 @@
 class NavigatorPanel;
 class ProjectSession;
 class QButtonGroup;
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -53,6 +55,9 @@ public:
     void        setSelectedProfile(const QString& name);  // no signal emitted
     QString     selectedProfile() const;
     QStringList enabledProfiles()  const;
+    /** Switch between global (all atlases) and per-atlas profile enablement. */
+    void        setProfilesGlobal(bool global);
+    bool        isProfilesGlobal() const;
 
     // Resolution selector
     void    setResolutionOptions(const QStringList& options, const QString& current);
@@ -70,8 +75,12 @@ signals:
 
     void selectedProfileChanged(const QString& profileName);
     void profileEnablementChanged(const QStringList& enabledProfiles);
+    void profilesGlobalChanged(bool global);
     void manageProfilesRequested();
     void resolutionChanged(const QString& resolution);
+
+    /** Emitted when the per-atlas export profile override changes for the selected atlas. */
+    void atlasExportProfilesChanged(int atlasIndex, QStringList profiles);
 
     void viewModeChanged(AtlasesManagementWorkspace::ViewMode mode);
     void zoomChanged(double percent);
@@ -93,8 +102,13 @@ private slots:
 private:
     void setupUi();
     void updateRightPanel();
+    void updateProfilesVisibility();
+    void rebuildProfileCombo();
+    void updateProfileListEnabledStates();
+    void updateStatsLabel();
     void setDragHoverRow(int row);
     void ensureValidProfileSelection();
+    void loadAtlasProfilesIntoList(int atlasRow);
 
     // Left panel
     QListWidget* m_atlasList   = nullptr;
@@ -114,8 +128,16 @@ private:
     QWidget*        m_zoomRow           = nullptr;
     QDoubleSpinBox* m_zoomSpin          = nullptr;
     QComboBox*      m_resolutionCombo   = nullptr;
+    QLabel*         m_statsLabel        = nullptr;
     QListWidget*    m_profileList       = nullptr;
+    QComboBox*      m_profileCombo      = nullptr;
+    QPushButton*    m_manageBtn         = nullptr;
 
+    // Profile "From Default" checkbox
+    QCheckBox*   m_profilesGlobalCheckBox = nullptr;
+    QStringList  m_savedGlobalProfiles;   ///< Saved when switching to per-atlas mode
+
+    QWidget*   m_rightPanel          = nullptr;
     QSplitter* m_splitter            = nullptr;
     bool       m_splitterInitialized = false;
 

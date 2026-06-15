@@ -7,10 +7,13 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QRegularExpression>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
+#include <QPushButton>
 #include <QScrollBar>
 #include <QStyle>
 #include <QTreeWidget>
@@ -40,6 +43,32 @@ static void updateFolderCheckState(QTreeWidgetItem* item)
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Convert a simple glob pattern (supports * and ?) to an anchored regex string.
+static QString globToRegex(const QString& glob)
+{
+    QString rx;
+    rx.reserve(glob.size() * 2 + 2);
+    for (const QChar& c : glob) {
+        switch (c.unicode()) {
+        case u'*': rx += QLatin1String(".*");  break;
+        case u'?': rx += QLatin1Char('.');      break;
+        // Escape every other regex metacharacter
+        case u'\\': case u'^': case u'$': case u'.': case u'|':
+        case u'+':  case u'(': case u')': case u'[': case u']':
+        case u'{':  case u'}':
+            rx += QLatin1Char('\\');
+            rx += c;
+            break;
+        default: rx += c; break;
+        }
+    }
+    return QLatin1Char('^') + rx + QLatin1Char('$');
+}
+
+// ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
 NavigatorPanel::NavigatorPanel(QWidget* parent)
@@ -63,13 +92,27 @@ NavigatorPanel::NavigatorPanel(QWidget* parent)
     connect(m_atlasCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &NavigatorPanel::onAtlasComboChanged);
 
-    // Filter row: search box + result count + show-hidden checkbox
+    // Filter row: mode combo + search box + result count + show-hidden checkbox
     auto* filterRow = new QHBoxLayout();
     filterRow->setContentsMargins(0, 0, 0, 0);
 
+    m_filterModeCombo = new QComboBox(this);
+    m_filterModeCombo->addItem(tr("Text"),  static_cast<int>(FilterMode::Text));
+    m_filterModeCombo->addItem(tr("Glob"),  static_cast<int>(FilterMode::Glob));
+    m_filterModeCombo->addItem(tr("Regex"), static_cast<int>(FilterMode::Regex));
+    m_filterModeCombo->setToolTip(tr(
+        "Filter mode:\n"
+        "  Text  — case-insensitive substring (default)\n"
+        "  Glob  — wildcards: * matches any run of characters, ? matches one\n"
+        "  Regex — full Qt regular expression"));
+    m_filterModeCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    filterRow->addWidget(m_filterModeCombo);
+    connect(m_filterModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { if (m_filterEdit) applyFilter(m_filterEdit->text()); });
+
     m_filterEdit = new QLineEdit(this);
     m_filterEdit->setPlaceholderText(tr("Search sprites..."));
-    filterRow->addWidget(m_filterEdit);
+    filterRow->addWidget(m_filterEdit, 1);
 
     m_filterResult = new QLabel(this);
     m_filterResult->setStyleSheet("color: #888; font-size: 11px;");
@@ -93,6 +136,28 @@ NavigatorPanel::NavigatorPanel(QWidget* parent)
     m_spriteTree->sortByColumn(0, Qt::AscendingOrder);
     m_spriteTree->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(m_spriteTree);
+
+    // Add Source button — hidden by default; shown in Sprites workspace
+    m_addSourceBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon),
+        tr("Add Source"), this);
+    m_addSourceBtn->setVisible(false);
+    layout->addWidget(m_addSourceBtn);
+
+    connect(m_addSourceBtn, &QPushButton::clicked, this, [this]() {
+        QMenu* menu = new QMenu(this);
+        auto* folderAction  = menu->addAction(tr("Folder..."));
+        auto* imageAction   = menu->addAction(tr("Image..."));
+        auto* archiveAction = menu->addAction(tr("Archive..."));
+        auto* urlAction     = menu->addAction(tr("URL..."));
+        QAction* chosen = menu->exec(
+            m_addSourceBtn->mapToGlobal(QPoint(0, m_addSourceBtn->height())));
+        if      (chosen == folderAction)  emit addSourceFolderRequested();
+        else if (chosen == imageAction)   emit addSourceImageRequested();
+        else if (chosen == archiveAction) emit addSourceArchiveRequested();
+        else if (chosen == urlAction)     emit addSourceUrlRequested();
+        menu->deleteLater();
+    });
 
     // Forward excludeRequested from the tree
     connect(m_spriteTree, &NavigatorTreeWidget::excludeRequested,
@@ -136,6 +201,7 @@ void NavigatorPanel::configure(const Config& config)
     setShowHiddenVisible(config.showHidden);
     setCheckboxesEnabled(config.checkboxes);
     setSelectionMode(config.selectionMode);
+    setAddSourceButtonVisible(config.addSourceButton);
 }
 
 void NavigatorPanel::setAtlasComboVisible(bool visible)
@@ -156,6 +222,11 @@ void NavigatorPanel::setCheckboxesEnabled(bool enabled)
 void NavigatorPanel::setSelectionMode(QAbstractItemView::SelectionMode mode)
 {
     if (m_spriteTree) m_spriteTree->setSelectionMode(mode);
+}
+
+void NavigatorPanel::setAddSourceButtonVisible(bool visible)
+{
+    if (m_addSourceBtn) m_addSourceBtn->setVisible(visible);
 }
 
 void NavigatorPanel::setGroupSimilar(bool group)
@@ -230,13 +301,31 @@ void NavigatorPanel::applyFilter(const QString& text)
 {
     if (!m_spriteTree) return;
 
+    const FilterMode mode = m_filterModeCombo
+        ? static_cast<FilterMode>(m_filterModeCombo->currentIndex())
+        : FilterMode::Text;
+
+    // Compile the regex/glob pattern once outside the item loop.
+    QRegularExpression rx;
+    if (!text.isEmpty() && mode != FilterMode::Text) {
+        const QString pattern = (mode == FilterMode::Glob) ? globToRegex(text) : text;
+        rx = QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption);
+    }
+
     QTreeWidgetItemIterator it(m_spriteTree);
     QSet<QTreeWidgetItem*> itemsToShow;
 
     // First pass: find all items matching the search text
     while (*it) {
         QTreeWidgetItem* item = *it;
-        const bool matches = text.isEmpty() || item->text(0).contains(text, Qt::CaseInsensitive);
+        bool matches;
+        if (text.isEmpty()) {
+            matches = true;
+        } else if (mode == FilterMode::Text) {
+            matches = item->text(0).contains(text, Qt::CaseInsensitive);
+        } else {
+            matches = rx.isValid() && rx.match(item->text(0)).hasMatch();
+        }
         if (matches) {
             itemsToShow.insert(item);
             QTreeWidgetItem* parent = item->parent();
@@ -254,12 +343,13 @@ void NavigatorPanel::applyFilter(const QString& text)
     QTreeWidgetItemIterator it2(m_spriteTree);
     while (*it2) {
         QTreeWidgetItem* item = *it2;
+        const bool visible = itemsToShow.contains(item);
         const bool isLeaf = item->data(0, Qt::UserRole).isValid();
         if (isLeaf) {
             ++totalLeaves;
-            if (itemsToShow.contains(item)) ++visibleLeaves;
+            if (visible) ++visibleLeaves;
         }
-        item->setHidden(!itemsToShow.contains(item));
+        item->setHidden(!visible);
         ++it2;
     }
 
@@ -376,17 +466,21 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
                 allSprites.append(it.value());
         }
     } else {
-        // Default: all non-excluded atlases' layoutModels (deduplicated)
+        // Default: all sprites from all non-excluded atlases via spritePaths +
+        // spriteIndex.  Using spritePaths (not layoutModels) ensures that sprites
+        // assigned to a named atlas that has never been laid out are still shown —
+        // layoutModels is empty for such atlases, which would cause them to vanish
+        // from the Sprites workspace whenever the Atlases workspace was used.
         QSet<QString> seen;
         for (const auto& atlas : session->atlases) {
             if (atlas.isExcluded) continue;
-            for (const auto& model : atlas.layoutModels) {
-                for (const auto& sp : model.sprites) {
-                    if (!seen.contains(sp->path)) {
-                        seen.insert(sp->path);
-                        allSprites.append(sp);
-                    }
-                }
+            for (const QString& p : atlas.spritePaths) {
+                const QString key = QDir::cleanPath(p);
+                if (seen.contains(key)) continue;
+                seen.insert(key);
+                auto it = session->spriteIndex.find(key);
+                if (it != session->spriteIndex.end())
+                    allSprites.append(it.value());
             }
         }
     }
@@ -408,9 +502,16 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             leaf->setCheckState(0, Qt::Unchecked);
         }
         leaf->setData(0, Qt::UserRole, QVariant::fromValue(spriteByPath.value(path)));
-        QPixmap pix(path);
-        if (!pix.isNull())
-            leaf->setIcon(0, QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+        auto it = m_iconCache.find(path);
+        if (it == m_iconCache.end()) {
+            QPixmap pix(path);
+            QIcon icon;
+            if (!pix.isNull())
+                icon = QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            it = m_iconCache.insert(path, icon);
+        }
+        if (!it.value().isNull())
+            leaf->setIcon(0, it.value());
     };
 
     auto findOrCreateFolderPath = [&](QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
@@ -444,14 +545,24 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         QVector<QVector<SpriteLeaf>> perSource(session->sources.size());
         QVector<SpriteLeaf> unassigned;
 
+        // Pre-compute cleaned source paths and per-source hidden folder sets so we
+        // don't repeat QDir::cleanPath / QSet construction inside the sprite loop.
+        QVector<QString> cleanedSourcePaths;
+        cleanedSourcePaths.reserve(session->sources.size());
+        QVector<QSet<QString>> hiddenSetsPerSource;
+        hiddenSetsPerSource.reserve(session->sources.size());
+        for (const auto& src : session->sources) {
+            cleanedSourcePaths.append(QDir::cleanPath(src.cachedFolderPath));
+            hiddenSetsPerSource.append(QSet<QString>(src.hiddenFolders.begin(), src.hiddenFolders.end()));
+        }
+
         for (const SpritePtr& sprite : allSprites) {
             const QString cleanedPath = QDir::cleanPath(sprite->path);
             int bestLen = -1;
             int bestIdx = -1;
             for (int si = 0; si < session->sources.size(); ++si) {
-                const QString& cached = session->sources[si].cachedFolderPath;
-                if (cached.isEmpty()) continue;
-                const QString cleaned = QDir::cleanPath(cached);
+                const QString& cleaned = cleanedSourcePaths[si];
+                if (cleaned.isEmpty()) continue;
                 if ((cleanedPath.startsWith(cleaned + QLatin1Char('/'))
                         || cleanedPath == cleaned)
                         && cleaned.length() > bestLen) {
@@ -461,7 +572,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             }
 
             if (bestIdx >= 0) {
-                const QString cleanedCache = QDir::cleanPath(session->sources[bestIdx].cachedFolderPath);
+                const QString& cleanedCache = cleanedSourcePaths[bestIdx];
                 QString localName;
                 if (cleanedPath.startsWith(cleanedCache + QLatin1Char('/'))) {
                     const QString rel = cleanedPath.mid(cleanedCache.length() + 1);
@@ -477,9 +588,8 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
                 }
                 // Strip hidden folder segments (Sprites workspace only; atlas views show full paths)
                 if (atlasFilter < 0) {
-                    const QStringList& hiddenFolders = session->sources[bestIdx].hiddenFolders;
-                    if (!hiddenFolders.isEmpty() && localName.contains('/')) {
-                        const QSet<QString> hiddenSet(hiddenFolders.begin(), hiddenFolders.end());
+                    const QSet<QString>& hiddenSet = hiddenSetsPerSource[bestIdx];
+                    if (!hiddenSet.isEmpty() && localName.contains('/')) {
                         const QStringList parts = localName.split('/');
                         QStringList resultParts;
                         QString accRelPath;

@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QCoreApplication>
 #include <QHash>
+#include <QtConcurrent>
 #include <QtGlobal>
 
 namespace {
@@ -39,9 +40,9 @@ QHash<QString, SpritePtr> g_cachedSpriteMap;
 quint64 g_boundsGeneration = 0;
 
 struct BoundsCache {
-    QStringList frames;
+    int     selectedTimelineIndex = -2;  // -2 = never computed; compared O(1) instead of O(N) frame list
     quint64 generation = ~quint64(0);
-    int left = 0, right = 0, top = 0, bottom = 0;
+    int     left = 0, right = 0, top = 0, bottom = 0;
 };
 BoundsCache g_boundsCache;
 
@@ -70,6 +71,9 @@ void AnimationPreviewService::invalidateBounds()
     ++g_boundsGeneration;
 }
 
+int AnimationPreviewService::cachedBoundsLeft() { return g_boundsCache.left; }
+int AnimationPreviewService::cachedBoundsTop()  { return g_boundsCache.top;  }
+
 void AnimationPreviewService::preloadTimeline(const QStringList& frames)
 {
     if (frames.isEmpty())
@@ -83,14 +87,33 @@ void AnimationPreviewService::preloadTimeline(const QStringList& frames)
         return;
     g_preloadedTimelineHash = h;
 
+    // Collect only the frames not already in the pixmap cache.
+    QStringList toLoad;
     for (const QString& path : frames) {
-        QPixmap cached;
-        if (!QPixmapCache::find(path, &cached)) {
-            QPixmap pix;
-            if (pix.load(path))
-                QPixmapCache::insert(path, pix);
-        }
+        QPixmap tmp;
+        if (!QPixmapCache::find(path, &tmp))
+            toLoad.append(path);
     }
+    if (toLoad.isEmpty())
+        return;
+
+    // Load QImages on a background thread (thread-safe disk I/O) and insert
+    // them into QPixmapCache on the main thread (QPixmap is not re-entrant).
+    // The returned QFuture is intentionally discarded — this is fire-and-forget.
+    auto preloadFuture = QtConcurrent::run([toLoad]() {
+        for (const QString& path : toLoad) {
+            QImage img(path);
+            if (img.isNull())
+                continue;
+            QMetaObject::invokeMethod(qApp, [path, img]() {
+                // Double-check: another path may have been inserted since we checked.
+                QPixmap tmp;
+                if (!QPixmapCache::find(path, &tmp))
+                    QPixmapCache::insert(path, QPixmap::fromImage(img));
+            }, Qt::QueuedConnection);
+        }
+    });
+    Q_UNUSED(preloadFuture)
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +121,8 @@ void AnimationPreviewService::preloadTimeline(const QStringList& frames)
 // Recompute the pivot-aligned bounds for every frame in the timeline and
 // store the result in g_boundsCache.  Called only on cache miss.
 static void recomputeBounds(const QStringList& frames,
-                             const QHash<QString, SpritePtr>& spriteMap)
+                             const QHash<QString, SpritePtr>& spriteMap,
+                             int timelineIndex)
 {
     if (g_frameSizeCache.size() > 16384) {
         auto it = g_frameSizeCache.begin();
@@ -134,8 +158,8 @@ static void recomputeBounds(const QStringList& frames,
         maxBottom = qMax(maxBottom, frameSize.height() - pivotY);
     }
 
-    g_boundsCache.frames     = frames;
-    g_boundsCache.generation = g_boundsGeneration;
+    g_boundsCache.selectedTimelineIndex = timelineIndex;
+    g_boundsCache.generation            = g_boundsGeneration;
     g_boundsCache.left       = maxLeft;
     g_boundsCache.right      = maxRight;
     g_boundsCache.top        = maxTop;
@@ -152,7 +176,9 @@ QPixmap AnimationPreviewService::refresh(
     QString& statusText,
     bool& hasFrames,
     bool& playing,
-    QTimer* timer)
+    QTimer* timer,
+    bool onionSkin,
+    int onionOpacity)
 {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         statusText = trAnimationPreview("Create/select a timeline and drag frames into it.");
@@ -217,9 +243,12 @@ QPixmap AnimationPreviewService::refresh(
     if (pix.isNull())
         return QPixmap();
 
-    // Bounds — O(frames) computation, cached until frames or pivots change.
-    if (g_boundsCache.generation != g_boundsGeneration || g_boundsCache.frames != frames)
-        recomputeBounds(frames, spriteMap);
+    // Bounds — O(frames) computation, cached until the selected timeline or pivots change.
+    // Comparing selectedTimelineIndex is O(1); changing frames within a timeline already
+    // increments g_boundsGeneration via invalidateBounds(), so the generation check covers it.
+    if (g_boundsCache.generation != g_boundsGeneration
+            || g_boundsCache.selectedTimelineIndex != selectedTimelineIndex)
+        recomputeBounds(frames, spriteMap, selectedTimelineIndex);
 
     int maxLeftExtent   = g_boundsCache.left;
     int maxRightExtent  = g_boundsCache.right;
@@ -243,14 +272,61 @@ QPixmap AnimationPreviewService::refresh(
     canvas.fill(Qt::transparent);
 
     QPainter p(&canvas);
+
+    // Onion skin: draw adjacent frames as semi-transparent ghosts underneath.
+    if (onionSkin && onionOpacity > 0) {
+        const qreal ghostAlpha = onionOpacity / 100.0;
+        // Indices of adjacent frames to render as ghosts (prev and next).
+        const int ghostIndices[2] = { frameIndex - 1, frameIndex + 1 };
+        for (int gi : ghostIndices) {
+            if (gi < 0 || gi >= frames.size()) continue;
+            const QString& ghostPath = frames[gi];
+            QPixmap ghostPix;
+            if (!QPixmapCache::find(ghostPath, &ghostPix)) {
+                ghostPix.load(ghostPath);
+                if (!ghostPix.isNull())
+                    QPixmapCache::insert(ghostPath, ghostPix);
+            }
+            if (ghostPix.isNull()) continue;
+            SpritePtr ghostSprite = spriteMap.value(ghostPath);
+            int gx = ghostSprite ? qBound(0, ghostSprite->pivotX, ghostPix.width())  : ghostPix.width()  / 2;
+            int gy = ghostSprite ? qBound(0, ghostSprite->pivotY, ghostPix.height()) : ghostPix.height() / 2;
+            p.setOpacity(ghostAlpha);
+            if (hFlip || vFlip) {
+                // Use a world-transform flip instead of allocating a new QPixmap per frame.
+                // For scale s in axis X (s = ±1): the pixel at (gx, gy) in image space must land
+                // at (maxLeftExtent, maxTopExtent) on the canvas.
+                // With QTransform().translate(tx, ty).scale(sx, sy): point p' = sx·p + tx.
+                // Setting tx = maxLeftExtent - sx·gx satisfies sx·gx + tx = maxLeftExtent. ✓
+                const qreal sx = hFlip ? -1.0 : 1.0;
+                const qreal sy = vFlip ? -1.0 : 1.0;
+                p.save();
+                p.setWorldTransform(QTransform()
+                    .translate(maxLeftExtent - sx * gx, maxTopExtent - sy * gy)
+                    .scale(sx, sy));
+                p.drawPixmap(0, 0, ghostPix);
+                p.restore();
+            } else {
+                p.drawPixmap(maxLeftExtent - gx, maxTopExtent - gy, ghostPix);
+            }
+        }
+        p.setOpacity(1.0);
+    }
+
     int pivotX = currentSprite ? qBound(0, currentSprite->pivotX, pix.width())  : pix.width()  / 2;
     int pivotY = currentSprite ? qBound(0, currentSprite->pivotY, pix.height()) : pix.height() / 2;
     if (hFlip || vFlip) {
-        pix = pix.transformed(QTransform().scale(hFlip ? -1.0 : 1.0, vFlip ? -1.0 : 1.0));
-        if (hFlip) pivotX = pix.width()  - pivotX;
-        if (vFlip) pivotY = pix.height() - pivotY;
+        const qreal sx = hFlip ? -1.0 : 1.0;
+        const qreal sy = vFlip ? -1.0 : 1.0;
+        p.save();
+        p.setWorldTransform(QTransform()
+            .translate(maxLeftExtent - sx * pivotX, maxTopExtent - sy * pivotY)
+            .scale(sx, sy));
+        p.drawPixmap(0, 0, pix);
+        p.restore();
+    } else {
+        p.drawPixmap(maxLeftExtent - pivotX, maxTopExtent - pivotY, pix);
     }
-    p.drawPixmap(maxLeftExtent - pivotX, maxTopExtent - pivotY, pix);
     p.end();
 
     return canvas;
@@ -292,8 +368,9 @@ QSize AnimationPreviewService::calculateAnimationSize(
         g_cachedSpriteMapGen = g_spriteMapGeneration;
     }
 
-    if (g_boundsCache.generation != g_boundsGeneration || g_boundsCache.frames != frames)
-        recomputeBounds(frames, g_cachedSpriteMap);
+    if (g_boundsCache.generation != g_boundsGeneration
+            || g_boundsCache.selectedTimelineIndex != selectedTimelineIndex)
+        recomputeBounds(frames, g_cachedSpriteMap, selectedTimelineIndex);
 
     const int animationWidth  = qMax(1, g_boundsCache.left  + g_boundsCache.right);
     const int animationHeight = qMax(1, g_boundsCache.top   + g_boundsCache.bottom);

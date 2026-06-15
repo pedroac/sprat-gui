@@ -38,6 +38,7 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <algorithm>
@@ -153,12 +154,53 @@ void MainWindow::setupUi() {
                     m_exportLayoutCanvas->setModels(models);
                     m_exportLayoutCanvas->setZoomManual(false);
                     m_exportLayoutCanvas->initialFit();
+                    // Restore user's last zoom level instead of resetting to initialFit on every refresh.
+                    if (m_savedExportZoom > 0.0) {
+                        m_exportLayoutCanvas->setZoomManual(true);
+                        m_exportLayoutCanvas->setZoom(m_savedExportZoom);
+                    }
                     if (m_exportWorkspaceActive)
                         m_exportWorkspace->setViewport(m_exportLayoutCanvas);
                 }
                 // Shared refresh: cancel in-progress load, invalidate cache, schedule pack
                 if (m_exportCoordinator)
                     m_exportCoordinator->refreshPreview(profile, sf);
+            });
+
+    connect(m_exportWorkspace, &ExportWorkspace::atlasExportConfigChanged,
+            this, [this](int sessionIdx, AtlasExportConfig cfg) {
+                if (!m_session) return;
+                if (sessionIdx >= 0 && sessionIdx < m_session->atlases.size())
+                    m_session->atlases[sessionIdx].exportConfig = cfg;
+            });
+
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::atlasExportProfilesChanged,
+            this, [this](int atlasIndex, QStringList profiles) {
+                if (!m_session || atlasIndex < 0 || atlasIndex >= m_session->atlases.size()) return;
+                m_session->atlases[atlasIndex].exportConfig.profiles = profiles;
+            });
+
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::profilesGlobalChanged,
+            this, [this](bool global) {
+                m_lastSaveConfig.profilesGlobal = global;
+            });
+
+    connect(m_exportWorkspace, &ExportWorkspace::savePresetRequested,
+            this, [this](ExportPreset preset) {
+                auto it = std::find_if(m_exportPresets.begin(), m_exportPresets.end(),
+                    [&](const ExportPreset& p){ return p.name == preset.name; });
+                if (it != m_exportPresets.end()) *it = preset;
+                else m_exportPresets.append(preset);
+                m_exportWorkspace->setPresets(m_exportPresets);
+            });
+
+    connect(m_exportWorkspace, &ExportWorkspace::deletePresetRequested,
+            this, [this](const QString& name) {
+                m_exportPresets.erase(
+                    std::remove_if(m_exportPresets.begin(), m_exportPresets.end(),
+                        [&](const ExportPreset& p){ return p.name == name; }),
+                    m_exportPresets.end());
+                m_exportWorkspace->setPresets(m_exportPresets);
             });
 
     // Page 3: Atlases Management Workspace
@@ -489,6 +531,31 @@ void MainWindow::setupUi() {
     connect(m_navigatorPanel, &NavigatorPanel::excludeKeyPressed,
             this, &MainWindow::onNavigatorExcludeKey);
 
+    // Add Source button (Sprites workspace)
+    m_navigatorPanel->setAddSourceButtonVisible(true);
+    connect(m_navigatorPanel, &NavigatorPanel::addSourceFolderRequested,
+            this, &MainWindow::onLoadFolder);
+    connect(m_navigatorPanel, &NavigatorPanel::addSourceImageRequested, this, [this]() {
+        const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Add Image"), m_session ? m_session->currentFolder : QString(), filter);
+        if (!path.isEmpty()) {
+            const DropAction action = confirmDropAction(path);
+            if (action != DropAction::Cancel) loadImageWithFrameDetection(path, action);
+        }
+    });
+    connect(m_navigatorPanel, &NavigatorPanel::addSourceArchiveRequested, this, [this]() {
+        const QString filter = tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)");
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Add Archive"), m_session ? m_session->currentFolder : QString(), filter);
+        if (!path.isEmpty()) {
+            const DropAction action = confirmDropAction(path);
+            if (action != DropAction::Cancel) loadProject(path, action);
+        }
+    });
+    connect(m_navigatorPanel, &NavigatorPanel::addSourceUrlRequested,
+            this, &MainWindow::onLoadFromUrl);
+
     // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
     connect(m_spriteTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int /*column*/) {
         m_spriteTree->blockSignals(true);
@@ -547,9 +614,10 @@ void MainWindow::setupUi() {
             // Update multi-selection label in the sprite editor panel
             if (m_multiSelectionLabel) {
                 const int n = checked.size();
-                if (n > 1 && m_settings.propagateEditsToChecked) {
-                    m_multiSelectionLabel->setText(
-                        tr("%1 sprites selected — pivot and marker changes apply to all").arg(n));
+                if (n > 1) {
+                    m_multiSelectionLabel->setText(m_settings.propagateEditsToChecked
+                        ? tr("%1 sprites selected — pivot and marker changes apply to all").arg(n)
+                        : tr("%1 sprites selected — changes apply to current frame only").arg(n));
                     m_multiSelectionLabel->setVisible(true);
                 } else {
                     m_multiSelectionLabel->setVisible(false);
@@ -595,12 +663,14 @@ void MainWindow::setupUi() {
             m_animFrameIndex = 0;
             fitAnimationToViewport();
             refreshAnimationTest();
+            syncSelectedSpriteToAnimFrame();
         });
     connect(m_timelineEditorPanel, &TimelineEditorPanel::animFrameIndexSelected, this,
         [this](int index) {
             if (!m_animPlaying) {
                 m_animFrameIndex = index;
                 refreshAnimationTest();
+                syncSelectedSpriteToAnimFrame();
             }
         });
     connect(m_timelineEditorPanel, &TimelineEditorPanel::animZoomResetAndFitRequested, this,
@@ -660,6 +730,10 @@ void MainWindow::setupUi() {
             this, &MainWindow::onMarkerSelectedFromCanvas);
     connect(m_previewView->overlay(), &EditorOverlayItem::markerChanged,
             this, &MainWindow::onMarkerChangedFromCanvas);
+    connect(m_previewView, &PreviewCanvas::copyMarkersRequested,
+            this, &MainWindow::onCopyMarkersRequested);
+    connect(m_previewView, &PreviewCanvas::pasteMarkersRequested,
+            this, &MainWindow::onPasteMarkersRequested);
     connect(m_previewView, &PreviewCanvas::zoomChanged, this, [this](double zoom) {
         m_previewZoomSpin->blockSignals(true);
         m_previewZoomSpin->setValue(zoom * 100.0);
@@ -679,6 +753,18 @@ void MainWindow::setupUi() {
             syncCoordinateSpinsFromSelection();
         });
     }
+    connect(m_spriteEditorPanel->onionSkinBtn(), &QPushButton::toggled,
+            this, [this](bool) { updateOnionSkinDisplay(); });
+
+    {
+        auto* btn = m_spriteEditorPanel->showGridBtn();
+        btn->setChecked(m_settings.showGrid);
+        connect(btn, &QPushButton::toggled, this, [this](bool checked) {
+            m_settings.showGrid = checked;
+            CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
+            m_previewView->setSettings(m_settings);
+        });
+    }
 
     // 4. Animation Preview panel — owned by AnimationPreviewPanel
     m_animPreviewPanel = new AnimationPreviewPanel(this);
@@ -687,8 +773,10 @@ void MainWindow::setupUi() {
     m_animPrevBtn      = m_animPreviewPanel->prevButton();
     m_animPlayPauseBtn = m_animPreviewPanel->playPauseButton();
     m_animNextBtn      = m_animPreviewPanel->nextButton();
-    m_animOverlayBtn   = m_animPreviewPanel->overlayButton();
-    m_animZoomSpin     = m_animPreviewPanel->zoomSpin();
+    m_animOverlayBtn    = m_animPreviewPanel->overlayButton();
+    m_animHandleCombo   = m_animPreviewPanel->handleCombo();
+    m_animOnionSkinBtn  = m_animPreviewPanel->onionSkinButton();
+    m_animZoomSpin      = m_animPreviewPanel->zoomSpin();
     m_animStatusLabel  = m_animPreviewPanel->statusLabel();
     m_animCanvas       = m_animPreviewPanel->animCanvas();
 
@@ -704,10 +792,17 @@ void MainWindow::setupUi() {
             this, &MainWindow::onMarkerSelectedFromCanvas);
     connect(m_animCanvas->overlay(), &EditorOverlayItem::markerChanged,
             this, &MainWindow::onMarkerChangedFromCanvas);
+    // The animation overlay is locked: only the handle shown in the combo can be dragged.
+    m_animCanvas->overlay()->setLockToActiveHandle(true);
+    connect(m_animHandleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onAnimHandleComboChanged);
     connect(m_animOverlayBtn, &QToolButton::toggled, this, [this](bool checked) {
         m_animCanvas->setOverlayVisible(checked);
         if (checked)
             m_animCanvas->setOverlayEditable(!m_animPlaying);
+    });
+    connect(m_animOnionSkinBtn, &QToolButton::toggled, this, [this](bool) {
+        refreshAnimationTest();
     });
 
     // 5. CLI Log panel
@@ -868,6 +963,7 @@ void MainWindow::setupUi() {
 
     updateUiState();
     applySettings();
+    refreshMarkerTemplatesMenu();
 
     setupZoomShortcuts();
 }
@@ -997,6 +1093,10 @@ void MainWindow::setupToolbar() {
 }
 
 void MainWindow::setupStatusBarUi() {
+    // Separator line + vertical padding so the bar doesn't sit flush at the window edge
+    statusBar()->setStyleSheet(QStringLiteral(
+        "QStatusBar { border-top: 1px solid palette(mid); padding: 2px 0px; }"));
+
     m_statusProgressBar = new QProgressBar(this);
     m_statusProgressBar->setRange(0, 0);        // indeterminate (busy) mode
     m_statusProgressBar->setFixedWidth(120);
