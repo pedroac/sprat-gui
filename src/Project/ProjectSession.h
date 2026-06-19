@@ -25,9 +25,9 @@ public:
     QString currentFolder;
     QString layoutSourcePath;
     bool layoutSourceIsList = false;
-    QString sourceFolder;  // Primary source folder for sync operations (mirrors smartFolders[0].path when non-empty)
-    QVector<SmartFolder> smartFolders; // Smart folders — the tool reads from these but never modifies them
-    QVector<ProjectSource> sources;   // Named sources (new model, parallel to smartFolders during migration)
+    QString sourceFolder;  // Primary source folder for sync operations (mirrors sources[0].originalPath when non-empty)
+    QVector<ProjectSource> sources;   // Named sources
+    QVector<SmartFolder> smartFolders; // Auto-scanned source folders
     QStringList activeFramePaths;
     QString frameListPath; // Temporary file path for frame list
     QStringList orphanedSpritePaths; // Sprites whose source image is no longer available
@@ -60,6 +60,34 @@ public:
     SpritePtr selectedSprite;
     QList<SpritePtr> selectedSprites;
     QString selectedPointName;
+
+    /**
+     * @struct SessionState
+     * @brief Snapshot of the project session state for undo/redo.
+     */
+    struct SessionState {
+        QString currentFolder;
+        QString layoutSourcePath;
+        bool layoutSourceIsList = false;
+        QString sourceFolder;
+        QVector<ProjectSource> sources;
+        QStringList activeFramePaths;
+        QString frameListPath;
+        QVector<AtlasEntry> atlases;
+        int activeAtlasIndex = 0;
+        QString cachedLayoutOutput;
+        double cachedLayoutScale = 1.0;
+        QString lastSuccessfulProfile;
+        bool lastRunUsedTrim = false;
+        int selectedTimelineIndex = -1;
+        QString selectedPointName;
+        QStringList selectedSpritePaths;
+        QString primarySelectedSpritePath;
+        bool sourceFolderIsTemp = false;
+    };
+
+    SessionState captureState(bool sourceFolderIsTemp = false) const;
+    void applyState(const SessionState& state);
 
     // --- Transient State ---
     QJsonObject pendingProjectPayload;

@@ -1,6 +1,6 @@
 #include "NavigatorTreeWidget.h"
 #include "SpritePreviewTooltip.h"
-#include "models.h"
+#include "SpriteModels.h"
 
 #include <functional>
 #include <QDrag>

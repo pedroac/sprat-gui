@@ -3,7 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
-#include "models.h"
+#include "ProjectModels.h"
 
 /**
  * @class FolderSyncService
@@ -38,19 +38,6 @@ public:
      */
     static SyncResult detectChanges(
         const QString& folderPath,
-        const QVector<SpritePtr>& currentSprites);
-
-    /**
-     * Scan multiple smart folders and detect changes compared to current layout.
-     * Files listed in each SmartFolder's excludedFiles are treated as already-excluded
-     * (not reported as new even if they exist on disk).
-     *
-     * @param smartFolders Smart folders to scan (with per-folder exclusion lists)
-     * @param currentSprites Current sprites in the layout
-     * @return SyncResult containing detected changes
-     */
-    static SyncResult detectChangesFromSmartFolders(
-        const QVector<SmartFolder>& smartFolders,
         const QVector<SpritePtr>& currentSprites);
 
     /**

@@ -1,6 +1,6 @@
 #pragma once
 #include <QGraphicsObject>
-#include "models.h"
+#include "SpriteModels.h"
 
 class QGraphicsSceneHoverEvent;
 

@@ -1,7 +1,8 @@
 #pragma once
 #include "ZoomableGraphicsView.h"
 #include "IAtlasViewport.h"
-#include "models.h"
+#include "LayoutModels.h"
+#include "AppSettings.h"
 #include "SpriteItem.h"
 #include <atomic>
 #include <optional>
@@ -23,6 +24,7 @@ public:
     explicit LayoutCanvas(QWidget* parent = nullptr);
 
     QWidget* widget() override { return this; }
+    double zoom() const override { return ZoomableGraphicsView::zoom(); }
 
     /**
      * @brief Sets the layout models to display.

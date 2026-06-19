@@ -1,7 +1,7 @@
 #pragma once
 #include "ZoomableGraphicsView.h"
 #include "IAtlasViewport.h"
-#include "models.h"
+#include "AppSettings.h"
 
 class QLabel;
 class QGraphicsScene;
@@ -22,6 +22,7 @@ public:
     void setIdle();
 
     QWidget* widget() override { return this; }
+    double zoom() const override { return ZoomableGraphicsView::zoom(); }
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

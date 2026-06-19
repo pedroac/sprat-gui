@@ -3,7 +3,7 @@
 #include <QHash>
 #include <QIcon>
 #include <QWidget>
-#include "models.h"
+#include "ProjectModels.h"
 
 class NavigatorTreeWidget;
 class ProjectSession;

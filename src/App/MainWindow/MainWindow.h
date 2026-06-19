@@ -14,19 +14,12 @@
 #include <QElapsedTimer>
 #include <QUndoStack>
 
-#include "LayoutCanvas.h"
-#include "PreviewCanvas.h"
 #include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
-#include "ExportWorkspace.h"
 #include "SpratProfilesConfig.h"
 #include "models.h"
+#include "DropAction.h"
 #include "SettingsDialog.h"
-#include "NavigatorPanel.h"
-#include "FrameAnimationWorkspace.h"
-#include "SpriteEditorPanel.h"
-#include "AnimationPreviewPanel.h"
-#include "TimelineEditorPanel.h"
 
 // Forward declarations for Qt classes
 class QComboBox;
@@ -37,7 +30,6 @@ class QLabel;
 class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
-class NavigatorTreeWidget;
 class QListWidget;
 class QLineEdit;
 class QActionGroup;
@@ -62,7 +54,6 @@ class QPlainTextEdit;
 class QAction;
 class QToolButton;
 class QMenu;
-class QUndoStack;
 class QVariantAnimation;
 class QMimeData;
 class QImage;
@@ -70,16 +61,18 @@ class QUrl;
 class QSize;
 
 // Forward declarations for custom classes
-class FrameDetectionDialog;
-class AnimationCanvas;
-class SourceFolderWatcher;
-class ElidedLabel;
 class PackedAtlasView;
 class LayoutOrchestrator;
 class CliSetupController;
+class LayoutCanvas;
+class ExportWorkspace;
+class FrameAnimationWorkspace;
 #include "ILayoutContext.h"
+#include "IWorkspace.h"
+#include "AtlasWorkspace.h"
 #include "ProjectController.h"
 #include "ExportCoordinator.h"
+#include "UndoCommands.h"
 #ifdef Q_OS_WASM
 class WasmFolderBrowserDialog;
 #endif
@@ -92,17 +85,9 @@ class WasmFolderBrowserDialog;
  * between different components including layout canvas, timeline editor,
  * sprite editor, and animation preview.
  */
-class MainWindow : public QMainWindow, public ILayoutContext {
+class MainWindow : public QMainWindow, public ILayoutContext, public IMainWindowUndoHost {
     Q_OBJECT
 public:
-    enum class DropAction {
-        Replace,
-        Merge,
-        Cancel
-    };
-
-    enum class Workspace { Atlas, FrameAnimation, Exportation, AtlasesManagement };
-
     /**
      * @brief Constructor for MainWindow.
      * 
@@ -223,16 +208,12 @@ private slots:
      */
     void onExportAsClicked();
 
-    void showExportWorkspace();
-    void leaveExportWorkspace();
     void onExportWorkspaceRequested(SaveConfig config);
     bool runExport(SaveConfig config);
     void refreshPreview(const QString& profileName, const QString& scaleFilter);
     void schedulePreviewPack(const QString& profileName, const QString& scaleFilter);
-    void showAtlasesManagementWorkspace();
-    void leaveAtlasesManagementWorkspace();
-    void switchToAtlasWorkspace();
-    void switchToFrameAnimWorkspace();
+    void switchWorkspace(IWorkspace* next);
+    void applyWorkspaceLayout(IWorkspace* ws);
 
     /**
      * @brief Handles when a generic process finishes execution.
@@ -259,72 +240,6 @@ private slots:
      * @param sprite Selected sprite
      */
     void onSpriteSelected(SpritePtr sprite);
-
-    // === Sprite Editor Events ===
-    /**
-     * @brief Handles changes to preview zoom level.
-     * 
-     * @param value New zoom level
-     */
-    void onPreviewZoomChanged(double value);
-
-    /**
-     * @brief Handles changes to pivot spin controls.
-     */
-    void onPivotSpinChanged();
-
-    /**
-     * @brief Handles changes to canvas pivot position.
-     * 
-     * @param x New X position
-     * @param y New Y position
-     */
-    void onCanvasPivotChanged(int x, int y);
-
-    /**
-     * @brief Handles changes to handle combo box selection.
-     *
-     * @param index Selected index
-     */
-    void onHandleComboChanged(int index);
-
-    /**
-     * @brief Handles changes to the animation-panel handle combo box.
-     *
-     * @param index Selected index
-     */
-    void onAnimHandleComboChanged(int index);
-
-    /**
-     * @brief Handles changes to the coordinate unit combo box (px / %).
-     */
-    void onCoordUnitChanged();
-
-    /**
-     * @brief Handles request to configure points.
-     */
-    void onPointsConfigClicked();
-
-    // === Marker Copy/Paste & Templates ===
-    void onCopyMarkersRequested();
-    void onPasteMarkersRequested();
-    void onSaveMarkerTemplate();
-    void onApplyMarkerTemplate(const MarkerTemplate& tmpl);
-    void onDeleteMarkerTemplate(const QString& name);
-    void refreshMarkerTemplatesMenu();
-    void applyMarkersToSelection(const QVector<NamedPoint>& points);
-
-    /**
-     * @brief Handles marker selection from canvas.
-     * 
-     * @param name Name of selected marker
-     */
-    void onMarkerSelectedFromCanvas(const QString& name);
-
-    /**
-     * @brief Handles changes to markers from canvas.
-     */
-    void onMarkerChangedFromCanvas();
 
     // === Profile Management Events ===
     /**
@@ -353,24 +268,6 @@ private slots:
      */
     void onManageProfiles();
 
-    // === Animation Events ===
-    /**
-     * @brief Handles changes to animation zoom level.
-     * 
-     * @param value New zoom level
-     */
-    void onAnimZoomChanged(double value);
-
-    /**
-     * @brief Handles previous frame button click.
-     */
-    void onAnimPrevClicked();
-
-    /**
-     * @brief Handles play/pause button click.
-     */
-    void onAnimPlayPauseClicked();
-
     /**
      * @brief Handles generating timelines from frame names.
      */
@@ -395,30 +292,14 @@ private slots:
      */
     void onCancelLoading();
 
-    /**
-     * @brief Handles next frame button click.
-     */
-    void onAnimNextClicked();
-
-    /**
-     * @brief Handles animation timer timeout.
-     */
-    void onAnimTimerTimeout();
-
-    /**
-     * @brief Called when the background animation export task finishes.
-     */
-    void onAnimExportFinished();
     void onGifSyncFinished();
     void onPasteImport();
 
-private slots:
     // === Undo/Redo ===
     void onUndo();
     void onRedo();
 
     // === Sprite Name ===
-    void onSpriteNameEditingFinished();
     void onEditAliases();
 
     // === Asynchronous Loading Slots ===
@@ -438,8 +319,6 @@ private slots:
     void onSyncLayoutRequested(int sourceIndex);
 
     // === Source Folder Sync ===
-    void onSpriteTreeContextMenu(const QPoint& pos);
-    void filterSpriteTree(const QString& text);
     void onFolderWatcherFilesAdded(const QStringList& paths);
     void onFolderWatcherFilesRemoved(const QStringList& paths);
     void onFolderWatcherFilesModified(const QStringList& paths);
@@ -628,36 +507,6 @@ private:
     void setupKeyboardShortcuts();
 
     /**
-     * @brief Syncs pivot spin boxes with current sprite pivot.
-     */
-    void syncPivotSpinsFromSprite();
-
-    /**
-     * @brief Syncs coordinate spin boxes from the currently selected pivot or marker.
-     */
-    void syncCoordinateSpinsFromSelection();
-
-    /**
-     * @brief Returns the editable coordinate-space size for a sprite.
-     */
-    QSize spriteCoordinateSpaceSize(const SpritePtr& sprite) const;
-
-    /**
-     * @brief Clears any pending typed coordinate override for the spin boxes.
-     */
-    void clearCoordinateFieldOverride();
-
-    /**
-     * @brief Stores the currently typed coordinate values for the active selection.
-     */
-    void storeCoordinateFieldOverride();
-
-    /**
-     * @brief Whether a typed coordinate override should be shown instead of recalculated values.
-     */
-    bool coordinateFieldOverrideApplies() const;
-
-    /**
      * @brief Adds project to recent projects list.
      *
      * @param path Path to project file
@@ -754,75 +603,6 @@ private:
     void openSettingsDialogForSection(SettingsDialog::Section section);
 
     /**
-     * @brief Handles animation preview events.
-     * 
-     * @param event Event to handle
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewEvent(QEvent* event);
-
-    /**
-     * @brief Handles mouse press events in animation preview.
-     * 
-     * @param mouseEvent Mouse event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewMousePress(QMouseEvent* mouseEvent);
-
-    /**
-     * @brief Handles mouse move events in animation preview.
-     * 
-     * @param mouseEvent Mouse event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewMouseMove(QMouseEvent* mouseEvent);
-
-    /**
-     * @brief Handles mouse release events in animation preview.
-     * 
-     * @param mouseEvent Mouse event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewMouseRelease(QMouseEvent* mouseEvent);
-
-    /**
-     * @brief Handles key press events in animation preview.
-     * 
-     * @param keyEvent Key event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewKeyPress(QKeyEvent* keyEvent);
-
-    /**
-     * @brief Handles key release events in animation preview.
-     * 
-     * @param keyEvent Key event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewKeyRelease(QKeyEvent* keyEvent);
-
-    /**
-     * @brief Handles wheel events in animation preview.
-     * 
-     * @param wheelEvent Wheel event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewWheel(QWheelEvent* wheelEvent);
-
-    /**
-     * @brief Handles context menu events in animation preview.
-     * 
-     * @param contextEvent Context menu event
-     * @return bool True if event was handled
-     */
-    bool handleAnimPreviewContextMenu(QContextMenuEvent* contextEvent);
-
-    /**
-     * @brief Handles resize events in animation preview.
-     */
-    void handleAnimPreviewResize();
-
-    /**
      * @brief Shows CLI installation overlay.
      */
     void showCliInstallOverlay();
@@ -869,11 +649,6 @@ private:
      * @brief Refreshes handle combo box.
      */
     void refreshHandleCombo();
-
-    /**
-     * @brief Refreshes the animation-panel handle combo to match the current overlay sprite.
-     */
-    void refreshAnimHandleCombo();
     void refreshSpriteTree();
     void updateNavigatorAtlasCombo();
     void syncExcludedAtlas();
@@ -892,7 +667,6 @@ private:
     void moveAtlasSprites(const QStringList& paths, int srcIdx, int tgtIdx);
 
     // Navigator context menu helpers
-    QStringList collectCheckedSpritePaths() const;
     QStringList collectDescendantSpritePaths(QTreeWidgetItem* item) const;
     QString folderPathForTreeItem(QTreeWidgetItem* item) const;
     void onNavigatorDeleteFrames(const QStringList& paths);
@@ -997,11 +771,6 @@ public:
     void updateOnionSkinDisplay();
 
     /**
-     * @brief Selects the sprite corresponding to the current animation frame index.
-     */
-    void syncSelectedSpriteToAnimFrame();
-
-    /**
      * @brief Shows Quick Start guide dialog.
      */
     void onQuickStart();
@@ -1069,29 +838,20 @@ public:
 
 private:
     // === UI Components ===
-    QStackedWidget* m_mainStack;
-    QWidget* m_welcomePage;
+    QStackedWidget* m_mainStack = nullptr;
+    QWidget* m_welcomePage = nullptr;
     ExportWorkspace* m_exportWorkspace = nullptr;
-    bool m_exportWorkspaceActive = false;
     ExportCoordinator* m_exportCoordinator = nullptr;
-    bool       m_frameAnimFirstLoad     = true;
-    QList<int> m_atlasSplitterHSizes;   // saved before orientation→Vertical; restored on return
-    double     m_savedPreviewZoom = -1.0;
-    QPointF    m_savedPreviewCenter;    // scene-coord center saved alongside zoom
-    double     m_savedAnimZoom   = -1.0;
-    QPointF    m_savedAnimCenter;
-    double     m_savedExportZoom = -1.0;
     class AtlasesManagementWorkspace* m_atlasesManagementWorkspace = nullptr;
-    bool m_atlasesManagementWorkspaceActive = false;
+    AtlasWorkspace* m_atlasWorkspace = nullptr;
+    IWorkspace* m_currentWorkspace   = nullptr;
     PackedAtlasView*           m_packedAtlasView          = nullptr;
     LayoutCanvas*              m_exportLayoutCanvas       = nullptr;
-    Workspace m_activeWorkspace = Workspace::Atlas;
-    QLabel* m_welcomeLabel;
-    QPushButton* m_recentProjectBtn;
-    QLabel* m_folderLabel;
+    QLabel* m_welcomeLabel = nullptr;
+    QPushButton* m_recentProjectBtn = nullptr;
+    QLabel* m_folderLabel = nullptr;
 
     QDockWidget* m_atlasDock = nullptr;
-    QSplitter*   m_atlasSplitter = nullptr;
     QDockWidget* m_animationDock = nullptr;
     QDockWidget* m_debugDock = nullptr;
     QPlainTextEdit* m_cliLog = nullptr;
@@ -1099,93 +859,36 @@ private:
     QPlainTextEdit* m_cliInfoText = nullptr;
     QMenu* m_viewMenu = nullptr;
 
-    // Navigator panel (wraps tree + filter + atlas combo)
-    NavigatorPanel* m_navigatorPanel      = nullptr;
     FrameAnimationWorkspace* m_frameAnimWorkspace = nullptr;
-    // Sprite editor panel (wraps selected-sprite controls + preview canvas)
-    SpriteEditorPanel* m_spriteEditorPanel = nullptr;
-    // Animation preview panel (wraps animation canvas + playback controls)
-    AnimationPreviewPanel* m_animPreviewPanel = nullptr;
-    // Timeline editor panel (wraps timeline list + selected-timeline editor)
-    TimelineEditorPanel* m_timelineEditorPanel = nullptr;
 
-    // Atlas view stack (Layout / Navigator)
-    QStackedWidget* m_atlasViewStack      = nullptr;
-    QWidget*        m_editorContent       = nullptr;  // Frame editor panel (right slot of atlasSplitter)
-    NavigatorTreeWidget* m_spriteTree      = nullptr;
-    QLineEdit*      m_spriteFilterEdit    = nullptr;
-    QLabel*         m_spriteFilterResultLabel = nullptr;
-    QCheckBox*      m_showHiddenToggleBtn = nullptr;
-    bool            m_showHiddenItems     = false;
-    QWidget*        m_navigatorAtlasRow   = nullptr;  // Atlas combo row (FrameAnim workspace only)
-    QComboBox*      m_navigatorAtlasCombo = nullptr;
     QAction*        m_atlasWorkspaceAction            = nullptr;
     QAction*        m_frameAnimWorkspaceAction        = nullptr;
     QAction*        m_exportationWorkspaceAction      = nullptr;
     QAction*        m_atlasesManagementWorkspaceAction = nullptr;
 
     // Layout Canvas Area
-    LayoutCanvas* m_canvas = nullptr;
     QStackedWidget* m_profileSelectorStack = nullptr;
-    QComboBox* m_profileCombo = nullptr;
-    QPushButton* m_addProfilesBtn = nullptr;
-    QComboBox* m_sourceResolutionCombo = nullptr;
     double          m_layoutZoom     = 100.0;
-    QTimer* m_sourceResolutionDebounceTimer = nullptr;
-
-    // Selected Frame Editor Area
-    QLineEdit*   m_spriteNameEdit   = nullptr;
-    QPushButton* m_editAliasesBtn   = nullptr;
-    QLabel* m_multiSelectionLabel = nullptr;
-    QComboBox* m_handleCombo;
-    QPushButton* m_configPointsBtn;
-    QDoubleSpinBox* m_pivotXSpin;
-    QDoubleSpinBox* m_pivotYSpin;
-    QComboBox* m_coordUnitCombo = nullptr;
-    QDoubleSpinBox* m_previewZoomSpin;
-    PreviewCanvas* m_previewView;
-
-    struct CoordinateFieldOverride {
-        bool active = false;
-        const Sprite* sprite = nullptr;
-        QString markerName;
-        CoordUnit unit = CoordUnit::Pixels;
-        bool showTrimRect = false;
-        double x = 0.0;
-        double y = 0.0;
-    };
-    CoordinateFieldOverride m_coordinateFieldOverride;
 
     // Animation Test Area
-    QDoubleSpinBox* m_animZoomSpin;
-    QPushButton* m_animPrevBtn;
-    QPushButton* m_animPlayPauseBtn;
-    QPushButton* m_animNextBtn;
-    QToolButton* m_animOverlayBtn  = nullptr;  // Toggles pivot/marker overlay on animation canvas
-    QComboBox*   m_animHandleCombo = nullptr;  // Active handle selector for animation overlay
-    QToolButton* m_animOnionSkinBtn = nullptr; // Toggles onion skin in animation preview
-    QLabel* m_animStatusLabel;
-    AnimationCanvas* m_animCanvas = nullptr;
-    QFutureWatcher<bool> m_animExportWatcher;
-    QString m_animExportOutPath;
     QFutureWatcher<bool> m_gifSyncWatcher;
     std::function<void(bool)> m_gifSyncOnDone;
     QFutureWatcher<QString> m_cliDiagnosticsWatcher;
 
-    QAction* m_loadAction;
+    QAction* m_loadAction = nullptr;
     QAction* m_loadProjectAction = nullptr;
     QAction* m_addSourceFileAction = nullptr;
     QAction* m_addSourceUrlAction = nullptr;
-    QAction* m_saveAction;
+    QAction* m_saveAction = nullptr;
     QAction* m_saveAsAction = nullptr;
     QAction* m_exportAction = nullptr;
-    QLabel* m_statusLabel;
+    QLabel* m_statusLabel = nullptr;
     QProgressBar* m_statusProgressBar = nullptr;
     QToolButton* m_recentProjectsBtn = nullptr;
     QMenu* m_recentProjectsMenu = nullptr;
 
     // === Data Models ===
-    ProjectSession* m_session;
+    ProjectSession* m_session = nullptr;
 
     CliSetupController* m_cliSetup = nullptr;
     QString m_spratLayoutBin;
@@ -1195,17 +898,12 @@ private:
     QString m_spratUnpackBin;
     SourceFolderWatcher* m_folderWatcher = nullptr;
     QAction* m_openSourceFolderAction = nullptr;
-    // m_projectFilePath and m_sourceFolderIsTemp moved to ProjectController
     SyncMode m_appliedSyncMode = SyncMode::None;
 #ifndef SPRAT_EMBEDDED_CLI
     QProcess* m_process;
 #endif
     bool m_cliReady = false;
     bool m_isLoading = false;
-    QTimer* m_animTimer;
-    int m_animFrameIndex = 0;
-    bool m_animPlaying = false;
-    QElapsedTimer m_animElapsed; // wall-clock time since last rendered frame
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
     std::atomic<bool> m_isCanceled{false};
@@ -1215,13 +913,10 @@ private:
     QWidget* m_cliInstallOverlay = nullptr;
     QLabel* m_cliInstallOverlayLabel = nullptr;
     QLabel* m_atlasDimsLabel = nullptr;
-    ElidedLabel* m_spriteNameFooterLabel = nullptr;
-    QLabel* m_spriteDimsLabel = nullptr;
     QProgressBar* m_cliInstallProgress = nullptr;
     QPushButton* m_cancelLoadingButton = nullptr;
     QPlainTextEdit* m_cliInstallLog = nullptr;
     QString m_loadingUiMessage = "Loading...";
-    // m_shouldClearSpritesFolder moved to ProjectController
     bool m_mergeReplaceAllDuplicates = true;
     QTimer* m_watchModePeriodicCheckTimer = nullptr;
 
@@ -1239,56 +934,12 @@ private:
     // === Export Presets ===
     QVector<ExportPreset> m_exportPresets;
 
-    // === Marker Clipboard & Templates ===
-    QVector<NamedPoint>     m_markerClipboard;
-    QVector<MarkerTemplate> m_markerTemplates;
-
-    // === Async Loading Helpers (watchers moved to ProjectController) ===
+    // === IMainWindowUndoHost overrides ===
+    void refreshUiAfterUndo() override;
+    void setSourceFolderIsTemp(bool isTemp) override;
 
     void processProjectLoadResult(const ProjectController::ProjectLoadResult& result);
     void processZipDiscoveryResult(const ProjectController::ZipDiscoveryResult& result);
-
-public:
-    struct SessionUndoState {
-        QString currentFolder;
-        QString layoutSourcePath;
-        bool layoutSourceIsList = false;
-        QString sourceFolder;
-        QVector<ProjectSource> sources;
-        QStringList activeFramePaths;
-        QString frameListPath;
-        QVector<AtlasEntry> atlases;
-        int activeAtlasIndex = 0;
-        QString cachedLayoutOutput;
-        double cachedLayoutScale = 1.0;
-        QString lastSuccessfulProfile;
-        bool lastRunUsedTrim = false;
-        int selectedTimelineIndex = -1;
-        QString selectedPointName;
-        QStringList selectedSpritePaths;
-        QString primarySelectedSpritePath;
-        bool sourceFolderIsTemp = false;
-    };
-
-    struct PendingSessionUndoCommand {
-        QString text;
-        SessionUndoState before;
-    };
-
-    SessionUndoState captureSessionUndoState() const;
-    void applySessionUndoState(const SessionUndoState& state);
-    void pushSessionUndoCommand(const QString& text,
-                                const SessionUndoState& before,
-                                const SessionUndoState& after,
-                                bool alreadyApplied = true);
-    void beginPendingSessionUndoCommand(const QString& text);
-    void finalizePendingSessionUndoCommand();
-    void discardPendingSessionUndoCommand();
-    bool hasMeaningfulLayout(const SessionUndoState& state) const;
-
-private:
-
-    std::optional<PendingSessionUndoCommand> m_pendingSessionUndoCommand;
     void processFrameDetectionResult(const ProjectController::FrameDetectionTaskResult& result);
     void processTarExtractionResult(const ProjectController::TarExtractionResult& result);
     void processFrameExtractionResult(const ProjectController::FrameExtractionResult& result);
@@ -1312,7 +963,6 @@ private:
     QSize m_singleImageDimensions;  // Cache to avoid redundant image loads
     bool m_inResize = false;
     bool m_isRestoringProject = false;
-    // hidden folders are now stored per-source in ProjectSource::hiddenFolders
 
 #ifdef Q_OS_WASM
     static MainWindow* s_wasmInstance;

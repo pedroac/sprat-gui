@@ -2,7 +2,7 @@
 
 #include <QObject>
 #include <QTimer>
-#include "models.h"
+#include "AnimationModels.h"
 
 class QLabel;
 

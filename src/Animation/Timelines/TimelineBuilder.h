@@ -2,7 +2,7 @@
 
 #include <QVector>
 #include <QStringList>
-#include "models.h"
+#include "SpriteModels.h"
 
 struct TimelineSeed {
     QString name;

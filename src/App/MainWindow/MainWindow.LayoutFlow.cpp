@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "LayoutCanvas.h"
 #include "LayoutOrchestrator.h"
 #include "AtlasesManagementWorkspace.h"
 #include "ElidedLabel.h"
@@ -97,17 +98,20 @@ void MainWindow::setLoading(bool loading) {
             showLoadingOverlayNow();
         }
         // Disable dockers and canvas while loading - prevent interaction with stale data
-        if (m_canvas) {
-            m_canvas->setEnabled(false);
-            // Create semi-transparent overlay if not already created
-            if (!m_canvasOverlay) {
-                m_canvasOverlay = new QWidget(m_canvas);
-                m_canvasOverlay->setStyleSheet("background-color: rgba(128, 128, 128, 160);");
+        {
+            auto* canvas = m_atlasWorkspace->canvas();
+            if (canvas) {
+                canvas->setEnabled(false);
+                // Create semi-transparent overlay if not already created
+                if (!m_canvasOverlay) {
+                    m_canvasOverlay = new QWidget(canvas);
+                    m_canvasOverlay->setStyleSheet("background-color: rgba(128, 128, 128, 160);");
+                }
+                // Show overlay and resize to match canvas
+                m_canvasOverlay->resize(canvas->size());
+                m_canvasOverlay->raise();
+                m_canvasOverlay->show();
             }
-            // Show overlay and resize to match canvas
-            m_canvasOverlay->resize(m_canvas->size());
-            m_canvasOverlay->raise();
-            m_canvasOverlay->show();
         }
         if (m_atlasDock) m_atlasDock->setEnabled(false);
         if (m_animationDock) m_animationDock->setEnabled(false);
@@ -122,11 +126,14 @@ void MainWindow::setLoading(bool loading) {
             m_loadingOverlayVisible = false;
         }
         // Re-enable dockers and canvas when loading finishes
-        if (m_canvas) {
-            m_canvas->setEnabled(true);
-            // Hide overlay to restore normal canvas appearance
-            if (m_canvasOverlay) {
-                m_canvasOverlay->hide();
+        {
+            auto* canvas = m_atlasWorkspace->canvas();
+            if (canvas) {
+                canvas->setEnabled(true);
+                // Hide overlay to restore normal canvas appearance
+                if (m_canvasOverlay) {
+                    m_canvasOverlay->hide();
+                }
             }
         }
         if (m_atlasDock) m_atlasDock->setEnabled(true);
@@ -142,7 +149,10 @@ void MainWindow::setLoading(bool loading) {
 }
 
 void MainWindow::onSpriteSelected(SpritePtr sprite) {
-    clearCoordinateFieldOverride();
+    m_atlasWorkspace->clearCoordinateOverride();
+
+    auto* spriteEditorPanel = m_atlasWorkspace->spriteEditorPanel();
+    auto* previewView = spriteEditorPanel->previewCanvas();
 
     // Flipbook: capture the previous pivot's screen position before any state changes.
     QPoint savedPivotScreenPos;
@@ -157,32 +167,32 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
             doFlipbookAlign = !prevLabel.isEmpty() && prevLabel == newLabel;
         }
         if (doFlipbookAlign)
-            savedPivotScreenPos = m_previewView->mapFromScene(
+            savedPivotScreenPos = previewView->mapFromScene(
                 QPointF(m_session->selectedSprite->pivotX, m_session->selectedSprite->pivotY));
     }
 
     // Flipbook: capture the actual view zoom now, before applySpriteSelection may change it
     // via the spin box (which can be stale relative to the actual transform).
-    const double flipbookZoom = doFlipbookAlign ? m_previewView->transform().m11() : 0.0;
+    const double flipbookZoom = doFlipbookAlign ? previewView->transform().m11() : 0.0;
 
     m_session->selectedSprite = sprite;
     if (sprite) {
         m_statusLabel->setText(tr("Selected: ") + sprite->name);
     }
-    if (m_spriteDimsLabel) {
+    if (spriteEditorPanel->spriteDimsLabel()) {
         if (sprite) {
             const int w = sprite->rotated ? sprite->rect.height() : sprite->rect.width();
             const int h = sprite->rotated ? sprite->rect.width()  : sprite->rect.height();
-            if (m_spriteNameFooterLabel) {
-                m_spriteNameFooterLabel->setFullText(sprite->name);
-                m_spriteNameFooterLabel->setVisible(true);
+            if (spriteEditorPanel->spriteNameFooterLabel()) {
+                spriteEditorPanel->spriteNameFooterLabel()->setFullText(sprite->name);
+                spriteEditorPanel->spriteNameFooterLabel()->setVisible(true);
             }
-            m_spriteDimsLabel->setText(QString("%1 \xc3\x97 %2 px").arg(w).arg(h));
-            m_spriteDimsLabel->setVisible(true);
+            spriteEditorPanel->spriteDimsLabel()->setText(QString("%1 \xc3\x97 %2 px").arg(w).arg(h));
+            spriteEditorPanel->spriteDimsLabel()->setVisible(true);
         } else {
-            if (m_spriteNameFooterLabel)
-                m_spriteNameFooterLabel->setVisible(false);
-            m_spriteDimsLabel->setVisible(false);
+            if (spriteEditorPanel->spriteNameFooterLabel())
+                spriteEditorPanel->spriteNameFooterLabel()->setVisible(false);
+            spriteEditorPanel->spriteDimsLabel()->setVisible(false);
         }
     }
     const FrameZoomMode effectiveZoomMode =
@@ -191,72 +201,38 @@ void MainWindow::onSpriteSelected(SpritePtr sprite) {
     SpriteSelectionPresenter::applySpriteSelection(
         sprite,
         m_session->selectedPointName,
-        {m_spriteNameEdit, m_pivotXSpin, m_pivotYSpin,
-         m_configPointsBtn, m_previewView, m_previewZoomSpin, m_handleCombo},
+        {spriteEditorPanel->spriteNameEdit(), spriteEditorPanel->pivotXSpin(), spriteEditorPanel->pivotYSpin(),
+         spriteEditorPanel->configPointsBtn(), previewView, spriteEditorPanel->previewZoomSpin(), spriteEditorPanel->handleCombo()},
         effectiveZoomMode);
 
     if (doFlipbookAlign && sprite) {
         // Mark zoom as manual so any pending resize-debounce timer does not fire
         // initialFit() and overwrite the zoom we are about to restore.
-        m_previewView->setZoomManual(true);
-        m_previewView->setZoom(flipbookZoom);
-        m_previewView->alignPivotToScreenPos(QPoint(sprite->pivotX, sprite->pivotY), savedPivotScreenPos);
+        previewView->setZoomManual(true);
+        previewView->setZoom(flipbookZoom);
+        previewView->alignPivotToScreenPos(QPoint(sprite->pivotX, sprite->pivotY), savedPivotScreenPos);
     }
 
-    syncCoordinateSpinsFromSelection();
+    m_atlasWorkspace->refreshSpriteEditor();
 
-    if (m_editAliasesBtn) m_editAliasesBtn->setEnabled(sprite != nullptr);
-    if (m_spriteEditorPanel) m_spriteEditorPanel->markerTemplatesBtn()->setEnabled(sprite != nullptr);
+    if (spriteEditorPanel->editAliasesBtn()) spriteEditorPanel->editAliasesBtn()->setEnabled(sprite != nullptr);
+    spriteEditorPanel->markerTemplatesBtn()->setEnabled(sprite != nullptr);
     updateAliasesButton();
     updateOnionSkinDisplay();
 }
 
 void MainWindow::updateAliasesButton() {
-    if (!m_editAliasesBtn) return;
+    auto* editAliasesBtn = m_atlasWorkspace->spriteEditorPanel()->editAliasesBtn();
+    if (!editAliasesBtn) return;
     if (!m_session || !m_session->selectedSprite) {
-        m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
+        editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
         return;
     }
     const int count = m_session->selectedSprite->aliases.size();
     if (count > 0)
-        m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases (%1)").arg(count));
+        editAliasesBtn->setToolTip(tr("Edit sprite name aliases (%1)").arg(count));
     else
-        m_editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
-}
-
-void MainWindow::onSpriteNameEditingFinished() {
-    if (!m_session || !m_session->selectedSprite || !m_spriteNameEdit) return;
-    const QString newName = m_spriteNameEdit->text().trimmed();
-    const QString oldName = m_session->selectedSprite->name;
-
-    if (newName.isEmpty()) {
-        // Revert display — don't allow clearing the name.
-        m_spriteNameEdit->blockSignals(true);
-        m_spriteNameEdit->setText(oldName);
-        m_spriteNameEdit->blockSignals(false);
-        return;
-    }
-    if (newName == oldName) return;
-
-    const QStringList aliases = m_session->selectedSprite->aliases;
-    m_session->selectedSprite->name = newName;
-    if (m_statusLabel) m_statusLabel->setText(tr("Selected: ") + newName);
-
-    SpritePtr sprite = m_session->selectedSprite;
-    m_undoStack->push(new SetSpriteNamesCommand(
-        sprite,
-        oldName, aliases,
-        newName, aliases,
-        [this, sprite]() {
-            if (m_session && m_session->selectedSprite == sprite) {
-                m_spriteNameEdit->blockSignals(true);
-                m_spriteNameEdit->setText(sprite->name);
-                m_spriteNameEdit->blockSignals(false);
-                if (m_statusLabel)
-                    m_statusLabel->setText(tr("Selected: ") + sprite->name);
-            }
-        }
-    ));
+        editAliasesBtn->setToolTip(tr("Edit sprite name aliases"));
 }
 
 void MainWindow::onEditAliases() {
@@ -355,7 +331,8 @@ void MainWindow::onEditAliases() {
 }
 
 void MainWindow::onProfileChanged() {
-    const QString requestedProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+    auto* profileCombo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+    const QString requestedProfile = profileCombo ? profileCombo->currentData().toString() : QString();
     if (requestedProfile == m_currentProfile) return;
 
     if (m_layoutOrchestrator) m_layoutOrchestrator->clearProfilesTried();
@@ -364,11 +341,12 @@ void MainWindow::onProfileChanged() {
     m_currentProfile = requestedProfile;
 
     m_undoStack->push(new SetProfileCommand(
-        m_profileCombo,
+        profileCombo,
         oldProfile,
         requestedProfile,
         [this]() {
-            m_currentProfile = m_profileCombo->currentData().toString();
+            auto* combo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+            m_currentProfile = combo ? combo->currentData().toString() : QString();
             if (m_layoutOrchestrator) m_layoutOrchestrator->setCurrentProfile(m_currentProfile);
             scheduleLayoutRebuild(true);
         }
@@ -381,9 +359,10 @@ void MainWindow::onProfileChanged() {
 }
 
 void MainWindow::onLayoutZoomChanged(double value) {
-    if (m_canvas) {
-        m_canvas->setZoomManual(true);
-        m_canvas->setZoom(value / 100.0);
+    auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+    if (canvas) {
+        canvas->setZoomManual(true);
+        canvas->setZoom(value / 100.0);
     }
 }
 

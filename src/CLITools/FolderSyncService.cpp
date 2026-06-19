@@ -119,62 +119,6 @@ FolderSyncService::SyncResult FolderSyncService::detectChangesFromSources(
     return result;
 }
 
-FolderSyncService::SyncResult FolderSyncService::detectChangesFromSmartFolders(
-    const QVector<SmartFolder>& smartFolders,
-    const QVector<SpritePtr>& currentSprites) {
-
-    SyncResult result;
-    if (smartFolders.isEmpty()) {
-        result.error = "No smart folders configured";
-        return result;
-    }
-
-    // Build the union of all image files across all smart folders,
-    // subtracting each folder's excluded files.
-    QSet<QString> folderImagesSet;
-    for (const SmartFolder& sf : smartFolders) {
-        if (sf.path.isEmpty()) continue;
-        QDir dir(sf.path);
-        if (!dir.exists()) continue;
-
-        const QStringList images = getImageFilesInFolder(sf.path);
-        // Build per-folder exclusion set (resolved to absolute paths)
-        QSet<QString> excluded;
-        for (const QString& rel : sf.excludedFiles) {
-            excluded.insert(dir.absoluteFilePath(rel));
-        }
-        for (const QString& imgPath : images) {
-            if (!excluded.contains(imgPath)) {
-                folderImagesSet.insert(imgPath);
-            }
-        }
-    }
-
-    // Get current sprite paths
-    const QStringList currentPaths = getSpritePaths(currentSprites);
-    const QSet<QString> currentPathsSet(currentPaths.cbegin(), currentPaths.cend());
-
-    // Detect added files (in smart folders but not in sprites)
-    for (const QString& imagePath : folderImagesSet) {
-        if (!currentPathsSet.contains(imagePath)) {
-            result.newImagePaths.append(imagePath);
-        }
-    }
-
-    // Detect removed files (in sprites but not in any smart folder)
-    for (const QString& spritePath : currentPaths) {
-        if (!folderImagesSet.contains(spritePath)) {
-            result.deletedImagePaths.append(spritePath);
-        }
-    }
-
-    qInfo() << "FolderSyncService(smart): Detected"
-            << result.newImagePaths.size() << "new files,"
-            << result.deletedImagePaths.size() << "deleted files";
-
-    return result;
-}
-
 bool FolderSyncService::mergeSyncResults(
     LayoutModel& layout,
     const SyncResult& changes,

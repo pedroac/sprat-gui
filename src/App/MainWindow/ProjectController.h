@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "models.h"
+#include "DropAction.h"
 
 class ProjectSession;
 class QMimeData;
@@ -37,13 +38,6 @@ class ProjectController : public QObject {
     Q_OBJECT
 
 public:
-    // Mirrors MainWindow::DropAction with the same integer values.
-    enum class DropAction {
-        Replace = 0,
-        Merge   = 1,
-        Cancel  = 2
-    };
-
     // Mirrors MainWindow::FrameDetectionResult
     struct FrameDetectionResult {
         QVector<QRect> frames;

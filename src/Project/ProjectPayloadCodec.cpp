@@ -655,22 +655,12 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 for (const auto& h : hiddenArr) src.hiddenFolders.append(h.toString());
                 out.sources.append(src);
             }
-            // Derive smart_folders from sources for backward-compat consumers
-            for (const auto& src : out.sources) {
-                if (src.type == SourceType::Folder) {
-                    SmartFolder sf;
-                    sf.path = src.originalPath;
-                    sf.excludedFiles = src.excludedFiles;
-                    out.smartFolders.append(sf);
-                }
-            }
         } else {
             // Read smart_folders (legacy format)
             const QJsonArray sfArr = layoutInfo["smart_folders"].toArray();
             if (!sfArr.isEmpty()) {
                 for (const auto& sfVal : sfArr) {
                     const QJsonObject sfObj = sfVal.toObject();
-                    SmartFolder sf;
                     QString path = sfObj["path"].toString();
                     if (!path.isEmpty() && QDir::isRelativePath(path) && !currentFolder.isEmpty()) {
                         path = QDir(currentFolder).absoluteFilePath(path);
@@ -678,17 +668,16 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                             path.clear();
                         }
                     }
-                    sf.path = path;
+                    QStringList excludedFiles;
                     const QJsonArray excArr = sfObj["excluded"].toArray();
-                    sf.excludedFiles.reserve(excArr.size());
-                    for (const auto& e : excArr) sf.excludedFiles.append(e.toString());
-                    out.smartFolders.append(sf);
+                    excludedFiles.reserve(excArr.size());
+                    for (const auto& e : excArr) excludedFiles.append(e.toString());
                     // Convert to ProjectSource
                     ProjectSource src;
                     src.name = QFileInfo(path).fileName();
                     src.type = SourceType::Folder;
                     src.originalPath = path;
-                    src.excludedFiles = sf.excludedFiles;
+                    src.excludedFiles = excludedFiles;
                     out.sources.append(src);
                 }
             } else {
@@ -701,9 +690,6 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                             legacyFolder.clear();
                         }
                     }
-                    SmartFolder sf;
-                    sf.path = legacyFolder;
-                    out.smartFolders.append(sf);
                     // Convert to ProjectSource
                     ProjectSource src;
                     src.name = QFileInfo(legacyFolder).fileName();

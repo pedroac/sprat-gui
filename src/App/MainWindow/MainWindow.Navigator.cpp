@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include "FrameAnimationWorkspace.h"
+#include "TimelineEditorPanel.h"
+#include "LayoutCanvas.h"
 #include "AtlasesManagementWorkspace.h"
 #include "MessageDialog.h"
 #include "NavigatorTreeWidget.h"
@@ -26,39 +29,6 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QUrl>
-
-// ---------------------------------------------------------------------------
-// Helper: collect sprite paths from all checked (Qt::Checked) leaf items.
-// Falls back to the single current/selected item if nothing is checked.
-// ---------------------------------------------------------------------------
-QStringList MainWindow::collectCheckedSpritePaths() const
-{
-    QStringList paths;
-    std::function<void(QTreeWidgetItem*)> walk = [&](QTreeWidgetItem* item) {
-        if (item->childCount() == 0) {
-            if (item->checkState(0) == Qt::Checked) {
-                auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
-                if (sprite && !sprite->path.isEmpty())
-                    paths.append(sprite->path);
-            }
-        } else {
-            for (int i = 0; i < item->childCount(); ++i)
-                walk(item->child(i));
-        }
-    };
-    for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
-        walk(m_spriteTree->topLevelItem(i));
-
-    if (paths.isEmpty()) {
-        QTreeWidgetItem* cur = m_spriteTree->currentItem();
-        if (cur) {
-            auto sprite = cur->data(0, Qt::UserRole).value<SpritePtr>();
-            if (sprite && !sprite->path.isEmpty())
-                paths.append(sprite->path);
-        }
-    }
-    return paths;
-}
 
 // ---------------------------------------------------------------------------
 // Helper: recursively collect all leaf sprite paths under a group node.
@@ -152,267 +122,6 @@ QString MainWindow::absolutePathForNavItem(QTreeWidgetItem* item) const
 }
 
 // ---------------------------------------------------------------------------
-// Context menu slot
-// ---------------------------------------------------------------------------
-void MainWindow::onSpriteTreeContextMenu(const QPoint& pos)
-{
-    QTreeWidgetItem* clickedItem = m_spriteTree->itemAt(pos);
-
-    // Paths for the right-clicked item and all its descendants.
-    QStringList clickedPaths;
-    {
-        std::function<void(QTreeWidgetItem*)> walk = [&](QTreeWidgetItem* item) {
-            QVariant v = item->data(0, Qt::UserRole);
-            if (v.isValid()) {
-                auto sprite = v.value<SpritePtr>();
-                if (sprite && !sprite->path.isEmpty())
-                    clickedPaths.append(sprite->path);
-            } else {
-                for (int i = 0; i < item->childCount(); ++i)
-                    walk(item->child(i));
-            }
-        };
-        if (clickedItem) walk(clickedItem);
-    }
-
-    // Paths from checkbox-checked leaf sprites (no fallback).
-    QStringList checkedPaths;
-    {
-        std::function<void(QTreeWidgetItem*)> walkChecked = [&](QTreeWidgetItem* item) {
-            if (item->childCount() == 0) {
-                if (item->checkState(0) == Qt::Checked) {
-                    auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
-                    if (sprite && !sprite->path.isEmpty())
-                        checkedPaths.append(sprite->path);
-                }
-            } else {
-                for (int i = 0; i < item->childCount(); ++i)
-                    walkChecked(item->child(i));
-            }
-        };
-        for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
-            walkChecked(m_spriteTree->topLevelItem(i));
-    }
-
-    const bool clickedIsLeaf  = clickedItem && clickedItem->childCount() == 0
-                                && clickedItem->data(0, Qt::UserRole).isValid();
-    const bool clickedIsGroup = clickedItem && clickedItem->childCount() > 0;
-    // A source node stores its index in UserRole+1 (set in refreshSpriteTree).
-    const bool clickedIsSourceNode = clickedItem
-                                     && clickedItem->data(0, Qt::UserRole + 1).isValid()
-                                     && !clickedItem->data(0, Qt::UserRole).isValid();
-    const int  clickedSourceIndex  = clickedIsSourceNode
-                                     ? clickedItem->data(0, Qt::UserRole + 1).toInt() : -1;
-    const bool hasChecked     = !checkedPaths.isEmpty();
-    const bool hasTimeline    = m_session->selectedTimelineIndex >= 0
-                                && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size();
-
-    // Special item types stored in UserRole+2 (int):
-    //   1 = hidden-folder placeholder  2 = excluded item
-    // UserRole+3 = source index, UserRole+4 = relative path within source.
-    const int clickedItemType = clickedItem
-        ? clickedItem->data(0, Qt::UserRole + 2).toInt() : 0;
-    const int  clickedSpecialSourceIdx    = (clickedItemType > 0 && clickedItem)
-        ? clickedItem->data(0, Qt::UserRole + 3).toInt() : -1;
-    const QString clickedSpecialRelPath   = (clickedItemType > 0 && clickedItem)
-        ? clickedItem->data(0, Qt::UserRole + 4).toString() : QString();
-
-    // Hidden-placeholder (1), excluded item (2), and excluded-section header (3)
-    // each get a minimal single-action menu — no timeline, grouping, or other
-    // sections apply to them.
-    if (clickedItemType > 0) {
-        QMenu menu(this);
-        if (clickedItemType == 1) {
-            // Hidden-folder placeholder: offer Unhide.
-            auto* action = menu.addAction(tr("Unhide \"%1\"").arg(clickedItem->text(0)));
-            if (menu.exec(m_spriteTree->viewport()->mapToGlobal(pos)) == action)
-                onNavigatorUnhideGroup(clickedSpecialSourceIdx, clickedSpecialRelPath);
-        } else if (clickedItemType == 2) {
-            // Excluded item: offer Re-include for this entry.
-            auto* action = menu.addAction(
-                tr("Re-include \"%1\"").arg(QFileInfo(clickedSpecialRelPath).fileName()));
-            if (menu.exec(m_spriteTree->viewport()->mapToGlobal(pos)) == action)
-                onNavigatorReincludeFromSource(clickedSpecialSourceIdx, clickedSpecialRelPath);
-        } else if (clickedItemType == 3) {
-            // Excluded-section (trash) header: offer Re-include all.
-            // Collect leaf data recursively before any mutation (refreshSpriteTree invalidates items).
-            QVector<QPair<int, QString>> toReinclude;
-            std::function<void(QTreeWidgetItem*)> collectExcluded = [&](QTreeWidgetItem* node) {
-                for (int i = 0; i < node->childCount(); ++i) {
-                    QTreeWidgetItem* child = node->child(i);
-                    if (child->data(0, Qt::UserRole + 2).toInt() == 2) {
-                        toReinclude.append({child->data(0, Qt::UserRole + 3).toInt(),
-                                            child->data(0, Qt::UserRole + 4).toString()});
-                    } else {
-                        collectExcluded(child); // recurse into folder nodes
-                    }
-                }
-            };
-            collectExcluded(clickedItem);
-            if (!toReinclude.isEmpty()) {
-                auto* action = menu.addAction(tr("Re-include all (%1)").arg(toReinclude.size()));
-                if (menu.exec(m_spriteTree->viewport()->mapToGlobal(pos)) == action) {
-                    m_undoStack->beginMacro(tr("Re-include All Excluded"));
-                    for (const auto& [srcIdx, rel] : toReinclude)
-                        onNavigatorReincludeFromSource(srcIdx, rel);
-                    m_undoStack->endMacro();
-                }
-            }
-        }
-        return;
-    }
-
-    bool clickedGroupHasGroups = false;
-    if (clickedIsGroup) {
-        for (int i = 0; i < clickedItem->childCount(); ++i) {
-            if (clickedItem->child(i)->childCount() > 0) {
-                clickedGroupHasGroups = true;
-                break;
-            }
-        }
-    }
-
-    const QString subfolder = clickedItem ? folderPathForTreeItem(clickedItem) : QString();
-
-    // Helper: find which smart folder (if any) contains the given absolute path.
-    // Returns the index into m_session->smartFolders, or -1 if not in any smart folder.
-    auto smartFolderIndexFor = [this](const QString& absPath) -> int {
-        for (int i = 0; i < m_session->smartFolders.size(); ++i) {
-            const QString& sfPath = m_session->smartFolders[i].path;
-            if (!sfPath.isEmpty() && absPath.startsWith(sfPath + "/")) {
-                return i;
-            }
-        }
-        return -1;
-    };
-
-    // Determine if the clicked leaf is inside a smart folder (for single-frame Exclude action).
-    const QString clickedLeafPath = (clickedIsLeaf && !clickedPaths.isEmpty()) ? clickedPaths.first() : QString();
-    const int clickedLeafSmartFolderIdx = clickedLeafPath.isEmpty() ? -1 : smartFolderIndexFor(clickedLeafPath);
-    const bool clickedLeafIsSmartFolder = clickedLeafSmartFolderIdx >= 0;
-
-    QMenu menu(this);
-    // Helper: insert a separator only when there are preceding items.
-    bool hadItems = false;
-    auto addSep = [&]() { if (hadItems) { menu.addSeparator(); hadItems = false; } };
-
-    const bool isFrameAnimWorkspace = (m_activeWorkspace == Workspace::FrameAnimation);
-
-    // ── Section 0: source-specific actions (top-level source nodes only) ───
-    QAction* openFolderAction   = nullptr;
-    QAction* syncSourceAction   = nullptr;
-    QAction* syncLayoutAction   = nullptr;
-    QAction* removeSourceAction = nullptr;
-    if (clickedIsSourceNode) {
-        // Open the cached folder where the source's files live (so the user can edit them).
-        QString openFolderPath;
-        if (clickedSourceIndex >= 0 && clickedSourceIndex < m_session->sources.size()) {
-            const ProjectSource& src = m_session->sources[clickedSourceIndex];
-            if (!src.cachedFolderPath.isEmpty() && QDir(src.cachedFolderPath).exists())
-                openFolderPath = src.cachedFolderPath;
-        }
-        if (!openFolderPath.isEmpty()) {
-            openFolderAction = menu.addAction(tr("Open Folder"));
-            openFolderAction->setData(openFolderPath);
-            hadItems = true;
-        }
-        if (!isFrameAnimWorkspace) {
-            if (clickedSourceIndex >= 0 && clickedSourceIndex < m_session->sources.size()) {
-                const ProjectSource& src = m_session->sources[clickedSourceIndex];
-                const bool isUrl    = (src.type == SourceType::Url);
-                const bool hasCopy  = !src.cachedFolderPath.isEmpty();
-                const bool isFolder = (src.type == SourceType::Folder);
-                syncSourceAction = menu.addAction(tr("Sync Source to Layout"));
-                syncSourceAction->setEnabled(!isUrl && (isFolder || hasCopy));
-                syncLayoutAction = menu.addAction(tr("Sync Layout to Source"));
-                syncLayoutAction->setEnabled(!isUrl && hasCopy);
-            }
-            removeSourceAction = menu.addAction(tr("Remove \"%1\"").arg(clickedItem->text(0)));
-        }
-        hadItems = true;
-        addSep();
-    }
-
-    // ── Section 1: remove / exclude from layout ────────────────────────────
-    QAction* deleteFrameAction    = nullptr;
-    QAction* excludeFrameAction   = nullptr;
-    QMenu*   hideGroupMenu              = nullptr;
-    QAction* hideGroupWithDescAction    = nullptr;
-    QAction* hideGroupOnlyAction        = nullptr;
-    QAction* deleteSelectedAction = nullptr;
-
-    if (!isFrameAnimWorkspace) {
-        if (clickedIsLeaf) {
-            if (clickedLeafIsSmartFolder) {
-                excludeFrameAction = menu.addAction(tr("Exclude"));
-            } else {
-                deleteFrameAction = menu.addAction(tr("Exclude"));
-            }
-            hadItems = true;
-        }
-        if (clickedIsGroup && !clickedIsSourceNode) {
-            hideGroupMenu           = menu.addMenu(tr("Hide..."));
-            hideGroupWithDescAction = hideGroupMenu->addAction(tr("with descendants"));
-            hideGroupOnlyAction     = hideGroupMenu->addAction(tr("group only"));
-            hadItems = true;
-        }
-        if (hasChecked) {
-            deleteSelectedAction = menu.addAction(tr("Exclude selected"));
-            hadItems = true;
-        }
-    }
-
-    // ── Section 2: add frames (groups and source nodes) ──────────────────
-    QAction* addFramesAction = nullptr;
-    if (clickedIsGroup) {
-        addSep();
-        addFramesAction = menu.addAction(
-            tr("Add frames into '%1'...").arg(clickedItem->text(0)));
-        hadItems = true;
-    }
-
-    // ── Section 3: timelines ───────────────────────────────────────────────
-    QAction* createTimelineFromGroupAction    = nullptr;
-    QAction* autoCreateTimelinesAction        = nullptr;
-    QAction* createTimelineFromSelectedAction = nullptr;
-    QAction* addToTimelineAction              = nullptr;
-
-    if (m_activeWorkspace == Workspace::FrameAnimation && (clickedIsGroup || hasChecked)) {
-        addSep();
-        // "Create timeline from group" doesn't apply to source nodes; use Auto-create instead.
-        if (clickedIsGroup && !clickedIsSourceNode) { createTimelineFromGroupAction    = menu.addAction(tr("Create timeline from group"));          hadItems = true; }
-        // For source nodes always offer Auto-create (name-pattern grouping works on flat structures too).
-        if (clickedGroupHasGroups || clickedIsSourceNode) { autoCreateTimelinesAction  = menu.addAction(tr("Auto-create timelines"));               hadItems = true; }
-        if (hasChecked)                             { createTimelineFromSelectedAction = menu.addAction(tr("Create timeline from selected frames")); hadItems = true; }
-        if (hasChecked && hasTimeline)              { addToTimelineAction              = menu.addAction(tr("Add selected to current timeline"));    hadItems = true; }
-    }
-
-    // ── Dispatch ──────────────────────────────────────────────────────────
-    QAction* chosen = menu.exec(m_spriteTree->viewport()->mapToGlobal(pos));
-    if (!chosen) return;
-
-    if      (chosen == openFolderAction)                                  QDesktopServices::openUrl(QUrl::fromLocalFile(chosen->data().toString()));
-    else if (chosen == syncSourceAction)                                  onSyncSourceRequested(clickedSourceIndex);
-    else if (chosen == syncLayoutAction)                                  onSyncLayoutRequested(clickedSourceIndex);
-    else if (chosen == removeSourceAction)                                removeSource(clickedSourceIndex);
-    else if (chosen == excludeFrameAction)                                onNavigatorExcludeFromSmartFolder(clickedLeafPath, clickedLeafSmartFolderIdx);
-    else if (chosen == deleteFrameAction)                                 onNavigatorDeleteFrames(clickedPaths);
-    else if (chosen == hideGroupWithDescAction)                           onNavigatorExcludeGroup(clickedItem);
-    else if (chosen == hideGroupOnlyAction)                               onNavigatorHideGroupOnly(clickedItem);
-    else if (chosen == deleteSelectedAction)                              onNavigatorDeleteFrames(checkedPaths);
-    else if (chosen == addFramesAction)                                   onNavigatorAddFrames(subfolder);
-    else if (chosen == createTimelineFromGroupAction)                     onNavigatorCreateTimeline(clickedPaths, clickedItem);
-    else if (chosen == autoCreateTimelinesAction) {
-        if (clickedIsSourceNode)
-            onNavigatorAutoCreateTimelinesForSource(clickedSourceIndex);
-        else
-            onNavigatorAutoCreateTimelines(clickedItem);
-    }
-    else if (chosen == createTimelineFromSelectedAction)                  onNavigatorCreateTimeline(checkedPaths, nullptr);
-    else if (chosen == addToTimelineAction)                               onNavigatorAddToTimeline(checkedPaths);
-}
-
-// ---------------------------------------------------------------------------
 // Action: Exclude sprite from smart folder (adds to excludedFiles, removes from layout)
 // ---------------------------------------------------------------------------
 void MainWindow::onNavigatorExcludeFromSmartFolder(const QString& absolutePath, int smartFolderIndex)
@@ -433,14 +142,15 @@ void MainWindow::onNavigatorExcludeFromSmartFolder(const QString& absolutePath, 
     const QVector<LayoutModel> savedLayoutModels = m_session->activeAtlas().layoutModels;
 
     auto postExecuteRedo = [this, absolutePath]() {
-        if (m_canvas) m_canvas->removeSprites({absolutePath});
+        auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        if (canvas) canvas->removeSprites({absolutePath});
         m_statusLabel->setText(tr("Excluded from layout (file kept on disk)"));
         refreshTimelineFrames();
         refreshTimelineList();
         refreshAnimationTest();
         if (m_session->activeFramePaths.isEmpty()) {
             m_session->activeAtlas().layoutModels.clear();
-            if (m_canvas) m_canvas->clearCanvas();
+            if (canvas) canvas->clearCanvas();
             updateMainContentView();
         } else {
             scheduleLayoutRebuild(true, true);
@@ -572,7 +282,7 @@ void MainWindow::onNavigatorDeleteFrames(const QStringList& paths)
         for (const QString& p : paths)
             addToExcludedFiles(p);
         syncExcludedAtlas();
-        if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+        if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
             m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
     }
     onRemoveFramesRequested(paths);
@@ -703,16 +413,18 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     // Build the candidate name first
     QString candidateName = folderPath.isEmpty() ? defaultName : folderPath + "/" + defaultName;
 
+    auto* tp = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+
     // Only ask for a name if there is a collision
-    if (m_timelineEditorPanel->hasDuplicateTimelineName(candidateName)) {
+    if (tp && tp->hasDuplicateTimelineName(candidateName)) {
         bool ok = false;
         QString promptName = QInputDialog::getText(this, tr("Create Timeline"),
                                                    tr("Timeline name (collision detected):"),
                                                    QLineEdit::Normal, defaultName, &ok);
         if (!ok || promptName.trimmed().isEmpty()) return;
-        candidateName = m_timelineEditorPanel->getUniqueTimelineName(promptName.trimmed(), folderPath);
+        candidateName = tp->getUniqueTimelineName(promptName.trimmed(), folderPath);
 
-        if (m_timelineEditorPanel->hasDuplicateTimelineName(candidateName)) {
+        if (tp->hasDuplicateTimelineName(candidateName)) {
             MessageDialog::warning(this, tr("Create Timeline"),
                                    tr("A timeline with the name '%1' already exists.").arg(candidateName));
             return;
@@ -728,7 +440,7 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
     m_session->activeAtlas().timelines.append(timeline);
     m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
 
-    m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+    if (tp) tp->selectTimeline(m_session->selectedTimelineIndex);
     refreshAnimationTest();
 
     m_undoStack->push(new TimelineAddCommand(
@@ -736,7 +448,8 @@ void MainWindow::onNavigatorCreateTimeline(const QStringList& paths, QTreeWidget
         timeline,
         &m_session->selectedTimelineIndex,
         [this]() {
-            m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+            auto* tp2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+            if (tp2) tp2->selectTimeline(m_session->selectedTimelineIndex);
             refreshAnimationTest();
         }
     ));
@@ -764,11 +477,13 @@ void MainWindow::onSpritesDroppedToTimeline(const QStringList& paths,
     const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
     const int oldSel = m_session->selectedTimelineIndex;
 
+    auto* tp = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+
     for (auto it = grouped.constBegin(); it != grouped.constEnd(); ++it) {
         QString dirName = QFileInfo(it.key()).fileName();
         if (dirName.isEmpty()) dirName = tr("animation");
 
-        const QString uniqueName = m_timelineEditorPanel->getUniqueTimelineName(dirName, targetFolderPath);
+        const QString uniqueName = tp ? tp->getUniqueTimelineName(dirName, targetFolderPath) : dirName;
 
         AnimationTimeline timeline;
         timeline.name    = uniqueName;
@@ -779,7 +494,8 @@ void MainWindow::onSpritesDroppedToTimeline(const QStringList& paths,
     }
 
     auto refreshAndSelect = [this]() {
-        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+        auto* tp2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+        if (tp2) tp2->selectTimeline(m_session->selectedTimelineIndex);
         refreshAnimationTest();
     };
 
@@ -1050,7 +766,7 @@ void MainWindow::onNavigatorReincludeFromSource(int sourceIdx, const QString& re
             neutral.spritePaths.append(absPath);
     }
     syncExcludedAtlas();
-    if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+    if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
         m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
 
     scheduleLayoutRebuild();
@@ -1074,8 +790,11 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
 
     const QString parentFolderPath = folderPathForTreeItem(parentGroup);
 
+    auto* tp = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+
     auto postExecute = [this]() {
-        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+        auto* tp2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+        if (tp2) tp2->selectTimeline(m_session->selectedTimelineIndex);
         refreshAnimationTest();
     };
 
@@ -1091,7 +810,7 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
         if (paths.isEmpty()) continue;
 
         AnimationTimeline timeline;
-        timeline.name = m_timelineEditorPanel->getUniqueTimelineName(childItem->text(0), parentFolderPath);
+        timeline.name = tp ? tp->getUniqueTimelineName(childItem->text(0), parentFolderPath) : childItem->text(0);
         timeline.fps = 8;
         timeline.frames = paths;
 
@@ -1110,7 +829,7 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
     }
 
     if (addedCount > 0) {
-        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+        if (tp) tp->selectTimeline(m_session->selectedTimelineIndex);
         refreshAnimationTest();
     }
 }
@@ -1173,7 +892,8 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
             m_session->selectedTimelineIndex = focusIndex;
 
         auto postExecute = [this]() {
-            m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+            auto* tp2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+            if (tp2) tp2->selectTimeline(m_session->selectedTimelineIndex);
             refreshAnimationTest();
         };
 
@@ -1194,63 +914,4 @@ void MainWindow::onNavigatorAutoCreateTimelinesForSource(int sourceIndex)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Navigator Search Filter
-// ---------------------------------------------------------------------------
-void MainWindow::filterSpriteTree(const QString& text) {
-    // Delegate to NavigatorPanel when available
-    if (m_navigatorPanel) {
-        m_navigatorPanel->applyFilter(text);
-        return;
-    }
-
-    if (!m_spriteTree) return;
-
-    // Iterate through all items in the tree and apply filter
-    QTreeWidgetItemIterator it(m_spriteTree);
-    QSet<QTreeWidgetItem*> itemsToShow;
-
-    // First pass: find all items matching the search text
-    while (*it) {
-        QTreeWidgetItem* item = *it;
-        bool matches = text.isEmpty() || item->text(0).contains(text, Qt::CaseInsensitive);
-
-        if (matches) {
-            itemsToShow.insert(item);
-            // Mark all ancestors as visible (they should show since a descendant matches)
-            QTreeWidgetItem* parent = item->parent();
-            while (parent) {
-                itemsToShow.insert(parent);
-                parent = parent->parent();
-            }
-        }
-        ++it;
-    }
-
-    // Second pass: apply visibility based on filter results
-    int visibleLeaves = 0;
-    int totalLeaves = 0;
-    QTreeWidgetItemIterator it2(m_spriteTree);
-    while (*it2) {
-        QTreeWidgetItem* item = *it2;
-        const bool isLeaf = item->data(0, Qt::UserRole).isValid();
-        if (isLeaf) {
-            ++totalLeaves;
-            if (itemsToShow.contains(item)) ++visibleLeaves;
-        }
-        item->setHidden(!itemsToShow.contains(item));
-        ++it2;
-    }
-
-    if (m_spriteFilterResultLabel) {
-        const bool filtering = !text.isEmpty();
-        m_spriteFilterResultLabel->setVisible(filtering);
-        if (filtering) {
-            if (visibleLeaves == 0)
-                m_spriteFilterResultLabel->setText(tr("No results"));
-            else
-                m_spriteFilterResultLabel->setText(tr("%1/%2").arg(visibleLeaves).arg(totalLeaves));
-        }
-    }
-}
 

@@ -1,5 +1,4 @@
 #include "SpriteTreeUtils.h"
-#include "models.h"
 #include "TimelineBuilder.h"
 
 #include <QMap>
@@ -129,6 +128,58 @@ void buildSubTree(
 
         if (folderNode != root) folderNode->setExpanded(true);
     }
+}
+
+QStringList collectDescendantPaths(QTreeWidgetItem* item) {
+    QStringList result;
+    std::function<void(QTreeWidgetItem*)> walk = [&](QTreeWidgetItem* node) {
+        auto sprite = node->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && !sprite->path.isEmpty()) {
+            result.append(sprite->path);
+        } else {
+            for (int i = 0; i < node->childCount(); ++i)
+                walk(node->child(i));
+        }
+    };
+    walk(item);
+    return result;
+}
+
+QStringList collectCheckedPaths(QTreeWidget* tree) {
+    QStringList result;
+    std::function<void(QTreeWidgetItem*)> walk = [&](QTreeWidgetItem* item) {
+        if (item->childCount() == 0) {
+            if (item->checkState(0) == Qt::Checked) {
+                auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
+                if (sprite && !sprite->path.isEmpty())
+                    result.append(sprite->path);
+            }
+        } else {
+            for (int i = 0; i < item->childCount(); ++i)
+                walk(item->child(i));
+        }
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i)
+        walk(tree->topLevelItem(i));
+    return result;
+}
+
+QList<SpritePtr> collectCheckedSprites(QTreeWidget* tree) {
+    QList<SpritePtr> result;
+    std::function<void(QTreeWidgetItem*)> walk = [&](QTreeWidgetItem* item) {
+        if (item->childCount() == 0) {
+            if (item->checkState(0) == Qt::Checked) {
+                auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
+                if (sprite) result.append(sprite);
+            }
+        } else {
+            for (int i = 0; i < item->childCount(); ++i)
+                walk(item->child(i));
+        }
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i)
+        walk(tree->topLevelItem(i));
+    return result;
 }
 
 } // namespace SpriteTreeUtils

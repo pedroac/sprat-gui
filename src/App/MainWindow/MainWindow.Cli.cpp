@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "AnimationPreviewPanel.h"
+#include "FrameAnimationWorkspace.h"
 #include "LayoutOrchestrator.h"
 #include "CliSetupController.h"
 #ifdef Q_OS_WASM
@@ -298,9 +300,6 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         src.originalPath = folderPath;
         src.cachedFolderPath = subfolderPath;
         m_session->sources.append(src);
-        SmartFolder sf;
-        sf.path = folderPath;
-        m_session->smartFolders.append(sf);
 
         m_statusLabel->setText(QString(tr("Merging %1 image frame(s) from %2"))
                                .arg(newImages.size()).arg(folderPath));
@@ -370,12 +369,6 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
             src.cachedFolderPath = subfolderPath;
             m_session->sources.append(src);
         }
-        m_session->smartFolders.clear();
-        {
-            SmartFolder sf;
-            sf.path = folderPath;
-            m_session->smartFolders.append(sf);
-        }
 
         m_loadingUiMessage = tr("Building layout...");
         if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(m_loadingUiMessage);
@@ -415,7 +408,9 @@ void MainWindow::onLoadFolder() {
 #endif
     QString dir = QFileDialog::getExistingDirectory(this, tr("Select Frames Folder"));
     if (!dir.isEmpty()) {
-        if (m_animCanvas) m_animCanvas->setZoomManual(false);
+        auto* apC = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = apC ? apC->animCanvas() : nullptr;
+        if (animCanvas) animCanvas->setZoomManual(false);
         loadFolder(dir, confirmDropAction(dir));
     }
 }

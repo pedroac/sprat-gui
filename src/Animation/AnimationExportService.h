@@ -2,7 +2,8 @@
 
 #include <functional>
 #include <QVector>
-#include "models.h"
+#include "AnimationModels.h"
+#include "LayoutModels.h"
 
 class QWidget;
 

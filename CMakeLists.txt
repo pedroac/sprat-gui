@@ -43,8 +43,33 @@ endif()
 add_definitions(-DSPRAT_CLI_VERSION="${SPRAT_CLI_VERSION}")
 
 # === Configuration ===
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# === MSVC Compatibility ===
+# Fix Qt 6.5.3 compatibility with newer MSVC versions (stdext namespace issue)
+if(MSVC)
+    # Add stdext namespace compatibility for MSVC
+    # These defines help Qt headers compile with newer MSVC versions
+    add_compile_definitions(
+        _HAS_STDEXT=1
+        _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
+    )
+
+    # Use C++latest to get all features including stdext
+    add_compile_options(/std:c++latest)
+
+    # Add these compatibility flags
+    if(MSVC_VERSION GREATER_EQUAL 1920)
+        # VS 2019 and later
+        add_compile_definitions(_ENABLE_EXTENDED_ALIGNED_STORAGE)
+    endif()
+
+    # Suppress specific warnings
+    add_compile_options(/wd4616 /wd4996)
+
+
+endif()
 
 set(DEFAULT_SPRAT_EMBEDDED_CLI OFF)
 if(EMSCRIPTEN OR WIN32)
@@ -182,10 +207,13 @@ endif()
 if(SPRAT_EMBEDDED_CLI)
     add_definitions(-DSPRAT_EMBEDDED_CLI)
     set(SPRAT_DOWNLOAD_STB ON CACHE BOOL "Download STB headers for sprat-cli" FORCE)
-    
+
+    # Force C++20 for sprat-cli
+    set(CMAKE_CXX_STANDARD 20 CACHE STRING "" FORCE)
+
     # Locate sprat-cli source
     set(SPRAT_CLI_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
-    
+
     if(EXISTS "${SPRAT_CLI_LOCAL_DIR}/CMakeLists.txt")
         message(STATUS "Using local sprat-cli at ${SPRAT_CLI_LOCAL_DIR}")
         set(SPRAT_CLI_SOURCE_DIR "${SPRAT_CLI_LOCAL_DIR}")
@@ -227,11 +255,10 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.Cli.cpp
     src/App/MainWindow/MainWindow.Events.cpp
     src/App/MainWindow/MainWindow.LayoutFlow.cpp
-    src/App/MainWindow/MainWindow.Marker.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
     src/App/MainWindow/MainWindow.Navigator.cpp
-    src/App/MainWindow/NavigatorTreeWidget.h
-    src/App/MainWindow/NavigatorTreeWidget.cpp
+    src/App/Workspaces/Shared/NavigatorTreeWidget.h
+    src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
     src/App/MainWindow/SpritePreviewTooltip.h
     src/App/MainWindow/SpritePreviewTooltip.cpp
     src/App/MainWindow/TimelineTreeWidget.h
@@ -280,25 +307,28 @@ set(PROJECT_SOURCES
     src/CLITools/FolderSyncService.h
     src/SelectedSpriteFrame/Markers/MarkersDialog.cpp
     src/SelectedSpriteFrame/Markers/MarkersDialog.h
-    src/App/MainWindow/IAtlasViewport.h
-    src/App/MainWindow/PackedAtlasView.cpp
-    src/App/MainWindow/PackedAtlasView.h
-    src/App/MainWindow/ExportWorkspace.cpp
-    src/App/MainWindow/ExportWorkspace.h
+    src/App/Workspaces/IWorkspace.h
+    src/App/Workspaces/Shared/IAtlasViewport.h
+    src/App/Workspaces/Shared/NavigatorPanel.h
+    src/App/Workspaces/Shared/NavigatorPanel.cpp
+    src/App/Workspaces/Atlas/AtlasWorkspace.h
+    src/App/Workspaces/Atlas/AtlasWorkspace.cpp
+    src/App/Workspaces/Atlas/SpriteEditorPanel.h
+    src/App/Workspaces/Atlas/SpriteEditorPanel.cpp
+    src/App/Workspaces/FrameAnimation/FrameAnimationWorkspace.h
+    src/App/Workspaces/FrameAnimation/FrameAnimationWorkspace.cpp
+    src/App/Workspaces/FrameAnimation/AnimationPreviewPanel.h
+    src/App/Workspaces/FrameAnimation/AnimationPreviewPanel.cpp
+    src/App/Workspaces/FrameAnimation/TimelineEditorPanel.h
+    src/App/Workspaces/FrameAnimation/TimelineEditorPanel.cpp
+    src/App/Workspaces/Export/ExportWorkspace.h
+    src/App/Workspaces/Export/ExportWorkspace.cpp
+    src/App/Workspaces/AtlasesManagement/AtlasesManagementWorkspace.h
+    src/App/Workspaces/AtlasesManagement/AtlasesManagementWorkspace.cpp
+    src/App/Workspaces/AtlasesManagement/PackedAtlasView.h
+    src/App/Workspaces/AtlasesManagement/PackedAtlasView.cpp
     src/App/MainWindow/ExportDiffDialog.h
     src/App/MainWindow/ExportDiffDialog.cpp
-    src/App/MainWindow/AtlasesManagementWorkspace.cpp
-    src/App/MainWindow/AtlasesManagementWorkspace.h
-    src/App/MainWindow/NavigatorPanel.h
-    src/App/MainWindow/NavigatorPanel.cpp
-    src/App/MainWindow/FrameAnimationWorkspace.h
-    src/App/MainWindow/FrameAnimationWorkspace.cpp
-    src/App/MainWindow/SpriteEditorPanel.h
-    src/App/MainWindow/SpriteEditorPanel.cpp
-    src/App/MainWindow/AnimationPreviewPanel.h
-    src/App/MainWindow/AnimationPreviewPanel.cpp
-    src/App/MainWindow/TimelineEditorPanel.h
-    src/App/MainWindow/TimelineEditorPanel.cpp
     src/Settings/SettingsDialog.cpp
     src/Settings/SettingsDialog.h
     src/SpriteSheetLayout/LayoutParser.cpp
@@ -309,6 +339,16 @@ set(PROJECT_SOURCES
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
     src/Project/ProjectSession.h
+    src/Project/ProjectData.cpp
+    src/Project/ProjectData.h
+    src/Project/Repositories/SpriteRepository.cpp
+    src/Project/Repositories/SpriteRepository.h
+    src/Project/Repositories/SourceRepository.cpp
+    src/Project/Repositories/SourceRepository.h
+    src/Project/Repositories/MarkerRepository.cpp
+    src/Project/Repositories/MarkerRepository.h
+    src/Project/Repositories/ExportRepository.cpp
+    src/Project/Repositories/ExportRepository.h
 
     src/Animation/Timelines/AnimationTimelineOps.cpp
     src/Animation/Timelines/AnimationTimelineOps.h
@@ -390,6 +430,12 @@ target_include_directories(sprat-gui PRIVATE
     src
     src/App
     src/App/MainWindow
+    src/App/Workspaces
+    src/App/Workspaces/Atlas
+    src/App/Workspaces/AtlasesManagement
+    src/App/Workspaces/Export
+    src/App/Workspaces/FrameAnimation
+    src/App/Workspaces/Shared
     src/Animation
     src/Animation/Timelines
     src/Animation/Test
@@ -399,6 +445,7 @@ target_include_directories(sprat-gui PRIVATE
     src/CLITools
     src/Profiles
     src/Project
+    src/Project/Repositories
     src/Settings
     src/Core
 )

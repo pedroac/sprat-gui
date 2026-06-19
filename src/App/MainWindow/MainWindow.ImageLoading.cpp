@@ -20,6 +20,7 @@
 #include <algorithm>
 
 #include "MainWindow.h"
+#include "LayoutCanvas.h"
 #include "LayoutOrchestrator.h"
 #include "MessageDialog.h"
 #include "FrameDetectionDialog.h"
@@ -87,7 +88,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     QTimer::singleShot(0, this, [this, imagePath, action]() {
         ProjectController::FrameDetectionTaskResult result;
         result.imagePath = imagePath;
-        result.action = static_cast<ProjectController::DropAction>(action);
+        result.action = action;
         result.detection = m_projectController->detectFramesInImage(imagePath);
         processFrameDetectionResult(result);
     });
@@ -110,7 +111,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     setLoading(true);
 
     m_projectController->launchFrameDetection(imagePath,
-        static_cast<ProjectController::DropAction>(action));
+        action);
 #endif
 }
 
@@ -123,7 +124,7 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
 
     if (result.detection.frames.isEmpty()) {
         m_statusLabel->setText(tr("No frames detected, using image as single frame"));
-        handleSingleImageLayout(result.imagePath, static_cast<DropAction>(result.action), result.detection.backgroundColor);
+        handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
         return;
     }
 
@@ -131,8 +132,7 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
     if (dialog.exec() == QDialog::Accepted) {
         if (dialog.userAccepted()) {
             QVector<QRect> selectedFrames = dialog.getSelectedFrames();
-            const ProjectController::DropAction pcAction = result.action;
-            const DropAction action = static_cast<DropAction>(pcAction);
+            const DropAction action = result.action;
             const QString imagePath = result.imagePath;
             const QColor backgroundColor = result.detection.backgroundColor;
 
@@ -152,11 +152,11 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
             m_projectController->addTempDir(std::move(tempDir));
 
 #ifdef Q_OS_WASM
-            auto extractTaskWasm = [this, selectedFrames, imagePath, tempPath, pcAction, backgroundColor]() {
+            auto extractTaskWasm = [this, selectedFrames, imagePath, tempPath, action, backgroundColor]() {
                 ProjectController::FrameExtractionResult res;
                 res.tempPath = tempPath;
                 res.sourcePath = imagePath;
-                res.action = pcAction;
+                res.action = action;
                 res.backgroundColor = backgroundColor;
 
                 QString framesData = m_projectController->generateSpratFramesFormat(selectedFrames, imagePath);
@@ -170,11 +170,11 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
                 processFrameExtractionResult(extractTaskWasm());
             });
 #else
-            m_projectController->launchFrameExtraction(imagePath, tempPath, pcAction, backgroundColor, selectedFrames);
+            m_projectController->launchFrameExtraction(imagePath, tempPath, action, backgroundColor, selectedFrames);
 #endif
         } else {
             m_statusLabel->setText(tr("Using image as single frame"));
-            handleSingleImageLayout(result.imagePath, static_cast<DropAction>(result.action), result.detection.backgroundColor);
+            handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
         }
     } else {
         m_statusLabel->setText(tr("Frame detection cancelled"));
@@ -188,7 +188,7 @@ void MainWindow::onFrameExtractionFinished() {
 void MainWindow::processFrameExtractionResult(const ProjectController::FrameExtractionResult& result) {
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.sourcePath,
-                static_cast<DropAction>(result.action), result.backgroundColor)) {
+                result.action, result.backgroundColor)) {
             scheduleLayoutRebuild(true);
         }
     } else {
@@ -233,12 +233,11 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     m_projectController->addTempDir(std::move(tempDir));
 
 #ifdef Q_OS_WASM
-    const ProjectController::DropAction pcAction = static_cast<ProjectController::DropAction>(action);
-    auto taskWasm = [this, tarPath, tempPath, pcAction]() {
+    auto taskWasm = [this, tarPath, tempPath, action]() {
         ProjectController::TarExtractionResult result;
         result.tempPath = tempPath;
         result.tarPath = tarPath;
-        result.action = pcAction;
+        result.action = action;
         result.success = false;
         QString error;
         if (ArchiveExtractor::extractToDirectory(tarPath, tempPath, error, &m_isCanceled)) {
@@ -253,7 +252,7 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     });
 #else
     m_projectController->launchTarExtraction(tarPath,
-        static_cast<ProjectController::DropAction>(action), tempPath);
+        action, tempPath);
 #endif
 }
 
@@ -269,7 +268,7 @@ void MainWindow::processTarExtractionResult(const ProjectController::TarExtracti
     }
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.tarPath,
-                static_cast<DropAction>(result.action))) {
+                result.action)) {
             scheduleLayoutRebuild(true);
         }
     } else {
@@ -315,7 +314,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
         const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             {finalPath}, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        m_projectController->registerLoadedSource(imagePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(imagePath, action, subfolderPath);
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
         if (m_layoutOrchestrator) m_layoutOrchestrator->markCenterPivotsOnNextLayout();
@@ -350,7 +349,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     const QStringList copied = m_projectController->copyFramesToSourceSubfolder({finalPath}, subfolderPath);
     m_session->activeFramePaths = copied;
     if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
-    m_projectController->registerLoadedSource(imagePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+    m_projectController->registerLoadedSource(imagePath, action, subfolderPath);
     // After copying, update to the copied path
     QString copiedPath = m_session->activeFramePaths.isEmpty()
                          ? finalPath : m_session->activeFramePaths.first();
@@ -392,16 +391,18 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     m_session->activeAtlas().layoutModels = { singleImageModel };
     AnimationPreviewService::invalidateSpriteMap();
     ensureUniqueSpriteNames(m_session->activeAtlas().layoutModels, m_session->sourceFolder);
-    if (m_canvas) {
+    auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+    if (canvas) {
         m_loadingUiMessage = tr("Loading image...");
         setLoading(true);
-        m_canvas->setModelsAsync(m_session->activeAtlas().layoutModels, &m_isCanceled, [this, sprite]() {
+        canvas->setModelsAsync(m_session->activeAtlas().layoutModels, &m_isCanceled, [this, sprite]() {
+            auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
             if (m_isCanceled) {
                 setLoading(false);
                 return;
             }
-            m_canvas->setZoomManual(false);
-            QTimer::singleShot(0, m_canvas, &LayoutCanvas::initialFit);
+            if (canvas) canvas->setZoomManual(false);
+            if (canvas) QTimer::singleShot(0, canvas, &LayoutCanvas::initialFit);
             
             m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));
             // Update UI state
@@ -469,7 +470,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             framePaths, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, action, subfolderPath);
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
     } else {
@@ -507,7 +508,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         m_session->activeFramePaths = m_projectController->copyFramesToSourceSubfolder(framePaths, subfolderPath);
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
 
-        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, action, subfolderPath);
     }
 
     if (!m_session->frameListPath.isEmpty()) {
@@ -550,7 +551,7 @@ void MainWindow::onTransparencyProcessingFinished() {
         const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             framePaths, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, action, subfolderPath);
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
         if (m_layoutOrchestrator) m_layoutOrchestrator->markCenterPivotsOnNextLayout();
@@ -589,7 +590,7 @@ void MainWindow::onTransparencyProcessingFinished() {
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
         m_session->activeFramePaths = m_projectController->copyFramesToSourceSubfolder(framePaths, subfolderPath);
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
-        m_projectController->registerLoadedSource(sourcePath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(sourcePath, action, subfolderPath);
     }
 
     if (!m_session->frameListPath.isEmpty()) {

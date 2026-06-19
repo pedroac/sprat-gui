@@ -2,7 +2,8 @@
 
 #include <QVector>
 #include <QPixmap>
-#include "models.h"
+#include "AnimationModels.h"
+#include "LayoutModels.h"
 
 class QLabel;
 class QPushButton;

@@ -1,7 +1,7 @@
 #include "SpriteEditorPanel.h"
 #include "ElidedLabel.h"
 #include "PreviewCanvas.h"
-#include "models.h"
+#include "ViewEnums.h"
 
 #include <QApplication>
 #include <QComboBox>

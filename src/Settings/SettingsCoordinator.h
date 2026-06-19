@@ -1,6 +1,6 @@
 #pragma once
 
-#include "models.h"
+#include "AppSettings.h"
 
 class LayoutCanvas;
 class PreviewCanvas;

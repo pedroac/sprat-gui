@@ -1,7 +1,8 @@
 #pragma once
 #include <QDialog>
 #include <QVector>
-#include "models.h"
+#include "ExportModels.h"
+#include "ProjectModels.h"
 #include "SpratProfilesConfig.h"
 
 class QTreeWidget;

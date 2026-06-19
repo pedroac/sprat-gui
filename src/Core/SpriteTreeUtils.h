@@ -1,9 +1,11 @@
 #pragma once
 #include <functional>
 #include <QIcon>
+#include <QList>
 #include <QPair>
 #include <QString>
 #include <QVector>
+#include "SpriteModels.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -45,5 +47,21 @@ void buildSubTree(
     const std::function<void(QTreeWidgetItem*, const QString&, const QString&)>& makeLeaf,
     bool groupSimilar = true
 );
+
+/**
+ * Recursively collect sprite paths from all leaf items under @p item.
+ * Items with a valid Qt::UserRole SpritePtr are leaves; others are recursed into.
+ */
+QStringList collectDescendantPaths(QTreeWidgetItem* item);
+
+/**
+ * Collect sprite paths from all checked leaf items across all top-level items in @p tree.
+ */
+QStringList collectCheckedPaths(QTreeWidget* tree);
+
+/**
+ * Collect SpritePtr from all checked leaf items across all top-level items in @p tree.
+ */
+QList<SpritePtr> collectCheckedSprites(QTreeWidget* tree);
 
 } // namespace SpriteTreeUtils

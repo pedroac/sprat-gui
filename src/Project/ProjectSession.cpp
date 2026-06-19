@@ -133,6 +133,83 @@ void ProjectSession::rebuildSpriteIndex() {
     }
 }
 
+namespace {
+SpritePtr spriteByPath(const QVector<AtlasEntry>& atlases, const QString& path) {
+    if (path.isEmpty()) return nullptr;
+    for (const auto& atlas : atlases) {
+        for (const auto& model : atlas.layoutModels) {
+            for (const auto& sprite : model.sprites) {
+                if (sprite && sprite->path == path) return sprite;
+            }
+        }
+    }
+    return nullptr;
+}
+}
+
+ProjectSession::SessionState ProjectSession::captureState(bool sourceFolderIsTemp) const {
+    SessionState state;
+    state.currentFolder = currentFolder;
+    state.layoutSourcePath = layoutSourcePath;
+    state.layoutSourceIsList = layoutSourceIsList;
+    state.sourceFolder = sourceFolder;
+    state.sources = sources;
+    state.activeFramePaths = activeFramePaths;
+    state.frameListPath = frameListPath;
+    state.atlases = atlases;
+    state.activeAtlasIndex = activeAtlasIndex;
+    state.cachedLayoutOutput = cachedLayoutOutput;
+    state.cachedLayoutScale = cachedLayoutScale;
+    state.lastSuccessfulProfile = lastSuccessfulProfile;
+    state.lastRunUsedTrim = lastRunUsedTrim;
+    state.selectedTimelineIndex = selectedTimelineIndex;
+    state.selectedPointName = selectedPointName;
+
+    state.selectedSpritePaths.clear();
+    for (const auto& s : selectedSprites) {
+        if (s) state.selectedSpritePaths << s->path;
+    }
+    state.primarySelectedSpritePath = selectedSprite ? selectedSprite->path : QString();
+
+    state.sourceFolderIsTemp = sourceFolderIsTemp; 
+
+    return state;
+}
+
+void ProjectSession::applyState(const SessionState& state) {
+    currentFolder = state.currentFolder;
+    layoutSourcePath = state.layoutSourcePath;
+    layoutSourceIsList = state.layoutSourceIsList;
+    sourceFolder = state.sourceFolder;
+    sources = state.sources;
+    activeFramePaths = state.activeFramePaths;
+    frameListPath = state.frameListPath;
+    atlases = state.atlases;
+    activeAtlasIndex = state.activeAtlasIndex;
+    cachedLayoutOutput = state.cachedLayoutOutput;
+    cachedLayoutScale = state.cachedLayoutScale;
+    lastSuccessfulProfile = state.lastSuccessfulProfile;
+    lastRunUsedTrim = state.lastRunUsedTrim;
+    selectedTimelineIndex = state.selectedTimelineIndex;
+    selectedPointName = state.selectedPointName;
+
+    rebuildSpriteIndex();
+
+    // Restore selections
+    selectedSprites.clear();
+    for (const QString& p : state.selectedSpritePaths) {
+        SpritePtr s = spriteByPath(atlases, p);
+        if (s) selectedSprites.push_back(s);
+    }
+    selectedSprite = spriteByPath(atlases, state.primarySelectedSpritePath);
+
+    emit atlasesChanged();
+    emit timelinesChanged();
+    emit changed();
+    emit selectionChanged();
+    emit layoutChanged();
+}
+
 int ProjectSession::excludedAtlasIndex() const {
     for (int i = 0; i < atlases.size(); ++i) {
         if (atlases[i].isExcluded) return i;

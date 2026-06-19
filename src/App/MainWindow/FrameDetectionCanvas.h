@@ -8,7 +8,7 @@
 #include <QGraphicsPixmapItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsLineItem>
-#include "models.h"
+#include "AppSettings.h"
 
 /**
  * @class FrameDetectionCanvas

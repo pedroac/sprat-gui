@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include "AnimationPreviewPanel.h"
+#include "ExportWorkspace.h"
+#include "FrameAnimationWorkspace.h"
 #include "SpriteEditorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "LayoutOrchestrator.h"
@@ -9,6 +12,8 @@
 #include "UndoCommands.h"
 #include "AnimationCanvas.h"
 #include "MarkersDialog.h"
+#include "LayoutCanvas.h"
+#include "NavigatorPanel.h"
 #include "SettingsDialog.h"
 #include "CliToolsConfig.h"
 #include "LayoutParser.h"
@@ -827,121 +832,134 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_undoStack, &QUndoStack::cleanChanged,
             this, [this](bool clean) { setWindowModified(!clean); });
     connect(m_undoStack, &QUndoStack::indexChanged,
-            this, [this](int) { syncPivotSpinsFromSprite(); });
+            this, [this](int) { if (m_atlasWorkspace) m_atlasWorkspace->refreshSpriteEditor(); });
 
     setupUi();
     setupKeyboardShortcuts();
-    if (m_previewView && m_previewView->overlay()) {
-        connect(m_previewView->overlay(), &EditorOverlayItem::pivotDragFinished,
-                this, [this](int oldX, int oldY, int newX, int newY) {
-            if (!m_session->selectedSprite) return;
-            const CoordUnit unit = m_settings.coordUnit;
-            const QSize activeSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
-            const double relX = (unit == CoordUnit::Percent && activeSize.width() > 0)
-                ? (double(newX) * 100.0 / activeSize.width())
-                : double(newX);
-            const double relY = (unit == CoordUnit::Percent && activeSize.height() > 0)
-                ? (double(newY) * 100.0 / activeSize.height())
-                : double(newY);
-            QVector<SetPivotCommand::CoTarget> coTargets;
-            auto addPivotCoTarget = [&](const SpritePtr& sprite) {
-                const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
-                if (unit == CoordUnit::Percent) {
-                    const QSize coSize = spriteCoordinateSpaceSize(sprite);
-                    sprite->pivotX = coSize.width() > 0
-                        ? qRound(relX * coSize.width() / 100.0)
-                        : newX;
-                    sprite->pivotY = coSize.height() > 0
-                        ? qRound(relY * coSize.height() / 100.0)
-                        : newY;
-                } else {
-                    sprite->pivotX = newX;
-                    sprite->pivotY = newY;
+    {
+        auto* previewCanvas = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+        if (previewCanvas && previewCanvas->overlay()) {
+            connect(previewCanvas->overlay(), &EditorOverlayItem::pivotDragFinished,
+                    this, [this](int oldX, int oldY, int newX, int newY) {
+                if (!m_session->selectedSprite) return;
+                const CoordUnit unit = m_settings.coordUnit;
+                const QSize activeSize = m_atlasWorkspace->spriteCoordinateSpaceSize(m_session->selectedSprite);
+                const double relX = (unit == CoordUnit::Percent && activeSize.width() > 0)
+                    ? (double(newX) * 100.0 / activeSize.width())
+                    : double(newX);
+                const double relY = (unit == CoordUnit::Percent && activeSize.height() > 0)
+                    ? (double(newY) * 100.0 / activeSize.height())
+                    : double(newY);
+                QVector<SetPivotCommand::CoTarget> coTargets;
+                auto addPivotCoTarget = [&](const SpritePtr& sprite) {
+                    const QPair<int, int> oldPos{sprite->pivotX, sprite->pivotY};
+                    if (unit == CoordUnit::Percent) {
+                        const QSize coSize = m_atlasWorkspace->spriteCoordinateSpaceSize(sprite);
+                        sprite->pivotX = coSize.width() > 0
+                            ? qRound(relX * coSize.width() / 100.0)
+                            : newX;
+                        sprite->pivotY = coSize.height() > 0
+                            ? qRound(relY * coSize.height() / 100.0)
+                            : newY;
+                    } else {
+                        sprite->pivotX = newX;
+                        sprite->pivotY = newY;
+                    }
+                    const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
+                    if (oldPos != newPos) coTargets.append({sprite, oldPos, newPos});
+                };
+                if (m_settings.propagateEditsToChecked) {
+                    for (const auto& sprite : m_session->selectedSprites)
+                        if (sprite && sprite != m_session->selectedSprite)
+                            addPivotCoTarget(sprite);
                 }
-                const QPair<int, int> newPos{sprite->pivotX, sprite->pivotY};
-                if (oldPos != newPos) coTargets.append({sprite, oldPos, newPos});
-            };
-            if (m_settings.propagateEditsToChecked) {
-                for (const auto& sprite : m_session->selectedSprites)
-                    if (sprite && sprite != m_session->selectedSprite)
-                        addPivotCoTarget(sprite);
-            }
-            AnimationPreviewService::invalidateBounds();
-            updateOnionSkinDisplay();
-            m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
-                                                  oldX, oldY, newX, newY, true,
-                                                  std::move(coTargets)));
-        });
-        connect(m_previewView->overlay(), &EditorOverlayItem::markerDragFinished,
-                this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
-            if (!m_session->selectedSprite) return;
-            QVector<SetMarkersCommand::CoTarget> coTargets;
-            if (m_settings.propagateEditsToChecked) {
-                for (const auto& sprite : m_session->selectedSprites) {
-                    if (sprite && sprite != m_session->selectedSprite) {
-                        const QVector<NamedPoint> oldCoPoints = sprite->points;
-                        sprite->points = newPoints;
-                        coTargets.append({sprite, oldCoPoints, sprite->points});
+                AnimationPreviewService::invalidateBounds();
+                updateOnionSkinDisplay();
+                m_undoStack->push(new SetPivotCommand(m_session->selectedSprite,
+                                                      oldX, oldY, newX, newY, true,
+                                                      std::move(coTargets)));
+            });
+            connect(previewCanvas->overlay(), &EditorOverlayItem::markerDragFinished,
+                    this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
+                if (!m_session->selectedSprite) return;
+                QVector<SetMarkersCommand::CoTarget> coTargets;
+                if (m_settings.propagateEditsToChecked) {
+                    for (const auto& sprite : m_session->selectedSprites) {
+                        if (sprite && sprite != m_session->selectedSprite) {
+                            const QVector<NamedPoint> oldCoPoints = sprite->points;
+                            sprite->points = newPoints;
+                            coTargets.append({sprite, oldCoPoints, sprite->points});
+                        }
                     }
                 }
-            }
-            m_undoStack->push(new SetMarkersCommand(
-                m_session->selectedSprite,
-                oldPoints,
-                newPoints,
-                [this]() {
-                    m_previewView->overlay()->updateLayout();
-                    if (m_animCanvas && m_animCanvas->overlay())
-                        m_animCanvas->overlay()->updateLayout();
-                    refreshHandleCombo();
-                },
-                std::move(coTargets)
-            ));
-        });
+                m_undoStack->push(new SetMarkersCommand(
+                    m_session->selectedSprite,
+                    oldPoints,
+                    newPoints,
+                    [this]() {
+                        auto* pv = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+                        if (pv) pv->overlay()->updateLayout();
+                        auto* apL = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+                        auto* ac = apL ? apL->animCanvas() : nullptr;
+                        if (ac && ac->overlay()) ac->overlay()->updateLayout();
+                        refreshHandleCombo();
+                    },
+                    std::move(coTargets)
+                ));
+            });
+        }
     }
 
-    if (m_animCanvas && m_animCanvas->overlay()) {
-        connect(m_animCanvas->overlay(), &EditorOverlayItem::pivotDragFinished,
-                this, [this](int oldX, int oldY, int newX, int newY) {
-            // Use the animation frame's sprite directly — independent of the
-            // global selection so that navigator clicks never affect the wrong frame.
-            const SpritePtr sprite = m_animCanvas->overlaySprite();
-            if (!sprite) return;
-            AnimationPreviewService::invalidateBounds();
-            updateOnionSkinDisplay();
-            m_undoStack->push(new SetPivotCommand(sprite,
-                                                  oldX, oldY, newX, newY, true,
-                                                  {}));
-            // Rebuild the composite with the new pivot so the overlay is
-            // repositioned immediately and the stored coords stay consistent.
-            refreshAnimationTest();
-        });
-        connect(m_animCanvas->overlay(), &EditorOverlayItem::markerDragFinished,
-                this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
-            if (!m_session->selectedSprite) return;
-            QVector<SetMarkersCommand::CoTarget> coTargets;
-            if (m_settings.propagateEditsToChecked) {
-                for (const auto& sprite : m_session->selectedSprites) {
-                    if (sprite && sprite != m_session->selectedSprite) {
-                        const QVector<NamedPoint> oldCoPoints = sprite->points;
-                        sprite->points = newPoints;
-                        coTargets.append({sprite, oldCoPoints, sprite->points});
+    {
+        auto* ap = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = ap ? ap->animCanvas() : nullptr;
+        if (animCanvas && animCanvas->overlay()) {
+            connect(animCanvas->overlay(), &EditorOverlayItem::pivotDragFinished,
+                    this, [this](int oldX, int oldY, int newX, int newY) {
+                // Use the animation frame's sprite directly — independent of the
+                // global selection so that navigator clicks never affect the wrong frame.
+                auto* apL = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+                auto* ac = apL ? apL->animCanvas() : nullptr;
+                const SpritePtr sprite = ac ? ac->overlaySprite() : nullptr;
+                if (!sprite) return;
+                AnimationPreviewService::invalidateBounds();
+                updateOnionSkinDisplay();
+                m_undoStack->push(new SetPivotCommand(sprite,
+                                                      oldX, oldY, newX, newY, true,
+                                                      {}));
+                // Rebuild the composite with the new pivot so the overlay is
+                // repositioned immediately and the stored coords stay consistent.
+                refreshAnimationTest();
+            });
+            connect(animCanvas->overlay(), &EditorOverlayItem::markerDragFinished,
+                    this, [this](const QVector<NamedPoint>& oldPoints, const QVector<NamedPoint>& newPoints) {
+                if (!m_session->selectedSprite) return;
+                QVector<SetMarkersCommand::CoTarget> coTargets;
+                if (m_settings.propagateEditsToChecked) {
+                    for (const auto& sprite : m_session->selectedSprites) {
+                        if (sprite && sprite != m_session->selectedSprite) {
+                            const QVector<NamedPoint> oldCoPoints = sprite->points;
+                            sprite->points = newPoints;
+                            coTargets.append({sprite, oldCoPoints, sprite->points});
+                        }
                     }
                 }
-            }
-            m_undoStack->push(new SetMarkersCommand(
-                m_session->selectedSprite,
-                oldPoints,
-                newPoints,
-                [this]() {
-                    m_previewView->overlay()->updateLayout();
-                    if (m_animCanvas && m_animCanvas->overlay())
-                        m_animCanvas->overlay()->updateLayout();
-                    refreshHandleCombo();
-                },
-                std::move(coTargets)
-            ));
-        });
+                m_undoStack->push(new SetMarkersCommand(
+                    m_session->selectedSprite,
+                    oldPoints,
+                    newPoints,
+                    [this]() {
+                        auto* pv = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+                        if (pv) pv->overlay()->updateLayout();
+                        auto* apL2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+                        auto* ac = apL2 ? apL2->animCanvas() : nullptr;
+                        if (ac && ac->overlay()) ac->overlay()->updateLayout();
+                        refreshHandleCombo();
+                    },
+                    std::move(coTargets)
+                ));
+            });
+        }
     }
 
     // Load recent projects
@@ -967,10 +985,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     {
         LayoutOrchestrator::Config cfg;
         cfg.session         = m_session;
-        cfg.canvas          = m_canvas;
-        cfg.profileCombo    = m_profileCombo;
-        cfg.resolutionCombo = m_sourceResolutionCombo;
-        cfg.atlasViewStack       = m_atlasViewStack;
+        cfg.canvas          = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        cfg.profileCombo    = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+        cfg.resolutionCombo = m_atlasWorkspace ? m_atlasWorkspace->sourceResolutionCombo() : nullptr;
+        cfg.atlasViewStack       = m_atlasWorkspace ? m_atlasWorkspace->atlasViewStack() : nullptr;
         cfg.atlasMgmtWorkspace   = m_atlasesManagementWorkspace;
         cfg.layoutBinary         = m_spratLayoutBin;
         cfg.context = this;
@@ -982,7 +1000,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         m_layoutOrchestrator->setLayoutZoomOnChange(m_settings.layoutZoomOnChange);
         m_layoutOrchestrator->setCLIReady(m_cliReady);
         m_layoutOrchestrator->setMergeReplaceAllDuplicates(m_mergeReplaceAllDuplicates);
-        m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
+        m_layoutOrchestrator->setActiveWorkspace(0);
 
         connect(m_layoutOrchestrator, &LayoutOrchestrator::statusMessageChanged,
                 this, [this](const QString& msg) { if (m_statusLabel) m_statusLabel->setText(msg); });
@@ -1008,7 +1026,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 this, &MainWindow::applyProjectPayload);
         connect(m_layoutOrchestrator, &LayoutOrchestrator::selectSpritesByPathsRequested,
                 this, [this](const QStringList& paths, const QString& primary) {
-                    if (m_canvas) m_canvas->selectSpritesByPaths(paths, primary);
+                    auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+                    if (canvas) canvas->selectSpritesByPaths(paths, primary);
                 });
         connect(m_layoutOrchestrator, &LayoutOrchestrator::tempDirsCleanupNeeded,
                 this, [this]() { if (m_projectController) m_projectController->clearTempDirs(); });
@@ -1021,9 +1040,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 });
         connect(m_layoutOrchestrator, &LayoutOrchestrator::profileFallbackRequested,
                 this, [this](const QString& profile) {
-                    if (!m_profileCombo) return;
-                    const QSignalBlocker blocker(m_profileCombo);
-                    m_profileCombo->setCurrentIndex(m_profileCombo->findData(profile));
+                    auto* profileCombo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+                    if (!profileCombo) return;
+                    const QSignalBlocker blocker(profileCombo);
+                    profileCombo->setCurrentIndex(profileCombo->findData(profile));
                     m_currentProfile = profile;
                     if (m_layoutOrchestrator) m_layoutOrchestrator->setCurrentProfile(profile);
                 });
@@ -1146,8 +1166,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             });
 
     QTimer::singleShot(AppConstants::kCliStartupDelayMs, this, &MainWindow::checkCliTools);
-    m_animTimer = new QTimer(this);
-    connect(m_animTimer, &QTimer::timeout, this, &MainWindow::onAnimTimerTimeout);
     // Autosave setup
     m_autosaveTimer = new QTimer(this);
     connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosaveTimer);
@@ -1218,9 +1236,9 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
     bool isFolder = (mode == 1);
     qInfo() << "[WASM] onWasmFilePicked path=" << path << "isFolder=" << isFolder;
     if (isFolder) {
-        if (m_animCanvas) {
-            m_animCanvas->setZoomManual(false);
-        }
+        auto* apW = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = apW ? apW->animCanvas() : nullptr;
+        if (animCanvas) animCanvas->setZoomManual(false);
         loadFolder(path);
     } else {
         const QUrl url(path);
@@ -1330,10 +1348,11 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
             QResizeEvent dummyEvent(m_pendingResizeSize, m_pendingResizeOldSize);
             QMainWindow::resizeEvent(&dummyEvent);
             updateCliOverlayGeometry();
-            handleAnimPreviewResize();
+            if (m_frameAnimWorkspace) m_frameAnimWorkspace->handleResize();
             // Update canvas overlay if visible
-            if (m_canvasOverlay && m_canvasOverlay->isVisible() && m_canvas) {
-                m_canvasOverlay->resize(m_canvas->size());
+            auto* resizeCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+            if (m_canvasOverlay && m_canvasOverlay->isVisible() && resizeCanvas) {
+                m_canvasOverlay->resize(resizeCanvas->size());
             }
         });
     }
@@ -1448,10 +1467,11 @@ QVector<SpratProfile> MainWindow::configuredProfiles() {
 }
 
 bool MainWindow::selectedProfileDefinition(SpratProfile& out) const {
-    if (!m_profileCombo) {
+    auto* profileCombo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+    if (!profileCombo) {
         return false;
     }
-    const QString selectedName = m_profileCombo->currentData().toString().trimmed();
+    const QString selectedName = profileCombo->currentData().toString().trimmed();
     if (selectedName.isEmpty()) {
         return false;
     }
@@ -1466,7 +1486,8 @@ bool MainWindow::selectedProfileDefinition(SpratProfile& out) const {
 }
 
 void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, const QString& preferred) {
-    if (!m_profileCombo) {
+    auto* profileCombo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+    if (!profileCombo) {
         return;
     }
 
@@ -1478,16 +1499,16 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
         }
         effectiveNames.append(trimmed);
     }
-    const QString previousSelected = m_profileCombo->currentData().toString().trimmed();
-    m_profileCombo->blockSignals(true);
-    m_profileCombo->clear();
+    const QString previousSelected = profileCombo->currentData().toString().trimmed();
+    profileCombo->blockSignals(true);
+    profileCombo->clear();
     for (const SpratProfile& profile : profiles) {
         const QString name = profile.name.trimmed();
-        if (name.isEmpty() || m_profileCombo->findData(name) >= 0) {
+        if (name.isEmpty() || profileCombo->findData(name) >= 0) {
             continue;
         }
         const QString display = profile.label.trimmed().isEmpty() ? name : profile.label.trimmed();
-        m_profileCombo->addItem(display, name);
+        profileCombo->addItem(display, name);
     }
     if (!effectiveNames.isEmpty()) {
         QString selected = preferred.trimmed();
@@ -1497,15 +1518,15 @@ void MainWindow::applyConfiguredProfiles(const QVector<SpratProfile>& profiles, 
         if (selected.isEmpty() || !effectiveNames.contains(selected)) {
             selected = effectiveNames.first();
         }
-        const int idx = m_profileCombo->findData(selected);
-        m_profileCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+        const int idx = profileCombo->findData(selected);
+        profileCombo->setCurrentIndex(idx >= 0 ? idx : 0);
     }
-    m_profileCombo->blockSignals(false);
+    profileCombo->blockSignals(false);
 
     if (m_profileSelectorStack) {
         m_profileSelectorStack->setCurrentIndex(effectiveNames.isEmpty() ? 1 : 0);
     }
-    m_currentProfile = m_profileCombo->currentData().toString();
+    m_currentProfile = profileCombo->currentData().toString();
 
     if (!effectiveNames.contains(m_session->lastSuccessfulProfile)) {
         m_session->lastSuccessfulProfile.clear();
@@ -1717,7 +1738,7 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     // In AtlasesManagement Layout mode, "remove" means move to the neutral (Default)
     // atlas. If this already IS the neutral atlas, remove from the session entirely.
     // Both operations mirror Navigation-mode behaviour and bypass the undo stack.
-    if (m_activeWorkspace == Workspace::AtlasesManagement
+    if (m_currentWorkspace == m_atlasesManagementWorkspace
         && m_atlasesManagementWorkspace
         && m_atlasesManagementWorkspace->viewMode() == AtlasesManagementWorkspace::ViewMode::Layout
         && m_session) {
@@ -1764,7 +1785,7 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
 
                 emit m_session->atlasesChanged();
                 m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
-                if (m_canvas) m_canvas->setModels(src.layoutModels);
+                if (m_atlasWorkspace && m_atlasWorkspace->canvas()) m_atlasWorkspace->canvas()->setModels(src.layoutModels);
                 refreshSpriteTree();
                 scheduleLayoutRebuild(true);
             }
@@ -1786,7 +1807,7 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     for (const QString& p : targets)
         addToExcludedFiles(p);
     syncExcludedAtlas();
-    if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+    if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
         m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
 
     QSet<QString> timelineNames;
@@ -1831,7 +1852,10 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
                 m_session->frameListPath.clear();
             }
             m_session->activeAtlas().layoutModels.clear();
-            if (m_canvas) m_canvas->clearCanvas();
+            {
+                auto* rmCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+                if (rmCanvas) rmCanvas->clearCanvas();
+            }
             m_session->selectedSprites.clear();
             m_session->selectedSprite.reset();
             m_statusLabel->setText(tr("No frames loaded"));
@@ -1846,7 +1870,8 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
             refreshAnimationTest();
         } else {
             captureOldSpritePositions();
-            if (m_canvas) m_canvas->removeSprites(targets);
+            auto* rmCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+            if (rmCanvas) rmCanvas->removeSprites(targets);
             m_statusLabel->setText(QString(tr("Removed %1 frame(s)")).arg(targets.size()));
             refreshTimelineFrames();
             refreshTimelineList();
@@ -2050,7 +2075,8 @@ void MainWindow::onManageProfiles() {
         return;
     }
 
-    const QString previousProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+    auto* profileCombo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
+    const QString previousProfile = profileCombo ? profileCombo->currentData().toString() : QString();
     applyConfiguredProfiles(profiles, previousProfile);
 
     // Invalidate cached layout so changed profile settings take effect
@@ -2059,7 +2085,7 @@ void MainWindow::onManageProfiles() {
         m_session->lastSuccessfulProfile.clear();
     }
 
-    if (m_exportWorkspaceActive && m_exportWorkspace) {
+    if (m_exportWorkspace && m_currentWorkspace == m_exportWorkspace) {
         // Re-populate the export workspace profile combo with the updated definitions
         const QStringList enabled = m_atlasesManagementWorkspace
             ? m_atlasesManagementWorkspace->enabledProfiles() : QStringList();
@@ -2069,7 +2095,7 @@ void MainWindow::onManageProfiles() {
                 toExport << p;
         }
         m_exportWorkspace->populate(toExport,
-                                    m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
+                                    profileCombo ? profileCombo->currentData().toString() : QString(),
                                     m_lastSaveConfig,
                                     QString());
         // Refresh the preview with the updated profile settings
@@ -2077,8 +2103,8 @@ void MainWindow::onManageProfiles() {
         refreshPreview(cfg.profiles.isEmpty() ? QString() : cfg.profiles.first(),
                        cfg.scaleFilter);
     } else if (!m_session->layoutSourcePath.isEmpty()
-               && m_profileCombo
-               && !m_profileCombo->currentData().toString().trimmed().isEmpty()) {
+               && profileCombo
+               && !profileCombo->currentData().toString().trimmed().isEmpty()) {
         // Rebuild the atlas layout with the new profile settings
         scheduleLayoutRebuild(true);
     }
@@ -2086,11 +2112,12 @@ void MainWindow::onManageProfiles() {
 
 
 void MainWindow::updateOnionSkinDisplay() {
-    if (!m_previewView || !m_session) return;
-    const bool enabled = m_spriteEditorPanel
-        && m_spriteEditorPanel->onionSkinBtn()->isChecked();
+    auto* previewCanvas = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+    if (!previewCanvas || !m_session) return;
+    auto* spriteEditorPanel = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel() : nullptr;
+    const bool enabled = spriteEditorPanel && spriteEditorPanel->onionSkinBtn()->isChecked();
     if (!enabled || m_settings.onionSkinOpacity == 0) {
-        m_previewView->setGhostSprites({});
+        previewCanvas->setGhostSprites({});
         return;
     }
     const QPoint activePivot = m_session->selectedSprite
@@ -2099,15 +2126,19 @@ void MainWindow::updateOnionSkinDisplay() {
     QList<SpritePtr> ghosts;
     for (const auto& s : m_session->selectedSprites)
         if (s && s != m_session->selectedSprite) ghosts.append(s);
-    m_previewView->setGhostSprites(ghosts, activePivot);
+    previewCanvas->setGhostSprites(ghosts, activePivot);
 }
 
 /**
  * @brief Applies application settings.
  */
 void MainWindow::applySettings() {
-    if (m_canvas) {
-        SettingsCoordinator::apply(m_settings, m_canvas, m_previewView, m_animCanvas);
+    auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+    auto* previewCanvas = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+    auto* apS = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+    auto* animCanvas = apS ? apS->animCanvas() : nullptr;
+    if (canvas) {
+        SettingsCoordinator::apply(m_settings, canvas, previewCanvas, animCanvas);
     }
     if (m_packedAtlasView) {
         m_packedAtlasView->setSettings(m_settings);
@@ -2115,12 +2146,14 @@ void MainWindow::applySettings() {
     if (m_exportLayoutCanvas) {
         m_exportLayoutCanvas->setSettings(m_settings);
     }
-    if (m_spriteTree) {
-        m_spriteTree->setPreviewEnabled(m_settings.spritePreviewEnabled);
-        m_spriteTree->setPreviewDelay(static_cast<int>(m_settings.spritePreviewDelay * 1000.0));
+    auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
+    auto* spriteTree = navigatorPanel ? navigatorPanel->tree() : nullptr;
+    if (spriteTree) {
+        spriteTree->setPreviewEnabled(m_settings.spritePreviewEnabled);
+        spriteTree->setPreviewDelay(static_cast<int>(m_settings.spritePreviewDelay * 1000.0));
     }
-    if (m_navigatorPanel) {
-        m_navigatorPanel->setGroupSimilar(m_settings.navigatorGroupSimilar);
+    if (navigatorPanel) {
+        navigatorPanel->setGroupSimilar(m_settings.navigatorGroupSimilar);
         refreshSpriteTree();
     }
 
@@ -2144,7 +2177,7 @@ void MainWindow::applySettings() {
         && m_appliedSyncMode == SyncMode::None
         && m_session
         && !m_session->activeAtlas().layoutModels.isEmpty()
-        && m_canvas) {
+        && m_atlasWorkspace && m_atlasWorkspace->canvas()) {
         // Sync mode enabled - rebuild immediately
         scheduleLayoutRebuild(true);
     }
@@ -2170,15 +2203,16 @@ void MainWindow::applySettings() {
     updateOnionSkinDisplay();
 
     // Refresh multi-selection label
-    if (m_multiSelectionLabel && m_session) {
+    auto* multiSelectionLabel = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->multiSelectionLabel() : nullptr;
+    if (multiSelectionLabel && m_session) {
         const int n = m_session->selectedSprites.size();
         if (n > 1) {
-            m_multiSelectionLabel->setText(m_settings.propagateEditsToChecked
+            multiSelectionLabel->setText(m_settings.propagateEditsToChecked
                 ? tr("%1 sprites selected — pivot and marker changes apply to all").arg(n)
                 : tr("%1 sprites selected — changes apply to current frame only").arg(n));
-            m_multiSelectionLabel->setVisible(true);
+            multiSelectionLabel->setVisible(true);
         } else {
-            m_multiSelectionLabel->setVisible(false);
+            multiSelectionLabel->setVisible(false);
         }
     }
 }
@@ -2369,11 +2403,11 @@ void MainWindow::performFolderSync() {
         return;
     }
 
-    // Detect changes — use smart-folder-aware detection when smart folders are configured
+    // Detect changes — use source-aware detection when sources are configured
     FolderSyncService::SyncResult syncResult;
-    if (!m_session->smartFolders.isEmpty()) {
-        syncResult = FolderSyncService::detectChangesFromSmartFolders(
-            m_session->smartFolders,
+    if (!m_session->sources.isEmpty()) {
+        syncResult = FolderSyncService::detectChangesFromSources(
+            m_session->sources,
             m_session->activeAtlas().layoutModels.first().sprites);
     } else {
         syncResult = FolderSyncService::detectChanges(
@@ -2417,8 +2451,9 @@ void MainWindow::performFolderSync() {
             // IMPORTANT: Refresh GUI immediately to show deleted sprites removed
             // This prevents stale UI while layout rebuilds in background
             refreshSpriteTree();
-            if (m_canvas) {
-                m_canvas->update();
+            {
+                auto* syncCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+                if (syncCanvas) syncCanvas->update();
             }
 
             // Show feedback about what happened
@@ -2446,8 +2481,9 @@ void MainWindow::performFolderSync() {
             // All frames were deleted
             m_statusLabel->setText(tr("All sprites removed."));
             refreshSpriteTree();
-            if (m_canvas) {
-                m_canvas->update();
+            {
+                auto* syncCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+                if (syncCanvas) syncCanvas->update();
             }
         }
     }
@@ -2831,7 +2867,10 @@ void MainWindow::onSpritesDeleted(const QStringList& paths)
         }
         m_session->currentFolder.clear();
         m_session->activeAtlas().layoutModels.clear();
-        if (m_canvas) m_canvas->clearCanvas();
+        {
+            auto* wasmCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+            if (wasmCanvas) wasmCanvas->clearCanvas();
+        }
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
         m_statusLabel->setText(tr("No frames loaded"));
@@ -2848,7 +2887,8 @@ void MainWindow::onSpritesDeleted(const QStringList& paths)
     } else {
         ensureFrameListInput();
         captureOldSpritePositions();
-        if (m_canvas) m_canvas->removeSprites(targets);
+        auto* wasmCanvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        if (wasmCanvas) wasmCanvas->removeSprites(targets);
         m_statusLabel->setText(QString(tr("Removed %1 file(s)")).arg(targets.size()));
         refreshTimelineFrames();
         refreshTimelineList();
@@ -3030,16 +3070,16 @@ void MainWindow::showSyncNotification(const QString& message) {
 
 void MainWindow::onUndo() {
     if (!m_undoStack) return;
-    clearCoordinateFieldOverride();
+    if (m_atlasWorkspace) m_atlasWorkspace->clearCoordinateOverride();
     m_undoStack->undo();
-    syncPivotSpinsFromSprite();
+    if (m_atlasWorkspace) m_atlasWorkspace->refreshSpriteEditor();
 }
 
 void MainWindow::onRedo() {
     if (!m_undoStack) return;
-    clearCoordinateFieldOverride();
+    if (m_atlasWorkspace) m_atlasWorkspace->clearCoordinateOverride();
     m_undoStack->redo();
-    syncPivotSpinsFromSprite();
+    if (m_atlasWorkspace) m_atlasWorkspace->refreshSpriteEditor();
 }
 
 void MainWindow::onQuickStart() {
@@ -3270,68 +3310,7 @@ void MainWindow::onShowHotkeys() {
     dlg.exec();
 }
 
-MainWindow::SessionUndoState MainWindow::captureSessionUndoState() const {
-    SessionUndoState state;
-    state.currentFolder = m_session->currentFolder;
-    state.layoutSourcePath = m_session->layoutSourcePath;
-    state.layoutSourceIsList = m_session->layoutSourceIsList;
-    state.sourceFolder = m_session->sourceFolder;
-    state.sources = m_session->sources;
-    state.activeFramePaths = m_session->activeFramePaths;
-    state.frameListPath = m_session->frameListPath;
-    state.atlases = m_session->atlases;
-    state.activeAtlasIndex = m_session->activeAtlasIndex;
-    state.cachedLayoutOutput = m_session->cachedLayoutOutput;
-    state.cachedLayoutScale = m_session->cachedLayoutScale;
-    state.lastSuccessfulProfile = m_session->lastSuccessfulProfile;
-    state.lastRunUsedTrim = m_session->lastRunUsedTrim;
-    state.selectedTimelineIndex = m_session->selectedTimelineIndex;
-    state.selectedPointName = m_session->selectedPointName;
-    state.selectedSpritePaths.clear();
-    for (const auto& s : m_session->selectedSprites) if (s) state.selectedSpritePaths << s->path;
-    state.primarySelectedSpritePath = m_session->selectedSprite ? m_session->selectedSprite->path : QString();
-    state.sourceFolderIsTemp = m_projectController ? m_projectController->isSourceFolderTemp() : false;
-    return state;
-}
-
-namespace {
-SpritePtr spriteByPath(const QVector<LayoutModel>& models, const QString& path) {
-    if (path.isEmpty()) return nullptr;
-    for (const auto& model : models) {
-        for (const auto& sprite : model.sprites) {
-            if (sprite && sprite->path == path) return sprite;
-        }
-    }
-    return nullptr;
-}
-}
-
-void MainWindow::applySessionUndoState(const SessionUndoState& state) {
-    m_session->currentFolder = state.currentFolder;
-    m_session->layoutSourcePath = state.layoutSourcePath;
-    m_session->layoutSourceIsList = state.layoutSourceIsList;
-    m_session->sourceFolder = state.sourceFolder;
-    m_session->sources = state.sources;
-    m_session->activeFramePaths = state.activeFramePaths;
-    m_session->frameListPath = state.frameListPath;
-    m_session->atlases = state.atlases;
-    m_session->activeAtlasIndex = state.activeAtlasIndex;
-    m_session->cachedLayoutOutput = state.cachedLayoutOutput;
-    m_session->cachedLayoutScale = state.cachedLayoutScale;
-    m_session->lastSuccessfulProfile = state.lastSuccessfulProfile;
-    m_session->lastRunUsedTrim = state.lastRunUsedTrim;
-    m_session->selectedTimelineIndex = state.selectedTimelineIndex;
-    m_session->selectedPointName = state.selectedPointName;
-    if (m_projectController) m_projectController->setSourceFolderIsTemp(state.sourceFolderIsTemp);
-
-    // Restore selections
-    m_session->selectedSprites.clear();
-    for (const QString& p : state.selectedSpritePaths) {
-        SpritePtr s = spriteByPath(m_session->activeAtlas().layoutModels, p);
-        if (s) m_session->selectedSprites.push_back(s);
-    }
-    m_session->selectedSprite = spriteByPath(m_session->activeAtlas().layoutModels, state.primarySelectedSpritePath);
-
+void MainWindow::refreshUiAfterUndo() {
     // Refresh UI
     updateMainContentView();
     updateUiState();
@@ -3339,57 +3318,15 @@ void MainWindow::applySessionUndoState(const SessionUndoState& state) {
     refreshTimelineList();
     refreshTimelineFrames();
     refreshAnimationTest();
-    if (m_canvas) m_canvas->update();
-    m_previewView->overlay()->updateLayout();
+    auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+    if (canvas) canvas->update();
+    auto* previewCanvas = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+    if (previewCanvas) previewCanvas->overlay()->updateLayout();
     refreshHandleCombo();
     updateManualFrameLabel();
     updateOpenSourceFolderAction();
 }
 
-namespace {
-class SessionUndoCommand : public QUndoCommand {
-public:
-    SessionUndoCommand(MainWindow* mw, const QString& text,
-                       const MainWindow::SessionUndoState& before,
-                       const MainWindow::SessionUndoState& after,
-                       bool alreadyApplied)
-        : QUndoCommand(text), m_mw(mw), m_before(before), m_after(after), m_skipFirstRedo(alreadyApplied) {}
-
-    void undo() override { m_mw->applySessionUndoState(m_before); }
-    void redo() override {
-        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
-        m_mw->applySessionUndoState(m_after);
-    }
-
-private:
-    MainWindow* m_mw;
-    MainWindow::SessionUndoState m_before;
-    MainWindow::SessionUndoState m_after;
-    mutable bool m_skipFirstRedo;
-};
-}
-
-void MainWindow::pushSessionUndoCommand(const QString& text,
-                                        const SessionUndoState& before,
-                                        const SessionUndoState& after,
-                                        bool alreadyApplied) {
-    m_undoStack->push(new SessionUndoCommand(this, text, before, after, alreadyApplied));
-}
-
-void MainWindow::beginPendingSessionUndoCommand(const QString& text) {
-    m_pendingSessionUndoCommand = { text, captureSessionUndoState() };
-}
-
-void MainWindow::finalizePendingSessionUndoCommand() {
-    if (m_pendingSessionUndoCommand) {
-        pushSessionUndoCommand(m_pendingSessionUndoCommand->text,
-                               m_pendingSessionUndoCommand->before,
-                               captureSessionUndoState(),
-                               true);
-        m_pendingSessionUndoCommand.reset();
-    }
-}
-
-void MainWindow::discardPendingSessionUndoCommand() {
-    m_pendingSessionUndoCommand.reset();
+void MainWindow::setSourceFolderIsTemp(bool isTemp) {
+    if (m_projectController) m_projectController->setSourceFolderIsTemp(isTemp);
 }

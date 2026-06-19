@@ -1,6 +1,7 @@
 #pragma once
 #include <QDialog>
-#include "models.h"
+#include "AppSettings.h"
+#include "CliPaths.h"
 
 class QPushButton;
 class QLineEdit;

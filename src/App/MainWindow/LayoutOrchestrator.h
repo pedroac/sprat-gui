@@ -8,7 +8,9 @@
 #include <QVariantAnimation>
 #include <functional>
 #include <atomic>
-#include "models.h"
+#include "SyncMode.h"
+#include "ViewEnums.h"
+#include "LayoutModels.h"
 #include "LayoutRunner.h"
 
 class ILayoutContext;

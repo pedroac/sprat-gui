@@ -6,8 +6,7 @@
 struct ProjectPayloadBuildInput {
     QString currentFolder;
     QString sourceFolder;          // Primary source folder for sprite files (used as base for relative paths)
-    QVector<SmartFolder> smartFolders; // Smart folders list (saved as "smart_folders" in project JSON)
-    QVector<ProjectSource> sources;    // Named sources (new model; serialized as "sources" alongside "smart_folders")
+    QVector<ProjectSource> sources;    // Named sources (serialized as "sources" alongside legacy "smart_folders")
     QString projectDir;            // Directory containing project.spart.json (used to compute portable relative folder path)
     QStringList activeFramePaths;
     bool layoutSourceIsList = false;
@@ -47,7 +46,6 @@ struct ProjectPayloadBuildInput {
 };
 
 struct ProjectPayloadApplyResult {
-    QVector<SmartFolder> smartFolders; // Smart folders resolved from the project file
     QVector<ProjectSource> sources;    // Named sources resolved from the project file
     QStringList orphanedSpritePaths;   // Sprite paths recorded as orphaned in the project file
     // Multi-atlas support (v4+); empty for v1-3 files (use timelines below instead)

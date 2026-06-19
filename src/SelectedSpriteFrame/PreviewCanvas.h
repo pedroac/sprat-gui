@@ -1,6 +1,7 @@
 #pragma once
 #include "ZoomableGraphicsView.h"
-#include "models.h"
+#include "SpriteModels.h"
+#include "AppSettings.h"
 #include "EditorOverlayItem.h"
 #include <QDateTime>
 #include <QFutureWatcher>

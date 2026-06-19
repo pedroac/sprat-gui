@@ -1,10 +1,9 @@
 #pragma once
 
 #include <QVector>
-#include "models.h"
+#include "AnimationModels.h"
 
 class QTimer;
-class QPushButton;
 
 /**
  * @class AnimationPlaybackService
@@ -26,7 +25,7 @@ public:
      * @param playPauseButton Play/pause button to update (will be updated if needed)
      * @return bool True if frame was changed, false if already at first frame
      */
-    static bool prev(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer, QPushButton* playPauseButton);
+    static bool prev(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer);
 
     /**
      * @brief Moves to the next frame in the animation.
@@ -39,7 +38,7 @@ public:
      * @param playPauseButton Play/pause button to update (will be updated if needed)
      * @return bool True if frame was changed, false if already at last frame
      */
-    static bool next(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer, QPushButton* playPauseButton);
+    static bool next(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer);
 
     /**
      * @brief Advances the animation based on elapsed real time.
@@ -70,5 +69,5 @@ public:
      * @param playPauseButton Play/pause button to update
      * @return bool True if state was toggled, false if no valid timeline selected
      */
-    static bool togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer, QPushButton* playPauseButton);
+    static bool togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer);
 };

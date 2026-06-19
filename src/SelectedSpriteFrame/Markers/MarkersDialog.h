@@ -1,6 +1,6 @@
 #pragma once
 #include <QDialog>
-#include "models.h"
+#include "SpriteModels.h"
 
 class QListWidget;
 class QLineEdit;

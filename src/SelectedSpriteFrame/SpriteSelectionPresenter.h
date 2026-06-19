@@ -4,7 +4,8 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include "PreviewCanvas.h"
-#include "models.h"
+#include "SpriteModels.h"
+#include "ViewEnums.h"
 
 class QDoubleSpinBox;
 

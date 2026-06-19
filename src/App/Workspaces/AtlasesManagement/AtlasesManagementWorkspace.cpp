@@ -242,18 +242,10 @@ void AtlasesManagementWorkspace::setupUi() {
         const int srcRow = m_atlasList->currentRow();
         if (srcRow < 0 || srcRow >= m_atlases.size()) return;
         QSet<QString> pathSet;
-        std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* node) {
-            auto sprite = node->data(0, Qt::UserRole).value<SpritePtr>();
-            if (sprite && !sprite->path.isEmpty()) {
-                pathSet.insert(sprite->path);
-            } else {
-                for (int i = 0; i < node->childCount(); ++i)
-                    collect(node->child(i));
-            }
-        };
         // Collect from all visually selected items (not just the current item).
         for (auto* selected : m_navigator->tree()->selectedItems())
-            collect(selected);
+            for (const QString& p : SpriteTreeUtils::collectDescendantPaths(selected))
+                pathSet.insert(p);
         if (pathSet.isEmpty()) return;
         QStringList paths(pathSet.cbegin(), pathSet.cend());
         if (m_atlases[srcRow].isExcluded) {
@@ -717,23 +709,16 @@ void AtlasesManagementWorkspace::onSpriteContextMenu(const QPoint& pos) {
 
     const auto selectedItems = m_navigator->tree()->selectedItems();
 
-    QSet<QString> pathSet;
-    std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* item) {
-        auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
-        if (sprite && !sprite->path.isEmpty()) {
-            pathSet.insert(sprite->path);
-        } else {
-            for (int i = 0; i < item->childCount(); ++i)
-                collect(item->child(i));
-        }
-    };
     // For group/source nodes use the clicked node directly — no selection needed.
     // For leaf nodes use the full selection for multi-select support.
+    QSet<QString> pathSet;
     if (isGroupNode || isSourceNode) {
-        collect(clickedItem);
+        const auto paths = SpriteTreeUtils::collectDescendantPaths(clickedItem);
+        pathSet = QSet<QString>(paths.begin(), paths.end());
     } else {
         for (auto* item : selectedItems)
-            collect(item);
+            for (const QString& p : SpriteTreeUtils::collectDescendantPaths(item))
+                pathSet.insert(p);
     }
     if (pathSet.isEmpty()) return;
     QStringList paths(pathSet.cbegin(), pathSet.cend());
@@ -1222,4 +1207,27 @@ void AtlasesManagementWorkspace::showEvent(QShowEvent* event) {
         if (centerW > 0)
             m_splitter->setSizes({leftW, centerW, rightW});
     });
+}
+
+// ---------------------------------------------------------------------------
+// IWorkspace
+// ---------------------------------------------------------------------------
+
+void AtlasesManagementWorkspace::enter()
+{
+    // Data is already populated via setAtlases/setSources/setSession before enter()
+    // is called. Just ensure the view mode is coherent (Navigation by default).
+    if (m_viewMode == ViewMode::Layout && m_centerStack)
+        m_centerStack->setCurrentIndex(1);
+    else if (m_centerStack)
+        m_centerStack->setCurrentIndex(0);
+}
+
+void AtlasesManagementWorkspace::leave()
+{
+    // Nothing to persist — selectedAtlasIndex() is already tracked by the list widget.
+    // Clear the canvas widget if Layout mode was active so the canvas can be
+    // re-parented back into the atlas dock without leaving stale references.
+    if (m_viewMode == ViewMode::Layout)
+        clearCanvasWidget();
 }

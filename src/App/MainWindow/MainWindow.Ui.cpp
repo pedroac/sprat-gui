@@ -1,4 +1,12 @@
 #include "MainWindow.h"
+#include "AnimationPreviewPanel.h"
+#include "TimelineEditorPanel.h"
+#include "ExportWorkspace.h"
+#include "FrameAnimationWorkspace.h"
+#include "LayoutCanvas.h"
+#include "SpriteEditorPanel.h"
+#include "PreviewCanvas.h"
+#include "NavigatorPanel.h"
 #include "PackedAtlasView.h"
 #include "AtlasesManagementWorkspace.h"
 #include "UndoCommands.h"
@@ -51,21 +59,6 @@
 #include "NavigatorTreeWidget.h"
 #include "SpriteTreeUtils.h"
 #include <QUuid>
-
-static double toDisplay(int px, int dim, CoordUnit unit, int origin = 0) {
-    const int adjusted = px - origin;
-    return (unit == CoordUnit::Percent && dim > 0)
-        ? adjusted * 100.0 / dim : double(adjusted);
-}
-
-namespace {
-void setCoordinateSpinValue(QDoubleSpinBox* spin, int px, int dim, CoordUnit unit, int origin = 0) {
-    if (!spin) return;
-    spin->blockSignals(true);
-    spin->setValue(toDisplay(px, dim, unit, origin));
-    spin->blockSignals(false);
-}
-}
 
 void MainWindow::setupUi() {
     resize(1400, 860);
@@ -127,7 +120,7 @@ void MainWindow::setupUi() {
     connect(m_exportWorkspace, &ExportWorkspace::exportRequested,
             this, &MainWindow::onExportWorkspaceRequested);
     connect(m_exportWorkspace, &ExportWorkspace::cancelled,
-            this, &MainWindow::leaveExportWorkspace);
+            this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
     m_packedAtlasView = new PackedAtlasView(this);
     m_packedAtlasView->hide();
@@ -154,12 +147,7 @@ void MainWindow::setupUi() {
                     m_exportLayoutCanvas->setModels(models);
                     m_exportLayoutCanvas->setZoomManual(false);
                     m_exportLayoutCanvas->initialFit();
-                    // Restore user's last zoom level instead of resetting to initialFit on every refresh.
-                    if (m_savedExportZoom > 0.0) {
-                        m_exportLayoutCanvas->setZoomManual(true);
-                        m_exportLayoutCanvas->setZoom(m_savedExportZoom);
-                    }
-                    if (m_exportWorkspaceActive)
+                    if (m_currentWorkspace == m_exportWorkspace)
                         m_exportWorkspace->setViewport(m_exportLayoutCanvas);
                 }
                 // Shared refresh: cancel in-progress load, invalidate cache, schedule pack
@@ -259,8 +247,8 @@ void MainWindow::setupUi() {
                 m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
                 if (m_atlasesManagementWorkspace->viewMode()
                         == AtlasesManagementWorkspace::ViewMode::Layout) {
-                    if (m_canvas)
-                        m_canvas->setModels(m_session->atlases[sourceAtlasIndex].layoutModels);
+                    if (m_atlasWorkspace->canvas())
+                        m_atlasWorkspace->canvas()->setModels(m_session->atlases[sourceAtlasIndex].layoutModels);
                     scheduleLayoutRebuild(true);
                 }
                 if (toExcluded || fromExcluded)
@@ -311,113 +299,86 @@ void MainWindow::setupUi() {
     });
 
     // --- Create Docks ---
-    const int groupMargin = 4;
-    const int groupTopPadding = 12;
-    const int groupBottomMargin = 0;
 
-    // 1. Layout Canvas panel
-    QWidget* canvasContent = new QWidget(this);
-    canvasContent->setStyleSheet("font-weight: normal;");
-    QVBoxLayout* canvasLayout = new QVBoxLayout(canvasContent);
-    canvasLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+    // 1. Atlas workspace — owns canvas, navigator, sprite editor, profile/resolution combos
+    m_atlasWorkspace = new AtlasWorkspace(m_session, m_undoStack, &m_settings, &m_cliPaths, this);
 
-    // Hidden profile combo – drives layout logic, never shown directly
-    m_profileCombo = new QComboBox(this);
-    m_profileCombo->setVisible(false);
-    m_profileCombo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_profileCombo->setToolTip(tr("Layout profile"));
-    m_profileCombo->setAccessibleName(tr("Layout profile"));
-    connect(m_profileCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onProfileChanged);
-    // Keep profileCombo in sync with workspace selection
-    connect(m_profileCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        if (!m_profileCombo) return;
-        const QString name = m_profileCombo->currentData().toString();
+    // Populate profile combo now that AtlasWorkspace is created
+    applyConfiguredProfiles(configuredProfiles(), QString());
+    // Keep profile combo in sync with AtlasesManagementWorkspace
+    connect(m_atlasWorkspace->profileCombo(), QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        auto* combo = m_atlasWorkspace->profileCombo();
+        if (!combo) return;
+        const QString name = combo->currentData().toString();
         if (m_atlasesManagementWorkspace) m_atlasesManagementWorkspace->setSelectedProfile(name);
     });
-    applyConfiguredProfiles(configuredProfiles(), QString());
 
-    // Resolution combo
-    m_sourceResolutionCombo = new QComboBox(this);
-    m_sourceResolutionCombo->setToolTip(tr("Target source resolution for layout"));
-    m_sourceResolutionCombo->setAccessibleName(tr("Source resolution"));
-    m_sourceResolutionCombo->addItems(ResolutionsConfig::loadResolutionOptions());
-    if (m_sourceResolutionCombo->count() == 0) {
-        m_sourceResolutionCombo->addItem("1024x768");
-    }
-
-    // Set default resolution based on actual screen size
-    if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        const QSize screenSize = screen->size();
-        int bestIndex = 0;
-        int minDistance = std::numeric_limits<int>::max();
-        for (int i = 0; i < m_sourceResolutionCombo->count(); ++i) {
-            int w, h;
-            if (parseResolutionText(m_sourceResolutionCombo->itemText(i), w, h)) {
-                int distance = qAbs(w - screenSize.width()) + qAbs(h - screenSize.height());
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    bestIndex = i;
+    // Populate resolution combo (AtlasWorkspace owns the widget; we set options + screen default)
+    {
+        QStringList resOptions = ResolutionsConfig::loadResolutionOptions();
+        if (resOptions.isEmpty()) resOptions << "1024x768";
+        if (QScreen* screen = QGuiApplication::primaryScreen()) {
+            const QSize screenSize = screen->size();
+            int bestIndex = 0, minDist = std::numeric_limits<int>::max();
+            for (int i = 0; i < resOptions.size(); ++i) {
+                int w, h;
+                if (parseResolutionText(resOptions[i], w, h)) {
+                    const int d = qAbs(w - screenSize.width()) + qAbs(h - screenSize.height());
+                    if (d < minDist) { minDist = d; bestIndex = i; }
                 }
             }
+            m_currentResolution = resOptions[bestIndex];
+            m_atlasWorkspace->setResolutionOptions(resOptions, m_currentResolution);
+        } else {
+            m_atlasWorkspace->setResolutionOptions(resOptions, resOptions.first());
+            m_currentResolution = resOptions.first();
         }
-        m_sourceResolutionCombo->setCurrentIndex(bestIndex);
-        m_currentResolution = m_sourceResolutionCombo->currentText();
     }
 
-    if (!m_sourceResolutionDebounceTimer) {
-        m_sourceResolutionDebounceTimer = new QTimer(this);
-        m_sourceResolutionDebounceTimer->setSingleShot(true);
-        connect(m_sourceResolutionDebounceTimer, &QTimer::timeout, this, [this]() { scheduleLayoutRebuild(); });
-    }
-    auto scheduleSourceResolutionLayoutRun = [this](int) {
-        const QString requestedRes = m_sourceResolutionCombo->currentText();
+    // Connect AtlasWorkspace resolution change → push undo command + debounce rebuild
+    connect(m_atlasWorkspace, &AtlasWorkspace::resolutionChangeRequested,
+            this, [this](const QString& requestedRes) {
         if (requestedRes == m_currentResolution) return;
-
-        QString oldRes = m_currentResolution;
+        const QString oldRes = m_currentResolution;
         m_currentResolution = requestedRes;
-
         m_undoStack->push(new SetSourceResolutionCommand(
-            m_sourceResolutionCombo,
-            oldRes,
-            requestedRes,
+            m_atlasWorkspace->sourceResolutionCombo(), oldRes, requestedRes,
             [this]() {
-                m_currentResolution = m_sourceResolutionCombo->currentText();
+                m_currentResolution = m_atlasWorkspace->sourceResolutionCombo()->currentText();
                 scheduleLayoutRebuild();
             }
         ));
+        m_atlasWorkspace->sourceResolutionDebounceTimer()->start(AppConstants::kSourceResDebounceMs);
+    });
 
-        if (!m_sourceResolutionDebounceTimer) {
-            scheduleLayoutRebuild();
-            return;
-        }
-        m_sourceResolutionDebounceTimer->start(AppConstants::kSourceResDebounceMs);
-    };
-    connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, scheduleSourceResolutionLayoutRun);
-    m_sourceResolutionCombo->hide();
-    m_sourceResolutionCombo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    // Debounce timer fires → schedule layout rebuild
+    connect(m_atlasWorkspace->sourceResolutionDebounceTimer(), &QTimer::timeout,
+            this, [this]() { scheduleLayoutRebuild(); });
 
     // m_layoutZoom (double) tracks the current layout canvas zoom percentage.
 
     // AtlasesManagementWorkspace — resolution and profile wiring
     m_atlasesManagementWorkspace->setResolutionOptions(
         ResolutionsConfig::loadResolutionOptions(), m_currentResolution);
-    // Keep resolution combos in sync (m_sourceResolutionCombo ↔ AtlasesManagement)
-    connect(m_sourceResolutionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    // Keep resolution combos in sync (sourceResolutionCombo ↔ AtlasesManagement)
+    connect(m_atlasWorkspace->sourceResolutionCombo(), QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this]() {
         if (m_atlasesManagementWorkspace)
-            m_atlasesManagementWorkspace->setCurrentResolution(m_sourceResolutionCombo->currentText());
+            m_atlasesManagementWorkspace->setCurrentResolution(m_atlasWorkspace->sourceResolutionCombo()->currentText());
     });
     connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::resolutionChanged,
             this, [this](const QString& res) {
-        const int idx = m_sourceResolutionCombo->findText(res);
-        if (idx >= 0) m_sourceResolutionCombo->setCurrentIndex(idx);
+        auto* combo = m_atlasWorkspace->sourceResolutionCombo();
+        const int idx = combo->findText(res);
+        if (idx >= 0) combo->setCurrentIndex(idx);
     });
     connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::selectedProfileChanged,
             this, [this](const QString& name) {
-        if (!m_profileCombo) return;
-        const int idx = m_profileCombo->findData(name);
-        if (idx >= 0 && idx != m_profileCombo->currentIndex())
-            m_profileCombo->setCurrentIndex(idx);
+        auto* combo = m_atlasWorkspace->profileCombo();
+        if (!combo) return;
+        const int idx = combo->findData(name);
+        if (idx >= 0 && idx != combo->currentIndex())
+            combo->setCurrentIndex(idx);
     });
     connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::manageProfilesRequested,
             this, &MainWindow::onManageProfiles);
@@ -426,7 +387,7 @@ void MainWindow::setupUi() {
     connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::viewModeChanged,
             this, [this](AtlasesManagementWorkspace::ViewMode mode) {
         if (mode == AtlasesManagementWorkspace::ViewMode::Layout) {
-            m_atlasesManagementWorkspace->setCanvasWidget(m_canvas);
+            m_atlasesManagementWorkspace->setCanvasWidget(m_atlasWorkspace->canvas());
             m_atlasesManagementWorkspace->setZoom(m_layoutZoom);
             if (!m_session) return;
             // Rebuild so the canvas reflects the currently selected atlas (it may have
@@ -434,117 +395,101 @@ void MainWindow::setupUi() {
             scheduleLayoutRebuild(true);
         } else {
             // Clear dim filter before returning the canvas to the Sprites workspace.
-            if (m_canvas) m_canvas->setDimFilter(QString());
+            auto* canvas = m_atlasWorkspace->canvas();
+            if (canvas) canvas->setDimFilter(QString());
             m_atlasesManagementWorkspace->clearCanvasWidget();
             // Re-parent the canvas back to its original dock container so it
             // is not left as a floating top-level window blocking the menu bar.
-            if (m_canvas && m_atlasViewStack && m_atlasViewStack->widget(0)) {
-                QWidget* cc = m_atlasViewStack->widget(0);
-                m_canvas->setParent(cc);
-                if (auto* l = cc->layout()) l->addWidget(m_canvas);
-                m_canvas->show();
+            auto* atlasViewStack = m_atlasWorkspace->atlasViewStack();
+            if (canvas && atlasViewStack && atlasViewStack->widget(0)) {
+                QWidget* cc = atlasViewStack->widget(0);
+                canvas->setParent(cc);
+                if (auto* l = cc->layout()) l->addWidget(canvas);
+                canvas->show();
             }
         }
     });
     connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::layoutFilterChanged,
             this, [this](const QString& query) {
-        if (m_canvas) m_canvas->setDimFilter(query);
+        if (m_atlasWorkspace->canvas()) m_atlasWorkspace->canvas()->setDimFilter(query);
     });
 
-    m_canvas = new LayoutCanvas(this);
-    canvasLayout->addWidget(m_canvas);
+    // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
+    m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
 
-    m_atlasDimsLabel = new QLabel(canvasContent);
-    m_atlasDimsLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    m_atlasDimsLabel->setContentsMargins(8, 2, 8, 2);
-    m_atlasDimsLabel->setVisible(false);
-    canvasLayout->addWidget(m_atlasDimsLabel);
-
-    connect(m_canvas, &LayoutCanvas::spriteSelected, this, &MainWindow::onSpriteSelected);
-    connect(m_canvas, &LayoutCanvas::selectionChanged, this, [this](const QList<SpritePtr>& selection) {
-        m_session->selectedSprites = selection;
-    });
-    connect(m_canvas, &LayoutCanvas::zoomChanged, this, [this](double zoom) {
-        m_layoutZoom = zoom * 100.0;
+    // Connect AtlasWorkspace signals that need MainWindow context
+    connect(m_atlasWorkspace, &AtlasWorkspace::spriteSelected,
+            this, &MainWindow::onSpriteSelected);
+    connect(m_atlasWorkspace, &AtlasWorkspace::canvasSelectionChanged,
+            this, [this](const QList<SpritePtr>&) { updateOnionSkinDisplay(); });
+    connect(m_atlasWorkspace, &AtlasWorkspace::canvasZoomChanged,
+            this, [this](double pct) {
+        m_layoutZoom = pct;
         if (m_atlasesManagementWorkspace)
-            m_atlasesManagementWorkspace->setZoom(zoom * 100.0);
+            m_atlasesManagementWorkspace->setZoom(pct);
     });
-    connect(m_canvas, &LayoutCanvas::requestTimelineGeneration, this, &MainWindow::onGenerateTimelinesFromFrames);
-    connect(m_canvas, &LayoutCanvas::externalPathDropped, this, &MainWindow::onLayoutCanvasPathDropped);
-    connect(m_canvas, &LayoutCanvas::addFramesRequested, this, &MainWindow::onCanvasAddFramesRequested);
-    connect(m_canvas, &LayoutCanvas::removeFramesRequested, this, &MainWindow::onCanvasRemoveFramesRequested);
-    connect(m_canvas, &LayoutCanvas::removeSmallFramesRequested, m_canvas, &LayoutCanvas::removeFramesSmallerThan);
-    connect(m_canvas, &LayoutCanvas::splitSpriteRequested, this, &MainWindow::onSplitSpriteRequested);
-    connect(m_canvas, &LayoutCanvas::userInteractionStarted, this, &MainWindow::pauseLayoutRebuild);
-    connect(m_canvas, &LayoutCanvas::userInteractionEnded, this, &MainWindow::resumeLayoutRebuild);
-    connect(m_canvas, &LayoutCanvas::splitModeChanged, this, [this](bool enabled) {
-        m_statusLabel->setText(enabled
-            ? tr("Split mode — click a sprite edge to split it. Press S or right-click to exit.")
-            : tr("Idle"));
-    });
-    m_canvas->viewport()->installEventFilter(this);
-
-    // Navigator panel (tree view of sprites) — now managed by NavigatorPanel
-    QWidget* navigatorContent = new QWidget(this);
-    navigatorContent->setStyleSheet("font-weight: normal;");
-    QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
-    navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
-
-    m_navigatorPanel = new NavigatorPanel(navigatorContent);
-    navigatorLayout->addWidget(m_navigatorPanel);
-
-    // Wire up NavigatorPanel's internal widgets back to MainWindow's existing pointers
-    // so all other code (context menus, filterSpriteTree, etc.) keeps working unchanged.
-    m_spriteTree            = m_navigatorPanel->tree();
-    m_spriteFilterEdit      = m_navigatorPanel->filterEdit();
-    m_spriteFilterResultLabel = m_navigatorPanel->filterResultLabel();
-    m_showHiddenToggleBtn   = m_navigatorPanel->showHiddenCheckBox();
-    m_navigatorAtlasRow     = m_navigatorPanel->atlasRow();
-    m_navigatorAtlasCombo   = m_navigatorPanel->atlasCombo();
-
-    // Atlas combo changes: update session + refresh everything
-    connect(m_navigatorPanel, &NavigatorPanel::atlasIndexChanged,
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::externalPathDropped,
+            this, &MainWindow::onLayoutCanvasPathDropped);
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::addFramesRequested,
+            this, &MainWindow::onCanvasAddFramesRequested);
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::removeFramesRequested,
+            this, &MainWindow::onCanvasRemoveFramesRequested);
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::splitSpriteRequested,
+            this, &MainWindow::onSplitSpriteRequested);
+    connect(m_atlasWorkspace, &AtlasWorkspace::layoutRebuildNeeded,
+            this, [this](bool immediate) { scheduleLayoutRebuild(immediate); });
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::userInteractionStarted,
+            this, &MainWindow::pauseLayoutRebuild);
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::userInteractionEnded,
+            this, &MainWindow::resumeLayoutRebuild);
+    connect(m_atlasWorkspace->canvas(), &LayoutCanvas::requestTimelineGeneration,
+            this, &MainWindow::onGenerateTimelinesFromFrames);
+    connect(m_atlasWorkspace, &AtlasWorkspace::statusMessage,
+            this, [this](const QString& text) { if (m_statusLabel) m_statusLabel->setText(text); });
+    connect(m_atlasWorkspace, &AtlasWorkspace::spriteDataChanged,
+            this, &MainWindow::updateOnionSkinDisplay);
+    connect(m_atlasWorkspace, &AtlasWorkspace::profileChangeRequested,
+            this, [this](const QString&) { onProfileChanged(); });
+    connect(m_atlasWorkspace->addProfilesBtn(), &QPushButton::clicked,
+            this, &MainWindow::onManageProfiles);
+    connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::atlasIndexChanged,
             this, [this](int atlasIndex) {
-                if (!m_session) return;
-                if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
-                    m_session->activeAtlasIndex = atlasIndex;
-                    refreshSpriteTree();
-                    refreshTimelineList();
-                    refreshAnimationTest();
-                    // Ensure the selected atlas is packed so the sprite tree is populated.
-                    scheduleLayoutRebuild(true);
-                } else {
-                    // "All" selected: refresh tree only, active atlas unchanged.
-                    refreshSpriteTree();
-                }
-            });
-
-    // Show-hidden checkbox
-    connect(m_navigatorPanel, &NavigatorPanel::showHiddenChanged, this, [this](bool checked) {
-        m_showHiddenItems = checked;
-        refreshSpriteTree();
-    });
-
-    // Context menu + exclude key: delegate to existing MainWindow slots
-    connect(m_spriteTree, &QWidget::customContextMenuRequested,
-            this, &MainWindow::onSpriteTreeContextMenu);
-    connect(m_navigatorPanel, &NavigatorPanel::excludeKeyPressed,
-            this, &MainWindow::onNavigatorExcludeKey);
-
-    // Add Source button (Sprites workspace)
-    m_navigatorPanel->setAddSourceButtonVisible(true);
-    connect(m_navigatorPanel, &NavigatorPanel::addSourceFolderRequested,
-            this, &MainWindow::onLoadFolder);
-    connect(m_navigatorPanel, &NavigatorPanel::addSourceImageRequested, this, [this]() {
-        const QString filter = tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tga *.dds)");
-        const QString path = QFileDialog::getOpenFileName(
-            this, tr("Add Image"), m_session ? m_session->currentFolder : QString(), filter);
-        if (!path.isEmpty()) {
-            const DropAction action = confirmDropAction(path);
-            if (action != DropAction::Cancel) loadImageWithFrameDetection(path, action);
+        if (!m_session) return;
+        if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
+            m_session->activeAtlasIndex = atlasIndex;
+            refreshSpriteTree();
+            refreshTimelineList();
+            refreshAnimationTest();
+            scheduleLayoutRebuild(true);
+        } else {
+            refreshSpriteTree();
         }
     });
-    connect(m_navigatorPanel, &NavigatorPanel::addSourceArchiveRequested, this, [this]() {
+    connect(m_atlasWorkspace, &AtlasWorkspace::showHiddenToggled,
+            this, [this](bool) { refreshSpriteTree(); });
+    connect(m_atlasWorkspace, &AtlasWorkspace::deleteFramesRequested,
+            this, &MainWindow::onNavigatorDeleteFrames);
+    connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::excludeKeyPressed,
+            this, &MainWindow::onNavigatorExcludeKey);
+    connect(m_atlasWorkspace, &AtlasWorkspace::addSmartFolderRequested,
+            this, &MainWindow::onNavigatorAddSmartFolder);
+    connect(m_atlasWorkspace, &AtlasWorkspace::addFramesToFolderRequested,
+            this, &MainWindow::onNavigatorAddFrames);
+    connect(m_atlasWorkspace, &AtlasWorkspace::addToTimelineRequested,
+            this, &MainWindow::onNavigatorAddToTimeline);
+    connect(m_atlasWorkspace, &AtlasWorkspace::createTimelineRequested,
+            this, &MainWindow::onNavigatorCreateTimeline);
+    connect(m_atlasWorkspace, &AtlasWorkspace::createGroupRequested,
+            this, &MainWindow::onNavigatorCreateGroup);
+    connect(m_atlasWorkspace, &AtlasWorkspace::deleteGroupRequested,
+            this, &MainWindow::onNavigatorDeleteGroup);
+    connect(m_atlasWorkspace, &AtlasWorkspace::autoCreateTimelinesForSourceRequested,
+            this, &MainWindow::onNavigatorAutoCreateTimelinesForSource);
+    connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceFolderRequested,
+            this, &MainWindow::onLoadFolder);
+    connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceImageRequested,
+            this, &MainWindow::onAddSourceFile);
+    connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceArchiveRequested, this, [this]() {
         const QString filter = tr("Archives (*.zip *.tar *.tar.gz *.tar.bz2 *.tar.xz)");
         const QString path = QFileDialog::getOpenFileName(
             this, tr("Add Archive"), m_session ? m_session->currentFolder : QString(), filter);
@@ -553,263 +498,75 @@ void MainWindow::setupUi() {
             if (action != DropAction::Cancel) loadProject(path, action);
         }
     });
-    connect(m_navigatorPanel, &NavigatorPanel::addSourceUrlRequested,
+    connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceUrlRequested,
             this, &MainWindow::onLoadFromUrl);
+    connect(m_atlasWorkspace, &AtlasWorkspace::editAliasesRequested,
+            this, [this](SpritePtr) { onEditAliases(); });
+    connect(m_atlasWorkspace, &AtlasWorkspace::onionSkinToggled,
+            this, &MainWindow::updateOnionSkinDisplay);
+    connect(m_atlasWorkspace, &AtlasWorkspace::spriteDroppedToTimeline,
+            this, &MainWindow::onSpritesDroppedToTimeline);
 
-    // Checkbox toggling: only propagate to children/parents (no canvas side-effects)
-    connect(m_spriteTree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int /*column*/) {
-        m_spriteTree->blockSignals(true);
+    // 2. Animation Timelines panel
+    auto* timelineEditorPanel = new TimelineEditorPanel(m_session, m_undoStack, this);
 
-        // If a group node was checked/unchecked, propagate to all descendants
-        if (item->childCount() > 0 && item->checkState(0) != Qt::PartiallyChecked) {
-            std::function<void(QTreeWidgetItem*, Qt::CheckState)> setDescendants;
-            setDescendants = [&](QTreeWidgetItem* node, Qt::CheckState state) {
-                for (int i = 0; i < node->childCount(); ++i) {
-                    node->child(i)->setCheckState(0, state);
-                    setDescendants(node->child(i), state);
-                }
-            };
-            setDescendants(item, item->checkState(0));
-        }
-
-        // Walk up and update all ancestor group states
-        for (QTreeWidgetItem* p = item->parent(); p; p = p->parent()) {
-            int checked = 0, total = 0;
-            for (int i = 0; i < p->childCount(); ++i) {
-                auto s = p->child(i)->checkState(0);
-                ++total;
-                if (s == Qt::Checked) ++checked;
-                else if (s == Qt::PartiallyChecked) { checked = -1; break; }
-            }
-            if (checked == -1 || (checked > 0 && checked < total))
-                p->setCheckState(0, Qt::PartiallyChecked);
-            else if (checked == total)
-                p->setCheckState(0, Qt::Checked);
-            else
-                p->setCheckState(0, Qt::Unchecked);
-        }
-
-        m_spriteTree->blockSignals(false);
-
-        // Rebuild selectedSprites from all checked leaf items so that
-        // "Apply to Selected Frames" reflects the navigator checkbox state.
-        if (m_session) {
-            QList<SpritePtr> checked;
-            std::function<void(QTreeWidgetItem*)> collectChecked = [&](QTreeWidgetItem* node) {
-                if (node->childCount() == 0) {
-                    if (node->checkState(0) == Qt::Checked) {
-                        auto sprite = node->data(0, Qt::UserRole).value<SpritePtr>();
-                        if (sprite) checked.append(sprite);
-                    }
-                } else {
-                    for (int i = 0; i < node->childCount(); ++i)
-                        collectChecked(node->child(i));
-                }
-            };
-            for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
-                collectChecked(m_spriteTree->topLevelItem(i));
-            m_session->selectedSprites = checked;
-            updateOnionSkinDisplay();
-
-            // Update multi-selection label in the sprite editor panel
-            if (m_multiSelectionLabel) {
-                const int n = checked.size();
-                if (n > 1) {
-                    m_multiSelectionLabel->setText(m_settings.propagateEditsToChecked
-                        ? tr("%1 sprites selected — pivot and marker changes apply to all").arg(n)
-                        : tr("%1 sprites selected — changes apply to current frame only").arg(n));
-                    m_multiSelectionLabel->setVisible(true);
-                } else {
-                    m_multiSelectionLabel->setVisible(false);
-                }
-            }
-        }
-    });
-
-    // Selecting (highlighting) a sprite row makes it the active/editable sprite
-    connect(m_spriteTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* current, QTreeWidgetItem* /*previous*/) {
-        if (!current) return;
-        QVariant v = current->data(0, Qt::UserRole);
-        if (!v.isValid()) return;
-        auto sprite = v.value<SpritePtr>();
-        if (sprite) onSpriteSelected(sprite);
-    });
-
-    // Atlas view stack: page 0 = Layout, page 1 = Navigator, page 2 = Empty state
-    m_atlasViewStack = new QStackedWidget(this);
-    m_atlasViewStack->addWidget(canvasContent);
-    m_atlasViewStack->addWidget(navigatorContent);
-    auto* emptyAtlasLabel = new QLabel(tr("Drag and drop folder, files or URLs"), m_atlasViewStack);
-    emptyAtlasLabel->setAlignment(Qt::AlignCenter);
-    emptyAtlasLabel->setStyleSheet("font-size: 14px; color: #888;");
-    m_atlasViewStack->addWidget(emptyAtlasLabel);
-    m_atlasViewStack->setCurrentIndex(1);
-
-    // 2. Animation Timelines panel — owns all timeline business logic (Phase 7)
-    m_timelineEditorPanel = new TimelineEditorPanel(m_session, m_undoStack, this);
-
-    // Connect TimelineEditorPanel signals to MainWindow animation state
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::animPlaybackIntervalChanged, this,
-        [this](int fps) {
-            if (m_animPlaying) {
-#ifndef Q_OS_WASM
-                m_animTimer->setInterval(1000 / qMax(1, fps));
-#endif
-                m_animElapsed.restart();
-            }
-        });
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::animFrameReset, this,
-        [this]() {
-            m_animFrameIndex = 0;
-            fitAnimationToViewport();
-            refreshAnimationTest();
-            syncSelectedSpriteToAnimFrame();
-        });
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::animFrameIndexSelected, this,
-        [this](int index) {
-            if (!m_animPlaying) {
-                m_animFrameIndex = index;
-                refreshAnimationTest();
-                syncSelectedSpriteToAnimFrame();
-            }
-        });
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::animZoomResetAndFitRequested, this,
-        [this]() {
-            if (m_animCanvas) m_animCanvas->setZoomManual(false);
-            fitAnimationToViewport();
-            refreshAnimationTest();
-        });
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::animationDataChanged,
-        this, &MainWindow::refreshAnimationTest);
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::statusMessage, this,
+    // TimelineEditorPanel → animation playback connections are wired in FrameAnimationWorkspace ctor.
+    // Non-animation signals stay here:
+    connect(timelineEditorPanel, &TimelineEditorPanel::statusMessage, this,
         [this](const QString& text) { if (m_statusLabel) m_statusLabel->setText(text); });
-    connect(m_timelineEditorPanel, &TimelineEditorPanel::spritesToTimelineRequested,
+    connect(timelineEditorPanel, &TimelineEditorPanel::spritesToTimelineRequested,
         this, &MainWindow::onSpritesDroppedToTimeline);
 
     // The panel widget itself is never placed in any layout — its sub-widgets are
     // distributed directly into the animation dock. Hide it so it doesn't sit as
     // an invisible 100×30 overlay on top of the menu bar.
-    m_timelineEditorPanel->hide();
+    timelineEditorPanel->hide();
 
-    // 3. Selected Frame Editor panel — owned by SpriteEditorPanel
-    m_spriteEditorPanel = new SpriteEditorPanel(this);
-    m_editorContent = m_spriteEditorPanel;
+    // 3. Animation Preview panel
+    auto* animPreviewPanel = new AnimationPreviewPanel(this);
 
-    // Wire MainWindow's raw-pointer members to the panel's child widgets
-    m_multiSelectionLabel    = m_spriteEditorPanel->multiSelectionLabel();
-    m_spriteNameEdit         = m_spriteEditorPanel->spriteNameEdit();
-    m_editAliasesBtn         = m_spriteEditorPanel->editAliasesBtn();
-    m_previewZoomSpin        = m_spriteEditorPanel->previewZoomSpin();
-    m_handleCombo            = m_spriteEditorPanel->handleCombo();
-    m_pivotXSpin             = m_spriteEditorPanel->pivotXSpin();
-    m_pivotYSpin             = m_spriteEditorPanel->pivotYSpin();
-    m_coordUnitCombo         = m_spriteEditorPanel->coordUnitCombo();
-    m_configPointsBtn        = m_spriteEditorPanel->configPointsBtn();
-    m_previewView            = m_spriteEditorPanel->previewCanvas();
-    m_spriteNameFooterLabel  = m_spriteEditorPanel->spriteNameFooterLabel();
-    m_spriteDimsLabel        = m_spriteEditorPanel->spriteDimsLabel();
-
-    // Apply initial coordinate unit from settings
-    m_coordUnitCombo->setCurrentIndex(
-        m_settings.coordUnit == CoordUnit::Percent ? 1 : 0);
-
-    // Connect panel widget signals to MainWindow slots
-    connect(m_spriteNameEdit, &QLineEdit::editingFinished,
-            this, &MainWindow::onSpriteNameEditingFinished);
-    connect(m_editAliasesBtn, &QPushButton::clicked, this, &MainWindow::onEditAliases);
-    connect(m_handleCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onHandleComboChanged);
-    connect(m_pivotXSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double){ onPivotSpinChanged(); });
-    connect(m_pivotYSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double){ onPivotSpinChanged(); });
-    connect(m_coordUnitCombo, &QComboBox::currentIndexChanged,
-            this, &MainWindow::onCoordUnitChanged);
-    connect(m_configPointsBtn, &QPushButton::clicked, this, &MainWindow::onPointsConfigClicked);
-    connect(m_previewView, &PreviewCanvas::pivotChanged, this, &MainWindow::onCanvasPivotChanged);
-    connect(m_previewView->overlay(), &EditorOverlayItem::markerSelected,
-            this, &MainWindow::onMarkerSelectedFromCanvas);
-    connect(m_previewView->overlay(), &EditorOverlayItem::markerChanged,
-            this, &MainWindow::onMarkerChangedFromCanvas);
-    connect(m_previewView, &PreviewCanvas::copyMarkersRequested,
-            this, &MainWindow::onCopyMarkersRequested);
-    connect(m_previewView, &PreviewCanvas::pasteMarkersRequested,
-            this, &MainWindow::onPasteMarkersRequested);
-    connect(m_previewView, &PreviewCanvas::zoomChanged, this, [this](double zoom) {
-        m_previewZoomSpin->blockSignals(true);
-        m_previewZoomSpin->setValue(zoom * 100.0);
-        m_previewZoomSpin->blockSignals(false);
-    });
-    connect(m_previewZoomSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &MainWindow::onPreviewZoomChanged);
-
-    {
-        auto* btn = m_spriteEditorPanel->showTrimRectBtn();
-        btn->setChecked(m_settings.showTrimRect);
-        connect(btn, &QPushButton::toggled, this, [this](bool checked) {
-            m_settings.showTrimRect = checked;
-            CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
-            m_previewView->setSettings(m_settings);
-            clearCoordinateFieldOverride();
-            syncCoordinateSpinsFromSelection();
-        });
-    }
-    connect(m_spriteEditorPanel->onionSkinBtn(), &QPushButton::toggled,
-            this, [this](bool) { updateOnionSkinDisplay(); });
-
-    {
-        auto* btn = m_spriteEditorPanel->showGridBtn();
-        btn->setChecked(m_settings.showGrid);
-        connect(btn, &QPushButton::toggled, this, [this](bool checked) {
-            m_settings.showGrid = checked;
-            CliToolsConfig::saveAppSettings(m_settings, m_cliPaths);
-            m_previewView->setSettings(m_settings);
-        });
-    }
-
-    // 4. Animation Preview panel — owned by AnimationPreviewPanel
-    m_animPreviewPanel = new AnimationPreviewPanel(this);
-
-    // Wire MainWindow's raw-pointer members to the panel's child widgets
-    m_animPrevBtn      = m_animPreviewPanel->prevButton();
-    m_animPlayPauseBtn = m_animPreviewPanel->playPauseButton();
-    m_animNextBtn      = m_animPreviewPanel->nextButton();
-    m_animOverlayBtn    = m_animPreviewPanel->overlayButton();
-    m_animHandleCombo   = m_animPreviewPanel->handleCombo();
-    m_animOnionSkinBtn  = m_animPreviewPanel->onionSkinButton();
-    m_animZoomSpin      = m_animPreviewPanel->zoomSpin();
-    m_animStatusLabel  = m_animPreviewPanel->statusLabel();
-    m_animCanvas       = m_animPreviewPanel->animCanvas();
-
-    // Connect animation panel signals to MainWindow slots
-    connect(m_animPrevBtn,      &QPushButton::clicked, this, &MainWindow::onAnimPrevClicked);
-    connect(m_animPlayPauseBtn, &QPushButton::clicked, this, &MainWindow::onAnimPlayPauseClicked);
-    connect(m_animNextBtn,      &QPushButton::clicked, this, &MainWindow::onAnimNextClicked);
-    connect(m_animZoomSpin,     QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &MainWindow::onAnimZoomChanged);
-    connect(m_animCanvas->overlay(), &EditorOverlayItem::pivotChanged,
-            this, &MainWindow::onCanvasPivotChanged);
-    connect(m_animCanvas->overlay(), &EditorOverlayItem::markerSelected,
-            this, &MainWindow::onMarkerSelectedFromCanvas);
-    connect(m_animCanvas->overlay(), &EditorOverlayItem::markerChanged,
-            this, &MainWindow::onMarkerChangedFromCanvas);
+    // Playback buttons / zoom / overlay toggle are wired in FrameAnimationWorkspace ctor.
+    connect(animPreviewPanel->animCanvas()->overlay(), &EditorOverlayItem::pivotChanged,
+            m_atlasWorkspace, &AtlasWorkspace::onCanvasPivotChanged);
+    connect(animPreviewPanel->animCanvas()->overlay(), &EditorOverlayItem::markerSelected,
+            m_atlasWorkspace, &AtlasWorkspace::onMarkerSelectedFromCanvas);
+    connect(animPreviewPanel->animCanvas()->overlay(), &EditorOverlayItem::markerChanged,
+            m_atlasWorkspace, &AtlasWorkspace::onMarkerChangedFromCanvas);
     // The animation overlay is locked: only the handle shown in the combo can be dragged.
-    m_animCanvas->overlay()->setLockToActiveHandle(true);
-    connect(m_animHandleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onAnimHandleComboChanged);
-    connect(m_animOverlayBtn, &QToolButton::toggled, this, [this](bool checked) {
-        m_animCanvas->setOverlayVisible(checked);
-        if (checked)
-            m_animCanvas->setOverlayEditable(!m_animPlaying);
-    });
-    connect(m_animOnionSkinBtn, &QToolButton::toggled, this, [this](bool) {
-        refreshAnimationTest();
-    });
+    animPreviewPanel->animCanvas()->overlay()->setLockToActiveHandle(true);
+    // 5. Frame Animation workspace — drives playback, export, and timeline state.
+    // Overlay/onion-skin button connections and prev/next/play/zoom are wired internally.
+    m_frameAnimWorkspace = new FrameAnimationWorkspace(
+        m_atlasWorkspace->navigatorPanel(), animPreviewPanel,
+        timelineEditorPanel, m_session, &m_settings, this);
+    m_frameAnimWorkspace->hide();
 
-    // 5. CLI Log panel
+    connect(m_frameAnimWorkspace, &FrameAnimationWorkspace::spriteSelectionRequested,
+            this, &MainWindow::onSpriteSelected);
+    connect(m_frameAnimWorkspace, &FrameAnimationWorkspace::markerSelectionChanged,
+            this, [this](const QString& name) {
+        auto* pv = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+        if (pv && pv->overlay()) pv->overlay()->setSelectedMarker(name);
+        auto* hc = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->handleCombo() : nullptr;
+        if (hc) {
+            hc->blockSignals(true);
+            const int idx = name.isEmpty() ? 0 : hc->findText(name);
+            hc->setCurrentIndex(idx != -1 ? idx : 0);
+            hc->blockSignals(false);
+        }
+    });
+    connect(m_atlasWorkspace, &AtlasWorkspace::selectedMarkerChanged,
+            m_frameAnimWorkspace, &FrameAnimationWorkspace::onMarkerSelectedFromCanvas);
+    connect(m_frameAnimWorkspace, &FrameAnimationWorkspace::statusMessage,
+            this, [this](const QString& t) { if (m_statusLabel) m_statusLabel->setText(t); });
+    connect(m_frameAnimWorkspace, &FrameAnimationWorkspace::loadingStateChanged,
+            this, &MainWindow::setLoading);
+
+    // 6. CLI Log panel
     QWidget* cliLogContent = new QWidget(this);
     cliLogContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* cliLogLayout = new QVBoxLayout(cliLogContent);
-    cliLogLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+    cliLogLayout->setContentsMargins(4, 12, 4, 0);
     m_cliLog = new QPlainTextEdit(this);
     m_cliLog->setReadOnly(true);
     m_cliLog->setMaximumBlockCount(AppConstants::kCliLogMaxBlocks);
@@ -833,13 +590,7 @@ void MainWindow::setupUi() {
     m_atlasDock->setFont(boldFont);
     m_atlasDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
     m_atlasDock->setTitleBarWidget(new QWidget(this));
-    m_atlasSplitter = new QSplitter(Qt::Horizontal, m_atlasDock);
-    m_atlasSplitter->addWidget(m_atlasViewStack);
-    m_atlasSplitter->addWidget(m_editorContent);
-    m_atlasSplitter->setStretchFactor(0, 0);
-    m_atlasSplitter->setStretchFactor(1, 1);
-    m_atlasSplitter->setSizes({270, 1030});  // sprites tree : frame editor  ~1:4
-    m_atlasDock->setWidget(m_atlasSplitter);
+    m_atlasDock->setWidget(m_atlasWorkspace);
 
     // Animation dock (right column in Frame Animation workspace):
     //   Top  = timeline list
@@ -854,11 +605,11 @@ void MainWindow::setupUi() {
         auto* animBottomLayout = new QVBoxLayout(animBottomPanel);
         animBottomLayout->setContentsMargins(0, 0, 0, 0);
         animBottomLayout->setSpacing(0);
-        animBottomLayout->addWidget(m_timelineEditorPanel->timelineEditorContainer());
-        animBottomLayout->addWidget(m_animPreviewPanel, 1);
+        animBottomLayout->addWidget(m_frameAnimWorkspace->timelinePanel()->timelineEditorContainer());
+        animBottomLayout->addWidget(m_frameAnimWorkspace->animPanel(), 1);
 
         auto* animSplitter = new QSplitter(Qt::Vertical, m_animationDock);
-        animSplitter->addWidget(m_timelineEditorPanel->listAreaWidget());
+        animSplitter->addWidget(m_frameAnimWorkspace->timelinePanel()->listAreaWidget());
         animSplitter->addWidget(animBottomPanel);
         animSplitter->setStretchFactor(0, 2);
         animSplitter->setStretchFactor(1, 3);
@@ -915,20 +666,20 @@ void MainWindow::setupUi() {
     m_atlasesManagementWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_atlasesManagementWorkspaceAction);
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
-            this, &MainWindow::showAtlasesManagementWorkspace);
+            this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
     m_atlasWorkspaceAction = m_viewMenu->addAction(tr("Sprites"));
     m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
     m_atlasWorkspaceAction->setCheckable(true);
     m_atlasWorkspaceAction->setChecked(true);
     workspaceGroup->addAction(m_atlasWorkspaceAction);
-    connect(m_atlasWorkspaceAction, &QAction::triggered, this, &MainWindow::switchToAtlasWorkspace);
+    connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
     m_frameAnimWorkspaceAction = m_viewMenu->addAction(tr("Frame Animation"));
     m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
     m_frameAnimWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_frameAnimWorkspaceAction);
-    connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, &MainWindow::switchToFrameAnimWorkspace);
+    connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_frameAnimWorkspace); });
 
     m_viewMenu->addSeparator();
 
@@ -961,9 +712,11 @@ void MainWindow::setupUi() {
 
     setupStatusBarUi();
 
+    // Initial workspace — Atlas workspace is always the starting point
+    m_currentWorkspace = m_atlasWorkspace;
+
     updateUiState();
     applySettings();
-    refreshMarkerTemplatesMenu();
 
     setupZoomShortcuts();
 }
@@ -1037,7 +790,7 @@ void MainWindow::setupToolbar() {
     undoAction->setShortcut(QKeySequence::Undo);
     undoAction->setEnabled(m_undoStack->canUndo());
     connect(undoAction, &QAction::triggered, this, [this]() {
-        clearCoordinateFieldOverride();
+        if (m_atlasWorkspace) m_atlasWorkspace->clearCoordinateOverride();
         m_undoStack->undo();
     });
     connect(m_undoStack, &QUndoStack::canUndoChanged, undoAction, &QAction::setEnabled);
@@ -1048,7 +801,7 @@ void MainWindow::setupToolbar() {
     redoAction->setShortcut(QKeySequence::Redo);
     redoAction->setEnabled(m_undoStack->canRedo());
     connect(redoAction, &QAction::triggered, this, [this]() {
-        clearCoordinateFieldOverride();
+        if (m_atlasWorkspace) m_atlasWorkspace->clearCoordinateOverride();
         m_undoStack->redo();
     });
     connect(m_undoStack, &QUndoStack::canRedoChanged, redoAction, &QAction::setEnabled);
@@ -1127,18 +880,22 @@ void MainWindow::setupZoomShortcuts() {
         }
 
         const double scaleFactor = 1.25;
-        if (m_canvas && (fw == m_canvas || m_canvas->isAncestorOf(fw))) {
+        auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        auto* previewView = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+        auto* ap = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = ap ? ap->animCanvas() : nullptr;
+        if (canvas && (fw == canvas || canvas->isAncestorOf(fw))) {
             double zoom = qBound(10.0, zoomIn ? m_layoutZoom * scaleFactor : m_layoutZoom / scaleFactor, 800.0);
             m_layoutZoom = zoom;
             onLayoutZoomChanged(zoom);
             return;
         }
         QDoubleSpinBox* targetSpin = nullptr;
-        if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
-            targetSpin = m_previewZoomSpin;
-        } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
-            targetSpin = m_animZoomSpin;
-        } else if (m_exportWorkspace && m_exportWorkspaceActive && (fw == m_exportWorkspace || m_exportWorkspace->isAncestorOf(fw))) {
+        if (previewView && (fw == previewView || previewView->isAncestorOf(fw))) {
+            targetSpin = m_atlasWorkspace->spriteEditorPanel()->previewZoomSpin();
+        } else if (animCanvas && (fw == animCanvas || animCanvas->isAncestorOf(fw))) {
+            targetSpin = ap->zoomSpin();
+        } else if (m_exportWorkspace && m_currentWorkspace == m_exportWorkspace && (fw == m_exportWorkspace || m_exportWorkspace->isAncestorOf(fw))) {
             targetSpin = m_exportWorkspace->zoomSpin();
         }
 
@@ -1161,16 +918,20 @@ void MainWindow::setupZoomShortcuts() {
     auto applyZoomPreset = [this](bool fitToContent) {
         QWidget* fw = QApplication::focusWidget();
         if (!fw) return;
-        if (m_canvas && (fw == m_canvas || m_canvas->isAncestorOf(fw))) {
-            if (fitToContent) { m_canvas->setZoomManual(false); m_canvas->initialFit(); }
+        auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        auto* previewView = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+        auto* ap2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = ap2 ? ap2->animCanvas() : nullptr;
+        if (canvas && (fw == canvas || canvas->isAncestorOf(fw))) {
+            if (fitToContent) { canvas->setZoomManual(false); canvas->initialFit(); }
             else              { m_layoutZoom = 100.0; onLayoutZoomChanged(100.0); }
-        } else if (m_previewView && (fw == m_previewView || m_previewView->isAncestorOf(fw))) {
-            if (fitToContent) { m_previewView->setZoomManual(false); m_previewView->initialFit(); }
-            else              { m_previewView->setZoomManual(true);  m_previewZoomSpin->setValue(100.0); }
-        } else if (m_animCanvas && (fw == m_animCanvas || m_animCanvas->isAncestorOf(fw))) {
-            if (fitToContent) { m_animCanvas->setZoomManual(false); m_animCanvas->initialFit(); }
-            else              { m_animCanvas->setZoomManual(true);  m_animZoomSpin->setValue(100.0); }
-        } else if (m_exportWorkspace && m_exportWorkspaceActive && (fw == m_exportWorkspace || m_exportWorkspace->isAncestorOf(fw))) {
+        } else if (previewView && (fw == previewView || previewView->isAncestorOf(fw))) {
+            if (fitToContent) { previewView->setZoomManual(false); previewView->initialFit(); }
+            else              { previewView->setZoomManual(true);  m_atlasWorkspace->spriteEditorPanel()->previewZoomSpin()->setValue(100.0); }
+        } else if (animCanvas && (fw == animCanvas || animCanvas->isAncestorOf(fw))) {
+            if (fitToContent) { animCanvas->setZoomManual(false); animCanvas->initialFit(); }
+            else              { animCanvas->setZoomManual(true);  ap2->zoomSpin()->setValue(100.0); }
+        } else if (m_exportWorkspace && m_currentWorkspace == m_exportWorkspace && (fw == m_exportWorkspace || m_exportWorkspace->isAncestorOf(fw))) {
             if (fitToContent) {
                 if (m_packedAtlasView) {
                     m_packedAtlasView->setZoomManual(false);
@@ -1209,7 +970,7 @@ void MainWindow::updateUiState() {
         hasModels,
         !m_lastSaveConfig.outputPath.isEmpty(),
         m_loadAction,
-        m_profileCombo,
+        m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr,
         m_saveAction,
         m_exportAction,
         m_saveAsAction);
@@ -1229,11 +990,11 @@ void MainWindow::updateUiState() {
         m_recentProjectBtn->setEnabled(!m_isLoading);
     }
 
-    if (m_addProfilesBtn) {
-        m_addProfilesBtn->setEnabled(enabled);
+    if (m_atlasWorkspace && m_atlasWorkspace->addProfilesBtn()) {
+        m_atlasWorkspace->addProfilesBtn()->setEnabled(enabled);
     }
-    if (m_sourceResolutionCombo) {
-        m_sourceResolutionCombo->setEnabled(enabled);
+    if (m_atlasWorkspace && m_atlasWorkspace->sourceResolutionCombo()) {
+        m_atlasWorkspace->sourceResolutionCombo()->setEnabled(enabled);
     }
 
     // View menu items: enabled once a project is open or sprites are loaded
@@ -1245,21 +1006,21 @@ void MainWindow::updateUiState() {
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
-    if (m_exportWorkspaceActive || m_atlasesManagementWorkspaceActive) return;
+    if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace) return;
 
     if (hasModels) {
         m_mainStack->hide();
         if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        const bool wantsAnim = (m_activeWorkspace == Workspace::FrameAnimation);
+        const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
         if (m_animationDock) m_animationDock->setVisible(wantsAnim);
-        if (m_atlasViewStack && m_atlasViewStack->currentIndex() == 2)
-            m_atlasViewStack->setCurrentIndex(1); // Navigation
+        if (m_atlasWorkspace && m_atlasWorkspace->atlasViewStack() && m_atlasWorkspace->atlasViewStack()->currentIndex() == 2)
+            m_atlasWorkspace->atlasViewStack()->setCurrentIndex(1); // Navigation
     } else if (hasProject) {
         m_mainStack->hide();
         if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        const bool wantsAnim = (m_activeWorkspace == Workspace::FrameAnimation);
+        const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
         if (m_animationDock) m_animationDock->setVisible(wantsAnim);
-        if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(2); // Empty-state placeholder
+        if (m_atlasWorkspace && m_atlasWorkspace->atlasViewStack()) m_atlasWorkspace->atlasViewStack()->setCurrentIndex(2); // Empty-state placeholder
     } else {
         m_mainStack->setCurrentIndex(0); // Welcome page
         m_mainStack->show();
@@ -1276,7 +1037,7 @@ void MainWindow::updateMainContentView() {
     const QString projectFilePathUi = m_projectController ? m_projectController->projectFilePath() : QString();
     const bool hasProject = !projectFilePathUi.isEmpty();
 
-    if (!m_exportWorkspaceActive && !m_atlasesManagementWorkspaceActive) {
+    if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1317,110 +1078,6 @@ void MainWindow::addToRecentProjects(const QString& path) {
     updateRecentProjectsMenu();
 }
 
-void MainWindow::clearCoordinateFieldOverride() {
-    m_coordinateFieldOverride = {};
-}
-
-void MainWindow::storeCoordinateFieldOverride() {
-    if (!m_session || !m_session->selectedSprite || !m_pivotXSpin || !m_pivotYSpin) {
-        clearCoordinateFieldOverride();
-        return;
-    }
-
-    m_coordinateFieldOverride.active = true;
-    m_coordinateFieldOverride.sprite = m_session->selectedSprite.get();
-    m_coordinateFieldOverride.markerName = m_session->selectedPointName;
-    m_coordinateFieldOverride.unit = m_settings.coordUnit;
-    m_coordinateFieldOverride.showTrimRect = m_settings.showTrimRect;
-    m_coordinateFieldOverride.x = m_pivotXSpin->value();
-    m_coordinateFieldOverride.y = m_pivotYSpin->value();
-}
-
-bool MainWindow::coordinateFieldOverrideApplies() const {
-    return m_coordinateFieldOverride.active
-        && m_session
-        && m_session->selectedSprite
-        && m_coordinateFieldOverride.sprite == m_session->selectedSprite.get()
-        && m_coordinateFieldOverride.markerName == m_session->selectedPointName
-        && m_coordinateFieldOverride.unit == m_settings.coordUnit
-        && m_coordinateFieldOverride.showTrimRect == m_settings.showTrimRect;
-}
-
-void MainWindow::syncPivotSpinsFromSprite() {
-    syncCoordinateSpinsFromSelection();
-    if (m_previewView && m_previewView->overlay())
-        m_previewView->overlay()->updateLayout();
-    if (m_animCanvas && m_animCanvas->overlay())
-        m_animCanvas->overlay()->updateLayout();
-}
-
-void MainWindow::syncCoordinateSpinsFromSelection() {
-    if (!m_session || !m_session->selectedSprite) {
-        if (m_coordUnitCombo) {
-            m_coordUnitCombo->setEnabled(false);
-        }
-        return;
-    }
-
-    const QSize spriteSize = spriteCoordinateSpaceSize(m_session->selectedSprite);
-    int spriteWidth = spriteSize.width();
-    int spriteHeight = spriteSize.height();
-    int originX = 0, originY = 0;
-    if (m_settings.showTrimRect && m_previewView) {
-        const QRect tr = m_previewView->cachedTrimRect();
-        if (tr.isValid()) {
-            originX     = tr.left();
-            originY     = tr.top();
-            spriteWidth  = tr.width();
-            spriteHeight = tr.height();
-        }
-    }
-    const bool hasDimensions = spriteWidth > 0 && spriteHeight > 0;
-    const CoordUnit displayUnit = hasDimensions ? m_settings.coordUnit : CoordUnit::Pixels;
-
-    if (m_coordUnitCombo) {
-        m_coordUnitCombo->setEnabled(hasDimensions);
-    }
-    if (m_pivotXSpin) {
-        m_pivotXSpin->blockSignals(true);
-        m_pivotXSpin->setDecimals(displayUnit == CoordUnit::Percent ? 1 : 0);
-        m_pivotXSpin->blockSignals(false);
-    }
-    if (m_pivotYSpin) {
-        m_pivotYSpin->blockSignals(true);
-        m_pivotYSpin->setDecimals(displayUnit == CoordUnit::Percent ? 1 : 0);
-        m_pivotYSpin->blockSignals(false);
-    }
-
-    if (coordinateFieldOverrideApplies()) {
-        m_pivotXSpin->blockSignals(true);
-        m_pivotYSpin->blockSignals(true);
-        m_pivotXSpin->setValue(m_coordinateFieldOverride.x);
-        m_pivotYSpin->setValue(m_coordinateFieldOverride.y);
-        m_pivotXSpin->blockSignals(false);
-        m_pivotYSpin->blockSignals(false);
-        return;
-    }
-
-    if (m_session->selectedPointName.isEmpty()) {
-        setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit, originX);
-        setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit, originY);
-        return;
-    }
-
-    for (const auto& point : m_session->selectedSprite->points) {
-        if (point.name != m_session->selectedPointName) {
-            continue;
-        }
-        setCoordinateSpinValue(m_pivotXSpin, point.x, spriteWidth, displayUnit, originX);
-        setCoordinateSpinValue(m_pivotYSpin, point.y, spriteHeight, displayUnit, originY);
-        return;
-    }
-
-    setCoordinateSpinValue(m_pivotXSpin, m_session->selectedSprite->pivotX, spriteWidth, displayUnit, originX);
-    setCoordinateSpinValue(m_pivotYSpin, m_session->selectedSprite->pivotY, spriteHeight, displayUnit, originY);
-}
-
 // Recursively compute tristate check state for every folder node from the
 // bottom up.  Must be called with signals blocked so the setCheckState calls
 // don't cascade back into onSpriteTreeItemChanged.
@@ -1443,21 +1100,24 @@ static void updateSpriteTreeFolderCheckState(QTreeWidgetItem* item)
 }
 
 void MainWindow::refreshSpriteTree() {
-    if (!m_spriteTree) return;
+    auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
+    auto* spriteTree = navigatorPanel ? navigatorPanel->tree() : nullptr;
+    if (!spriteTree) return;
 
     // Keep excluded atlas in sync with sources' excludedFiles before rebuilding.
     syncExcludedAtlas();
 
     // Refresh the atlases workspace sprite list if it is visible.
-    if (m_atlasesManagementWorkspace && m_atlasesManagementWorkspaceActive)
+    if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
         m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
 
     // Delegate the actual tree build to NavigatorPanel when it's available.
-    if (m_navigatorPanel && m_session) {
+    if (navigatorPanel && m_session) {
         int atlasFilter = -1;
-        if (m_activeWorkspace == Workspace::FrameAnimation && m_navigatorAtlasCombo)
-            atlasFilter = m_navigatorAtlasCombo->currentData().toInt();
-        m_navigatorPanel->refresh(m_session, m_showHiddenItems, atlasFilter);
+        auto* atlasCombo = navigatorPanel->atlasCombo();
+        if (m_currentWorkspace == m_frameAnimWorkspace && atlasCombo)
+            atlasFilter = atlasCombo->currentData().toInt();
+        navigatorPanel->refresh(m_session, m_atlasWorkspace->showHiddenItems(), atlasFilter);
         return;
     }
 
@@ -1471,12 +1131,12 @@ void MainWindow::refreshSpriteTree() {
         while (node) { parts.prepend(node->text(0)); node = node->parent(); }
         return parts.join(QChar(0x1F));
     };
-    const bool hadItems = m_spriteTree->invisibleRootItem()->childCount() > 0;
+    const bool hadItems = spriteTree->invisibleRootItem()->childCount() > 0;
     QSet<QString> collapsedKeys;
     QSet<QString> checkedPaths;
     int scrollPos = 0;
     if (hadItems) {
-        QTreeWidgetItemIterator sit(m_spriteTree);
+        QTreeWidgetItemIterator sit(spriteTree);
         while (*sit) {
             const QVariant v = (*sit)->data(0, Qt::UserRole);
             if (v.isValid()) {
@@ -1490,30 +1150,33 @@ void MainWindow::refreshSpriteTree() {
             }
             ++sit;
         }
-        scrollPos = m_spriteTree->verticalScrollBar()->value();
+        scrollPos = spriteTree->verticalScrollBar()->value();
     }
     // ────────────────────────────────────────────────────────────────────────
 
     // Clear the filter when refreshing the tree
-    if (m_spriteFilterEdit) {
-        m_spriteFilterEdit->blockSignals(true);
-        m_spriteFilterEdit->clear();
-        m_spriteFilterEdit->blockSignals(false);
+    auto* spriteFilterEdit = navigatorPanel ? navigatorPanel->filterEdit() : nullptr;
+    auto* spriteFilterResultLabel = navigatorPanel ? navigatorPanel->filterResultLabel() : nullptr;
+    auto* multiSelectionLabel = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->multiSelectionLabel() : nullptr;
+    if (spriteFilterEdit) {
+        spriteFilterEdit->blockSignals(true);
+        spriteFilterEdit->clear();
+        spriteFilterEdit->blockSignals(false);
     }
-    if (m_spriteFilterResultLabel) m_spriteFilterResultLabel->setVisible(false);
-    if (m_multiSelectionLabel)     m_multiSelectionLabel->setVisible(false);
-    m_spriteTree->blockSignals(true);
-    m_spriteTree->clear();
+    if (spriteFilterResultLabel) spriteFilterResultLabel->setVisible(false);
+    if (multiSelectionLabel)     multiSelectionLabel->setVisible(false);
+    spriteTree->blockSignals(true);
+    spriteTree->clear();
 
     // In Frame Animation workspace the relevant "is there anything to show" check
     // is whether the selected atlas has any packed sprites — not the global
     // activeFramePaths list which doesn't change when switching atlases.
     const bool nothingToShow = !m_session ||
-        (m_activeWorkspace == Workspace::FrameAnimation
+        (m_currentWorkspace == m_frameAnimWorkspace
             ? m_session->activeAtlas().layoutModels.isEmpty()
             : m_session->activeFramePaths.isEmpty());
     if (nothingToShow) {
-        m_spriteTree->blockSignals(false);
+        spriteTree->blockSignals(false);
         return;
     }
 
@@ -1521,7 +1184,7 @@ void MainWindow::refreshSpriteTree() {
     const QIcon animGroupIcon = QApplication::style()->standardIcon(QStyle::SP_DirLinkIcon);
 
     auto makeGroupNode = [&](QTreeWidgetItem* parent, const QString& text) {
-        auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
+        auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(spriteTree);
         node->setText(0, text);
         node->setIcon(0, folderIcon);
         node->setFlags(node->flags() | Qt::ItemIsUserCheckable);
@@ -1535,7 +1198,7 @@ void MainWindow::refreshSpriteTree() {
     // Frame Animation: show only the selected atlas's sprites.
     // All other workspaces: show every active sprite across all non-excluded atlases.
     QVector<SpritePtr> allSprites;
-    if (m_activeWorkspace == Workspace::FrameAnimation) {
+    if (m_currentWorkspace == m_frameAnimWorkspace) {
         for (const auto& model : m_session->activeAtlas().layoutModels)
             for (const auto& sp : model.sprites)
                 allSprites.append(sp);
@@ -1559,7 +1222,7 @@ void MainWindow::refreshSpriteTree() {
         spriteByPath[sp->path] = sp;
 
     auto makeLeafCb = [&](QTreeWidgetItem* parent, const QString& path, const QString& leafName) {
-        auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
+        auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(spriteTree);
         leaf->setText(0, leafName);
         leaf->setFlags(leaf->flags() | Qt::ItemIsUserCheckable);
         leaf->setCheckState(0, Qt::Unchecked);
@@ -1574,9 +1237,9 @@ void MainWindow::refreshSpriteTree() {
         QTreeWidgetItem* current = root;
         for (const QString& part : parts) {
             QTreeWidgetItem* found = nullptr;
-            int childCount = current ? current->childCount() : m_spriteTree->topLevelItemCount();
+            int childCount = current ? current->childCount() : spriteTree->topLevelItemCount();
             for (int i = 0; i < childCount; ++i) {
-                QTreeWidgetItem* child = current ? current->child(i) : m_spriteTree->topLevelItem(i);
+                QTreeWidgetItem* child = current ? current->child(i) : spriteTree->topLevelItem(i);
                 if (child->text(0) == part && !child->data(0, Qt::UserRole).isValid()) {
                     found = child;
                     break;
@@ -1665,7 +1328,7 @@ void MainWindow::refreshSpriteTree() {
             const auto& src = m_session->sources[si];
             // When hidden toggle is OFF, show a count badge on the source node.
             const int hiddenCount = src.hiddenFolders.size();
-            const QString nodeText = (!m_showHiddenItems && hiddenCount > 0)
+            const QString nodeText = (!m_atlasWorkspace->showHiddenItems() && hiddenCount > 0)
                 ? tr("%1 (%2 hidden)").arg(src.name).arg(hiddenCount)
                 : src.name;
             auto* sourceNode = makeGroupNode(nullptr, nodeText);
@@ -1698,11 +1361,11 @@ void MainWindow::refreshSpriteTree() {
             sourceNode->setIcon(0, QApplication::style()->standardIcon(pixmap));
             sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
-            SpriteTreeUtils::buildSubTree(m_spriteTree, sourceNode, toEntries(perSource[si]),
+            SpriteTreeUtils::buildSubTree(spriteTree, sourceNode, toEntries(perSource[si]),
                 folderIcon, animGroupIcon, /*checkable=*/true, makeLeafCb);
 
             // ── Hidden-folder placeholders (only shown when "Hidden" toggle is ON) ──
-            if (m_showHiddenItems && !src.hiddenFolders.isEmpty()) {
+            if (m_atlasWorkspace->showHiddenItems() && !src.hiddenFolders.isEmpty()) {
                 const QSet<QString> hiddenSet(src.hiddenFolders.begin(), src.hiddenFolders.end());
                 const QColor dimColor = QApplication::palette().color(QPalette::Disabled, QPalette::Text);
                 for (const QString& relHidden : src.hiddenFolders) {
@@ -1816,7 +1479,7 @@ void MainWindow::refreshSpriteTree() {
 
         if (!unassigned.isEmpty()) {
             auto* otherNode = makeGroupNode(nullptr, tr("Other"));
-            SpriteTreeUtils::buildSubTree(m_spriteTree, otherNode, toEntries(unassigned),
+            SpriteTreeUtils::buildSubTree(spriteTree, otherNode, toEntries(unassigned),
                 folderIcon, animGroupIcon, /*checkable=*/true, makeLeafCb);
         }
     } else {
@@ -1825,13 +1488,13 @@ void MainWindow::refreshSpriteTree() {
         entries.reserve(allSprites.size());
         for (const auto& sprite : allSprites)
             entries.append({sprite->path, sprite->name});
-        SpriteTreeUtils::buildSubTree(m_spriteTree, nullptr, entries,
+        SpriteTreeUtils::buildSubTree(spriteTree, nullptr, entries,
             folderIcon, animGroupIcon, /*checkable=*/true, makeLeafCb);
     }
 
     // ── Restore tree state ───────────────────────────────────────────────────
     {
-        QTreeWidgetItemIterator rit(m_spriteTree);
+        QTreeWidgetItemIterator rit(spriteTree);
         while (*rit) {
             if ((*rit)->data(0, Qt::UserRole + 2).toInt() > 0) {
                 // Hidden/excluded special item: skip (no check state to restore)
@@ -1850,16 +1513,16 @@ void MainWindow::refreshSpriteTree() {
             ++rit;
         }
         // Propagate leaf check states up to folder tristate nodes
-        for (int i = 0; i < m_spriteTree->topLevelItemCount(); ++i)
-            updateSpriteTreeFolderCheckState(m_spriteTree->topLevelItem(i));
+        for (int i = 0; i < spriteTree->topLevelItemCount(); ++i)
+            updateSpriteTreeFolderCheckState(spriteTree->topLevelItem(i));
     }
     // ────────────────────────────────────────────────────────────────────────
 
-    m_spriteTree->sortItems(0, Qt::AscendingOrder);
-    m_spriteTree->blockSignals(false);
+    spriteTree->sortItems(0, Qt::AscendingOrder);
+    spriteTree->blockSignals(false);
 
     if (hadItems)
-        m_spriteTree->verticalScrollBar()->setValue(scrollPos);
+        spriteTree->verticalScrollBar()->setValue(scrollPos);
 }
 
 void MainWindow::onAboutClicked() {
@@ -1884,25 +1547,27 @@ void MainWindow::onAboutClicked() {
 
 void MainWindow::updateNavigatorAtlasCombo() {
     if (!m_session) return;
-    if (m_navigatorPanel) {
-        m_navigatorPanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+    auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
+    if (navigatorPanel) {
+        navigatorPanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
         return;
     }
     // Fallback: direct combo manipulation (kept for safety)
-    if (!m_navigatorAtlasCombo) return;
-    m_navigatorAtlasCombo->blockSignals(true);
-    m_navigatorAtlasCombo->clear();
+    auto* navigatorAtlasCombo = navigatorPanel ? navigatorPanel->atlasCombo() : nullptr;
+    if (!navigatorAtlasCombo) return;
+    navigatorAtlasCombo->blockSignals(true);
+    navigatorAtlasCombo->clear();
     int selectComboIdx = 0;
     for (int i = 0; i < m_session->atlases.size(); ++i) {
         const auto& atlas = m_session->atlases[i];
         if (atlas.isExcluded) continue;
         if (atlas.spritePaths.isEmpty()) continue;  // Hide empty atlases
         if (i == m_session->activeAtlasIndex)
-            selectComboIdx = m_navigatorAtlasCombo->count();
-        m_navigatorAtlasCombo->addItem(atlas.name, i);  // Store real atlas index as item data
+            selectComboIdx = navigatorAtlasCombo->count();
+        navigatorAtlasCombo->addItem(atlas.name, i);  // Store real atlas index as item data
     }
-    m_navigatorAtlasCombo->setCurrentIndex(selectComboIdx);
-    m_navigatorAtlasCombo->blockSignals(false);
+    navigatorAtlasCombo->setCurrentIndex(selectComboIdx);
+    navigatorAtlasCombo->blockSignals(false);
 }
 
 // ---------------------------------------------------------------------------

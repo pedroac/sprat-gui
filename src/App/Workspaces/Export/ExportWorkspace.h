@@ -4,6 +4,7 @@
 #include <QPair>
 #include "models.h"
 #include "SpratProfilesConfig.h"
+#include "IWorkspace.h"
 
 class QLabel;
 class QLineEdit;
@@ -16,10 +17,15 @@ class QTreeWidget;
 class IAtlasViewport;
 class ZoomableGraphicsView;
 
-class ExportWorkspace : public QWidget {
+class ExportWorkspace : public QWidget, public IWorkspace {
     Q_OBJECT
 public:
     explicit ExportWorkspace(QWidget* parent = nullptr);
+
+    // IWorkspace
+    void enter() override;
+    void leave() override;
+    QWidget* widget() override { return this; }
 
     void populate(const QVector<SpratProfile>& profiles,
                   const QString& selectedProfileName,
@@ -52,6 +58,9 @@ public:
     void setPresets(const QVector<ExportPreset>& presets);
 
     QDoubleSpinBox* zoomSpin() const { return m_zoomSpin; }
+
+    double savedZoom() const { return m_savedZoom; }
+    void   setSavedZoom(double z) { m_savedZoom = z; }
 
 signals:
     void exportRequested(SaveConfig config);
@@ -110,4 +119,7 @@ private:
     QTreeWidget* m_logTree      = nullptr;
     QPushButton* m_logRevealBtn = nullptr;
     QString      m_logDestination;
+
+    // Saved viewport zoom (persisted across enter/leave cycles)
+    double m_savedZoom = -1.0;
 };

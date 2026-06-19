@@ -1,9 +1,5 @@
 #include "AnimationPlaybackService.h"
 
-#include <QCoreApplication>
-#include <QApplication>
-#include <QPushButton>
-#include <QStyle>
 #include <QTimer>
 #include "AnimationTestOps.h"
 
@@ -22,19 +18,9 @@ const QStringList& effectiveFrames(const QVector<AnimationTimeline>& timelines, 
     }
     return tl.frames;
 }
-
-const QIcon& playIcon() {
-    static const QIcon icon = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
-    return icon;
 }
 
-const QIcon& pauseIcon() {
-    static const QIcon icon = QApplication::style()->standardIcon(QStyle::SP_MediaPause);
-    return icon;
-}
-}
-
-bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer, QPushButton* playPauseButton) {
+bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -43,11 +29,10 @@ bool AnimationPlaybackService::prev(const QVector<AnimationTimeline>& timelines,
     }
     playing = false;
     timer->stop();
-    playPauseButton->setIcon(playIcon());
     return true;
 }
 
-bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer, QPushButton* playPauseButton) {
+bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int& frameIndex, bool& playing, QTimer* timer) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -56,7 +41,6 @@ bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines,
     }
     playing = false;
     timer->stop();
-    playPauseButton->setIcon(playIcon());
     return true;
 }
 
@@ -75,7 +59,7 @@ bool AnimationPlaybackService::tick(const QVector<AnimationTimeline>& timelines,
     return AnimationTestOps::tick(effectiveFrames(timelines, selectedTimelineIndex), frameIndex, count);
 }
 
-bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer, QPushButton* playPauseButton) {
+bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -83,7 +67,6 @@ bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>&
         return false;
     }
     playing = !playing;
-    playPauseButton->setIcon(playing ? pauseIcon() : playIcon());
     if (playing) {
 #ifdef Q_OS_WASM
         // In WASM, Qt's event loop is driven by requestAnimationFrame (~60 fps).

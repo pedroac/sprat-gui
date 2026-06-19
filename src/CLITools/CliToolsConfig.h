@@ -1,7 +1,8 @@
 #pragma once
 
 #include <QString>
-#include "models.h"
+#include "AppSettings.h"
+#include "CliPaths.h"
 
 class CliToolsConfig {
 public:

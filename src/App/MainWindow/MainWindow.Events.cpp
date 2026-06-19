@@ -1,32 +1,15 @@
 #include "MainWindow.h"
+#include "FrameAnimationWorkspace.h"
+#include "LayoutCanvas.h"
 #include "LayoutOrchestrator.h"
-#include "AnimationCanvas.h"
 #include "ImportPathSupport.h"
-#include "MessageDialog.h"
 
-#include <QAction>
-#include <QApplication>
-#include <QStyle>
-#include <QClipboard>
-#include <QContextMenuEvent>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QDoubleSpinBox>
 #include <QFileInfo>
-#include <QLabel>
-#include <QMenu>
 #include <QMimeData>
-#include <QMessageBox>
-#include <QIcon>
-#include <QPushButton>
 #include <QPixmapCache>
-#include <QStandardPaths>
-#include <QWheelEvent>
-#include <QScrollArea>
-#include <QMouseEvent>
-#include <QKeyEvent>
-#include <QScrollBar>
 
 namespace {
 }
@@ -74,14 +57,8 @@ void MainWindow::dropEvent(QDropEvent* event) {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
-    if (m_animCanvas && (watched == m_animCanvas || watched == m_animCanvas->viewport())) {
-        if (event->type() == QEvent::Resize) {
-            handleAnimPreviewResize();
-        } else if (event->type() == QEvent::ContextMenu) {
-            return handleAnimPreviewContextMenu(static_cast<QContextMenuEvent*>(event));
-        }
-    }
-    if (m_canvas && watched == m_canvas->viewport() && m_layoutOrchestrator) {
+    auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+    if (canvas && watched == canvas->viewport() && m_layoutOrchestrator) {
         const auto type = event->type();
         if (type == QEvent::MouseButtonPress ||
             type == QEvent::MouseButtonRelease ||
@@ -100,7 +77,7 @@ bool MainWindow::isSupportedDropPath(const QString& path) const {
     return ImportPathSupport::isSupportedLocalImportPath(info.filePath());
 }
 
-MainWindow::DropAction MainWindow::confirmDropAction(const QString& /*path*/) {
+DropAction MainWindow::confirmDropAction(const QString& /*path*/) {
     // With the multi-source model the layout is always the union of all sources.
     // New files are always added as an additional source (Merge).
     // Replace is only used for the very first load when there is no content yet.
@@ -156,42 +133,3 @@ void MainWindow::onLayoutCanvasPathDropped(const QString& path) {
     }
 }
 
-bool MainWindow::handleAnimPreviewEvent(QEvent*) { return false; }
-bool MainWindow::handleAnimPreviewMousePress(QMouseEvent*) { return false; }
-bool MainWindow::handleAnimPreviewMouseMove(QMouseEvent*) { return false; }
-bool MainWindow::handleAnimPreviewMouseRelease(QMouseEvent*) { return false; }
-bool MainWindow::handleAnimPreviewKeyPress(QKeyEvent*) { return false; }
-bool MainWindow::handleAnimPreviewKeyRelease(QKeyEvent*) { return false; }
-
-bool MainWindow::handleAnimPreviewWheel(QWheelEvent*) {
-    return false;
-}
-
-void MainWindow::handleAnimPreviewResize() {
-    if (m_animCanvas && !m_animCanvas->isZoomManual()) {
-        QTimer::singleShot(0, this, &MainWindow::fitAnimationToViewport);
-    }
-    QTimer::singleShot(0, this, &MainWindow::refreshAnimationTest);
-}
-
-bool MainWindow::handleAnimPreviewContextMenu(QContextMenuEvent* contextEvent) {
-    QMenu menu(this);
-    QString ffmpegExe = QStandardPaths::findExecutable("ffmpeg");
-    QString magickExe = QStandardPaths::findExecutable("magick");
-    if (magickExe.isEmpty()) {
-        magickExe = QStandardPaths::findExecutable("convert");
-    }
-    const bool hasExportTools = !ffmpegExe.isEmpty() || !magickExe.isEmpty();
-
-    QAction* saveAnim = menu.addAction(tr("Save Animation..."));
-    saveAnim->setEnabled(hasExportTools);
-    QAction* copyFrame = menu.addAction(tr("Copy Current Frame"));
-
-    QAction* selectedAction = menu.exec(contextEvent->globalPos());
-    if (selectedAction == saveAnim) {
-        saveAnimationToFile();
-    } else if (selectedAction == copyFrame && m_animCanvas) {
-        QApplication::clipboard()->setPixmap(m_animCanvas->grab());
-    }
-    return true;
-}

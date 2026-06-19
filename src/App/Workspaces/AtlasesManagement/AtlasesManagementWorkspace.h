@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
-#include "models.h"
+#include "ProjectModels.h"
+#include "IWorkspace.h"
 
 class NavigatorPanel;
 class ProjectSession;
@@ -26,12 +27,17 @@ class QTreeWidgetItem;
  * sprites to atlases via drag-and-drop or context menu. Provides two
  * view modes: Navigation (sprite tree) and Layout (packed atlas canvas).
  */
-class AtlasesManagementWorkspace : public QWidget {
+class AtlasesManagementWorkspace : public QWidget, public IWorkspace {
     Q_OBJECT
 public:
     enum class ViewMode { Navigation, Layout };
 
     explicit AtlasesManagementWorkspace(QWidget* parent = nullptr);
+
+    // IWorkspace
+    void enter() override;
+    void leave() override;
+    QWidget* widget() override { return this; }
 
     void setAtlases(const QVector<AtlasEntry>& atlases, int activeIndex);
     void setSources(const QVector<ProjectSource>& sources);

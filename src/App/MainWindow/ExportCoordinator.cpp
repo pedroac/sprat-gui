@@ -310,6 +310,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
 
         // Run post-export hook command (in background thread; blocks until done)
         const QString hookCmd = config.postExportCommand.trimmed();
+#ifndef Q_OS_WASM
         if (result.success && !hookCmd.isEmpty()) {
             QProcess proc;
             QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -333,6 +334,9 @@ bool ExportCoordinator::runExport(SaveConfig config) {
             }
             logEntries.append(hookEntry);
         }
+#else
+        Q_UNUSED(hookCmd)
+#endif
 
         result.logEntries = std::move(logEntries);
         return result;

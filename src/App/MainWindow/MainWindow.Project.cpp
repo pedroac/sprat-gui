@@ -1,10 +1,20 @@
 #include "MainWindow.h"
+#include "AnimationPreviewPanel.h"
+#include "TimelineEditorPanel.h"
 #include "TimelineListWidget.h"
+#include "LayoutCanvas.h"
 #include "LayoutOrchestrator.h"
 #include "CliSetupController.h"
 #include "AnimationCanvas.h"
 #include "PackedAtlasView.h"
+#include "SpriteEditorPanel.h"
+#include "PreviewCanvas.h"
+#include "NavigatorPanel.h"
+#include "NavigatorTreeWidget.h"
+#include "MarkerRepository.h"
 #include "AtlasesManagementWorkspace.h"
+#include "ExportWorkspace.h"
+#include "FrameAnimationWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -188,11 +198,11 @@ void MainWindow::loadAutosavedProject() {
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolutionText(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
     syncSourceResolutionPresetSelection(
-        m_sourceResolutionCombo,
+        m_atlasWorkspace->sourceResolutionCombo(),
         hasSourceResolution ? sourceResolutionWidth : 1024,
         hasSourceResolution ? sourceResolutionHeight : 1024);
-    if (m_sourceResolutionCombo) {
-        m_sourceResolutionCombo->setEnabled(true);
+    if (m_atlasWorkspace->sourceResolutionCombo()) {
+        m_atlasWorkspace->sourceResolutionCombo()->setEnabled(true);
     }
 
     const QJsonObject layoutInfo = root["layout"].toObject();
@@ -770,7 +780,7 @@ void MainWindow::onExportAsClicked() {
             toExport << p;
     }
     m_exportWorkspace->populate(toExport,
-                                m_profileCombo ? m_profileCombo->currentData().toString() : QString(),
+                                m_atlasWorkspace->profileCombo() ? m_atlasWorkspace->profileCombo()->currentData().toString() : QString(),
                                 configForPopulate,
                                 startDir);
 
@@ -788,223 +798,7 @@ void MainWindow::onExportAsClicked() {
         m_exportWorkspace->setAtlasExportConfigs(atlasConfigs, atlasNames);
     }
 
-    showExportWorkspace();
-}
-
-void MainWindow::showAtlasesManagementWorkspace() {
-    if (!m_atlasesManagementWorkspace) return;
-    if (m_exportWorkspaceActive) leaveExportWorkspace();
-    m_atlasesManagementWorkspaceActive = true;
-    m_activeWorkspace = Workspace::AtlasesManagement;
-    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
-    if (m_atlasesManagementWorkspaceAction)
-        m_atlasesManagementWorkspaceAction->setChecked(true);
-    if (m_atlasDock)     m_atlasDock->hide();
-    if (m_animationDock) m_animationDock->hide();
-    if (m_session) {
-        m_projectController->syncFramePathsToNeutralAtlas(ProjectController::DropAction::Merge);
-        m_atlasesManagementWorkspace->setSources(m_session->sources);
-        m_atlasesManagementWorkspace->setAtlases(
-            m_session->atlases, m_session->activeAtlasIndex);
-    }
-    m_mainStack->setCurrentIndex(2);
-    m_mainStack->show();
-}
-
-void MainWindow::leaveAtlasesManagementWorkspace() {
-    m_atlasesManagementWorkspaceActive = false;
-    // If Layout mode is active, the canvas was moved into the workspace.
-    // Restore it to its original dock container before hiding the workspace.
-    if (m_atlasesManagementWorkspace &&
-            m_atlasesManagementWorkspace->viewMode() == AtlasesManagementWorkspace::ViewMode::Layout) {
-        if (m_canvas) m_canvas->setDimFilter(QString());
-        m_atlasesManagementWorkspace->clearCanvasWidget();
-        if (m_canvas && m_atlasViewStack && m_atlasViewStack->widget(0)) {
-            QWidget* cc = m_atlasViewStack->widget(0);
-            m_canvas->setParent(cc);
-            if (auto* l = cc->layout()) l->addWidget(m_canvas);
-            m_canvas->show();
-        }
-    }
-    // Reset to the neutral atlas so updateUiState() checks the correct atlas
-    // when returning to the Sprites workspace. A newly-selected atlas whose
-    // layout has not been built yet would otherwise make hasModels=false,
-    // causing the welcome page to appear with all workspace actions disabled.
-    if (m_session)
-        m_session->activeAtlasIndex = m_session->neutralAtlasIndex();
-    // Cancel any atlas-specific layout run in flight so that its result is
-    // not written into the neutral atlas's layout models after the reset.
-    if (m_layoutOrchestrator) {
-        m_layoutOrchestrator->stopAndClearPending();
-    }
-    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Horizontal);
-    m_mainStack->setCurrentIndex(0);
-    updateUiState();
-}
-
-void MainWindow::switchToAtlasWorkspace() {
-    if (m_exportWorkspaceActive) leaveExportWorkspace();
-    const bool fromAtlasManagement = m_atlasesManagementWorkspaceActive;
-    if (m_atlasesManagementWorkspaceActive) leaveAtlasesManagementWorkspace();
-    m_activeWorkspace = Workspace::Atlas;
-    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
-    if (m_atlasWorkspaceAction) m_atlasWorkspaceAction->setChecked(true);
-    if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1);
-    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Horizontal);
-    if (m_editorContent) m_editorContent->show();
-    // Restore the horizontal panel sizes saved before we flipped to vertical for
-    // Frame Animation.  Without this, Qt's reshuffled size array leaves the
-    // navigator too wide (or too narrow) after every workspace round-trip.
-    if (m_atlasSplitter) {
-        const QList<int> sizes = m_atlasSplitterHSizes.isEmpty()
-            ? QList<int>{270, 1030} : m_atlasSplitterHSizes;
-        m_atlasSplitter->setSizes(sizes);
-    }
-    // The show() + setSizes() above trigger resize events that feed into
-    // ZoomableGraphicsView's debounced resizeEvent.  Restore the saved zoom and
-    // scroll position from before the workspace switch; the debounce timer will
-    // apply them once QGraphicsView::resizeEvent has updated the scroll-bar
-    // ranges.  Fall back to initialFit() if no state was saved.
-    if (m_previewView) {
-        if (m_savedPreviewZoom > 0.0) {
-            m_previewView->setPendingRestore(m_savedPreviewZoom, m_savedPreviewCenter);
-            m_savedPreviewZoom = -1.0;
-        } else {
-            m_previewView->setZoomManual(false);
-        }
-    }
-    // Save animation canvas zoom/center before hiding so they can be restored on the next
-    // switchToFrameAnimWorkspace() call. Only save if the dock is currently visible.
-    if (m_animationDock && !m_animationDock->isHidden() && m_animCanvas) {
-        m_savedAnimZoom   = m_animCanvas->zoom();
-        m_savedAnimCenter = m_animCanvas->mapToScene(m_animCanvas->viewport()->rect().center());
-    }
-    if (m_animationDock) m_animationDock->hide();
-    if (m_navigatorPanel) {
-        m_navigatorPanel->setAtlasComboVisible(false);
-        m_navigatorPanel->setShowHiddenVisible(true);
-        m_navigatorPanel->setCheckboxesEnabled(true);
-        m_navigatorPanel->setAddSourceButtonVisible(true);
-        refreshSpriteTree();
-    } else {
-        if (m_navigatorAtlasRow)   m_navigatorAtlasRow->setVisible(false);
-        if (m_showHiddenToggleBtn) m_showHiddenToggleBtn->setVisible(true);
-    }
-    // Rebuild the layout for the Sprites workspace context when returning from
-    // the Atlas Management workspace, so the full sprite set is displayed and
-    // activeFramePaths reflects any atlas assignment changes.
-    if (fromAtlasManagement)
-        scheduleLayoutRebuild(true);
-}
-
-void MainWindow::switchToFrameAnimWorkspace() {
-    if (m_exportWorkspaceActive) leaveExportWorkspace();
-    if (m_atlasesManagementWorkspaceActive) leaveAtlasesManagementWorkspace();
-    m_activeWorkspace = Workspace::FrameAnimation;
-    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
-    if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1);
-    // Save horizontal sizes before the orientation flip so they can be
-    // restored when returning to the Atlas workspace.
-    if (m_atlasSplitter && m_atlasSplitter->orientation() == Qt::Horizontal)
-        m_atlasSplitterHSizes = m_atlasSplitter->sizes();
-    // Save PreviewCanvas view state before the orientation change + hide trigger
-    // resize events that would corrupt the scroll position.
-    if (m_previewView) {
-        m_savedPreviewZoom   = m_previewView->zoom();
-        m_savedPreviewCenter = m_previewView->viewportCenterInScene();
-    }
-    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Vertical);
-    if (m_editorContent) m_editorContent->hide();
-    if (m_animationDock) m_animationDock->show();
-    // Restore animation canvas zoom after the dock show triggers resize events.
-    // setPendingRestore() sets m_isZoomManual=true (preventing initialFit) and defers
-    // the zoom+center restore to a 0-ms timer that fires once the dock geometry is final.
-    if (m_animCanvas && m_savedAnimZoom > 0.0)
-        m_animCanvas->setPendingRestore(m_savedAnimZoom, m_savedAnimCenter);
-    if (m_navigatorPanel) {
-        m_navigatorPanel->setAtlasComboVisible(true);
-        m_navigatorPanel->setShowHiddenVisible(false);
-        m_navigatorPanel->setCheckboxesEnabled(false);
-        m_navigatorPanel->setAddSourceButtonVisible(false);
-    } else {
-        if (m_navigatorAtlasRow)   m_navigatorAtlasRow->setVisible(true);
-        if (m_showHiddenToggleBtn) m_showHiddenToggleBtn->setVisible(false);
-    }
-    updateNavigatorAtlasCombo();
-    refreshSpriteTree();
-    refreshTimelineList();
-    refreshAnimationTest();
-    // If the active atlas has not been packed yet (e.g. after atlas reassignment),
-    // trigger a rebuild so layoutModels are filled and refreshSpriteTree runs again.
-    scheduleLayoutRebuild(true);
-    if (m_frameAnimFirstLoad) {
-        m_frameAnimFirstLoad = false;
-        resizeDocks({m_atlasDock, m_animationDock}, {270, 730}, Qt::Horizontal);
-    }
-}
-
-void MainWindow::showExportWorkspace() {
-    if (m_atlasesManagementWorkspaceActive) leaveAtlasesManagementWorkspace();
-    m_exportWorkspaceActive = true;
-    if (m_exportCoordinator) m_exportCoordinator->setExportWorkspaceActive(true);
-    m_activeWorkspace = Workspace::Exportation;
-    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
-    if (m_exportationWorkspaceAction) m_exportationWorkspaceAction->setChecked(true);
-    if (m_atlasDock)     m_atlasDock->hide();
-    // Save animation canvas zoom before hiding (may be coming from FrameAnimation workspace).
-    if (m_animationDock && !m_animationDock->isHidden() && m_animCanvas) {
-        m_savedAnimZoom   = m_animCanvas->zoom();
-        m_savedAnimCenter = m_animCanvas->mapToScene(m_animCanvas->viewport()->rect().center());
-    }
-    if (m_animationDock) m_animationDock->hide();
-    if (m_debugDock)     m_debugDock->hide();
-    if (m_exportWorkspace && m_session) {
-        QStringList atlasNames;
-        QList<int>  sessionIndices;
-        for (int i = 0; i < m_session->atlases.size(); ++i) {
-            const auto& a = m_session->atlases[i];
-            if (a.isExcluded) continue;           // Excluded atlas is never exported
-            if (a.spritePaths.isEmpty()) continue; // Empty atlases have nothing to export
-            atlasNames.append(a.name);
-            sessionIndices.append(i);
-        }
-        // setAtlasNames fires previewRefreshRequested (via onAnyComboChanged), which sets
-        // m_exportPreviewAtlasIndex and calls refreshPreview for the selected atlas.
-        // No explicit refreshPreview call needed here.
-        m_exportWorkspace->setAtlasNames(atlasNames, m_session->activeAtlasIndex, sessionIndices);
-    }
-    m_mainStack->setCurrentIndex(1);
-    m_mainStack->show();
-}
-
-void MainWindow::leaveExportWorkspace() {
-    // Persist the current export canvas zoom so it can be restored on the next visit.
-    if (m_exportLayoutCanvas && m_exportLayoutCanvas->zoom() > 0.0)
-        m_savedExportZoom = m_exportLayoutCanvas->zoom();
-    m_exportWorkspaceActive = false;
-    if (m_exportCoordinator) {
-        m_exportCoordinator->setExportWorkspaceActive(false);
-        m_exportCoordinator->setExportPreviewAtlasIndex(-1);  // Reset atlas filter for next visit
-    }
-    m_activeWorkspace = Workspace::Atlas;
-    if (m_layoutOrchestrator) m_layoutOrchestrator->setActiveWorkspace(static_cast<int>(m_activeWorkspace));
-    if (m_atlasWorkspaceAction) m_atlasWorkspaceAction->setChecked(true);
-    if (m_atlasViewStack) m_atlasViewStack->setCurrentIndex(1); // restore Navigation
-    if (m_atlasSplitter) m_atlasSplitter->setOrientation(Qt::Horizontal);
-    // Cancel any in-flight preview generation
-    if (m_exportCoordinator) m_exportCoordinator->cancelPreview();
-    m_exportWorkspace->clearViewport();
-    if (m_packedAtlasView) {
-        m_packedAtlasView->setParent(this);
-        m_packedAtlasView->hide();
-    }
-    if (m_exportLayoutCanvas) {
-        m_exportLayoutCanvas->setLoadingHint(false);
-        m_exportLayoutCanvas->setParent(this);
-        m_exportLayoutCanvas->hide();
-    }
-    m_mainStack->setCurrentIndex(0);  // reset; updateUiState restores correct page
-    updateUiState();                  // restores docks and stack for current project state
+    switchWorkspace(m_exportWorkspace);
 }
 
 void MainWindow::refreshPreview(const QString& profileName, const QString& scaleFilter) {
@@ -1032,7 +826,7 @@ void MainWindow::onExportWorkspaceRequested(SaveConfig config) {
         return;
 
     m_lastSaveConfig = config;
-    leaveExportWorkspace();
+    switchWorkspace(m_atlasWorkspace);
     updateUiState();  // enables Export action now that outputPath is set
     if (m_exportCoordinator) m_exportCoordinator->runExport(m_lastSaveConfig);
 }
@@ -1059,7 +853,8 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.selectedTimelineIndex = session->selectedTimelineIndex;
     QVector<int> selectedTimelineRows;
     {
-        auto* framesList = m_timelineEditorPanel ? m_timelineEditorPanel->timelineFramesList() : nullptr;
+        auto* tp = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+        auto* framesList = tp ? tp->timelineFramesList() : nullptr;
         const QList<QListWidgetItem*> selectedFrameItems = framesList ? framesList->selectedItems() : QList<QListWidgetItem*>();
         selectedTimelineRows.reserve(selectedFrameItems.size());
         for (QListWidgetItem* item : selectedFrameItems) {
@@ -1068,8 +863,8 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
         std::sort(selectedTimelineRows.begin(), selectedTimelineRows.end());
     }
     input.selectedTimelineFrameRows = selectedTimelineRows;
-    input.animationFrameIndex = m_animFrameIndex;
-    input.animationPlaying = m_animPlaying;
+    input.animationFrameIndex = m_frameAnimWorkspace ? m_frameAnimWorkspace->animFrameIndex() : 0;
+    input.animationPlaying = m_frameAnimWorkspace ? m_frameAnimWorkspace->isAnimPlaying() : false;
     input.selectedSprite = session->selectedSprite;
     for (const auto& sprite : session->selectedSprites) {
         if (sprite) {
@@ -1081,31 +876,35 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.layoutModels = session->activeAtlas().layoutModels;
     input.layoutOutput = session->cachedLayoutOutput;
     input.layoutScale = session->cachedLayoutScale;
-    input.profile = m_profileCombo->currentData().toString();
+    input.profile = m_atlasWorkspace->profileCombo() ? m_atlasWorkspace->profileCombo()->currentData().toString() : QString();
     SpratProfile selectedProfile;
     const bool hasSelectedProfile = selectedProfileDefinition(selectedProfile);
     input.padding = hasSelectedProfile ? selectedProfile.padding : 0;
     input.trimTransparent = hasSelectedProfile ? selectedProfile.trimTransparent : false;
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
-    if (m_sourceResolutionCombo && parseResolutionText(m_sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight)) {
+    auto* sourceResolutionCombo = m_atlasWorkspace->sourceResolutionCombo();
+    if (sourceResolutionCombo && parseResolutionText(sourceResolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight)) {
         input.sourceResolutionWidth = sourceResolutionWidth;
         input.sourceResolutionHeight = sourceResolutionHeight;
     }
     input.layoutZoom = m_layoutZoom / 100.0;
-    input.previewZoom = m_previewZoomSpin->value() / 100.0;
-    input.animationZoom = m_animZoomSpin->value() / 100.0;
+    auto* spriteEditorPanel = m_atlasWorkspace->spriteEditorPanel();
+    input.previewZoom = spriteEditorPanel ? spriteEditorPanel->previewZoomSpin()->value() / 100.0 : 1.0;
+    auto* ap = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+    auto* animZoomSpin = ap ? ap->zoomSpin() : nullptr;
+    input.animationZoom = animZoomSpin ? animZoomSpin->value() / 100.0 : 1.0;
     // Export canvas zoom: use live canvas zoom when in export workspace, otherwise the last saved value.
-    input.exportZoom = (m_exportWorkspaceActive && m_exportLayoutCanvas && m_exportLayoutCanvas->zoom() > 0.0)
+    input.exportZoom = (m_currentWorkspace == m_exportWorkspace && m_exportLayoutCanvas && m_exportLayoutCanvas->zoom() > 0.0)
         ? m_exportLayoutCanvas->zoom()
-        : m_savedExportZoom;
+        : (m_exportWorkspace ? m_exportWorkspace->savedZoom() : 0.0);
     input.dockState = saveState();
     input.appSettings = m_settings;
     input.cliPaths = m_cliPaths;
     input.saveConfig = config;
     input.portablePaths = portable;
     input.exportPresets   = m_exportPresets;
-    input.markerTemplates = m_markerTemplates;
+    input.markerTemplates = m_atlasWorkspace ? m_atlasWorkspace->markerRepository()->markerTemplates() : QVector<MarkerTemplate>{};
     return ProjectPayloadCodec::build(input);
 }
 
@@ -1130,9 +929,12 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
     if (action == DropAction::Cancel) {
         return;
     }
-    if (m_animCanvas) m_animCanvas->setZoomManual(false);
-    if (m_canvas) m_canvas->setZoomManual(false);
-    if (m_previewView) m_previewView->setZoomManual(false);
+    auto* ap0 = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+    if (ap0 && ap0->animCanvas())
+        ap0->animCanvas()->setZoomManual(false);
+    if (m_atlasWorkspace->canvas()) m_atlasWorkspace->canvas()->setZoomManual(false);
+    auto* sprEd = m_atlasWorkspace->spriteEditorPanel();
+    if (sprEd && sprEd->previewCanvas()) sprEd->previewCanvas()->setZoomManual(false);
 
     const QString lowerPath = path.toLower();
 
@@ -1163,16 +965,15 @@ void MainWindow::loadProject(const QString& path, DropAction action) {
 #ifdef Q_OS_WASM
     // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously
     // via a deferred timer so the loading overlay paints before we block.
-    const ProjectController::DropAction pcAction = static_cast<ProjectController::DropAction>(action);
-    QTimer::singleShot(0, this, [this, path, pcAction]() {
+    QTimer::singleShot(0, this, [this, path, action]() {
         ProjectController::ProjectLoadResult result;
         result.path = path;
-        result.action = pcAction;
+        result.action = action;
         result.success = ProjectFileLoader::load(path, result.root, result.error);
         processProjectLoadResult(result);
     });
 #else
-    m_projectController->launchProjectLoad(path, static_cast<ProjectController::DropAction>(action));
+    m_projectController->launchProjectLoad(path, action);
 #endif
 }
 
@@ -1182,7 +983,7 @@ void MainWindow::onProjectLoadFinished() {
 
 void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadResult& result) {
     const QString path = result.path;
-    const DropAction action = static_cast<DropAction>(result.action);
+    const DropAction action = result.action;
 
     if (!result.success) {
         if (path.endsWith(".zip", Qt::CaseInsensitive)) {
@@ -1290,28 +1091,29 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
     cacheLayoutOutputFromPayload(root);
 
     QJsonObject layoutOpts = root["layout_options"].toObject();
+    auto* profileCombo = m_atlasWorkspace->profileCombo();
     if (layoutOpts.contains("profile")) {
         const QString profile = layoutOpts["profile"].toString();
-        if (!profile.isEmpty() && m_profileCombo->findData(profile) < 0) {
-            m_profileCombo->addItem(profile, profile);
+        if (!profile.isEmpty() && profileCombo->findData(profile) < 0) {
+            profileCombo->addItem(profile, profile);
         }
-        m_profileCombo->setCurrentIndex(m_profileCombo->findData(profile));
+        profileCombo->setCurrentIndex(profileCombo->findData(profile));
         if (m_profileSelectorStack) {
-            m_profileSelectorStack->setCurrentIndex(m_profileCombo->count() > 0 ? 0 : 1);
+            m_profileSelectorStack->setCurrentIndex(profileCombo->count() > 0 ? 0 : 1);
         }
     }
-    m_currentProfile = m_profileCombo ? m_profileCombo->currentData().toString() : QString();
+    m_currentProfile = profileCombo ? profileCombo->currentData().toString() : QString();
 
     int sourceResolutionWidth = 0;
     int sourceResolutionHeight = 0;
     const bool hasSourceResolution = parseResolutionText(layoutOpts["source_resolution"].toString(), sourceResolutionWidth, sourceResolutionHeight);
     syncSourceResolutionPresetSelection(
-        m_sourceResolutionCombo,
+        m_atlasWorkspace->sourceResolutionCombo(),
         hasSourceResolution ? sourceResolutionWidth : 1024,
         hasSourceResolution ? sourceResolutionHeight : 1024);
-    if (m_sourceResolutionCombo) {
-        m_sourceResolutionCombo->setEnabled(true);
-        m_currentResolution = m_sourceResolutionCombo->currentText();
+    if (m_atlasWorkspace->sourceResolutionCombo()) {
+        m_atlasWorkspace->sourceResolutionCombo()->setEnabled(true);
+        m_currentResolution = m_atlasWorkspace->sourceResolutionCombo()->currentText();
     }
     
     const QString sourceMode = layoutInfo["source_mode"].toString();
@@ -1389,14 +1191,12 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     QString tempPath = tempDir->path();
     m_projectController->addTempDir(std::move(tempDir));
 
-    const ProjectController::DropAction pcAction = static_cast<ProjectController::DropAction>(action);
-
 #ifdef Q_OS_WASM
-    auto zipTaskWasm = [this, zipPath, tempPath, pcAction]() {
+    auto zipTaskWasm = [this, zipPath, tempPath, action]() {
         ProjectController::ZipDiscoveryResult result;
         result.tempPath = tempPath;
         result.zipPath = zipPath;
-        result.action = pcAction;
+        result.action = action;
         result.canceled = false;
 
         QString error;
@@ -1419,7 +1219,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     // QtConcurrent can be unreliable without pthreads/COOP+COEP; run synchronously.
     processZipDiscoveryResult(zipTaskWasm());
 #else
-    m_projectController->launchZipDiscovery(zipPath, pcAction, tempPath);
+    m_projectController->launchZipDiscovery(zipPath, action, tempPath);
 #endif
     return true;
 }
@@ -1436,7 +1236,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
     }
     const QString tempPath = result.tempPath;
     const QString zipPath = result.zipPath;
-    const DropAction action = static_cast<DropAction>(result.action);
+    const DropAction action = result.action;
     QStringList imageDirectories = result.selections;
 
     if (imageDirectories.isEmpty()) {
@@ -1561,7 +1361,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
         const QStringList copied = m_projectController->copyFramesToSourceSubfolder(
             absolutePaths, subfolderPath, m_mergeReplaceAllDuplicates);
         m_session->activeFramePaths.append(copied);
-        m_projectController->registerLoadedSource(zipPath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(zipPath, action, subfolderPath);
     } else {
         // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
@@ -1597,7 +1397,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
         const QString subName = m_projectController->computeSourceSubfolderName(zipPath);
         const QString subfolderPath = QDir(m_session->sourceFolder).filePath(subName);
         m_session->activeFramePaths = m_projectController->copyFramesToSourceSubfolder(absolutePaths, subfolderPath);
-        m_projectController->registerLoadedSource(zipPath, static_cast<ProjectController::DropAction>(action), subfolderPath);
+        m_projectController->registerLoadedSource(zipPath, action, subfolderPath);
     }
 
     if (!ensureFrameListInput()) {
@@ -1681,27 +1481,29 @@ void MainWindow::applyProjectPayload() {
 
     m_layoutZoom = applied.layoutZoom * 100.0;
     onLayoutZoomChanged(m_layoutZoom);
-    if (m_previewZoomSpin) {
-        m_previewZoomSpin->setValue(applied.previewZoom * 100.0);
+    auto* spriteEditorPanel2 = m_atlasWorkspace->spriteEditorPanel();
+    if (spriteEditorPanel2 && spriteEditorPanel2->previewZoomSpin()) {
+        spriteEditorPanel2->previewZoomSpin()->setValue(applied.previewZoom * 100.0);
     }
-    // Save animation zoom for deferred restore when FrameAnimation workspace is entered.
-    // Block spin-box signals so onAnimZoomChanged does not immediately call setZoom()/setZoomManual(),
-    // which would be overwritten by the setZoomManual(false) below anyway.
-    m_savedAnimZoom   = applied.animationZoom;  // ratio, e.g. 1.0 = 100%
-    m_savedAnimCenter = QPointF();              // no scroll position known yet
-    if (m_animZoomSpin) {
-        m_animZoomSpin->blockSignals(true);
-        m_animZoomSpin->setValue(applied.animationZoom * 100.0);
-        m_animZoomSpin->blockSignals(false);
+    // Store animation zoom for deferred restore when FrameAnimation workspace is entered.
+    if (m_frameAnimWorkspace)
+        m_frameAnimWorkspace->setRestoreZoom(applied.animationZoom);
+    auto* ap2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+    auto* animZoomSpin2 = ap2 ? ap2->zoomSpin() : nullptr;
+    if (animZoomSpin2) {
+        animZoomSpin2->blockSignals(true);
+        animZoomSpin2->setValue(applied.animationZoom * 100.0);
+        animZoomSpin2->blockSignals(false);
     }
-    if (m_animCanvas) m_animCanvas->setZoomManual(false);
-    m_savedExportZoom = applied.exportZoom;
+    if (ap2 && ap2->animCanvas())
+        ap2->animCanvas()->setZoomManual(false);
+    if (m_exportWorkspace) m_exportWorkspace->setSavedZoom(applied.exportZoom);
     syncSourceResolutionPresetSelection(
-        m_sourceResolutionCombo,
+        m_atlasWorkspace->sourceResolutionCombo(),
         applied.sourceResolutionWidth > 0 ? applied.sourceResolutionWidth : 1024,
         applied.sourceResolutionHeight > 0 ? applied.sourceResolutionHeight : 1024);
-    if (m_sourceResolutionCombo) {
-        m_sourceResolutionCombo->setEnabled(true);
+    if (m_atlasWorkspace->sourceResolutionCombo()) {
+        m_atlasWorkspace->sourceResolutionCombo()->setEnabled(true);
     }
     if (!applied.dockState.isEmpty()) {
         restoreState(applied.dockState);
@@ -1712,22 +1514,17 @@ void MainWindow::applyProjectPayload() {
     if (m_atlasesManagementWorkspace)
         m_atlasesManagementWorkspace->setProfilesGlobal(m_lastSaveConfig.profilesGlobal);
     m_exportPresets   = applied.exportPresets;
-    m_markerTemplates = applied.markerTemplates;
+    if (m_atlasWorkspace)
+        m_atlasWorkspace->markerRepository()->setMarkerTemplates(applied.markerTemplates);
     applySettings();
-    refreshMarkerTemplatesMenu();
 
-    // Restore smart folders from project payload
-    if (!applied.smartFolders.isEmpty()) {
-        m_session->smartFolders = applied.smartFolders;
-        // Keep sourceFolder in sync with the first smart folder path
-        if (m_session->sourceFolder.isEmpty()) {
-            m_session->sourceFolder = applied.smartFolders.first().path;
-        }
-    }
-
-    // Restore sources (new model)
+    // Restore sources
     if (!applied.sources.isEmpty()) {
         m_session->sources = applied.sources;
+        // Keep sourceFolder in sync with the first source path if it's a folder
+        if (m_session->sourceFolder.isEmpty() && m_session->sources.first().type == SourceType::Folder) {
+            m_session->sourceFolder = m_session->sources.first().originalPath;
+        }
     }
     m_session->orphanedSpritePaths = applied.orphanedSpritePaths;
 
@@ -1736,13 +1533,15 @@ void MainWindow::applyProjectPayload() {
         QFileInfo fi(m_session->layoutSourcePath);
         if (fi.isDir()) {
             m_session->sourceFolder = fi.absoluteFilePath();
-            // Ensure the first smart folder mirrors the source folder
-            if (m_session->smartFolders.isEmpty()) {
-                SmartFolder sf;
-                sf.path = m_session->sourceFolder;
-                m_session->smartFolders.append(sf);
-            } else {
-                m_session->smartFolders.first().path = m_session->sourceFolder;
+            // Ensure the first source mirrors the source folder
+            if (m_session->sources.isEmpty()) {
+                ProjectSource src;
+                src.name = fi.fileName();
+                src.type = SourceType::Folder;
+                src.originalPath = m_session->sourceFolder;
+                m_session->sources.append(src);
+            } else if (m_session->sources.first().type == SourceType::Folder) {
+                m_session->sources.first().originalPath = m_session->sourceFolder;
             }
             initializeSourceFolderWatcher();
         }
@@ -1792,13 +1591,14 @@ void MainWindow::applyProjectPayload() {
         ? applied.selectedTimelineIndex
         : (m_session->activeAtlas().timelines.isEmpty() ? -1 : 0);
 
-    if (m_timelineEditorPanel)
-        m_timelineEditorPanel->selectTimeline(m_session->selectedTimelineIndex);
+    auto* tp2 = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+    if (tp2)
+        tp2->selectTimeline(m_session->selectedTimelineIndex);
     else
         refreshTimelineList();
 
     if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size() && !applied.selectedTimelineFrameRows.isEmpty()) {
-        auto* framesList = m_timelineEditorPanel ? m_timelineEditorPanel->timelineFramesList() : nullptr;
+        auto* framesList = tp2 ? tp2->timelineFramesList() : nullptr;
         for (int row : applied.selectedTimelineFrameRows) {
             if (framesList && row >= 0 && row < framesList->count()) {
                 if (QListWidgetItem* item = framesList->item(row)) {
@@ -1818,24 +1618,23 @@ void MainWindow::applyProjectPayload() {
         primaryPath = applied.selectedSpritePath;
     }
     if (!selectedPaths.isEmpty()) {
-        if (m_canvas) {
-            m_canvas->selectSpritesByPaths(selectedPaths, primaryPath);
+        if (m_atlasWorkspace->canvas()) {
+            m_atlasWorkspace->canvas()->selectSpritesByPaths(selectedPaths, primaryPath);
         }
     }
 
-    m_animFrameIndex = qMax(0, applied.animationFrameIndex);
-    if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
-        const int frameCount = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames.size();
-        if (frameCount > 0) {
-            m_animFrameIndex = qBound(0, m_animFrameIndex, frameCount - 1);
-        } else {
-            m_animFrameIndex = 0;
+    if (m_frameAnimWorkspace) {
+        int frameIndex = qMax(0, applied.animationFrameIndex);
+        if (m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
+            const int frameCount = m_session->activeAtlas().timelines[m_session->selectedTimelineIndex].frames.size();
+            frameIndex = frameCount > 0 ? qBound(0, frameIndex, frameCount - 1) : 0;
         }
-    }
-    if (applied.animationPlaying && m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
-        onAnimPlayPauseClicked();
-    } else if (m_animPlaying) {
-        onAnimPlayPauseClicked();
+        m_frameAnimWorkspace->setAnimFrameIndex(frameIndex);
+        if (applied.animationPlaying && m_session->selectedTimelineIndex >= 0 && m_session->selectedTimelineIndex < m_session->activeAtlas().timelines.size()) {
+            m_frameAnimWorkspace->onAnimPlayPauseClicked();
+        } else if (m_frameAnimWorkspace->isAnimPlaying()) {
+            m_frameAnimWorkspace->onAnimPlayPauseClicked();
+        }
     }
     refreshAnimationTest();
     m_isRestoringProject = false;
@@ -1943,5 +1742,157 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
             return;
         // Still pointing to an external folder — copy everything in
         copySpriteToProjectFolder(projectDir);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace switching — IWorkspace-based lifecycle
+// ---------------------------------------------------------------------------
+
+void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
+{
+    auto* atlasSplitter = m_atlasWorkspace ? m_atlasWorkspace->atlasSplitter() : nullptr;
+    auto* editorContent = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel() : nullptr;
+    if (ws == m_atlasWorkspace) {
+        // AtlasWorkspace::leave() already saved splitter H sizes; restore to Horizontal here
+        if (atlasSplitter) atlasSplitter->setOrientation(Qt::Horizontal);
+        if (m_atlasDock)     m_atlasDock->show();
+        if (m_animationDock) m_animationDock->hide();
+    } else if (ws == m_frameAnimWorkspace) {
+        // AtlasWorkspace::leave() already saved splitter H sizes; flip to Vertical now
+        if (atlasSplitter)  atlasSplitter->setOrientation(Qt::Vertical);
+        if (editorContent)  editorContent->hide();
+        if (m_atlasDock)      m_atlasDock->show();
+        if (m_animationDock)  m_animationDock->show();
+    } else if (ws == m_exportWorkspace) {
+        if (m_atlasDock)     m_atlasDock->hide();
+        if (m_animationDock) m_animationDock->hide();
+        if (m_debugDock)     m_debugDock->hide();
+        if (m_exportWorkspace && m_session) {
+            QStringList atlasNames;
+            QList<int>  sessionIndices;
+            for (int i = 0; i < m_session->atlases.size(); ++i) {
+                const auto& a = m_session->atlases[i];
+                if (a.isExcluded || a.spritePaths.isEmpty()) continue;
+                atlasNames.append(a.name);
+                sessionIndices.append(i);
+            }
+            m_exportWorkspace->setAtlasNames(atlasNames, m_session->activeAtlasIndex, sessionIndices);
+        }
+        m_mainStack->setCurrentIndex(1);
+        m_mainStack->show();
+    } else if (ws == m_atlasesManagementWorkspace) {
+        if (m_atlasDock)     m_atlasDock->hide();
+        if (m_animationDock) m_animationDock->hide();
+        if (m_session) {
+            m_projectController->syncFramePathsToNeutralAtlas(DropAction::Merge);
+            m_atlasesManagementWorkspace->setSources(m_session->sources);
+            m_atlasesManagementWorkspace->setAtlases(
+                m_session->atlases, m_session->activeAtlasIndex);
+        }
+        m_mainStack->setCurrentIndex(2);
+        m_mainStack->show();
+    }
+}
+
+void MainWindow::switchWorkspace(IWorkspace* next)
+{
+    if (m_currentWorkspace == next) return;
+
+    IWorkspace* prev = m_currentWorkspace;
+
+    // Leave current workspace (saves view state via enter/leave contract)
+    if (prev) {
+        prev->leave();
+
+        // Workspace-specific cleanup not expressible inside the workspace itself
+        if (prev == m_exportWorkspace) {
+            if (m_exportCoordinator) {
+                m_exportCoordinator->setExportWorkspaceActive(false);
+                m_exportCoordinator->setExportPreviewAtlasIndex(-1);
+                m_exportCoordinator->cancelPreview();
+            }
+            if (m_packedAtlasView) {
+                m_packedAtlasView->setParent(this);
+                m_packedAtlasView->hide();
+            }
+            if (m_exportLayoutCanvas) {
+                m_exportLayoutCanvas->setLoadingHint(false);
+                m_exportLayoutCanvas->setParent(this);
+                m_exportLayoutCanvas->hide();
+            }
+            m_mainStack->setCurrentIndex(0);
+        } else if (prev == m_atlasesManagementWorkspace) {
+            if (m_atlasesManagementWorkspace &&
+                    m_atlasesManagementWorkspace->viewMode()
+                    == AtlasesManagementWorkspace::ViewMode::Layout) {
+                auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+                auto* atlasViewStack = m_atlasWorkspace ? m_atlasWorkspace->atlasViewStack() : nullptr;
+                if (canvas) canvas->setDimFilter(QString());
+                m_atlasesManagementWorkspace->clearCanvasWidget();
+                if (canvas && atlasViewStack && atlasViewStack->widget(0)) {
+                    QWidget* cc = atlasViewStack->widget(0);
+                    canvas->setParent(cc);
+                    if (auto* l = cc->layout()) l->addWidget(canvas);
+                    canvas->show();
+                }
+            }
+            if (m_session)
+                m_session->activeAtlasIndex = m_session->neutralAtlasIndex();
+            if (m_layoutOrchestrator)
+                m_layoutOrchestrator->stopAndClearPending();
+            m_mainStack->setCurrentIndex(0);
+        }
+    }
+
+    m_currentWorkspace = next;
+
+    // Inform layout orchestrator of the new active workspace (0=Atlas, 1=FrameAnim, 2=Export, 3=AtlasMgt)
+    if (m_layoutOrchestrator) {
+        const int wsIdx = (next == m_frameAnimWorkspace) ? 1
+                        : (next == m_exportWorkspace)    ? 2
+                        : (next == m_atlasesManagementWorkspace) ? 3
+                        : 0;
+        m_layoutOrchestrator->setActiveWorkspace(wsIdx);
+    }
+
+    // Update toolbar action checked state
+    if (m_atlasWorkspaceAction)
+        m_atlasWorkspaceAction->setChecked(next == m_atlasWorkspace);
+    if (m_frameAnimWorkspaceAction)
+        m_frameAnimWorkspaceAction->setChecked(next == m_frameAnimWorkspace);
+    if (m_exportationWorkspaceAction)
+        m_exportationWorkspaceAction->setChecked(next == m_exportWorkspace);
+    if (m_atlasesManagementWorkspaceAction)
+        m_atlasesManagementWorkspaceAction->setChecked(next == m_atlasesManagementWorkspace);
+
+    // Apply dock/stack layout for the incoming workspace
+    applyWorkspaceLayout(next);
+
+    // Enter the new workspace (restores view state, configures navigator, etc.)
+    next->enter();
+
+    // Post-enter work that requires MainWindow context
+    auto* editorContent = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel() : nullptr;
+    if (next == m_frameAnimWorkspace) {
+        if (editorContent) editorContent->hide();
+        updateNavigatorAtlasCombo();
+        refreshSpriteTree();
+        refreshTimelineList();
+        refreshAnimationTest();
+        scheduleLayoutRebuild(true);
+        if (m_frameAnimWorkspace->firstLoad()) {
+            m_frameAnimWorkspace->clearFirstLoad();
+            resizeDocks({m_atlasDock, m_animationDock}, {270, 730}, Qt::Horizontal);
+        }
+    } else if (next == m_exportWorkspace) {
+        if (m_exportCoordinator)
+            m_exportCoordinator->setExportWorkspaceActive(true);
+    } else if (next == m_atlasWorkspace) {
+        if (editorContent) editorContent->show();
+        refreshSpriteTree();
+        updateUiState();
+        if (prev == m_atlasesManagementWorkspace)
+            scheduleLayoutRebuild(true);
     }
 }

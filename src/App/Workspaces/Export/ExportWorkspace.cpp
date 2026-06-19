@@ -407,6 +407,11 @@ void ExportWorkspace::setViewport(IAtlasViewport* viewport) {
     if (m_currentView) {
         connect(m_currentView, &ZoomableGraphicsView::zoomChanged,
                 this, &ExportWorkspace::onViewZoomChanged);
+        // Restore saved zoom from previous visit
+        if (m_savedZoom > 0.0) {
+            m_currentView->setZoomManual(true);
+            m_currentView->setZoom(m_savedZoom);
+        }
         // Sync spinbox to the current view zoom without triggering onZoomSpinChanged
         m_zoomSpin->blockSignals(true);
         m_zoomSpin->setValue(m_currentView->zoom() * 100.0);
@@ -763,4 +768,25 @@ void ExportWorkspace::showExportLog(const QVector<ExportLogEntry>& entries,
     m_logGroup->setTitle(title);
     m_logGroup->setVisible(true);
     if (m_logRevealBtn) m_logRevealBtn->setEnabled(!destination.isEmpty());
+}
+
+// ---------------------------------------------------------------------------
+// IWorkspace
+// ---------------------------------------------------------------------------
+
+void ExportWorkspace::enter()
+{
+    // The populate/setAtlasNames/setAtlasExportConfigs/setPresets setters are
+    // called by MainWindow before enter() is invoked, so all data is already in
+    // place.  Nothing extra to do here beyond what the setters already set up.
+}
+
+void ExportWorkspace::leave()
+{
+    // Persist the current viewport zoom so it can be restored on the next visit.
+    if (m_currentView) {
+        const double z = m_currentView->zoom();
+        if (z > 0.0) m_savedZoom = z;
+    }
+    clearViewport();
 }
