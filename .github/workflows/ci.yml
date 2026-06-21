@@ -125,16 +125,22 @@ jobs:
         if: runner.os == 'Windows' && github.ref == 'refs/heads/release'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           mkdir dist
           # Bundle sprat-cli (read version from DEPENDENCIES)
           $cli_version = (Get-Content DEPENDENCIES).Trim()
           $cli_url = "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-windows-x64.zip"
           Invoke-WebRequest -Uri $cli_url -OutFile cli.zip
-          # Extract and preserve structure into dist/cli/
+          # Extract into dist/cli/ — CLI executables and their DLLs land here
           Expand-Archive cli.zip -DestinationPath dist/cli -Force
-          # Bundle GUI
+          # Bundle GUI — exe at root, Qt DLLs deployed alongside it
           Copy-Item -Path build/bin/Release/sprat-gui.exe -Destination dist/ -Force
-          windeployqt dist/sprat-gui.exe
+          # Deploy Qt DLLs and plugins next to the exe.
+          # --release:                 release DLLs only
+          # --no-opengl-sw:            skip software OpenGL renderer (not needed for Qt Widgets)
+          # --no-system-d3d-compiler:  skip D3D compiler DLL
+          # MSVC runtime is included by default (no --no-compiler-runtime)
+          windeployqt --release --no-opengl-sw --no-system-d3d-compiler dist/sprat-gui.exe
           Compress-Archive -Path dist/* -DestinationPath sprat-gui-windows.zip
 
       - name: Package (macOS)
@@ -314,6 +320,44 @@ jobs:
           ./butler push linux-itch/ pedroac/sprat:linux \
             --userversion ${{ steps.version.outputs.tag }}
 
+      - name: Download Windows artifact
+        continue-on-error: true
+        id: download_windows
+        uses: actions/download-artifact@v4
+        with:
+          name: sprat-gui-Windows
+          path: dist
+
+      - name: Push Windows to itch.io
+        if: steps.download_windows.outcome == 'success'
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          mkdir -p windows-itch
+          unzip dist/sprat-gui-windows.zip -d windows-itch/
+          cp deploy/windows/.itch.toml windows-itch/
+          ./butler push windows-itch/ pedroac/sprat:windows \
+            --userversion ${{ steps.version.outputs.tag }}
+
+      - name: Download macOS artifact
+        continue-on-error: true
+        id: download_macos
+        uses: actions/download-artifact@v4
+        with:
+          name: sprat-gui-macOS
+          path: dist
+
+      - name: Push macOS to itch.io
+        if: steps.download_macos.outcome == 'success'
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          mkdir -p macos-itch
+          unzip dist/sprat-gui-macos.zip -d macos-itch/
+          cp deploy/macos/.itch.toml macos-itch/
+          ./butler push macos-itch/ pedroac/sprat:osx \
+            --userversion ${{ steps.version.outputs.tag }}
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-latest
@@ -348,5 +392,6 @@ jobs:
             dist/sprat-gui-macos.dmg
             dist/sprat-gui-macos.zip
             dist/sprat-gui-web.zip
+          fail_on_unmatched_files: false
           draft: false
           prerelease: false
