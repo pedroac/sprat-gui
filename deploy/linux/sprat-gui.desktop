@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Sprat GUI
+Comment=Sprite sheet packing and animation tool
+Exec=sprat-gui
+Icon=sprat-gui
+Categories=Graphics;

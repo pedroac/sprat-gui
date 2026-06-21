@@ -105,6 +105,22 @@ jobs:
           # but here we follow the existing pattern of creating the structure.
           tar -czf sprat-gui-linux.tar.gz -C dist .
 
+          # Create AppImage
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
+          cp build/sprat-gui AppDir/usr/bin/
+          cp deploy/linux/sprat-gui.desktop AppDir/usr/share/applications/
+          cp assets/icons/layout-svgrepo-com.svg AppDir/usr/share/icons/hicolor/scalable/apps/sprat-gui.svg
+          APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --plugin qt \
+            --output appimage
+          find . -maxdepth 1 -name '*.AppImage' ! -name 'linuxdeploy*' \
+            -exec mv {} sprat-gui-linux.AppImage \;
+
       - name: Package (Windows)
         if: runner.os == 'Windows' && github.ref == 'refs/heads/release'
         shell: pwsh
@@ -132,7 +148,7 @@ jobs:
           curl -fL -o cli.dmg "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-macos-x64.dmg"
           MOUNT_POINT=$(hdiutil mount cli.dmg | grep -o '/Volumes/.*' | head -n 1)
           if [ -z "$MOUNT_POINT" ]; then echo "Failed to mount DMG"; exit 1; fi
-          cp "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/MacOS/
+          cp -r "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/MacOS/
           hdiutil unmount "$MOUNT_POINT"
           # Package DMG
           macdeployqt dist/sprat-gui.app -dmg
@@ -147,6 +163,7 @@ jobs:
           name: sprat-gui-${{ runner.os }}
           path: |
             sprat-gui-linux.tar.gz
+            sprat-gui-linux.AppImage
             sprat-gui-windows.zip
             sprat-gui-macos.dmg
             sprat-gui-macos.zip
@@ -242,7 +259,7 @@ jobs:
   deploy-itchio:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-latest
-    needs: build-wasm
+    needs: [build, build-wasm]
 
     steps:
       - name: Checkout
@@ -252,6 +269,15 @@ jobs:
         id: version
         run: echo "tag=$(cat VERSION | xargs)" >> $GITHUB_OUTPUT
 
+      - name: Download butler
+        run: |
+          curl -fsSL -o butler.zip \
+            "https://github.com/itchio/butler/releases/latest/download/butler-linux-amd64.zip"
+          unzip butler.zip
+          chmod +x linux-amd64/butler
+          ln -s linux-amd64/butler butler
+          ./butler -V
+
       - name: Download WASM artifact
         continue-on-error: true
         id: download_wasm
@@ -260,39 +286,33 @@ jobs:
           name: sprat-gui-wasm
           path: dist
 
-      - name: Check if WASM artifact exists
-        id: check_wasm
-        run: |
-          if [ -f "dist/sprat-gui-web.zip" ]; then
-            echo "wasm_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "wasm_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Extract WASM package
-        if: steps.check_wasm.outputs.wasm_exists == 'true'
-        run: unzip dist/sprat-gui-web.zip -d .
-
-      - name: Download butler
-        if: steps.check_wasm.outputs.wasm_exists == 'true'
-        run: |
-          curl -fsSL -o butler.zip \
-            "https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default"
-          unzip butler.zip
-          chmod +x butler
-          ./butler -V
-
-      - name: Push to itch.io
-        if: steps.check_wasm.outputs.wasm_exists == 'true'
+      - name: Extract and push WASM to itch.io
+        if: steps.download_wasm.outcome == 'success'
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
         run: |
-          ./butler push sprat-gui-web/ pedroac/sprat-gui:web \
+          unzip dist/sprat-gui-web.zip -d .
+          ./butler push sprat-gui-web/ pedroac/sprat:web \
             --userversion ${{ steps.version.outputs.tag }}
 
-      - name: itch.io deployment skipped
-        if: steps.check_wasm.outputs.wasm_exists != 'true'
-        run: echo "⚠️ WASM build not available, itch.io deployment skipped"
+      - name: Download Linux artifact
+        continue-on-error: true
+        id: download_linux
+        uses: actions/download-artifact@v4
+        with:
+          name: sprat-gui-Linux
+          path: dist
+
+      - name: Push Linux AppImage to itch.io
+        if: steps.download_linux.outcome == 'success'
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          mkdir -p linux-itch
+          cp dist/sprat-gui-linux.AppImage linux-itch/
+          cp deploy/linux/.itch.toml linux-itch/
+          ./butler push linux-itch/ pedroac/sprat:linux \
+            --userversion ${{ steps.version.outputs.tag }}
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
@@ -323,6 +343,7 @@ jobs:
           name: Release ${{ steps.version.outputs.tag }}
           files: |
             dist/sprat-gui-linux.tar.gz
+            dist/sprat-gui-linux.AppImage
             dist/sprat-gui-windows.zip
             dist/sprat-gui-macos.dmg
             dist/sprat-gui-macos.zip

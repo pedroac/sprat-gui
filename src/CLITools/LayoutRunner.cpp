@@ -208,7 +208,9 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         // input event, causing onLayoutFinished() — and the "Loading images..."
         // overlay removal — to stall until cursor movement.
 #else
+#ifndef SPRAT_EMBEDDED_CLI
         m_running.store(false);
+#endif
         emit finished(result);
 #endif
     };
@@ -217,7 +219,9 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
     // QtConcurrent/QThreadPool may not run without pthreads/COOP+COEP.
     task();
 #else
+#ifndef SPRAT_EMBEDDED_CLI
     m_running.store(true);
+#endif
     QThreadPool::globalInstance()->start(task);
 #endif
 }
