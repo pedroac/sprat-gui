@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QProcess>
 #include <QThreadPool>
 #include <QtConcurrent>
 #include <QTime>
@@ -22,11 +23,7 @@ namespace {
 }
 
 LayoutRunner::LayoutRunner(QObject* parent) : QObject(parent)
-#ifndef SPRAT_EMBEDDED_CLI
-    , m_process(new QProcess(this))
-#endif
 {
-    // We don't connect signals anymore as we'll run synchronously in a thread
 }
 
 LayoutRunner::~LayoutRunner() {
@@ -43,9 +40,9 @@ void LayoutRunner::stop() {
 
 bool LayoutRunner::isRunning() const {
 #ifdef SPRAT_EMBEDDED_CLI
-    return false; // Embedded runner is synchronous in its thread
+    return false;
 #else
-    return m_process->state() != QProcess::NotRunning;
+    return m_running.load();
 #endif
 }
 
@@ -103,62 +100,68 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         result.error = QString::fromUtf8(embeddedResult.stdErr).trimmed();
         result.success = (result.exitCode == 0);
 #else
-        m_process->setProgram(config.layoutBinary);
-        m_process->setArguments(args);
-        m_process->start();
+        // QProcess is created here in the thread-pool thread so its children
+        // (socket notifiers, pipes) are also created in the same thread, avoiding
+        // the "Cannot create children for a parent that is in a different thread" warning.
+        QProcess process;
+        process.setProgram(config.layoutBinary);
+        process.setArguments(args);
+        process.start();
 
-        if (!m_process->waitForStarted()) {
+        if (!process.waitForStarted()) {
+            m_running.store(false);
             emit errorOccurred("Failed to start process: " + config.layoutBinary);
             return;
         }
 
         // For --stdin-list mode: write image paths to process stdin then close the channel.
         if (!stdinPayload.isEmpty()) {
-            m_process->write(stdinPayload);
-            m_process->closeWriteChannel();
+            process.write(stdinPayload);
+            process.closeWriteChannel();
         }
 
         QElapsedTimer timer;
         timer.start();
         const int timeoutMs = AppConstants::kLayoutProcessTimeoutMs;
 
-        while (m_process->state() == QProcess::Running || m_process->bytesAvailable() > 0) {
+        while (process.state() == QProcess::Running || process.bytesAvailable() > 0) {
             if (m_stopRequested.load()) {
-                m_process->kill();
-                m_process->waitForFinished(500);
+                process.kill();
+                process.waitForFinished(500);
                 LayoutResult killed;
                 killed.success = false;
                 killed.exitCode = -1;
                 killed.wasRetryingTrim = config.retryWithoutTrim;
                 killed.wasKilledIntentionally = true;
+                m_running.store(false);
                 emit finished(killed);
                 return;
             }
 
             if (timer.elapsed() > timeoutMs) {
-                m_process->kill();
-                m_process->waitForFinished(1000);
+                process.kill();
+                process.waitForFinished(1000);
                 break;
             }
 
-            m_process->waitForReadyRead(50);
-            m_stdoutBuffer.append(m_process->readAllStandardOutput());
-            m_stderrBuffer.append(m_process->readAllStandardError());
+            process.waitForReadyRead(50);
+            m_stdoutBuffer.append(process.readAllStandardOutput());
+            m_stderrBuffer.append(process.readAllStandardError());
 
-            if (m_process->state() == QProcess::NotRunning && m_process->bytesAvailable() == 0) break;
+            if (process.state() == QProcess::NotRunning && process.bytesAvailable() == 0) break;
         }
 
         LayoutResult result;
-        result.exitCode = m_process->exitCode();
+        result.exitCode = process.exitCode();
         result.wasRetryingTrim = config.retryWithoutTrim;
         result.output = QString::fromUtf8(m_stdoutBuffer).trimmed();
         result.error = QString::fromUtf8(m_stderrBuffer).trimmed();
 
-        if (m_process->exitStatus() == QProcess::CrashExit || result.exitCode != 0 || timer.elapsed() > timeoutMs) {
+        if (process.exitStatus() == QProcess::CrashExit || result.exitCode != 0 || timer.elapsed() > timeoutMs) {
             result.success = false;
             if (timer.elapsed() > timeoutMs) {
                 result.error = "Process timed out after 5 minutes.";
-            } else if (m_process->exitStatus() == QProcess::CrashExit) {
+            } else if (process.exitStatus() == QProcess::CrashExit) {
 #ifdef Q_OS_WIN
                 if (!result.error.isEmpty()) result.error += "\n\n";
                 result.error += "Process crashed. This might be due to missing dependencies like 'archive.dll'. Please check the 'cli' folder.";
@@ -205,6 +208,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         // input event, causing onLayoutFinished() — and the "Loading images..."
         // overlay removal — to stall until cursor movement.
 #else
+        m_running.store(false);
         emit finished(result);
 #endif
     };
@@ -213,6 +217,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
     // QtConcurrent/QThreadPool may not run without pthreads/COOP+COEP.
     task();
 #else
+    m_running.store(true);
     QThreadPool::globalInstance()->start(task);
 #endif
 }

@@ -242,7 +242,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # === Find Dependencies ===
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 # === Source Files ===
@@ -401,12 +401,24 @@ set(PROJECT_SOURCES
     src/Core/ViewUtils.cpp
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
+    assets/icons.qrc
 )
 
 if(SPRAT_EMBEDDED_CLI)
     list(APPEND PROJECT_SOURCES
         src/CLITools/EmbeddedCli.cpp
         src/CLITools/EmbeddedCli.h
+    )
+endif()
+
+if(NOT EMSCRIPTEN)
+    list(APPEND PROJECT_SOURCES
+        src/Update/UpdateChecker.h
+        src/Update/UpdateChecker.cpp
+        src/Update/UpdateInstaller.h
+        src/Update/UpdateInstaller.cpp
+        src/Update/UpdateDialog.h
+        src/Update/UpdateDialog.cpp
     )
 endif()
 
@@ -448,6 +460,7 @@ target_include_directories(sprat-gui PRIVATE
     src/Project/Repositories
     src/Settings
     src/Core
+    src/Update
 )
 
 # === Link Libraries ===
@@ -457,6 +470,7 @@ target_link_libraries(sprat-gui PRIVATE
     Qt6::Widgets
     Qt6::Concurrent
     Qt6::Network
+    Qt6::Svg
     LibArchive::LibArchive
 )
 

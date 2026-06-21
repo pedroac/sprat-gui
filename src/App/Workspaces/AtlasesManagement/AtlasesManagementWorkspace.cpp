@@ -82,11 +82,12 @@ void AtlasesManagementWorkspace::setupUi() {
     auto* btnRow = new QHBoxLayout();
     m_addBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), tr("Add"), leftPanel);
     m_addBtn->setToolTip(tr("Add atlas"));
+    m_addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_removeBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton), tr("Remove"), leftPanel);
     m_removeBtn->setToolTip(tr("Remove selected atlas"));
+    m_removeBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     btnRow->addWidget(m_addBtn);
     btnRow->addWidget(m_removeBtn);
-    btnRow->addStretch();
     leftLayout->addLayout(btnRow);
 
     splitter->addWidget(leftPanel);
@@ -125,8 +126,8 @@ void AtlasesManagementWorkspace::setupUi() {
     // Mode toggle
     auto* modeRow = new QHBoxLayout();
     modeRow->setSpacing(2);
-    auto* navBtn    = new QPushButton(tr("Navigation"), rightPanel);
-    auto* layoutBtn = new QPushButton(tr("Layout"), rightPanel);
+    auto* navBtn    = new QPushButton(QIcon(":/icons/timeline.svg"), tr("Navigation"), rightPanel);
+    auto* layoutBtn = new QPushButton(QIcon(":/icons/layout.svg"), tr("Layout"), rightPanel);
     navBtn->setCheckable(true);
     layoutBtn->setCheckable(true);
     navBtn->setChecked(true);

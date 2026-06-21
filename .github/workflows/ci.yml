@@ -137,6 +137,8 @@ jobs:
           # Package DMG
           macdeployqt dist/sprat-gui.app -dmg
           mv dist/sprat-gui.dmg sprat-gui-macos.dmg
+          # Package ZIP for in-app auto-update
+          cd dist && zip -r ../sprat-gui-macos.zip sprat-gui.app
 
       - name: Upload Artifacts
         if: github.ref == 'refs/heads/release'
@@ -147,6 +149,7 @@ jobs:
             sprat-gui-linux.tar.gz
             sprat-gui-windows.zip
             sprat-gui-macos.dmg
+            sprat-gui-macos.zip
 
   build-wasm:
     if: >
@@ -322,6 +325,7 @@ jobs:
             dist/sprat-gui-linux.tar.gz
             dist/sprat-gui-windows.zip
             dist/sprat-gui-macos.dmg
+            dist/sprat-gui-macos.zip
             dist/sprat-gui-web.zip
           draft: false
           prerelease: false

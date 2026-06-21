@@ -67,20 +67,20 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
     m_previewZoomSpin->setSingleStep(10.0);
     viewportRow->addWidget(m_previewZoomSpin);
 
-    m_showTrimRectBtn = new QPushButton(tr("Trim"), this);
+    m_showTrimRectBtn = new QPushButton(QIcon(":/icons/crop.svg"), tr("Trim"), this);
     m_showTrimRectBtn->setCheckable(true);
     m_showTrimRectBtn->setToolTip(tr("Show the trimmed-content boundary rectangle"));
     m_showTrimRectBtn->setAccessibleName(tr("Show trim rect"));
     viewportRow->addWidget(m_showTrimRectBtn);
 
-    m_onionSkinBtn = new QPushButton(tr("Onion"), this);
+    m_onionSkinBtn = new QPushButton(QIcon(":/icons/animation.svg"), tr("Onion"), this);
     m_onionSkinBtn->setCheckable(true);
     m_onionSkinBtn->setChecked(true);
     m_onionSkinBtn->setToolTip(tr("Toggle onion skin: show adjacent frames as ghost overlays"));
     m_onionSkinBtn->setAccessibleName(tr("Onion skin"));
     viewportRow->addWidget(m_onionSkinBtn);
 
-    m_showGridBtn = new QPushButton(tr("Grid"), this);
+    m_showGridBtn = new QPushButton(QIcon(":/icons/grid.svg"), tr("Grid"), this);
     m_showGridBtn->setCheckable(true);
     m_showGridBtn->setToolTip(tr("Show a configurable grid overlay on the frame editor canvas"));
     m_showGridBtn->setAccessibleName(tr("Show grid"));
@@ -161,8 +161,7 @@ SpriteEditorPanel::SpriteEditorPanel(QWidget* parent)
     m_coordUnitCombo->setToolTip(tr("Coordinate unit: pixels or percent of sprite dimensions"));
     spriteRow->addWidget(m_coordUnitCombo);
 
-    m_configPointsBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView), "", this);
+    m_configPointsBtn = new QPushButton(QIcon(":/icons/location.svg"), "", this);
     m_configPointsBtn->setToolTip(tr("Manage Markers: define named points on this sprite, such as hitboxes, spawn positions, or attachment points"));
     m_configPointsBtn->setAccessibleName(tr("Configure markers"));
     m_configPointsBtn->setEnabled(false);

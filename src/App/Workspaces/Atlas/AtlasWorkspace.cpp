@@ -19,6 +19,7 @@
 #include "../../../Core/SpriteTreeUtils.h"
 #include "../../../Profiles/SpratProfilesConfig.h"
 
+#include <QIcon>
 #include <QVBoxLayout>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -168,7 +169,7 @@ void AtlasWorkspace::setupUi() {
     QWidget* navigatorContent = new QWidget(this);
     navigatorContent->setStyleSheet("font-weight: normal;");
     QVBoxLayout* navigatorLayout = new QVBoxLayout(navigatorContent);
-    navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
+    navigatorLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, 8);
 
     m_navigatorPanel = new NavigatorPanel(navigatorContent);
     navigatorLayout->addWidget(m_navigatorPanel);
@@ -251,10 +252,20 @@ void AtlasWorkspace::setupUi() {
     m_atlasViewStack = new QStackedWidget(this);
     m_atlasViewStack->addWidget(canvasContent);    // page 0
     m_atlasViewStack->addWidget(navigatorContent); // page 1
-    auto* emptyAtlasLabel = new QLabel(tr("Drag and drop folder, files or URLs"), m_atlasViewStack);
+    auto* emptyAtlasWidget = new QWidget(m_atlasViewStack);
+    auto* emptyAtlasLayout = new QVBoxLayout(emptyAtlasWidget);
+    emptyAtlasLayout->setAlignment(Qt::AlignCenter);
+    auto* emptyAtlasIcon = new QLabel(emptyAtlasWidget);
+    emptyAtlasIcon->setPixmap(QIcon(":/icons/drag.svg").pixmap(48, 48));
+    emptyAtlasIcon->setAlignment(Qt::AlignCenter);
+    auto* emptyAtlasLabel = new QLabel(tr("Drag and drop folder, files or URLs"), emptyAtlasWidget);
     emptyAtlasLabel->setAlignment(Qt::AlignCenter);
     emptyAtlasLabel->setStyleSheet("font-size: 14px; color: #888;");
-    m_atlasViewStack->addWidget(emptyAtlasLabel);  // page 2
+    emptyAtlasLayout->addStretch();
+    emptyAtlasLayout->addWidget(emptyAtlasIcon);
+    emptyAtlasLayout->addWidget(emptyAtlasLabel);
+    emptyAtlasLayout->addStretch();
+    m_atlasViewStack->addWidget(emptyAtlasWidget);  // page 2
     m_atlasViewStack->setCurrentIndex(1);
 
     // -- Sprite editor panel -------------------------------------------------
@@ -834,15 +845,15 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     QAction* deleteSelectedAction = nullptr;
 
     if (clickedIsLeaf) {
-        deleteFrameAction = menu.addAction(tr("Exclude"));
+        deleteFrameAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude"));
         hadItems = true;
     }
     if (clickedIsGroup && !clickedIsSourceNode) {
-        deleteGroupAction = menu.addAction(tr("Exclude group"));
+        deleteGroupAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude group"));
         hadItems = true;
     }
     if (hasChecked) {
-        deleteSelectedAction = menu.addAction(tr("Exclude selected"));
+        deleteSelectedAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude selected"));
         hadItems = true;
     }
 
@@ -851,7 +862,7 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     if (clickedIsGroup) {
         addSep();
         addFramesAction = menu.addAction(
-            tr("Add frames into '%1'...").arg(clickedItem->text(0)));
+            QIcon(":/icons/add-ellipse.svg"), tr("Add frames into '%1'...").arg(clickedItem->text(0)));
         hadItems = true;
     }
 
@@ -863,15 +874,15 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     if (clickedIsGroup || hasChecked) {
         addSep();
         if (clickedIsGroup && !clickedIsSourceNode) {
-            createTimelineFromGroupAction = menu.addAction(tr("Create timeline from group"));
+            createTimelineFromGroupAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Create timeline from group"));
             hadItems = true;
         }
         if (hasChecked) {
-            createTimelineFromSelectedAction = menu.addAction(tr("Create timeline from selected frames"));
+            createTimelineFromSelectedAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Create timeline from selected frames"));
             hadItems = true;
         }
         if (hasChecked && hasTimeline) {
-            addToTimelineAction = menu.addAction(tr("Add selected to current timeline"));
+            addToTimelineAction = menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add selected to current timeline"));
             hadItems = true;
         }
     }
@@ -880,7 +891,7 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     QAction* autoCreateTimelinesAction = nullptr;
     if (clickedIsSourceNode) {
         addSep();
-        autoCreateTimelinesAction = menu.addAction(tr("Auto-create timelines"));
+        autoCreateTimelinesAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create timelines"));
         hadItems = true;
     }
 

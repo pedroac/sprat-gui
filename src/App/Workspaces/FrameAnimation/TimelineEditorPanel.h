@@ -2,6 +2,8 @@
 #include <QWidget>
 #include <QHash>
 #include <QIcon>
+#include <QPixmap>
+#include <QSize>
 #include <QStringList>
 
 class QLineEdit;
@@ -136,7 +138,8 @@ private:
     // Pending paths for creating a new timeline when no timeline is selected
     QStringList m_pendingCreateTimelinePaths;
 
-    // Icon caches
-    QHash<QString, QIcon> m_timelineFrameIconCache;
-    QHash<QString, QIcon> m_timelineListIconCache;
+    // Icon / pixmap caches
+    QHash<QString, QSize>   m_imageSizeCache;      // natural image size (header-only read)
+    QHash<QString, QPixmap> m_framePixmapCache;    // source pixmaps for frame thumbnails
+    QHash<QString, QIcon>   m_timelineListIconCache;
 };

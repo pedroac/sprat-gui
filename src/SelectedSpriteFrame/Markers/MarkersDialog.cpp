@@ -19,10 +19,10 @@
 namespace {
 void populateKindCombo(QComboBox* combo) {
     combo->clear();
-    combo->addItem(QCoreApplication::translate("MarkersDialog", "point"), static_cast<int>(MarkerKind::Point));
-    combo->addItem(QCoreApplication::translate("MarkersDialog", "circle"), static_cast<int>(MarkerKind::Circle));
-    combo->addItem(QCoreApplication::translate("MarkersDialog", "rectangle"), static_cast<int>(MarkerKind::Rectangle));
-    combo->addItem(QCoreApplication::translate("MarkersDialog", "polygon"), static_cast<int>(MarkerKind::Polygon));
+    combo->addItem(markerKindIcon(MarkerKind::Point),     QCoreApplication::translate("MarkersDialog", "point"),     static_cast<int>(MarkerKind::Point));
+    combo->addItem(markerKindIcon(MarkerKind::Circle),    QCoreApplication::translate("MarkersDialog", "circle"),    static_cast<int>(MarkerKind::Circle));
+    combo->addItem(markerKindIcon(MarkerKind::Rectangle), QCoreApplication::translate("MarkersDialog", "rectangle"), static_cast<int>(MarkerKind::Rectangle));
+    combo->addItem(markerKindIcon(MarkerKind::Polygon),   QCoreApplication::translate("MarkersDialog", "polygon"),   static_cast<int>(MarkerKind::Polygon));
 }
 
 MarkerKind markerKindFromCombo(const QComboBox* combo) {
@@ -177,7 +177,7 @@ void MarkersDialog::refreshList() {
     m_listWidget->clear();
     if (m_sprite) {
         for (const auto& p : m_sprite->points) {
-            m_listWidget->addItem(QString("%1 (%2)").arg(p.name, markerKindToString(p.kind)));
+            m_listWidget->addItem(new QListWidgetItem(markerKindIcon(p.kind), QString("%1 (%2)").arg(p.name, markerKindToString(p.kind))));
         }
     }
     if (currentRow >= 0 && currentRow < m_listWidget->count()) {

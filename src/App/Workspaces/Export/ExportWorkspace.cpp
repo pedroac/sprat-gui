@@ -27,6 +27,7 @@
 #include <QSet>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QIcon>
 
 namespace {
 QString formatFileSize(qint64 bytes) {
@@ -39,10 +40,33 @@ QString formatFileSize(qint64 bytes) {
 struct TransformInfo {
     QString id;
     QString name;
+    QString icon;  // relative path within the transforms directory
 };
 
-const QVector<TransformInfo>& loadAvailableTransforms() {
-    static const QVector<TransformInfo> cached = []() -> QVector<TransformInfo> {
+struct TransformsCache {
+    QVector<TransformInfo> transforms;
+    QString dir;
+};
+
+// Extract the last occurrence of  key: "value"  from a Jsonnet source file.
+// "Last" ensures we pick from the final result object, not from local function bodies.
+QString extractJsonnetField(const QString& text, const QString& key) {
+    const QString needle = key + QLatin1String(": \"");
+    const int pos = text.lastIndexOf(needle);
+    if (pos < 0) return {};
+    const int start = pos + needle.length();
+    const int end   = text.indexOf(QLatin1Char('"'), start);
+    return end >= 0 ? text.mid(start, end - start) : QString();
+}
+
+QIcon makeTransformIcon(const QString& iconRelPath, const QString& transformsDir) {
+    if (iconRelPath.isEmpty() || transformsDir.isEmpty()) return {};
+    const QString path = QDir(transformsDir).filePath(iconRelPath);
+    return QFile::exists(path) ? QIcon(path) : QIcon();
+}
+
+const TransformsCache& loadAvailableTransforms() {
+    static const TransformsCache cached = []() -> TransformsCache {
         const CliPaths cliPaths = CliToolsConfig::loadCliPaths();
 
         QStringList searchDirs;
@@ -60,7 +84,12 @@ const QVector<TransformInfo>& loadAvailableTransforms() {
         for (const QString& dirPath : searchDirs) {
             QDir dir(dirPath);
             if (!dir.exists()) continue;
-            const QStringList files = dir.entryList({"*.transform"}, QDir::Files, QDir::Name);
+
+            // Prefer compiled .transform files; fall back to .jsonnet sources.
+            QStringList files = dir.entryList({"*.transform"}, QDir::Files, QDir::Name);
+            const bool jsonnetMode = files.isEmpty();
+            if (jsonnetMode)
+                files = dir.entryList({"*.jsonnet"}, QDir::Files, QDir::Name);
             if (files.isEmpty()) continue;
 
             QVector<TransformInfo> result;
@@ -69,25 +98,40 @@ const QVector<TransformInfo>& loadAvailableTransforms() {
                 if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
                 TransformInfo info;
                 info.id = QFileInfo(fileName).completeBaseName().trimmed().toLower();
-                bool inMeta = false;
                 QTextStream in(&file);
-                while (!in.atEnd()) {
-                    const QString line = in.readLine().trimmed();
-                    if (line.compare("[meta]", Qt::CaseInsensitive) == 0) { inMeta = true; continue; }
-                    if (line.startsWith('[')) { inMeta = false; continue; }
-                    if (!inMeta) continue;
-                    const int eq = line.indexOf('=');
-                    if (eq <= 0) continue;
-                    const QString key = line.left(eq).trimmed().toLower();
-                    const QString value = line.mid(eq + 1).trimmed();
-                    if (key == "name") info.name = value;
+                if (jsonnetMode) {
+                    const QString text = in.readAll();
+                    info.name = extractJsonnetField(text, QStringLiteral("name"));
+                    info.icon = extractJsonnetField(text, QStringLiteral("icon"));
+                } else {
+                    bool inMeta = false;
+                    while (!in.atEnd()) {
+                        const QString line = in.readLine().trimmed();
+                        if (line.compare("[meta]", Qt::CaseInsensitive) == 0) { inMeta = true; continue; }
+                        if (line.startsWith('[')) { inMeta = false; continue; }
+                        if (!inMeta) continue;
+                        const int eq = line.indexOf('=');
+                        if (eq <= 0) continue;
+                        const QString key = line.left(eq).trimmed().toLower();
+                        const QString value = line.mid(eq + 1).trimmed();
+                        if (key == "name")      info.name = value;
+                        else if (key == "icon") info.icon = value;
+                    }
                 }
-                if (info.name.isEmpty()) {
-                    info.name = info.id;
+                // Fallback: if the compiled .transform has no icon, read it from
+                // the sibling .jsonnet source (older compiled files omit this field).
+                if (!jsonnetMode && info.icon.isEmpty()) {
+                    const QString jsonnetPath = dir.filePath(
+                        QFileInfo(fileName).completeBaseName() + QStringLiteral(".jsonnet"));
+                    QFile jf(jsonnetPath);
+                    if (jf.open(QIODevice::ReadOnly | QIODevice::Text))
+                        info.icon = extractJsonnetField(
+                            QTextStream(&jf).readAll(), QStringLiteral("icon"));
                 }
+                if (info.name.isEmpty()) info.name = info.id;
                 if (!info.id.isEmpty()) result.append(info);
             }
-            if (!result.isEmpty()) return result;
+            if (!result.isEmpty()) return {result, dirPath};
         }
         return {};
     }();
@@ -467,10 +511,10 @@ void ExportWorkspace::populate(const QVector<SpratProfile>& profiles,
     // Populate transform combo on first visit (deferred from constructor to avoid
     // blocking the main thread at startup with a queryTransformsDir subprocess).
     if (m_transformCombo->count() == 1) {
-        const QVector<TransformInfo> transforms = loadAvailableTransforms();
-        if (!transforms.isEmpty()) {
-            for (const TransformInfo& t : transforms)
-                m_transformCombo->addItem(t.name, t.id);
+        const TransformsCache& cache = loadAvailableTransforms();
+        if (!cache.transforms.isEmpty()) {
+            for (const TransformInfo& t : cache.transforms)
+                m_transformCombo->addItem(makeTransformIcon(t.icon, cache.dir), t.name, t.id);
         } else {
             m_transformCombo->addItem(QStringLiteral("json"), QStringLiteral("json"));
             m_transformCombo->addItem(QStringLiteral("csv"),  QStringLiteral("csv"));
@@ -534,7 +578,7 @@ void ExportWorkspace::setAtlasExportConfigs(const QList<QPair<int,AtlasExportCon
     m_atlasOverridesTable->setRowCount(0);
 
     // Build transform items list once
-    const QVector<TransformInfo> transforms = loadAvailableTransforms();
+    const TransformsCache& cache = loadAvailableTransforms();
 
     for (int row = 0; row < configs.size(); ++row) {
         const int sessionIdx = configs[row].first;
@@ -563,9 +607,9 @@ void ExportWorkspace::setAtlasExportConfigs(const QList<QPair<int,AtlasExportCon
         auto* transformOverrideCombo = new QComboBox(m_atlasOverridesTable);
         transformOverrideCombo->addItem(tr("(default)"), QString());
         transformOverrideCombo->addItem(tr("Raw (sprat-cli format)"), QStringLiteral("raw"));
-        if (!transforms.isEmpty()) {
-            for (const TransformInfo& t : transforms)
-                transformOverrideCombo->addItem(t.name, t.id);
+        if (!cache.transforms.isEmpty()) {
+            for (const TransformInfo& t : cache.transforms)
+                transformOverrideCombo->addItem(makeTransformIcon(t.icon, cache.dir), t.name, t.id);
         } else {
             transformOverrideCombo->addItem(QStringLiteral("json"), QStringLiteral("json"));
             transformOverrideCombo->addItem(QStringLiteral("csv"),  QStringLiteral("csv"));

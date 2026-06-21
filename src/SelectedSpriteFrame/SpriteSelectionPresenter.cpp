@@ -1,4 +1,5 @@
 #include "SpriteSelectionPresenter.h"
+#include "MarkerUtils.h"
 
 #include <QCoreApplication>
 #include <QDoubleSpinBox>
@@ -52,10 +53,10 @@ void SpriteSelectionPresenter::applySpriteSelection(
 void SpriteSelectionPresenter::refreshHandleCombo(QComboBox* handleCombo, SpritePtr selectedSprite, const QString& selectedPointName) {
     handleCombo->blockSignals(true);
     handleCombo->clear();
-    handleCombo->addItem(QCoreApplication::translate("SpriteSelectionPresenter", "pivot"));
+    handleCombo->addItem(markerKindIcon(MarkerKind::Point), QCoreApplication::translate("SpriteSelectionPresenter", "pivot"));
     if (selectedSprite) {
         for (const auto& p : selectedSprite->points) {
-            handleCombo->addItem(p.name);
+            handleCombo->addItem(markerKindIcon(p.kind), p.name);
         }
     }
     if (selectedPointName.isEmpty()) {

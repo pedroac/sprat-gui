@@ -52,6 +52,8 @@
 #include <algorithm>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QTextCursor>
+#include <QTextCharFormat>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QActionGroup>
@@ -98,16 +100,24 @@ void MainWindow::setupUi() {
     welcomeButtons->setSpacing(20);
 
     m_recentProjectBtn = new QPushButton(tr("Open Recent Project"), m_welcomePage);
+    m_recentProjectBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon));
     m_recentProjectBtn->setFixedSize(180, 50);
     m_recentProjectBtn->setStyleSheet("QPushButton { font-size: 14px; }");
     connect(m_recentProjectBtn, &QPushButton::clicked, this, &MainWindow::onOpenRecentProjectRequested);
     welcomeButtons->addWidget(m_recentProjectBtn);
 
     welcomeLayout->addLayout(welcomeButtons);
+    welcomeLayout->addSpacing(32);
+
+    auto* welcomeDragIcon = new QLabel(m_welcomePage);
+    welcomeDragIcon->setPixmap(QIcon(":/icons/drag.svg").pixmap(40, 40));
+    welcomeDragIcon->setAlignment(Qt::AlignCenter);
+    welcomeDragIcon->setStyleSheet("");
+    welcomeLayout->addWidget(welcomeDragIcon);
 
     m_welcomeLabel = new QLabel(tr("Or: drag and drop folders, files, or URLs"), m_welcomePage);
     m_welcomeLabel->setAlignment(Qt::AlignCenter);
-    m_welcomeLabel->setStyleSheet("font-size: 13px; color: #888; margin-top: 12px;");
+    m_welcomeLabel->setStyleSheet("font-size: 13px; color: #888; margin-top: 4px;");
     welcomeLayout->addWidget(m_welcomeLabel);
 
     welcomeLayout->addStretch();
@@ -162,17 +172,6 @@ void MainWindow::setupUi() {
                     m_session->atlases[sessionIdx].exportConfig = cfg;
             });
 
-    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::atlasExportProfilesChanged,
-            this, [this](int atlasIndex, QStringList profiles) {
-                if (!m_session || atlasIndex < 0 || atlasIndex >= m_session->atlases.size()) return;
-                m_session->atlases[atlasIndex].exportConfig.profiles = profiles;
-            });
-
-    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::profilesGlobalChanged,
-            this, [this](bool global) {
-                m_lastSaveConfig.profilesGlobal = global;
-            });
-
     connect(m_exportWorkspace, &ExportWorkspace::savePresetRequested,
             this, [this](ExportPreset preset) {
                 auto it = std::find_if(m_exportPresets.begin(), m_exportPresets.end(),
@@ -195,6 +194,15 @@ void MainWindow::setupUi() {
     m_atlasesManagementWorkspace = new AtlasesManagementWorkspace(this);
     m_atlasesManagementWorkspace->setSession(m_session);
     m_mainStack->addWidget(m_atlasesManagementWorkspace);  // page 2
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::atlasExportProfilesChanged,
+            this, [this](int atlasIndex, QStringList profiles) {
+                if (!m_session || atlasIndex < 0 || atlasIndex >= m_session->atlases.size()) return;
+                m_session->atlases[atlasIndex].exportConfig.profiles = profiles;
+            });
+    connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::profilesGlobalChanged,
+            this, [this](bool global) {
+                m_lastSaveConfig.profilesGlobal = global;
+            });
     connect(m_atlasesManagementWorkspace, &AtlasesManagementWorkspace::addAtlasRequested,
             this, [this]() {
                 if (!m_session) return;
@@ -562,24 +570,108 @@ void MainWindow::setupUi() {
     connect(m_frameAnimWorkspace, &FrameAnimationWorkspace::loadingStateChanged,
             this, &MainWindow::setLoading);
 
-    // 6. CLI Log panel
-    QWidget* cliLogContent = new QWidget(this);
-    cliLogContent->setStyleSheet("font-weight: normal;");
-    QVBoxLayout* cliLogLayout = new QVBoxLayout(cliLogContent);
-    cliLogLayout->setContentsMargins(4, 12, 4, 0);
-    m_cliLog = new QPlainTextEdit(this);
-    m_cliLog->setReadOnly(true);
-    m_cliLog->setMaximumBlockCount(AppConstants::kCliLogMaxBlocks);
-    m_cliLog->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    cliLogLayout->addWidget(m_cliLog);
-    QHBoxLayout* cliLogBtnLayout = new QHBoxLayout();
-    cliLogBtnLayout->setContentsMargins(4, 2, 4, 4);
-    cliLogBtnLayout->addStretch();
-    QPushButton* clearLogBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_LineEditClearButton), tr("Clear"), cliLogContent);
-    clearLogBtn->setToolTip(tr("Clear log output"));
-    connect(clearLogBtn, &QPushButton::clicked, m_cliLog, &QPlainTextEdit::clear);
-    cliLogBtnLayout->addWidget(clearLogBtn);
-    cliLogLayout->addLayout(cliLogBtnLayout);
+    // 6. Unified log panel
+    QWidget* logPanel = new QWidget(this);
+    logPanel->setStyleSheet("font-weight: normal;");
+    auto* logPanelLayout = new QVBoxLayout(logPanel);
+    logPanelLayout->setContentsMargins(4, 4, 4, 0);
+    logPanelLayout->setSpacing(4);
+
+    // Filter toolbar
+    auto* logToolbar = new QHBoxLayout();
+    logToolbar->setSpacing(3);
+
+    auto makeFilterBtn = [&](const QIcon& icon, const QString& tooltip) -> QPushButton* {
+        auto* btn = new QPushButton(icon, QString(), logPanel);
+        btn->setCheckable(true);
+        btn->setChecked(true);
+        btn->setToolTip(tooltip);
+        btn->setFlat(true);
+        btn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+        logToolbar->addWidget(btn);
+        return btn;
+    };
+    m_logFilterCli   = makeFilterBtn(QIcon(":/icons/cli.svg"),     tr("Show CLI tool output"));
+    m_logFilterInfo  = makeFilterBtn(QIcon(":/icons/info.svg"),    tr("Show info messages"));
+    m_logFilterWarn  = makeFilterBtn(QIcon(":/icons/warning.svg"), tr("Show warnings"));
+    m_logFilterError = makeFilterBtn(QIcon(":/icons/error.svg"),   tr("Show errors"));
+    m_logFilterQt    = makeFilterBtn(QIcon(":/icons/qt.svg"),      tr("Show Qt messages"));
+
+    auto* diagSep = new QFrame(logPanel);
+    diagSep->setFrameShape(QFrame::VLine);
+    diagSep->setFrameShadow(QFrame::Sunken);
+    logToolbar->addWidget(diagSep);
+    m_logFilterDiag = new QPushButton(QIcon(":/icons/diagnosis.svg"), QString(), logPanel);
+    m_logFilterDiag->setCheckable(true);
+    m_logFilterDiag->setChecked(true);
+    m_logFilterDiag->setToolTip(tr("Show CLI diagnostics"));
+    m_logFilterDiag->setFlat(true);
+    m_logFilterDiag->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    logToolbar->addWidget(m_logFilterDiag);
+
+    logToolbar->addSpacing(6);
+    m_logFilterEdit = new QLineEdit(logPanel);
+    m_logFilterEdit->setPlaceholderText(tr("Filter..."));
+    m_logFilterEdit->setClearButtonEnabled(true);
+    logToolbar->addWidget(m_logFilterEdit, 1);
+
+    auto* clearLogBtn = new QPushButton(
+        QApplication::style()->standardIcon(QStyle::SP_LineEditClearButton),
+        tr("Clear"), logPanel);
+    clearLogBtn->setToolTip(tr("Clear all log entries"));
+    logToolbar->addWidget(clearLogBtn);
+    logPanelLayout->addLayout(logToolbar);
+
+    m_logWidget = new QPlainTextEdit(logPanel);
+    m_logWidget->setReadOnly(true);
+    m_logWidget->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_logWidget->setPlaceholderText(tr("No log entries."));
+    logPanelLayout->addWidget(m_logWidget, 1);
+
+    auto applyLogFilter = [this]() {
+        m_logWidget->clear();
+        for (const auto& e : m_logEntries) {
+            QPushButton* btn = nullptr;
+            switch (e.level) {
+            case LogLevel::Cli:       btn = m_logFilterCli;   break;
+            case LogLevel::Info:      btn = m_logFilterInfo;  break;
+            case LogLevel::Warning:   btn = m_logFilterWarn;  break;
+            case LogLevel::Error:     btn = m_logFilterError; break;
+            case LogLevel::Qt:        btn = m_logFilterQt;    break;
+            case LogLevel::Diagnosis: btn = m_logFilterDiag;  break;
+            }
+            if (btn && !btn->isChecked()) continue;
+            const QString& filter = m_logFilterEdit->text();
+            if (!filter.isEmpty() && !e.text.contains(filter, Qt::CaseInsensitive)) continue;
+
+            QTextCursor cursor(m_logWidget->document());
+            cursor.movePosition(QTextCursor::End);
+            if (!m_logWidget->document()->isEmpty()) cursor.insertText(QStringLiteral("\n"));
+            QTextCharFormat fmt;
+            switch (e.level) {
+            case LogLevel::Info:      fmt.setForeground(QColor(100, 160, 240)); break;
+            case LogLevel::Warning:   fmt.setForeground(QColor(220, 140,   0)); break;
+            case LogLevel::Error:     fmt.setForeground(QColor(200,  60,  60)); break;
+            case LogLevel::Qt:        fmt.setForeground(QColor(160, 110, 220)); break;
+            case LogLevel::Diagnosis: fmt.setForeground(QColor( 80, 180, 160)); break;
+            default: break;
+            }
+            cursor.insertText(e.text, fmt);
+        }
+        m_logWidget->verticalScrollBar()->setValue(m_logWidget->verticalScrollBar()->maximum());
+    };
+
+    connect(m_logFilterCli,   &QPushButton::toggled, this, applyLogFilter);
+    connect(m_logFilterInfo,  &QPushButton::toggled, this, applyLogFilter);
+    connect(m_logFilterWarn,  &QPushButton::toggled, this, applyLogFilter);
+    connect(m_logFilterError, &QPushButton::toggled, this, applyLogFilter);
+    connect(m_logFilterQt,    &QPushButton::toggled, this, applyLogFilter);
+    connect(m_logFilterDiag,  &QPushButton::toggled, this, applyLogFilter);
+    connect(m_logFilterEdit,  &QLineEdit::textChanged, this, applyLogFilter);
+    connect(clearLogBtn, &QPushButton::clicked, this, [this]() {
+        m_logEntries.clear();
+        m_logWidget->clear();
+    });
     // --- Assemble group docks ---
     // Each group is a single QDockWidget with a QSplitter holding its panels.
     // Groups occupy separate rows so they never share a dock row.
@@ -616,26 +708,12 @@ void MainWindow::setupUi() {
         m_animationDock->setWidget(animSplitter);
     }
 
-    // Debug group: CLI diagnostics + log
-    m_debugDock = new QDockWidget(tr("Debug"), this);
+    // Log group: unified log + Diagnostics
+    m_debugDock = new QDockWidget(tr("Log"), this);
     m_debugDock->setObjectName("debugDock");
     m_debugDock->setFont(boldFont);
 
-    m_cliInfoText = new QPlainTextEdit(this);
-    m_cliInfoText->setReadOnly(true);
-    m_cliInfoText->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    m_cliInfoText->setStyleSheet("font-weight: normal;");
-    m_cliInfoText->setPlaceholderText(tr("CLI diagnostics not yet available."));
-
-    m_debugTabs = new QTabWidget(this);
-    m_debugTabs->addTab(cliLogContent, tr("Log"));
-    m_debugTabs->addTab(m_cliInfoText, tr("Diagnostics"));
-    m_debugDock->setWidget(m_debugTabs);
-    connect(m_debugDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-        if (visible && m_cliLog && m_cliLog->document()->isEmpty()) {
-            m_debugTabs->setCurrentIndex(1); // Diagnostics
-        }
-    });
+    m_debugDock->setWidget(logPanel);
 
     // Atlas dock fills the top area; animation dock sits to its right but starts hidden.
     // Debug dock lives below in its own row.
@@ -661,21 +739,21 @@ void MainWindow::setupUi() {
 
     m_viewMenu->addSeparator();
 
-    m_atlasesManagementWorkspaceAction = m_viewMenu->addAction(tr("Atlases"));
+    m_atlasesManagementWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/layout.svg"), tr("Atlases"));
     m_atlasesManagementWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_M));
     m_atlasesManagementWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_atlasesManagementWorkspaceAction);
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
-    m_atlasWorkspaceAction = m_viewMenu->addAction(tr("Sprites"));
+    m_atlasWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/scan.svg"), tr("Sprites"));
     m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
     m_atlasWorkspaceAction->setCheckable(true);
     m_atlasWorkspaceAction->setChecked(true);
     workspaceGroup->addAction(m_atlasWorkspaceAction);
     connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
-    m_frameAnimWorkspaceAction = m_viewMenu->addAction(tr("Frame Animation"));
+    m_frameAnimWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/film.svg"), tr("Frame Animation"));
     m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
     m_frameAnimWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_frameAnimWorkspaceAction);
@@ -692,16 +770,16 @@ void MainWindow::setupUi() {
 
     // Help menu (added last so it sits on the right)
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
-    QAction* quickStartAction = helpMenu->addAction(tr("Quick Start..."));
+    QAction* quickStartAction = helpMenu->addAction(QIcon(":/icons/help.svg"), tr("Quick Start..."));
     quickStartAction->setToolTip(tr("Learn the basic workflow"));
     connect(quickStartAction, &QAction::triggered, this, &MainWindow::onQuickStart);
 
-    QAction* hotkeysAction = helpMenu->addAction(tr("Hotkeys..."));
+    QAction* hotkeysAction = helpMenu->addAction(QIcon(":/icons/keyboard.svg"), tr("Hotkeys..."));
     hotkeysAction->setToolTip(tr("View keyboard shortcuts"));
     connect(hotkeysAction, &QAction::triggered, this, &MainWindow::onShowHotkeys);
 
     helpMenu->addSeparator();
-    QAction* aboutAction = helpMenu->addAction(tr("About..."));
+    QAction* aboutAction = helpMenu->addAction(QIcon(":/icons/info.svg"), tr("About..."));
     aboutAction->setToolTip(tr("About Sprat"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::onAboutClicked);
 
@@ -719,6 +797,10 @@ void MainWindow::setupUi() {
     applySettings();
 
     setupZoomShortcuts();
+
+#ifndef Q_OS_WASM
+    QTimer::singleShot(3000, this, &MainWindow::checkForUpdates);
+#endif
 }
 
 
@@ -739,18 +821,18 @@ void MainWindow::setupToolbar() {
     connect(m_loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
 
     m_loadAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DirOpenIcon), tr("Add Source Folder..."));
+        QIcon(":/icons/directory.svg"), tr("Add Source Folder..."));
     m_loadAction->setToolTip(tr("Add a source folder of sprite images to the current project"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
 
     m_addSourceFileAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_FileIcon), tr("Add Source File..."));
+        QIcon(":/icons/image.svg"), tr("Add Source File..."));
     m_addSourceFileAction->setToolTip(
         tr("Add a source image or archive file such as PNG, GIF, ZIP, or TAR"));
     connect(m_addSourceFileAction, &QAction::triggered, this, &MainWindow::onAddSourceFile);
 
     m_addSourceUrlAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_CommandLink), tr("Add Source URL..."));
+        QIcon(":/icons/internet.svg"), tr("Add Source URL..."));
     m_addSourceUrlAction->setToolTip(tr("Download and add an image or archive from a URL"));
     connect(m_addSourceUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
 
@@ -1338,27 +1420,29 @@ void MainWindow::refreshSpriteTree() {
             sourceNode->setData(0, Qt::UserRole + 1, si); // source index for context menu
 
             // Icon and tooltip reflecting the source type
-            QStyle::StandardPixmap pixmap;
+            QIcon sourceIcon;
             QString typeLabel;
             switch (src.type) {
             case SourceType::Folder:
-                pixmap = QStyle::SP_DirOpenIcon;
+                sourceIcon = QIcon(":/icons/directory.svg");
                 typeLabel = tr("Folder");
                 break;
             case SourceType::SingleImage:
-                pixmap = QStyle::SP_FileIcon;
+                sourceIcon = src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
+                    ? QIcon(":/icons/file-gif.svg")
+                    : QIcon(":/icons/image.svg");
                 typeLabel = tr("Image");
                 break;
             case SourceType::Archive:
-                pixmap = QStyle::SP_DriveFDIcon;
+                sourceIcon = QIcon(":/icons/package-compressed.svg");
                 typeLabel = tr("Archive");
                 break;
             case SourceType::Url:
-                pixmap = QStyle::SP_CommandLink;
+                sourceIcon = QIcon(":/icons/internet.svg");
                 typeLabel = tr("URL");
                 break;
             }
-            sourceNode->setIcon(0, QApplication::style()->standardIcon(pixmap));
+            sourceNode->setIcon(0, sourceIcon);
             sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
             SpriteTreeUtils::buildSubTree(spriteTree, sourceNode, toEntries(perSource[si]),

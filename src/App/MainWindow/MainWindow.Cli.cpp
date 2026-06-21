@@ -46,7 +46,7 @@ void MainWindow::checkCliTools() {
 }
 
 void MainWindow::updateCliDiagnostics() {
-    if (!m_cliInfoText || !m_cliSetup) return;
+    if (!m_cliSetup) return;
     // Skip if a previous update is still in progress — the result would be the same.
     if (m_cliDiagnosticsWatcher.isRunning()) return;
 
@@ -57,12 +57,11 @@ void MainWindow::updateCliDiagnostics() {
 #endif
 
     // buildDiagnosticsText spawns subprocesses (waitForFinished 2 s each).
-    // Run it off the main thread; update the text widget when done.
+    // Run it off the main thread; append as a diagnosis log entry when done.
     CliSetupController* cliSetup = m_cliSetup; // raw ptr safe: cliSetup outlives the watcher
     disconnect(&m_cliDiagnosticsWatcher, &QFutureWatcher<QString>::finished, this, nullptr);
     connect(&m_cliDiagnosticsWatcher, &QFutureWatcher<QString>::finished, this, [this]() {
-        if (m_cliInfoText)
-            m_cliInfoText->setPlainText(m_cliDiagnosticsWatcher.result());
+        appendLog(LogLevel::Diagnosis, m_cliDiagnosticsWatcher.result());
     });
     m_cliDiagnosticsWatcher.setFuture(
         QtConcurrent::run([cliSetup, spritesFolder]() {
@@ -300,6 +299,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         src.originalPath = folderPath;
         src.cachedFolderPath = subfolderPath;
         m_session->sources.append(src);
+        m_projectController->syncFramePathsToNeutralAtlas(DropAction::Merge);
 
         m_statusLabel->setText(QString(tr("Merging %1 image frame(s) from %2"))
                                .arg(newImages.size()).arg(folderPath));
@@ -369,6 +369,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
             src.cachedFolderPath = subfolderPath;
             m_session->sources.append(src);
         }
+        m_projectController->syncFramePathsToNeutralAtlas(DropAction::Replace);
 
         m_loadingUiMessage = tr("Building layout...");
         if (m_cliInstallOverlayLabel) m_cliInstallOverlayLabel->setText(m_loadingUiMessage);

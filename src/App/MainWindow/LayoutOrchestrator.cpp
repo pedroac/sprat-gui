@@ -31,6 +31,8 @@ LayoutOrchestrator::LayoutOrchestrator(const Config& cfg, QObject* parent)
             this, &LayoutOrchestrator::onRunnerFinished);
     connect(m_layoutRunner, &LayoutRunner::errorOccurred,
             this, &LayoutOrchestrator::onRunnerError);
+    connect(m_layoutRunner, &LayoutRunner::logMessage,
+            this, &LayoutOrchestrator::logMessage);
 }
 
 // --- Settings setters ---

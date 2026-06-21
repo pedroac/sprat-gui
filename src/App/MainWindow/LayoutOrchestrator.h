@@ -97,6 +97,7 @@ signals:
     void manualFrameLabelUpdateNeeded();
     void mainContentViewUpdateNeeded();
     void initSourceFolderWatcherNeeded();
+    void logMessage(QString text);
 
 private slots:
     void onRunnerFinished(const LayoutResult& result);

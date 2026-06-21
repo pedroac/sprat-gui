@@ -3,9 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
-#include <QProcess>
 #include <QMutex>
-#include <QElapsedTimer>
 #include <atomic>
 #include "SpratProfilesConfig.h"
 
@@ -51,8 +49,8 @@ signals:
 
 private:
 #ifndef SPRAT_EMBEDDED_CLI
-    QProcess* m_process;
     std::atomic<bool> m_stopRequested{false};
+    std::atomic<bool> m_running{false};
 #endif
     QMutex* m_mutex = nullptr;
     LayoutRunConfig m_currentConfig;

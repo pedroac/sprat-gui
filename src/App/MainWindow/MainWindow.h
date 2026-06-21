@@ -61,6 +61,7 @@ class QUrl;
 class QSize;
 
 // Forward declarations for custom classes
+class UpdateChecker;
 class PackedAtlasView;
 class LayoutOrchestrator;
 class CliSetupController;
@@ -522,6 +523,13 @@ private:
      * @brief Checks CLI tools availability (delegates to m_cliSetup).
      */
     void checkCliTools();
+
+#ifndef Q_OS_WASM
+    /**
+     * @brief Checks for application updates via the GitHub Releases API.
+     */
+    void checkForUpdates();
+#endif
     void updateCliDiagnostics();
 
     /**
@@ -834,7 +842,8 @@ public:
      */
     bool runTool(const QString& tool, const QStringList& args, const QByteArray* input = nullptr, QByteArray* output = nullptr, QByteArray* error = nullptr);
 
-    void appendCliLog(const QString& text);
+    enum class LogLevel { Cli, Info, Warning, Error, Qt, Diagnosis };
+    void appendLog(LogLevel level, const QString& text);
 
 private:
     // === UI Components ===
@@ -854,9 +863,17 @@ private:
     QDockWidget* m_atlasDock = nullptr;
     QDockWidget* m_animationDock = nullptr;
     QDockWidget* m_debugDock = nullptr;
-    QPlainTextEdit* m_cliLog = nullptr;
-    QTabWidget*     m_debugTabs = nullptr;
-    QPlainTextEdit* m_cliInfoText = nullptr;
+    QPlainTextEdit* m_logWidget = nullptr;
+    QLineEdit*      m_logFilterEdit = nullptr;
+    QPushButton*    m_logFilterCli = nullptr;
+    QPushButton*    m_logFilterInfo = nullptr;
+    QPushButton*    m_logFilterWarn = nullptr;
+    QPushButton*    m_logFilterError = nullptr;
+    QPushButton*    m_logFilterQt = nullptr;
+    QPushButton*    m_logFilterDiag = nullptr;
+
+    struct LogEntry { LogLevel level; QString text; };
+    QVector<LogEntry> m_logEntries;
     QMenu* m_viewMenu = nullptr;
 
     FrameAnimationWorkspace* m_frameAnimWorkspace = nullptr;
@@ -869,6 +886,8 @@ private:
     // Layout Canvas Area
     QStackedWidget* m_profileSelectorStack = nullptr;
     double          m_layoutZoom     = 100.0;
+    int             m_savedAtlasDockW  = -1;
+    int             m_savedAnimDockW   = -1;
 
     // Animation Test Area
     QFutureWatcher<bool> m_gifSyncWatcher;

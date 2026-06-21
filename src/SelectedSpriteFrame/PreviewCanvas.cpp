@@ -358,7 +358,7 @@ void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
     }
     
     QMenu menu(this);
-    QAction* copyAction = menu.addAction(tr("Copy Image"));
+    QAction* copyAction = menu.addAction(QIcon(":/icons/copy-2.svg"), tr("Copy Image"));
     QAction* selected = menu.exec(event->globalPos());
     if (selected == copyAction) {
         QApplication::clipboard()->setImage(QImage(m_sprites.first()->path));

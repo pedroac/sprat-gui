@@ -1,0 +1,39 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="animation.svg">icons/animation-svgrepo-com.svg</file>
+        <file alias="crop.svg">icons/crop-svgrepo-com.svg</file>
+        <file alias="drag.svg">icons/drag-svgrepo-com.svg</file>
+        <file alias="grid.svg">icons/grid-svgrepo-com.svg</file>
+        <file alias="location.svg">icons/location-on-svgrepo-com.svg</file>
+        <file alias="timeline.svg">icons/timeline-svgrepo-com.svg</file>
+        <file alias="layout.svg">icons/layout-svgrepo-com.svg</file>
+        <file alias="split-cells.svg">icons/split-cells-horizontal-svgrepo-com.svg</file>
+        <file alias="merge-cells.svg">icons/merge-cells-horizontal-svgrepo-com.svg</file>
+        <file alias="scan.svg">icons/scan-svgrepo-com.svg</file>
+        <file alias="film.svg">icons/film-alt-svgrepo-com.svg</file>
+        <file alias="book-one.svg">icons/book-one-svgrepo-com.svg</file>
+        <file alias="help.svg">icons/help-svgrepo-com.svg</file>
+        <file alias="info.svg">icons/info-svgrepo-com.svg</file>
+        <file alias="keyboard.svg">icons/keyboard-svgrepo-com.svg</file>
+        <file alias="add-ellipse.svg">icons/add-ellipse-svgrepo-com.svg</file>
+        <file alias="bot-add.svg">icons/bot-add-svgrepo-com.svg</file>
+        <file alias="copy-2.svg">icons/copy-2-svgrepo-com.svg</file>
+        <file alias="remove.svg">icons/remove-svgrepo-com.svg</file>
+        <file alias="speed.svg">icons/speed-svgrepo-com.svg</file>
+        <file alias="circle.svg">icons/circle-svgrepo-com.svg</file>
+        <file alias="polygon.svg">icons/polygon-svgrepo-com.svg</file>
+        <file alias="rectangle-wide.svg">icons/rectangle-wide-svgrepo-com.svg</file>
+        <file alias="point-scan.svg">icons/point-scan-svgrepo-com.svg</file>
+        <file alias="cli.svg">icons/cli-opened-svgrepo-com.svg</file>
+        <file alias="warning.svg">icons/warning-svgrepo-com.svg</file>
+        <file alias="error.svg">icons/alert-danger-error-warning-svgrepo-com.svg</file>
+        <file alias="diagnosis.svg">icons/diagnosis-svgrepo-com.svg</file>
+        <file alias="qt.svg">icons/qt-svgrepo-com.svg</file>
+        <file alias="link.svg">icons/link-svgrepo-com.svg</file>
+        <file alias="directory.svg">icons/directory-svgrepo-com.svg</file>
+        <file alias="file-gif.svg">icons/file-gif-1768-svgrepo-com.svg</file>
+        <file alias="image.svg">icons/image-svgrepo-com.svg</file>
+        <file alias="internet.svg">icons/internet-svgrepo-com.svg</file>
+        <file alias="package-compressed.svg">icons/package-compressed-svgrepo-com.svg</file>
+    </qresource>
+</RCC>

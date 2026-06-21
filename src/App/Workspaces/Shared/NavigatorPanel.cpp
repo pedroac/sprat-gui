@@ -622,27 +622,29 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             sourceNode->setFont(0, f);
             sourceNode->setData(0, Qt::UserRole + 1, si);
 
-            QStyle::StandardPixmap pixmap;
+            QIcon sourceIcon;
             QString typeLabel;
             switch (src.type) {
             case SourceType::Folder:
-                pixmap = QStyle::SP_DirOpenIcon;
+                sourceIcon = QIcon(":/icons/directory.svg");
                 typeLabel = tr("Folder");
                 break;
             case SourceType::SingleImage:
-                pixmap = QStyle::SP_FileIcon;
+                sourceIcon = src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
+                    ? QIcon(":/icons/file-gif.svg")
+                    : QIcon(":/icons/image.svg");
                 typeLabel = tr("Image");
                 break;
             case SourceType::Archive:
-                pixmap = QStyle::SP_DriveFDIcon;
+                sourceIcon = QIcon(":/icons/package-compressed.svg");
                 typeLabel = tr("Archive");
                 break;
             case SourceType::Url:
-                pixmap = QStyle::SP_CommandLink;
+                sourceIcon = QIcon(":/icons/internet.svg");
                 typeLabel = tr("URL");
                 break;
             }
-            sourceNode->setIcon(0, QApplication::style()->standardIcon(pixmap));
+            sourceNode->setIcon(0, sourceIcon);
             sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
             SpriteTreeUtils::buildSubTree(m_spriteTree, sourceNode, toEntries(perSource[si]),

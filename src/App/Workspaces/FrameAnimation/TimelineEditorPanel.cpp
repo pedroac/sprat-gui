@@ -14,26 +14,137 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QIcon>
+#include <QImageReader>
 #include <QInputDialog>
+#include <QPixmap>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMenu>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QStyledItemDelegate>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStyle>
 #include <QTimer>
+#include <QTreeView>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
 #include <QUndoStack>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <numeric>
+
+// ---------------------------------------------------------------------------
+// CenteredCheckDelegate — draws the checkbox centered in its cell
+// ---------------------------------------------------------------------------
+class CenteredCheckDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override
+    {
+        if (index.data(Qt::CheckStateRole).isNull()) {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+        // Spanned rows (folder items) fall back to default rendering.
+        const auto* tv = qobject_cast<const QTreeView*>(option.widget);
+        if (tv && tv->isFirstColumnSpanned(index.row(), index.parent())) {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+        QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
+
+        // Draw only the item panel (selection/hover background).
+        // PE_PanelItemViewItem never draws content, avoiding any double-draw.
+        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, opt.widget);
+
+        // option.rect for column 0 is shrunk by Qt's branch/indent area, which
+        // pushes a naively-centered checkbox to the right of the cell.
+        // Use the header section's true position and width instead.
+        const int colX = tv ? tv->header()->sectionViewportPosition(index.column())
+                            : option.rect.x();
+        const int colW = tv ? tv->columnWidth(index.column())
+                            : option.rect.width();
+
+        const Qt::CheckState cs = static_cast<Qt::CheckState>(
+            index.data(Qt::CheckStateRole).toInt());
+        QStyleOptionButton btn;
+        btn.state = opt.state & (QStyle::State_Enabled | QStyle::State_Active);
+        if      (cs == Qt::Checked)          btn.state |= QStyle::State_On;
+        else if (cs == Qt::PartiallyChecked) btn.state |= QStyle::State_NoChange;
+        else                                 btn.state |= QStyle::State_Off;
+        const QSize sz = style->subElementRect(
+            QStyle::SE_CheckBoxIndicator, &btn, opt.widget).size();
+        btn.rect = QRect(
+            colX + (colW               - sz.width())  / 2,
+            option.rect.y() + (option.rect.height() - sz.height()) / 2,
+            sz.width(), sz.height());
+        style->drawPrimitive(QStyle::PE_IndicatorCheckBox, &btn, painter, opt.widget);
+    }
+
+    bool editorEvent(QEvent* event, QAbstractItemModel* model,
+                     const QStyleOptionViewItem& option,
+                     const QModelIndex& index) override
+    {
+        if (index.data(Qt::CheckStateRole).isNull())
+            return QStyledItemDelegate::editorEvent(event, model, option, index);
+        if (event->type() == QEvent::MouseButtonRelease) {
+            const auto* me = static_cast<const QMouseEvent*>(event);
+            if (me->button() == Qt::LeftButton) {
+                const Qt::CheckState cur = static_cast<Qt::CheckState>(
+                    index.data(Qt::CheckStateRole).toInt());
+                model->setData(index, cur == Qt::Unchecked ? Qt::Checked : Qt::Unchecked,
+                               Qt::CheckStateRole);
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// CenteredIconDelegate — draws the decoration icon centered in its cell
+// ---------------------------------------------------------------------------
+class CenteredIconDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override
+    {
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+        QStyle* style = opt.widget ? opt.widget->style() : QApplication::style();
+
+        // Draw background / focus — suppress the default icon drawing
+        opt.features &= ~QStyleOptionViewItem::HasDecoration;
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+
+        // Draw icon centered in the cell
+        if (!opt.icon.isNull()) {
+            const QPixmap pix = opt.icon.pixmap(opt.decorationSize);
+            painter->drawPixmap(
+                option.rect.x() + (option.rect.width()  - pix.width())  / 2,
+                option.rect.y() + (option.rect.height() - pix.height()) / 2,
+                pix);
+        }
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -66,11 +177,28 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     listLayout->addLayout(addLayout);
 
     m_timelineList = new TimelineTreeWidget(m_listArea);
-    m_timelineList->setHeaderHidden(true);
+    m_timelineList->setColumnCount(5);
+    m_timelineList->setHeaderLabels({QString(), QString(), tr("Name"), tr("Frames"), tr("FPS")});
     m_timelineList->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     m_timelineList->setIconSize(QSize(32, 32));
     m_timelineList->setDragEnabled(true);
     m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_timelineList->setAllColumnsShowFocus(true);
+    m_timelineList->setItemDelegateForColumn(0, new CenteredCheckDelegate(m_timelineList));
+    m_timelineList->setItemDelegateForColumn(1, new CenteredIconDelegate(m_timelineList));
+    {
+        auto* hdr = m_timelineList->header();
+        hdr->setStretchLastSection(false);
+        hdr->setSectionResizeMode(0, QHeaderView::Fixed);
+        hdr->resizeSection(0, 36);         // checkbox / expander
+        hdr->setSectionResizeMode(1, QHeaderView::Fixed);
+        hdr->resizeSection(1, 38);         // thumbnail
+        hdr->setSectionResizeMode(2, QHeaderView::Stretch); // name
+        hdr->setSectionResizeMode(3, QHeaderView::Fixed);
+        hdr->resizeSection(3, 58);         // frame count
+        hdr->setSectionResizeMode(4, QHeaderView::Fixed);
+        hdr->resizeSection(4, 42);         // FPS
+    }
     listLayout->addWidget(m_timelineList, 1);
 
     // ── Bottom section: selected-timeline editor
@@ -140,8 +268,13 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     m_timelineFramesList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_timelineFramesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     m_timelineFramesList->setResizeMode(QListWidget::Adjust);
-    m_timelineFramesList->setIconSize(QSize(48, 48));
+    m_timelineFramesList->setIconSize(QSize(56, 56));
+    m_timelineFramesList->setGridSize(QSize(64, 78));
     m_timelineFramesList->setFixedHeight(96);
+    m_timelineFramesList->setStyleSheet(
+        "QListWidget { font-size: 9px; }"
+        "QListWidget::item { border: 1px solid #555; margin: 2px; }"
+        "QListWidget::item:selected { border: 2px solid #4a9eff; background: rgba(74, 158, 255, 40); color: black; font-weight: bold; }");
     dropLayout->addWidget(m_timelineFramesList);
     editorContainerLayout->addWidget(m_timelineDropArea);
 
@@ -271,6 +404,20 @@ void TimelineEditorPanel::selectTimeline(int index)
 }
 
 // ---------------------------------------------------------------------------
+// squareIcon — scale-to-fill + center-crop so all thumbnails are square
+// ---------------------------------------------------------------------------
+static QIcon squareIcon(const QString& path, int size)
+{
+    QPixmap pix(path);
+    if (pix.isNull())
+        return QIcon(path);
+    pix = pix.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    if (pix.width() > size || pix.height() > size)
+        pix = pix.copy((pix.width() - size) / 2, (pix.height() - size) / 2, size, size);
+    return QIcon(pix);
+}
+
+// ---------------------------------------------------------------------------
 // refreshTimelineList
 // ---------------------------------------------------------------------------
 void TimelineEditorPanel::refreshTimelineList()
@@ -330,6 +477,7 @@ void TimelineEditorPanel::refreshTimelineList()
                 found->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
                 found->setCheckState(0, Qt::Unchecked);
                 found->setToolTip(0, parts.mid(0, pi + 1).join('/'));
+                found->setFirstColumnSpanned(true);
             }
             current = found;
         }
@@ -364,25 +512,22 @@ void TimelineEditorPanel::refreshTimelineList()
             const QString middlePath = (*displayFrames)[middleIndex];
             icon = m_timelineListIconCache.value(middlePath);
             if (icon.isNull()) {
-                icon = QIcon(middlePath);
+                icon = squareIcon(middlePath, 32);
                 m_timelineListIconCache.insert(middlePath, icon);
             }
         }
 
-        const QString displayName = timeline.aliasOf.isEmpty()
-            ? leafName
-            : QStringLiteral("[alias] %1").arg(leafName);
-
         QTreeWidgetItem* item = parent
             ? new QTreeWidgetItem(parent)
             : new QTreeWidgetItem(m_timelineList);
-        item->setIcon(0, icon);
-        item->setText(0, QStringLiteral("%1 | %2 frames | %3 fps")
-            .arg(displayName)
-            .arg(displayFrames->size())
-            .arg(timeline.fps));
+        item->setIcon(1, timeline.aliasOf.isEmpty() ? icon : QIcon(":/icons/link.svg"));
+        item->setText(2, leafName);
+        item->setText(3, QString::number(displayFrames->size()));
+        item->setTextAlignment(3, Qt::AlignCenter | Qt::AlignVCenter);
+        item->setText(4, QString::number(timeline.fps));
+        item->setTextAlignment(4, Qt::AlignCenter | Qt::AlignVCenter);
         item->setData(0, Qt::UserRole, idx);
-        item->setToolTip(0, timeline.name);
+        item->setToolTip(2, timeline.name);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
         item->setCheckState(0, Qt::Unchecked);
     }
@@ -423,11 +568,12 @@ void TimelineEditorPanel::refreshTimelineList()
 // ---------------------------------------------------------------------------
 void TimelineEditorPanel::refreshTimelineFrames()
 {
-    if (m_timelineFrameIconCache.size() > 4096) {
-        auto it = m_timelineFrameIconCache.begin();
-        int toRemove = m_timelineFrameIconCache.size() / 2;
-        while (toRemove > 0 && it != m_timelineFrameIconCache.end()) {
-            it = m_timelineFrameIconCache.erase(it);
+    // Evict half the pixmap cache if it grows large
+    if (m_framePixmapCache.size() > 2048) {
+        auto it = m_framePixmapCache.begin();
+        int toRemove = m_framePixmapCache.size() / 2;
+        while (toRemove > 0 && it != m_framePixmapCache.end()) {
+            it = m_framePixmapCache.erase(it);
             --toRemove;
         }
     }
@@ -451,14 +597,62 @@ void TimelineEditorPanel::refreshTimelineFrames()
         }
     }
     m_timelineDragHintLabel->setVisible(framesToShow->isEmpty() && timeline.aliasOf.isEmpty());
+    if (framesToShow->isEmpty()) {
+        m_timelineFramesList->setUpdatesEnabled(true);
+        return;
+    }
+
+    const int iconSz = m_timelineFramesList->iconSize().width();
+
+    // ── Pass 1: collect natural image sizes (header-only reads, no pixel data) ──
+    QVector<QSize> naturalSizes;
+    naturalSizes.reserve(framesToShow->size());
     for (const QString& path : *framesToShow) {
-        QFileInfo fi(path);
-        QIcon icon = m_timelineFrameIconCache.value(path);
-        if (icon.isNull()) {
-            icon = QIcon(path);
-            m_timelineFrameIconCache.insert(path, icon);
+        QSize sz = m_imageSizeCache.value(path);
+        if (!sz.isValid()) {
+            sz = QImageReader(path).size();
+            if (!sz.isValid()) sz = QSize(iconSz, iconSz);
+            m_imageSizeCache.insert(path, sz);
         }
-        QListWidgetItem* item = new QListWidgetItem(icon, fi.baseName());
+        naturalSizes.append(sz);
+    }
+
+    // ── Find max dimensions, then the uniform scale that fits the largest frame ──
+    int maxW = 1, maxH = 1;
+    for (const QSize& sz : naturalSizes) {
+        maxW = qMax(maxW, sz.width());
+        maxH = qMax(maxH, sz.height());
+    }
+    const double scale = qMin(static_cast<double>(iconSz) / maxW,
+                              static_cast<double>(iconSz) / maxH);
+
+    // ── Pass 2: build proportionally-sized icons ──────────────────────────────
+    for (int i = 0; i < framesToShow->size(); ++i) {
+        const QString& path = (*framesToShow)[i];
+
+        const int tw = qMax(1, qRound(naturalSizes[i].width()  * scale));
+        const int th = qMax(1, qRound(naturalSizes[i].height() * scale));
+
+        // Load source pixmap from cache (capped at 256px to limit memory)
+        QPixmap src = m_framePixmapCache.value(path);
+        if (src.isNull()) {
+            src = QPixmap(path);
+            if (!src.isNull() && (src.width() > 256 || src.height() > 256))
+                src = src.scaled(256, 256, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            m_framePixmapCache.insert(path, src);
+        }
+
+        // Scale proportionally, then center on a transparent iconSz×iconSz cell
+        // so Qt's QIcon machinery never re-scales it back up.
+        QPixmap cell(iconSz, iconSz);
+        cell.fill(Qt::transparent);
+        if (!src.isNull()) {
+            QPixmap thumb = src.scaled(tw, th, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            QPainter p(&cell);
+            p.drawPixmap((iconSz - tw) / 2, (iconSz - th) / 2, thumb);
+        }
+
+        QListWidgetItem* item = new QListWidgetItem(QIcon(cell), QFileInfo(path).baseName());
         item->setToolTip(path);
         m_timelineFramesList->addItem(item);
     }
@@ -870,7 +1064,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
         menu.addSeparator();
 
-        menu.addAction(tr("Add Timeline Into Group"), this, [this, folderPath, refreshAndSelectLambda]() {
+        menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline Into Group"), this, [this, folderPath, refreshAndSelectLambda]() {
             bool ok = false;
             const QString suggested = folderPath + "/";
             const QString name = QInputDialog::getText(this, tr("Add Timeline Into Group"),
@@ -901,7 +1095,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
         const int idx = item->data(0, Qt::UserRole).toInt();
         m_timelineList->setCurrentItem(item);
 
-        menu.addAction(tr("Remove Timeline"), this, [this, idx, refreshAndSelectLambda]() {
+        menu.addAction(QIcon(":/icons/remove.svg"), tr("Remove Timeline"), this, [this, idx, refreshAndSelectLambda]() {
             if (idx < 0 || idx >= m_session->activeAtlas().timelines.size()) return;
             const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
             const int oldSel = m_session->selectedTimelineIndex;
@@ -923,13 +1117,13 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
             refreshAndSelectLambda();
         });
 
-        menu.addAction(tr("Create Alias"), this, &TimelineEditorPanel::onTimelineCreateAlias);
+        menu.addAction(QIcon(":/icons/link.svg"), tr("Create Alias"), this, &TimelineEditorPanel::onTimelineCreateAlias);
         hasItems = true;
     }
 
     if (hasChecked) {
         if (hasItems) menu.addSeparator();
-        menu.addAction(tr("Remove Selected"), this, [this, checkedIndices, refreshAndSelectLambda]() {
+        menu.addAction(QIcon(":/icons/remove.svg"), tr("Remove Selected"), this, [this, checkedIndices, refreshAndSelectLambda]() {
             const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
             const int oldSel = m_session->selectedTimelineIndex;
 
@@ -961,7 +1155,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
     if (!item && !hasChecked) {
         QMenu emptyMenu(this);
-        emptyMenu.addAction(tr("Add Timeline"), this, &TimelineEditorPanel::onTimelineAddClicked);
+        emptyMenu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline"), this, &TimelineEditorPanel::onTimelineAddClicked);
         emptyMenu.exec(m_timelineList->mapToGlobal(pos));
         return;
     }

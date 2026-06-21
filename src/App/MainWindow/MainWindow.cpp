@@ -41,6 +41,10 @@
 #include "WasmFileDialog.h"
 #include "WasmFolderBrowserDialog.h"
 #endif
+#ifndef Q_OS_WASM
+#include "UpdateChecker.h"
+#include "UpdateDialog.h"
+#endif
 #include <algorithm>
 #include <memory>
 #include <QFileDialog>
@@ -75,6 +79,9 @@
 #include <QToolButton>
 #include <QMenu>
 #include <QPlainTextEdit>
+#include <QScrollBar>
+#include <QTextCursor>
+#include <QTextCharFormat>
 #include <QTime>
 #include <QDialog>
 #include <QVBoxLayout>
@@ -84,6 +91,7 @@
 #include <QImage>
 #include <QDirIterator>
 #include "ArchiveExtractor.h"
+#include <QAtomicPointer>
 
 Q_LOGGING_CATEGORY(mainWindow, "mainWindow")
 Q_LOGGING_CATEGORY(cli, "cli")
@@ -93,6 +101,38 @@ Q_LOGGING_CATEGORY(cli, "cli")
 
 Q_LOGGING_CATEGORY(project, "project")
 Q_LOGGING_CATEGORY(autosave, "autosave")
+
+// ---------------------------------------------------------------------------
+// Qt message handler — routes qInfo/qWarning/qCritical to the Events tab.
+// ---------------------------------------------------------------------------
+static QAtomicPointer<MainWindow> s_eventLogTarget{nullptr};
+static QtMessageHandler s_prevMessageHandler = nullptr;
+
+static void spratMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg)
+{
+    if (s_prevMessageHandler)
+        s_prevMessageHandler(type, ctx, msg); // preserve default terminal output
+
+    if (type == QtDebugMsg || type == QtFatalMsg)
+        return;
+
+    MainWindow* w = s_eventLogTarget.loadAcquire();
+    if (!w) return;
+
+    QString prefix;
+    switch (type) {
+    case QtWarningMsg:  prefix = QStringLiteral("[W] "); break;
+    case QtCriticalMsg: prefix = QStringLiteral("[!] "); break;
+    default: break;
+    }
+    constexpr auto level = MainWindow::LogLevel::Qt;
+    const QString entry = QStringLiteral("[%1] %2%3")
+        .arg(QTime::currentTime().toString("HH:mm:ss"), prefix, msg);
+
+    QMetaObject::invokeMethod(w, [w, entry, level]() {
+        w->appendLog(level, entry);
+    }, Qt::QueuedConnection);
+}
 
 namespace {
 bool isUnderSpratTrash(const QString& sourceFolder, const QString& path) {
@@ -822,6 +862,9 @@ MainWindow* MainWindow::s_wasmInstance = nullptr;
 #include "ViewUtils.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    s_prevMessageHandler = qInstallMessageHandler(spratMessageHandler);
+    s_eventLogTarget.storeRelease(this);
+
     m_session = new ProjectSession(this);
     m_settings = CliToolsConfig::loadAppSettings();
     m_cliPaths = CliToolsConfig::loadCliPaths();
@@ -1020,6 +1063,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 this, &MainWindow::populateActiveFrameListFromModel);
         connect(m_layoutOrchestrator, &LayoutOrchestrator::initSourceFolderWatcherNeeded,
                 this, &MainWindow::initializeSourceFolderWatcher);
+        connect(m_layoutOrchestrator, &LayoutOrchestrator::logMessage,
+                this, [this](const QString& text) {
+                    const bool isSuccess = text.contains(QLatin1String("] Exit: 0 ("));
+                    const bool hasStderr = text.contains(QLatin1String("\n  stderr: "));
+                    LogLevel level = LogLevel::Cli;
+                    if (!isSuccess)        level = LogLevel::Error;
+                    else if (hasStderr)    level = LogLevel::Warning;
+                    appendLog(level, text);
+                });
         connect(m_layoutOrchestrator, &LayoutOrchestrator::manualFrameLabelUpdateNeeded,
                 this, &MainWindow::updateManualFrameLabel);
         connect(m_layoutOrchestrator, &LayoutOrchestrator::pendingProjectPayloadReady,
@@ -1303,6 +1355,9 @@ void MainWindow::updateFolderLabel(const QString& folder) {
 }
 
 MainWindow::~MainWindow() {
+    s_eventLogTarget.storeRelease(nullptr);
+    qInstallMessageHandler(s_prevMessageHandler);
+
     m_isCanceled = true;
 
     // Ensure all background tasks are stopped/finished before we destroy members
@@ -2217,9 +2272,39 @@ void MainWindow::applySettings() {
     }
 }
 
-void MainWindow::appendCliLog(const QString& text) {
-    if (m_cliLog) {
-        m_cliLog->appendPlainText(text);
+void MainWindow::appendLog(LogLevel level, const QString& text)
+{
+    if (!m_logWidget) return;
+
+    // Check filter: skip entry if its level toggle is off
+    auto* btn = (level == LogLevel::Cli)       ? m_logFilterCli
+              : (level == LogLevel::Info)      ? m_logFilterInfo
+              : (level == LogLevel::Warning)   ? m_logFilterWarn
+              : (level == LogLevel::Qt)        ? m_logFilterQt
+              : (level == LogLevel::Diagnosis) ? m_logFilterDiag
+              :                                  m_logFilterError;
+    const QString filterText = m_logFilterEdit ? m_logFilterEdit->text() : QString();
+    const bool passesFilter = (!btn || btn->isChecked())
+                           && (filterText.isEmpty() || text.contains(filterText, Qt::CaseInsensitive));
+
+    m_logEntries.append({level, text});
+
+    if (passesFilter) {
+        QTextCursor cursor(m_logWidget->document());
+        cursor.movePosition(QTextCursor::End);
+        if (!m_logWidget->document()->isEmpty())
+            cursor.insertText(QStringLiteral("\n"));
+        QTextCharFormat fmt;
+        switch (level) {
+        case LogLevel::Info:      fmt.setForeground(QColor(100, 160, 240)); break;
+        case LogLevel::Warning:   fmt.setForeground(QColor(220, 140,   0)); break;
+        case LogLevel::Error:     fmt.setForeground(QColor(200,  60,  60)); break;
+        case LogLevel::Qt:        fmt.setForeground(QColor(160, 110, 220)); break;
+        case LogLevel::Diagnosis: fmt.setForeground(QColor( 80, 180, 160)); break;
+        default: break;
+        }
+        cursor.insertText(text, fmt);
+        m_logWidget->verticalScrollBar()->setValue(m_logWidget->verticalScrollBar()->maximum());
     }
 }
 
@@ -2258,7 +2343,9 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
         qint64 ms = timer.elapsed();
         QString logEntry = QStringLiteral("[%1] %2 %3\n[%1] Failed to finish (%4 ms)")
             .arg(QTime::currentTime().toString("HH:mm:ss"), toolName, args.join(' '), QString::number(ms));
-        QMetaObject::invokeMethod(this, [this, logEntry]() { appendCliLog(logEntry); }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this, [this, logEntry]() {
+            appendLog(LogLevel::Error, logEntry);
+        }, Qt::QueuedConnection);
         return false;
     }
     QByteArray stdoutData = process.readAllStandardOutput();
@@ -2277,7 +2364,13 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
     if (!stderrStr.isEmpty()) {
         logEntry += QStringLiteral("\n  stderr: %1").arg(stderrStr);
     }
-    QMetaObject::invokeMethod(this, [this, logEntry]() { appendCliLog(logEntry); }, Qt::QueuedConnection);
+    const bool hasStderr = !stderrStr.isEmpty();
+    QMetaObject::invokeMethod(this, [this, logEntry, ok, hasStderr]() {
+        LogLevel level = LogLevel::Cli;
+        if (!ok)           level = LogLevel::Error;
+        else if (hasStderr) level = LogLevel::Warning;
+        appendLog(level, logEntry);
+    }, Qt::QueuedConnection);
 
     return ok;
 }
@@ -3330,3 +3423,16 @@ void MainWindow::refreshUiAfterUndo() {
 void MainWindow::setSourceFolderIsTemp(bool isTemp) {
     if (m_projectController) m_projectController->setSourceFolderIsTemp(isTemp);
 }
+
+#ifndef Q_OS_WASM
+void MainWindow::checkForUpdates() {
+    auto* checker = new UpdateChecker(this);
+    connect(checker, &UpdateChecker::updateAvailable, this,
+            [this](const UpdateChecker::ReleaseInfo& info) {
+                auto* dlg = new UpdateDialog(info, this);
+                dlg->setAttribute(Qt::WA_DeleteOnClose);
+                dlg->exec();
+            });
+    checker->check();
+}
+#endif

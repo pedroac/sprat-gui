@@ -6,8 +6,76 @@
 #include <QTimer>
 #include <QStyleFactory>
 #include <QPixmapCache>
+#include <QProxyStyle>
+#include <QStyleOptionButton>
+#include <QStyleOptionToolButton>
+#include <QPainter>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
+
+// Increases the gap between icon and text in QPushButton / QToolButton from Qt's
+// hardcoded 4 px to kIconTextSpacing.
+class SpratStyle : public QProxyStyle {
+public:
+    SpratStyle() : QProxyStyle(QStyleFactory::create("Fusion")) {}
+
+    void drawControl(ControlElement element, const QStyleOption* opt,
+                     QPainter* p, const QWidget* w) const override
+    {
+        if (element == CE_PushButtonLabel) {
+            if (const auto* btn = qstyleoption_cast<const QStyleOptionButton*>(opt))
+                if (!btn->icon.isNull() && !btn->text.isEmpty()) {
+                    drawIconLabel(btn->rect, btn->icon, btn->iconSize, btn->text,
+                                  btn->fontMetrics, btn->palette, btn->state, p, w);
+                    return;
+                }
+        }
+        if (element == CE_ToolButtonLabel) {
+            if (const auto* tb = qstyleoption_cast<const QStyleOptionToolButton*>(opt))
+                if (!tb->icon.isNull() && !tb->text.isEmpty()
+                        && tb->toolButtonStyle == Qt::ToolButtonTextBesideIcon) {
+                    drawIconLabel(tb->rect, tb->icon, tb->iconSize, tb->text,
+                                  tb->fontMetrics, tb->palette, tb->state, p, w);
+                    return;
+                }
+        }
+        QProxyStyle::drawControl(element, opt, p, w);
+    }
+
+private:
+    static constexpr int kIconTextSpacing = 8;
+
+    void drawIconLabel(const QRect& r, const QIcon& icon, const QSize& isz,
+                       const QString& text, const QFontMetrics& fm,
+                       const QPalette& pal, QStyle::State state,
+                       QPainter* p, const QWidget* w) const
+    {
+        const QIcon::Mode mode =
+            (state & State_Enabled)
+                ? ((state & State_HasFocus) ? QIcon::Active : QIcon::Normal)
+                : QIcon::Disabled;
+        const QIcon::State istate = (state & State_On) ? QIcon::On : QIcon::Off;
+        const qreal dpr = w ? w->devicePixelRatio() : 1.0;
+        const QPixmap pm = icon.pixmap(isz, dpr, mode, istate);
+        const int pw = qRound(pm.width()  / pm.devicePixelRatio());
+        const int ph = qRound(pm.height() / pm.devicePixelRatio());
+
+        uint tf = Qt::AlignVCenter | Qt::AlignLeft | Qt::TextShowMnemonic;
+        if (!proxy()->styleHint(SH_UnderlineShortcut, nullptr, w))
+            tf |= Qt::TextHideMnemonic;
+
+        const int tw = fm.boundingRect(r, tf, text).width();
+        const QRect iconRect(r.x() + (r.width() - pw - kIconTextSpacing - tw) / 2,
+                             r.y() + (r.height() - ph) / 2,
+                             pw, ph);
+        p->drawPixmap(iconRect, pm);
+
+        QRect textRect = r;
+        textRect.setLeft(iconRect.right() + kIconTextSpacing);
+        proxy()->drawItemText(p, textRect, tf, pal,
+                              bool(state & State_Enabled), text, QPalette::ButtonText);
+    }
+};
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -37,6 +105,7 @@ int main(int argc, char *argv[]) {
     qputenv("QT_STYLE_OVERRIDE", "Fusion");
 
     QApplication app(argc, argv);
+    app.setStyle(new SpratStyle());
 
     // Increase pixmap cache to prevent thrashing on sprite-heavy projects
     // Default is 10 MB; 256 MB is better for projects with 500+ sprites

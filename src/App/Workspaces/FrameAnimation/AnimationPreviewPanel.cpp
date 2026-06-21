@@ -3,6 +3,8 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QFrame>
+#include <QIcon>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -48,8 +50,15 @@ AnimationPreviewPanel::AnimationPreviewPanel(QWidget* parent)
     m_nextBtn->setAccessibleName(tr("Next frame"));
     controls->addWidget(m_nextBtn);
 
+    auto* sep = new QFrame(this);
+    sep->setFrameShape(QFrame::VLine);
+    sep->setFrameShadow(QFrame::Sunken);
+    controls->addWidget(sep);
+
     m_overlayBtn = new QToolButton(this);
     m_overlayBtn->setText(tr("Markers"));
+    m_overlayBtn->setIcon(QIcon(":/icons/location.svg"));
+    m_overlayBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_overlayBtn->setCheckable(true);
     m_overlayBtn->setToolTip(tr("Toggle pivot and marker overlay on animation preview"));
     controls->addWidget(m_overlayBtn);
@@ -58,10 +67,14 @@ AnimationPreviewPanel::AnimationPreviewPanel(QWidget* parent)
     m_handleCombo->addItem(tr("pivot"));
     m_handleCombo->setToolTip(tr("Active handle: only this pivot or marker can be dragged on the canvas"));
     m_handleCombo->setAccessibleName(tr("Active handle"));
+    m_handleCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    m_handleCombo->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     controls->addWidget(m_handleCombo);
 
     m_onionSkinBtn = new QToolButton(this);
     m_onionSkinBtn->setText(tr("Onion"));
+    m_onionSkinBtn->setIcon(QIcon(":/icons/animation.svg"));
+    m_onionSkinBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_onionSkinBtn->setCheckable(true);
     m_onionSkinBtn->setChecked(false);
     m_onionSkinBtn->setToolTip(tr("Toggle onion skin: show adjacent frames as ghost overlays"));
