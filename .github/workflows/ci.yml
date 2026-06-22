@@ -74,9 +74,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev imagemagick
 
+      - name: Read CLI version
+        id: cli_version
+        shell: bash
+        run: |
+          CLI_TAG=$(cat DEPENDENCIES | xargs)
+          echo "CLI version: $CLI_TAG"
+          echo "tag=$CLI_TAG" >> $GITHUB_OUTPUT
+
       - name: Configure
         run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DSPRAT_EMBEDDED_CLI=${{ matrix.embedded_cli }}
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DSPRAT_EMBEDDED_CLI=${{ matrix.embedded_cli }} -DSPRAT_CLI_VERSION=${{ steps.cli_version.outputs.tag }}
 
       - name: Build
         run: cmake --build build --config Release
