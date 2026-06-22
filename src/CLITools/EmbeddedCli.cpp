@@ -7,6 +7,7 @@
 #include "commands/entrypoints.h"
 
 std::atomic<bool> EmbeddedCli::m_stopRequested{false};
+QMutex EmbeddedCli::m_mutex;
 
 void EmbeddedCli::requestStop() {
     m_stopRequested = true;
@@ -21,6 +22,7 @@ void EmbeddedCli::resetStop() {
 }
 
 CliResult EmbeddedCli::run(const QString& command, const QStringList& args, const QByteArray& input) {
+    QMutexLocker locker(&m_mutex);
     resetStop();
 
     // Prepare arguments

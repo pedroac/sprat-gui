@@ -14,6 +14,8 @@
 
 #ifndef SPRAT_EMBEDDED_CLI
 #include <QtConcurrent>
+#else
+#include "EmbeddedCli.h"
 #endif
 
 #ifdef Q_OS_WIN
@@ -417,9 +419,31 @@ QString CliSetupController::buildDiagnosticsText(const QString& spritesFolder) c
     text += QStringLiteral("CPU arch:     %1\n\n").arg(QSysInfo::currentCpuArchitecture());
 
     // CLI version
+#ifdef SPRAT_EMBEDDED_CLI
+    // For embedded builds, checkBinaryVersion returns the compile-time DEPENDENCIES constant,
+    // not the actual version of the embedded binary. Call the binary directly to verify.
+    const QString requiredVersion = QStringLiteral(SPRAT_CLI_VERSION);
+    const CliResult versionResult = EmbeddedCli::run(
+        QStringLiteral("spratlayout"), {QStringLiteral("--version")}, {});
+    const QString versionOut = QString::fromUtf8(versionResult.stdOut).trimmed();
+    // Output format: "spratlayout version v0.11.3"
+    const QString actualVersion = versionOut.section(QLatin1Char(' '), -1);
+    const bool versionMismatch = !actualVersion.isEmpty() && actualVersion != requiredVersion;
+    text += QStringLiteral("CLI version:  %1").arg(actualVersion.isEmpty() ? tr("ERROR") : actualVersion);
+    if (versionMismatch) {
+        text += QStringLiteral("  (!) expected %1").arg(requiredVersion);
+    }
+    text += QLatin1Char('\n');
+    if (versionMismatch) {
+        text += QStringLiteral("  WARNING: embedded CLI version does not match DEPENDENCIES.\n"
+                               "  The app may behave incorrectly. Rebuild with the correct sprat-cli.\n");
+    }
+    text += QLatin1Char('\n');
+#else
     const QString version = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
     text += QStringLiteral("CLI version:  %1\n\n").arg(
         version.isEmpty() ? tr("ERROR  not found") : version);
+#endif
 
     // Binaries
 #ifdef SPRAT_EMBEDDED_CLI

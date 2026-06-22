@@ -3,6 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <QByteArray>
+#include <QMutex>
 #include <atomic>
 
 struct CliResult {
@@ -23,4 +24,5 @@ public:
 
 private:
     static std::atomic<bool> m_stopRequested;
+    static QMutex m_mutex;
 };
