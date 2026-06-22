@@ -541,8 +541,9 @@ if(EMSCRIPTEN)
     endif()
 
     add_custom_command(TARGET sprat-gui POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rename "$<TARGET_FILE_DIR:sprat-gui>/sprat-gui.html" "$<TARGET_FILE_DIR:sprat-gui>/index.html"
-        COMMENT "Renaming sprat-gui.html to index.html"
+        COMMAND ${CMAKE_COMMAND} -E remove "$<TARGET_FILE_DIR:sprat-gui>/sprat-gui.html"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/deploy/sprat-gui-itch/index.html" "$<TARGET_FILE_DIR:sprat-gui>/index.html"
+        COMMENT "Installing custom itch.io index.html"
     )
 endif()
 

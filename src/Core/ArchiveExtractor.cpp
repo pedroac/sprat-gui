@@ -80,10 +80,13 @@ bool ArchiveExtractor::extractToDirectory(const QString& archivePath, const QStr
 #endif
         const QString fullPath = destination.absoluteFilePath(currentFile);
 
-        // Security: Validate that the extracted path doesn't escape the destination directory
-        const QString canonicalDest = QDir(destination.absolutePath()).canonicalPath();
+        // Security: Validate that the extracted path doesn't escape the destination directory.
+        // Use QDir::cleanPath on both sides so separators are normalized to '/' on all
+        // platforms (QDir::separator() returns '\' on Windows, but cleanPath/canonicalPath
+        // both use '/'), which would otherwise cause every entry to be rejected on Windows.
+        const QString canonicalDest = QDir::cleanPath(QDir(destination.absolutePath()).canonicalPath());
         const QString candidatePath = QDir::cleanPath(fullPath);
-        if (!candidatePath.startsWith(canonicalDest + QDir::separator()) && candidatePath != canonicalDest) {
+        if (!candidatePath.startsWith(canonicalDest + '/') && candidatePath != canonicalDest) {
             error = QString("Path traversal attempt detected in archive entry: %1").arg(currentFile);
             r = ARCHIVE_FATAL;
             break;
