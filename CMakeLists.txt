@@ -213,16 +213,35 @@ if(SPRAT_EMBEDDED_CLI)
 
     # Locate sprat-cli source
     set(SPRAT_CLI_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sprat-cli")
+    set(_sprat_use_local FALSE)
 
     if(EXISTS "${SPRAT_CLI_LOCAL_DIR}/CMakeLists.txt")
-        message(STATUS "Using local sprat-cli at ${SPRAT_CLI_LOCAL_DIR}")
+        # Only use the local directory if its VERSION matches DEPENDENCIES.
+        # A mismatch means the local checkout is out of date; fall back to
+        # FetchContent so the correct version is always embedded.
+        set(_local_cli_version "")
+        if(EXISTS "${SPRAT_CLI_LOCAL_DIR}/VERSION")
+            file(READ "${SPRAT_CLI_LOCAL_DIR}/VERSION" _local_cli_version)
+            string(STRIP "${_local_cli_version}" _local_cli_version)
+        endif()
+        if(_local_cli_version STREQUAL SPRAT_CLI_VERSION)
+            set(_sprat_use_local TRUE)
+            message(STATUS "Using local sprat-cli ${_local_cli_version} at ${SPRAT_CLI_LOCAL_DIR}")
+        else()
+            message(WARNING
+                "Local sprat-cli version '${_local_cli_version}' does not match "
+                "required version '${SPRAT_CLI_VERSION}' (from DEPENDENCIES). "
+                "Falling back to FetchContent.")
+        endif()
+    endif()
+
+    if(_sprat_use_local)
         set(SPRAT_CLI_SOURCE_DIR "${SPRAT_CLI_LOCAL_DIR}")
-        # Check if already added (unlikely but safe)
         if(NOT TARGET spratcore)
             add_subdirectory("${SPRAT_CLI_SOURCE_DIR}" "sprat-cli-build")
         endif()
     else()
-        message(STATUS "sprat-cli source not found locally, fetching from GitHub...")
+        message(STATUS "Fetching sprat-cli ${SPRAT_CLI_VERSION} from GitHub...")
         include(FetchContent)
         FetchContent_Declare(
             sprat_cli

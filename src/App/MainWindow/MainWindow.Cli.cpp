@@ -50,11 +50,7 @@ void MainWindow::updateCliDiagnostics() {
     // Skip if a previous update is still in progress — the result would be the same.
     if (m_cliDiagnosticsWatcher.isRunning()) return;
 
-#ifdef Q_OS_WASM
     const QString spritesFolder = m_session ? m_session->currentFolder : QString();
-#else
-    const QString spritesFolder = m_session ? m_session->sourceFolder : QString();
-#endif
 
     // buildDiagnosticsText spawns subprocesses (waitForFinished 2 s each).
     // Run it off the main thread; append as a diagnosis log entry when done.
