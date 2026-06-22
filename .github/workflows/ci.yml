@@ -48,10 +48,13 @@ jobs:
         include:
           - os: ubuntu-latest
             qt_arch: gcc_64
+            embedded_cli: ON
           - os: windows-2022
             qt_arch: win64_msvc2019_64
+            embedded_cli: ON
           - os: macos-latest
             qt_arch: clang_64
+            embedded_cli: OFF
 
     runs-on: ${{ matrix.os }}
 
@@ -73,7 +76,7 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DSPRAT_EMBEDDED_CLI=${{ matrix.embedded_cli }}
 
       - name: Build
         run: cmake --build build --config Release
@@ -97,12 +100,12 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux' && github.ref == 'refs/heads/release'
         run: |
+          set -euo pipefail
           mkdir dist
           cp build/sprat-gui dist/
-          # Bundle sprat-cli (using local build tools is better but for now let's just create folders)
-          mkdir -p dist/cli/transforms
-          # Note: In a real CI this should probably download or have the CLI as a submodule/dependency
-          # but here we follow the existing pattern of creating the structure.
+          # CLI is embedded in the exe (SPRAT_EMBEDDED_CLI=ON); copy bundled assets.
+          cp build/spratprofiles.cfg dist/
+          cp -r build/transforms dist/
           tar -czf sprat-gui-linux.tar.gz -C dist .
 
           # Create AppImage
@@ -111,6 +114,8 @@ jobs:
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
           cp build/sprat-gui AppDir/usr/bin/
+          cp build/spratprofiles.cfg AppDir/usr/bin/
+          cp -r build/transforms AppDir/usr/bin/
           cp deploy/linux/sprat-gui.desktop AppDir/usr/share/applications/
           cp assets/icons/layout-svgrepo-com.svg AppDir/usr/share/icons/hicolor/scalable/apps/sprat-gui.svg
           APPIMAGE_EXTRACT_AND_RUN=1 \
@@ -127,13 +132,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           mkdir dist
-          # Bundle sprat-cli (read version from DEPENDENCIES)
-          $cli_version = (Get-Content DEPENDENCIES).Trim()
-          $cli_url = "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-windows-x64.zip"
-          Invoke-WebRequest -Uri $cli_url -OutFile cli.zip
-          # Extract into dist/cli/ — CLI executables and their DLLs land here
-          Expand-Archive cli.zip -DestinationPath dist/cli -Force
-          # Bundle GUI — exe at root, Qt DLLs deployed alongside it
+          # CLI is embedded in the exe (SPRAT_EMBEDDED_CLI=ON for Windows builds);
+          # no separate CLI download needed.
           Copy-Item -Path build/bin/Release/sprat-gui.exe -Destination dist/ -Force
           # Deploy Qt DLLs and plugins next to the exe.
           # --release:                 release DLLs only

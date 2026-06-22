@@ -503,6 +503,11 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
         }
 
         m_profilesTriedForCurrentLoad.clear();
+        // Discard any queued run: re-running immediately after total failure would
+        // just repeat the same error (possibly multiple times if the event loop
+        // processes deferred events during the error dialog below).
+        m_layoutRunPending = false;
+        m_layoutRunPendingQuiet = false;
 
         QString details = result.error;
         if (details.isEmpty()) details = result.output;

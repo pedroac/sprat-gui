@@ -282,7 +282,10 @@ QString CliToolsConfig::queryTransformsDir(const QString& convertBinaryPath) {
 #ifdef SPRAT_EMBEDDED_CLI
     Q_UNUSED(convertBinaryPath);
     CliResult result = EmbeddedCli::run("spratconvert", {"--transforms-dir"});
-    return QString::fromLocal8Bit(result.stdOut).trimmed();
+    const QString out = QString::fromLocal8Bit(result.stdOut).trimmed();
+    // A valid path is a single line. Multi-line output means the flag is
+    // unsupported and the binary printed its help text instead.
+    return out.contains(QLatin1Char('\n')) ? QString{} : out;
 #else
     if (convertBinaryPath.isEmpty()) return {};
 
@@ -296,8 +299,12 @@ QString CliToolsConfig::queryTransformsDir(const QString& convertBinaryPath) {
     QProcess process;
     process.start(convertBinaryPath, {"--transforms-dir"});
     QString result;
-    if (process.waitForFinished(2000))
-        result = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    if (process.waitForFinished(2000)) {
+        const QString out = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+        // Multi-line output means --transforms-dir is unsupported (binary printed help text).
+        if (!out.contains(QLatin1Char('\n')))
+            result = out;
+    }
 
     {
         QWriteLocker wl(&g_transformsLock);
