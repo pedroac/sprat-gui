@@ -74,17 +74,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev imagemagick
 
-      - name: Read CLI version
-        id: cli_version
+      - name: Configure
         shell: bash
         run: |
-          CLI_TAG=$(cat DEPENDENCIES | xargs)
-          echo "CLI version: $CLI_TAG"
-          echo "tag=$CLI_TAG" >> $GITHUB_OUTPUT
-
-      - name: Configure
-        run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DSPRAT_EMBEDDED_CLI=${{ matrix.embedded_cli }} -DSPRAT_CLI_VERSION=${{ steps.cli_version.outputs.tag }}
+          CLI_TAG=$(tr -d '\r' < DEPENDENCIES | xargs)
+          echo "Embedding CLI version: $CLI_TAG"
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
+            -DSPRAT_EMBEDDED_CLI=${{ matrix.embedded_cli }} \
+            -DSPRAT_CLI_VERSION="$CLI_TAG"
 
       - name: Build
         run: cmake --build build --config Release
@@ -143,6 +140,9 @@ jobs:
           # CLI is embedded in the exe (SPRAT_EMBEDDED_CLI=ON for Windows builds);
           # no separate CLI download needed.
           Copy-Item -Path build/bin/Release/sprat-gui.exe -Destination dist/ -Force
+          # Bundle sprat-cli assets (config and transforms) next to the exe.
+          Copy-Item -Path build/bin/Release/spratprofiles.cfg -Destination dist/ -Force
+          Copy-Item -Path build/bin/Release/transforms -Destination dist/ -Recurse -Force
           # Deploy Qt DLLs and plugins next to the exe.
           # --release:                 release DLLs only
           # --no-opengl-sw:            skip software OpenGL renderer (not needed for Qt Widgets)

@@ -77,10 +77,9 @@ void CliSetupController::check() {
         return;  // m_inCheck stays true until onVersionCheckFinished() clears it
 #else
         // Embedded CLI: checks are instant (return compile-time constants).
-        QString currentVersion = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
         const QString requiredVersion = SPRAT_CLI_VERSION;
 
-        if (currentVersion.isEmpty()) {
+        if (CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary).isEmpty()) {
             m_cliReady = false;
             emit statusMessageChanged(tr("CLI error (failed to execute layout)"));
             showCliExecutionError("spratlayout");
@@ -108,18 +107,43 @@ void CliSetupController::check() {
             m_inCheck = false;
             return;
         }
-        if (currentVersion != requiredVersion) {
-            if (CliToolsUi::askUpgrade(m_dialogParent, currentVersion, requiredVersion)) {
-                m_cliReady = false;
-                install();
-                m_inCheck = false;
-                return;
-            }
-            CliToolsConfig::saveInstalledCliVersion(currentVersion);
+
+        // checkBinaryVersion() returns the compile-time SPRAT_CLI_VERSION constant for
+        // embedded builds, not the version of the code that was actually compiled in.
+        // Run the binary directly to detect a real version mismatch (e.g. wrong sprat-cli
+        // was fetched at build time).
+        const CliResult versionResult = EmbeddedCli::run(
+            QStringLiteral("spratlayout"), {QStringLiteral("--version")}, {});
+        const QString versionOut = QString::fromUtf8(versionResult.stdOut).trimmed();
+        // Output format: "spratlayout version v0.11.3"
+        const QString actualVersion = versionOut.section(QLatin1Char(' '), -1);
+        if (!actualVersion.isEmpty() && actualVersion != requiredVersion) {
+            MessageDialog::critical(m_dialogParent, tr("CLI Version Mismatch"),
+                tr("The embedded CLI version (%1) does not match the expected version (%2).\n\n"
+                   "The application may behave incorrectly. Please reinstall.")
+                .arg(actualVersion, requiredVersion));
         }
+
+        // Check for required resource folders
+        QStringList missingFolders;
+        if (SpratProfilesConfig::findProfilesConfigPath().isEmpty()) {
+            missingFolders << tr("Profiles config (spratprofiles.cfg)");
+        }
+        const QString transformsDir = CliToolsConfig::queryTransformsDir(m_cliPaths.convertBinary);
+        if (transformsDir.isEmpty() || !QDir(transformsDir).exists()) {
+            missingFolders << tr("Transforms directory");
+        }
+        if (!missingFolders.isEmpty()) {
+            MessageDialog::warning(m_dialogParent, tr("Missing Required Files"),
+                tr("The following required resources were not found:\n\n%1\n\n"
+                   "Some features may not work correctly.")
+                .arg(missingFolders.join(QLatin1Char('\n'))));
+        }
+
         m_cliReady = true;
-        CliToolsConfig::saveInstalledCliVersion(currentVersion);
-        emit statusMessageChanged(tr("CLI ready (%1)").arg(currentVersion));
+        const QString displayVersion = actualVersion.isEmpty() ? requiredVersion : actualVersion;
+        CliToolsConfig::saveInstalledCliVersion(displayVersion);
+        emit statusMessageChanged(tr("CLI ready (%1)").arg(displayVersion));
         emit cliReady();
 #endif
     } else {
@@ -326,6 +350,22 @@ void CliSetupController::onVersionCheckFinished() {
         // User declined upgrade; persist the version they chose to keep.
         CliToolsConfig::saveInstalledCliVersion(r.layoutVersion);
     }
+    // Check for required resource folders
+    QStringList missingFolders;
+    if (SpratProfilesConfig::findProfilesConfigPath().isEmpty()) {
+        missingFolders << tr("Profiles config (spratprofiles.cfg)");
+    }
+    const QString transformsDir = CliToolsConfig::queryTransformsDir(m_cliPaths.convertBinary);
+    if (transformsDir.isEmpty() || !QDir(transformsDir).exists()) {
+        missingFolders << tr("Transforms directory");
+    }
+    if (!missingFolders.isEmpty()) {
+        MessageDialog::warning(m_dialogParent, tr("Missing Required Files"),
+            tr("The following required resources were not found:\n\n%1\n\n"
+               "Some features may not work correctly.")
+            .arg(missingFolders.join(QLatin1Char('\n'))));
+    }
+
     m_cliReady = true;
     CliToolsConfig::saveInstalledCliVersion(r.layoutVersion);
     emit statusMessageChanged(tr("CLI ready (%1)").arg(r.layoutVersion));
