@@ -83,11 +83,11 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         const QString inputDesc = config.imagePathList.isEmpty()
             ? config.sourceFolderPath
             : QStringLiteral("--stdin-list (%1 paths)").arg(config.imagePathList.size());
-        qInfo() << "[WASM] spratlayout start"
+        qInfo() << "[Embedded] spratlayout start"
                 << "input=" << inputDesc
                 << "args=" << args.join(' ');
         CliResult embeddedResult = EmbeddedCli::run("spratlayout", args, stdinPayload);
-        qInfo() << "[WASM] spratlayout done"
+        qInfo() << "[Embedded] spratlayout done"
                 << "exit=" << embeddedResult.exitCode
                 << "stdoutBytes=" << embeddedResult.stdOut.size()
                 << "stderrBytes=" << embeddedResult.stdErr.size()

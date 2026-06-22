@@ -541,7 +541,7 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
     const QString parserFolder = m_cfg.context ? m_cfg.context->layoutParserFolder() : QString();
     QVector<LayoutModel> newModels = LayoutParser::parse(layoutText, parserFolder,
                                                          m_cfg.session->currentFolder);
-    qInfo() << "[WASM] LayoutParser::parse done"
+    qInfo() << "[Layout] LayoutParser::parse done"
             << "models=" << newModels.size()
             << "ms=" << parseTimer.elapsed();
     if (newModels.isEmpty()) {
@@ -632,7 +632,7 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
                     << "(current:" << m_layoutGeneration << ")";
             return;
         }
-        qInfo() << "[WASM] setModelsAsync start"
+        qInfo() << "[Layout] setModelsAsync start"
                 << "models=" << m_cfg.session->activeAtlas().layoutModels.size();
         m_cfg.canvas->setModelsAsync(newModels, &m_isCanceled,
             [this, selectedPaths, primaryPath, myGeneration]() {
@@ -708,7 +708,7 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
                 emit tempDirsCleanupNeeded();
 
                 m_pendingChangeCount = 0;
-                qInfo() << "[WASM] setModelsAsync finished";
+                qInfo() << "[Layout] setModelsAsync finished";
 
                 if (m_layoutRunPending) {
                     const bool q = m_layoutRunPendingQuiet;

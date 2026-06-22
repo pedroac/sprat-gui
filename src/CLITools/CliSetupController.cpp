@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QSysInfo>
 #include <QTimer>
 
 #ifndef SPRAT_EMBEDDED_CLI
@@ -398,7 +399,24 @@ QString CliSetupController::buildDiagnosticsText(const QString& spritesFolder) c
 
     QString text;
 
-    // Version
+    // System info
+#if defined(Q_OS_WASM)
+    const QString buildPlatform = QStringLiteral("WASM");
+#elif defined(Q_OS_WIN)
+    const QString buildPlatform = QStringLiteral("Windows");
+#elif defined(Q_OS_MACOS)
+    const QString buildPlatform = QStringLiteral("macOS");
+#elif defined(Q_OS_LINUX)
+    const QString buildPlatform = QStringLiteral("Linux");
+#else
+    const QString buildPlatform = QStringLiteral("Unknown");
+#endif
+    text += QStringLiteral("GUI version:  %1  (%2)\n").arg(SPRAT_GUI_VERSION, buildPlatform);
+    text += QStringLiteral("OS:           %1\n").arg(QSysInfo::prettyProductName());
+    text += QStringLiteral("Kernel:       %1 %2\n").arg(QSysInfo::kernelType(), QSysInfo::kernelVersion());
+    text += QStringLiteral("CPU arch:     %1\n\n").arg(QSysInfo::currentCpuArchitecture());
+
+    // CLI version
     const QString version = CliToolsConfig::checkBinaryVersion(m_cliPaths.layoutBinary);
     text += QStringLiteral("CLI version:  %1\n\n").arg(
         version.isEmpty() ? tr("ERROR  not found") : version);

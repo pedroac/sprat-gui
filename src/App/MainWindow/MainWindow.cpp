@@ -1177,6 +1177,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (m_layoutOrchestrator) m_layoutOrchestrator->setCLIReady(true);
         if (m_exportCoordinator) m_exportCoordinator->setCliReady(true);
         updateUiState();
+        updateCliDiagnostics();
         scheduleLayoutRebuild(true);
     });
     connect(m_cliSetup, &CliSetupController::cliFailed, this, [this]() {
