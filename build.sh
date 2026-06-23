@@ -5,17 +5,28 @@ set -euo pipefail
 # Ensure we're in the script directory
 cd "$(dirname "$0")"
 
-# Update DEPENDENCIES if possible (don't fail offline)
-echo "Updating DEPENDENCIES..."
-TAG=$(curl -fsSL https://api.github.com/repos/pedroac/sprat-cli/releases/latest 2>/dev/null \
-    | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
-    | head -n 1 || true)
+# Update DEPENDENCIES from the local sprat-cli checkout if available,
+# otherwise fall back to the latest GitHub release.
+LOCAL_CLI_VERSION=""
+if [ -f "../sprat-cli/VERSION" ]; then
+    LOCAL_CLI_VERSION=$(tr -d '[:space:]' < "../sprat-cli/VERSION")
+fi
 
-if [ -n "$TAG" ]; then
-    echo "$TAG" > DEPENDENCIES
-    echo "Dependencies updated to latest release tag: $TAG"
+if [ -n "$LOCAL_CLI_VERSION" ]; then
+    echo "$LOCAL_CLI_VERSION" > DEPENDENCIES
+    echo "Dependencies set to local sprat-cli version: $LOCAL_CLI_VERSION"
 else
-    echo "Could not fetch latest release tag. Using existing DEPENDENCIES file."
+    echo "Updating DEPENDENCIES from latest GitHub release..."
+    TAG=$(curl -fsSL https://api.github.com/repos/pedroac/sprat-cli/releases/latest 2>/dev/null \
+        | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | head -n 1 || true)
+
+    if [ -n "$TAG" ]; then
+        echo "$TAG" > DEPENDENCIES
+        echo "Dependencies updated to latest release tag: $TAG"
+    else
+        echo "Could not fetch latest release tag. Using existing DEPENDENCIES file."
+    fi
 fi
 
 BUILD_TYPE="${1:-host}"
