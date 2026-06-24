@@ -252,6 +252,7 @@ if(SPRAT_EMBEDDED_CLI)
             sprat_cli
             GIT_REPOSITORY https://github.com/pedroac/sprat-cli.git
             GIT_TAG ${SPRAT_CLI_VERSION}
+            GIT_SUBMODULES ""
         )
         FetchContent_MakeAvailable(sprat_cli)
         set(SPRAT_CLI_SOURCE_DIR "${sprat_cli_SOURCE_DIR}")
