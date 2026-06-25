@@ -80,7 +80,7 @@ jobs:
         run: |
           # macOS Tahoe / Xcode 26 removed the legacy AGL framework;
           # Qt 6.5.x still references it in FindWrapOpenGL.cmake.
-          find "$Qt6_DIR" -name "FindWrapOpenGL.cmake" -exec \
+          find "$QT_ROOT_DIR" -name "FindWrapOpenGL.cmake" -exec \
             sed -i '' 's/-framework AGL//g' {} +
 
       - name: Configure
