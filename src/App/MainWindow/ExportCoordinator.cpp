@@ -509,7 +509,7 @@ void ExportCoordinator::doRunPreviewPack() {
         m_cfg.packedAtlasView->setLoading();
     }
 
-    auto task = [=]() -> PackPreviewResult {
+    auto task = [=, this]() -> PackPreviewResult {
         // Find effective profile definition
         SpratProfile effectiveProfile;
         for (const SpratProfile& p : profiles) {
