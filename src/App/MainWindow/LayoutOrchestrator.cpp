@@ -39,6 +39,8 @@ LayoutOrchestrator::LayoutOrchestrator(const Config& cfg, QObject* parent)
 
 void LayoutOrchestrator::setSyncMode(SyncMode mode) { m_syncMode = mode; }
 void LayoutOrchestrator::setDeduplicateMode(const QString& mode) { m_deduplicateMode = mode; }
+void LayoutOrchestrator::setDedupThreshold(int v) { m_dedupThreshold = v; }
+void LayoutOrchestrator::setIncrementalLayout(bool v) { m_incrementalLayout = v; }
 void LayoutOrchestrator::setLayoutZoomOnChange(LayoutZoomOnChange mode) { m_layoutZoomOnChange = mode; }
 void LayoutOrchestrator::setEnableAnimation(bool v) { m_enableSpriteAnimation = v; }
 void LayoutOrchestrator::setCLIReady(bool ready) { m_cliReady = ready; }
@@ -234,6 +236,10 @@ void LayoutOrchestrator::run(bool quiet) {
 
     const LayoutRunConfig inputCfg = buildConfig();
     if (inputCfg.sourceFolderPath.isEmpty() && inputCfg.imagePathList.isEmpty()) {
+        qWarning() << "[Layout] buildConfig returned empty config"
+                   << "sources=" << m_cfg.session->sources.size()
+                   << "activeFramePaths=" << m_cfg.session->activeFramePaths.size()
+                   << "layoutSourcePath=" << m_cfg.session->layoutSourcePath;
         const bool atlasesLayoutMode = m_activeWorkspace == 3
             && m_cfg.atlasMgmtWorkspace
             && m_cfg.atlasMgmtWorkspace->viewMode() == AtlasesManagementWorkspace::ViewMode::Layout;
@@ -249,6 +255,7 @@ void LayoutOrchestrator::run(bool quiet) {
         return;
     }
     if (!m_cliReady) {
+        qWarning() << "[Layout] run() aborted: CLI not ready";
         emit cliReadyCheckNeeded();
         return;
     }
@@ -284,6 +291,8 @@ void LayoutOrchestrator::run(bool quiet) {
     config.sourceResolutionHeight = sourceResolutionHeight;
     config.retryWithoutTrim = m_retryWithoutTrimOnFailure;
     config.deduplicateMode = m_deduplicateMode;
+    config.dedupThreshold = m_dedupThreshold;
+    config.incrementalLayout = m_incrementalLayout;
 
     m_cfg.session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile = requestedProfile;

@@ -13,6 +13,9 @@
 #ifndef Q_OS_WASM
 #include <QProcess>
 #endif
+#ifdef SPRAT_EMBEDDED_CLI
+#include "EmbeddedCli.h"
+#endif
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -24,6 +27,7 @@
 ProjectController::ProjectController(ProjectSession* session, QObject* parent)
     : QObject(parent)
     , m_session(session)
+    , m_isCanceled(std::make_shared<std::atomic<bool>>(false))
 {
     connect(&m_projectLoadWatcher,    &QFutureWatcher<ProjectLoadResult>::finished,
             this, &ProjectController::onProjectLoadWatcherFinished);
@@ -38,11 +42,24 @@ ProjectController::ProjectController(ProjectSession* session, QObject* parent)
 }
 
 // ---------------------------------------------------------------------------
+// Destructor
+// ---------------------------------------------------------------------------
+ProjectController::~ProjectController()
+{
+    *m_isCanceled = true;
+    m_projectLoadWatcher.waitForFinished();
+    m_zipDiscoveryWatcher.waitForFinished();
+    m_frameDetectionWatcher.waitForFinished();
+    m_tarExtractionWatcher.waitForFinished();
+    m_frameExtractionWatcher.waitForFinished();
+}
+
+// ---------------------------------------------------------------------------
 // cancelAll
 // ---------------------------------------------------------------------------
 void ProjectController::cancelAll()
 {
-    m_isCanceled = true;
+    *m_isCanceled = true;
     if (m_activeImportReply) m_activeImportReply->abort();
     m_projectLoadWatcher.cancel();
     m_zipDiscoveryWatcher.cancel();
@@ -117,20 +134,21 @@ void ProjectController::launchZipDiscovery(const QString& zipPath,
                                            const QString& tempPath)
 {
     if (m_zipDiscoveryWatcher.isRunning()) return;
-    auto task = [this, zipPath, action, tempPath]() {
+    auto cancelFlag = m_isCanceled;
+    auto task = [cancelFlag, zipPath, action, tempPath]() {
         ZipDiscoveryResult result;
         result.tempPath = tempPath;
         result.zipPath  = zipPath;
         result.action   = action;
         result.canceled = false;
         QString error;
-        if (ArchiveExtractor::extractToDirectory(zipPath, tempPath, error, &m_isCanceled)) {
-            if (m_isCanceled)
+        if (ArchiveExtractor::extractToDirectory(zipPath, tempPath, error, cancelFlag.get())) {
+            if (*cancelFlag)
                 result.canceled = true;
             else
                 result.selections = ImageDiscoveryService::imageDirectoriesRecursive(tempPath);
         } else {
-            if (m_isCanceled)
+            if (*cancelFlag)
                 result.canceled = true;
             else {
                 result.error = error;
@@ -162,15 +180,16 @@ void ProjectController::launchTarExtraction(const QString& tarPath,
                                             const QString& tempPath)
 {
     if (m_tarExtractionWatcher.isRunning()) return;
-    auto task = [this, tarPath, action, tempPath]() {
+    auto cancelFlag = m_isCanceled;
+    auto task = [cancelFlag, tarPath, action, tempPath]() {
         TarExtractionResult result;
         result.tempPath = tempPath;
         result.tarPath  = tarPath;
         result.action   = action;
         result.success  = false;
         QString error;
-        if (ArchiveExtractor::extractToDirectory(tarPath, tempPath, error, &m_isCanceled))
-            result.success = !m_isCanceled.load();
+        if (ArchiveExtractor::extractToDirectory(tarPath, tempPath, error, cancelFlag.get()))
+            result.success = !cancelFlag->load();
         else
             qWarning() << "ArchiveExtractor (tar) error:" << error;
         return result;
@@ -187,6 +206,8 @@ void ProjectController::launchFrameExtraction(const QString& imagePath,
 {
     if (m_frameExtractionWatcher.isRunning()) return;
     const QString unpackBin = m_unpackBinary;
+    qInfo() << "[FrameExtraction] launchFrameExtraction unpackBin=" << unpackBin
+            << "imagePath=" << imagePath << "frames=" << selectedFrames.size();
     auto task = [this, imagePath, tempPath, action, bgColor, selectedFrames, unpackBin]() {
         FrameExtractionResult res;
         res.tempPath       = tempPath;
@@ -199,7 +220,15 @@ void ProjectController::launchFrameExtraction(const QString& imagePath,
         args << imagePath << "--frames" << "-" << "--output" << tempPath;
         QByteArray framesDataBytes = framesData.toUtf8();
 
-#ifndef Q_OS_WASM
+#ifdef SPRAT_EMBEDDED_CLI
+        CliResult embeddedResult = EmbeddedCli::run("spratunpack", args, framesDataBytes);
+        res.success = (embeddedResult.exitCode == 0);
+        if (!res.success) {
+            qWarning() << "[FrameExtraction] spratunpack (embedded) failed: exitCode="
+                       << embeddedResult.exitCode
+                       << "stderr=" << embeddedResult.stdErr;
+        }
+#elif !defined(Q_OS_WASM)
         QProcess proc;
         proc.start(unpackBin, args);
         if (!framesDataBytes.isEmpty()) {
@@ -209,6 +238,13 @@ void ProjectController::launchFrameExtraction(const QString& imagePath,
         res.success = proc.waitForFinished(60000) &&
                       proc.exitStatus() == QProcess::NormalExit &&
                       proc.exitCode() == 0;
+        if (!res.success) {
+            qWarning() << "[FrameExtraction] spratunpack failed:"
+                       << "exitCode=" << proc.exitCode()
+                       << "exitStatus=" << proc.exitStatus()
+                       << "processError=" << proc.errorString()
+                       << "stderr=" << proc.readAllStandardError();
+        }
 #endif
         return res;
     };
@@ -227,19 +263,44 @@ void ProjectController::onFrameExtractionWatcherFinished(){ emit frameExtraction
 
 // ---------------------------------------------------------------------------
 // detectFramesInImage
-// Runs spratframes in a subprocess.  Called from a background thread.
+// Runs spratframes in-process (embedded) or as a subprocess.
+// Called from a background thread.
 // ---------------------------------------------------------------------------
 ProjectController::FrameDetectionResult
 ProjectController::detectFramesInImage(const QString& imagePath) const
 {
     FrameDetectionResult result;
-    if (m_framesBinary.isEmpty()) return result;
 
 #ifdef Q_OS_WASM
     return result;
 #else
+    QStringList args;
+    if (m_framesSettings.framesHasRectangles) {
+        args << "--has-rectangles";
+        if (!m_framesSettings.framesRectangleColor.isEmpty())
+            args << "--rectangle-color" << m_framesSettings.framesRectangleColor;
+    }
+    if (m_framesSettings.framesTolerance != 1)
+        args << "--tolerance" << QString::number(m_framesSettings.framesTolerance);
+    if (m_framesSettings.framesMinSize != 4)
+        args << "--min-size" << QString::number(m_framesSettings.framesMinSize);
+    if (m_framesSettings.framesMaxSprites != 10000)
+        args << "--max-sprites" << QString::number(m_framesSettings.framesMaxSprites);
+    args << imagePath;
+
+    QByteArray output;
+#ifdef SPRAT_EMBEDDED_CLI
+    CliResult embeddedResult = EmbeddedCli::run("spratframes", args);
+    if (embeddedResult.exitCode != 0) {
+        qWarning() << "spratframes error (embedded):" << embeddedResult.stdErr;
+        return result;
+    }
+    output = embeddedResult.stdOut;
+#else
+    if (m_framesBinary.isEmpty()) return result;
     QProcess proc;
-    proc.start(m_framesBinary, QStringList() << imagePath);
+    proc.start(m_framesBinary, args);
+    proc.closeWriteChannel();
     if (!proc.waitForFinished(30000)) {
         qWarning() << "spratframes timed out";
         return result;
@@ -248,7 +309,8 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
         qWarning() << "spratframes error";
         return result;
     }
-    const QByteArray output = proc.readAllStandardOutput();
+    output = proc.readAllStandardOutput();
+#endif // SPRAT_EMBEDDED_CLI
     QString outputStr = QString::fromUtf8(output);
     QTextStream stream(&outputStr);
     QString line;
@@ -542,4 +604,64 @@ void ProjectController::registerLoadedSource(const QString& sourcePath,
     }
     m_session->sources.append(src);
     syncFramePathsToNeutralAtlas(action);
+    m_session->rebuildSpriteIndex();
+}
+
+// ---------------------------------------------------------------------------
+// registerFailedSource
+// ---------------------------------------------------------------------------
+void ProjectController::registerFailedSource(const QString& sourcePath,
+                                              const QString& errorMessage)
+{
+    if (!m_session) return;
+
+    // Determine source type and name
+    ProjectSource src;
+    if (!m_pendingImportUrl.isEmpty()) {
+        const QUrl url(m_pendingImportUrl);
+        QString baseName = QFileInfo(url.path()).fileName();
+        if (baseName.isEmpty()) baseName = url.host();
+        if (baseName.isEmpty()) baseName = m_pendingImportUrl;
+        src.name = makeUniqueSourceName(baseName);
+        src.type = SourceType::Url;
+        src.originalPath = m_pendingImportUrl;
+        m_pendingImportUrl.clear();
+    } else {
+        const QString lower = sourcePath.toLower();
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            const QUrl url(sourcePath);
+            QString baseName = QFileInfo(url.path()).fileName();
+            if (baseName.isEmpty()) baseName = url.host();
+            if (baseName.isEmpty()) baseName = sourcePath;
+            src.name = makeUniqueSourceName(baseName);
+            src.type = SourceType::Url;
+        } else if (lower.endsWith(".zip") || lower.endsWith(".tar")
+                   || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
+                   || lower.endsWith(".tar.bz2") || lower.endsWith(".tar.xz")) {
+            src.name = makeUniqueSourceName(QFileInfo(sourcePath).fileName());
+            src.type = SourceType::Archive;
+        } else if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                   || lower.endsWith(".bmp") || lower.endsWith(".gif") || lower.endsWith(".webp")
+                   || lower.endsWith(".tga") || lower.endsWith(".dds")) {
+            src.name = makeUniqueSourceName(QFileInfo(sourcePath).fileName());
+            src.type = SourceType::SingleImage;
+        } else {
+            src.name = makeUniqueSourceName(QFileInfo(sourcePath).fileName());
+            src.type = SourceType::Folder;
+        }
+        src.originalPath = sourcePath;
+    }
+    src.hasError     = true;
+    src.errorMessage = errorMessage;
+
+    // Update in place if this source already exists (e.g. second failed attempt)
+    for (ProjectSource& existing : m_session->sources) {
+        if (existing.originalPath == src.originalPath) {
+            existing.hasError     = true;
+            existing.errorMessage = errorMessage;
+            return;
+        }
+    }
+
+    m_session->sources.append(src);
 }

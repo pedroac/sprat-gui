@@ -111,3 +111,24 @@ inline ExportZoomOnChange exportZoomOnChangeFromString(const QString& s) {
     if (n == "reset_100") return ExportZoomOnChange::Reset100;
     return ExportZoomOnChange::Fit;
 }
+
+/**
+ * @enum NineSliceZoomOnChange
+ * @brief Controls zoom behavior when selecting a nine-slice definition.
+ */
+enum class NineSliceZoomOnChange { FitToFrame, Reset100, NoChange };
+
+inline QString nineSliceZoomOnChangeToString(NineSliceZoomOnChange m) {
+    switch (m) {
+    case NineSliceZoomOnChange::Reset100: return "reset_100";
+    case NineSliceZoomOnChange::NoChange: return "no_change";
+    default:                              return "fit";
+    }
+}
+
+inline NineSliceZoomOnChange nineSliceZoomOnChangeFromString(const QString& s) {
+    const QString n = s.trimmed().toLower();
+    if (n == "reset_100") return NineSliceZoomOnChange::Reset100;
+    if (n == "no_change") return NineSliceZoomOnChange::NoChange;
+    return NineSliceZoomOnChange::FitToFrame;
+}

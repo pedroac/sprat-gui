@@ -15,6 +15,7 @@
 #include "AtlasesManagementWorkspace.h"
 #include "ExportWorkspace.h"
 #include "FrameAnimationWorkspace.h"
+#include "NineSliceWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -584,6 +585,8 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
                 msgBox->open();
 #else
                 MessageDialog::warning(this, tr("Download Failed"), errorText);
+                m_projectController->registerFailedSource(url.toString(), errorText);
+                refreshSpriteTree();
 #endif
             }
             return;
@@ -1241,11 +1244,12 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
 
     if (imageDirectories.isEmpty()) {
         setLoading(false);
-        if (!result.error.isEmpty()) {
-            MessageDialog::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(result.error));
-        } else {
-            MessageDialog::warning(this, tr("Load Failed"), tr("Could not extract ZIP or no image folders found."));
-        }
+        const QString errorMsg = !result.error.isEmpty()
+            ? tr("Could not extract ZIP: %1").arg(result.error)
+            : tr("Could not extract ZIP or no image folders found.");
+        MessageDialog::warning(this, tr("Load Failed"), errorMsg);
+        m_projectController->registerFailedSource(zipPath, errorMsg);
+        refreshSpriteTree();
         return;
     }
 
@@ -1805,6 +1809,11 @@ void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
         }
         m_mainStack->setCurrentIndex(2);
         m_mainStack->show();
+    } else if (ws == m_nineSliceWorkspace) {
+        if (m_atlasDock)     m_atlasDock->hide();
+        if (m_animationDock) m_animationDock->hide();
+        m_mainStack->setCurrentIndex(3);
+        m_mainStack->show();
     }
 }
 
@@ -1834,6 +1843,8 @@ void MainWindow::switchWorkspace(IWorkspace* next)
                 m_exportLayoutCanvas->setParent(this);
                 m_exportLayoutCanvas->hide();
             }
+            m_mainStack->setCurrentIndex(0);
+        } else if (prev == m_nineSliceWorkspace) {
             m_mainStack->setCurrentIndex(0);
         } else if (prev == m_atlasesManagementWorkspace) {
             if (m_atlasesManagementWorkspace &&
@@ -1865,6 +1876,7 @@ void MainWindow::switchWorkspace(IWorkspace* next)
         const int wsIdx = (next == m_frameAnimWorkspace) ? 1
                         : (next == m_exportWorkspace)    ? 2
                         : (next == m_atlasesManagementWorkspace) ? 3
+                        : (next == m_nineSliceWorkspace) ? 4
                         : 0;
         m_layoutOrchestrator->setActiveWorkspace(wsIdx);
     }
@@ -1878,6 +1890,8 @@ void MainWindow::switchWorkspace(IWorkspace* next)
         m_exportationWorkspaceAction->setChecked(next == m_exportWorkspace);
     if (m_atlasesManagementWorkspaceAction)
         m_atlasesManagementWorkspaceAction->setChecked(next == m_atlasesManagementWorkspace);
+    if (m_nineSliceWorkspaceAction)
+        m_nineSliceWorkspaceAction->setChecked(next == m_nineSliceWorkspace);
 
     // Apply dock/stack layout for the incoming workspace
     applyWorkspaceLayout(next);

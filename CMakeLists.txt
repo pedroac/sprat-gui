@@ -35,16 +35,16 @@ endif()
 add_definitions(-DSPRAT_GUI_VERSION="${SPRAT_GUI_VERSION}")
 
 # === CLI Dependency ===
-set(SPRAT_CLI_VERSION "" CACHE STRING "sprat-cli git tag to embed; reads DEPENDENCIES file if empty")
-if(NOT SPRAT_CLI_VERSION)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES")
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES" DEPENDENCIES_CONTENT)
-        string(STRIP "${DEPENDENCIES_CONTENT}" SPRAT_CLI_VERSION)
-    endif()
-    if(NOT SPRAT_CLI_VERSION)
-        set(SPRAT_CLI_VERSION "v0.0.0")
-    endif()
+# Read the version from DEPENDENCIES first, then allow the cache to override.
+set(_SPRAT_CLI_DEPS_VERSION "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES" DEPENDENCIES_CONTENT)
+    string(STRIP "${DEPENDENCIES_CONTENT}" _SPRAT_CLI_DEPS_VERSION)
 endif()
+if(NOT _SPRAT_CLI_DEPS_VERSION)
+    set(_SPRAT_CLI_DEPS_VERSION "v0.0.0")
+endif()
+set(SPRAT_CLI_VERSION "${_SPRAT_CLI_DEPS_VERSION}" CACHE STRING "sprat-cli git tag to embed; reads DEPENDENCIES file if empty" FORCE)
 add_definitions(-DSPRAT_CLI_VERSION="${SPRAT_CLI_VERSION}")
 
 # === Configuration ===
@@ -352,6 +352,12 @@ set(PROJECT_SOURCES
     src/App/Workspaces/AtlasesManagement/AtlasesManagementWorkspace.cpp
     src/App/Workspaces/AtlasesManagement/PackedAtlasView.h
     src/App/Workspaces/AtlasesManagement/PackedAtlasView.cpp
+    src/App/Workspaces/NineSlice/NineSliceWorkspace.h
+    src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
+    src/NineSlice/NineSliceEditorCanvas.h
+    src/NineSlice/NineSliceEditorCanvas.cpp
+    src/NineSlice/NineSlicePreviewWidget.h
+    src/NineSlice/NineSlicePreviewWidget.cpp
     src/App/MainWindow/ExportDiffDialog.h
     src/App/MainWindow/ExportDiffDialog.cpp
     src/Settings/SettingsDialog.cpp
@@ -472,7 +478,9 @@ target_include_directories(sprat-gui PRIVATE
     src/App/Workspaces/AtlasesManagement
     src/App/Workspaces/Export
     src/App/Workspaces/FrameAnimation
+    src/App/Workspaces/NineSlice
     src/App/Workspaces/Shared
+    src/NineSlice
     src/Animation
     src/Animation/Timelines
     src/Animation/Test
@@ -619,6 +627,7 @@ if(BUILD_TESTING)
         src
         src/Animation
         src/Animation/Timelines
+        src/NineSlice
         src/Project
         src/Core
         src/SpriteSheetLayout

@@ -32,6 +32,7 @@ void SettingsDialog::setupUi() {
         case Section::AtlasLayout: setWindowTitle(tr("Atlas Layout Settings")); break;
         case Section::Exportation: setWindowTitle(tr("Exportation Settings")); break;
         case Section::SpritesNavigator: setWindowTitle(tr("Sprites Navigator Settings")); break;
+        case Section::NineSlice: setWindowTitle(tr("Nine-Slice Editor Settings")); break;
 #ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
 #endif
@@ -66,7 +67,73 @@ void SettingsDialog::setupUi() {
     m_deduplicateModeCombo->setAccessibleName(tr("Deduplicate mode"));
     spritesheetForm->addRow(tr("Deduplicate Sprites:"), m_deduplicateModeCombo);
 
-    // Sync controls
+    m_dedupThresholdSpin = new QSpinBox(this);
+    m_dedupThresholdSpin->setRange(0, 64);
+    m_dedupThresholdSpin->setValue(m_settings.dedupThreshold);
+    m_dedupThresholdSpin->setToolTip(tr("Max Hamming distance for perceptual deduplication (0 = exact match, higher = more similar sprites merged)"));
+    m_dedupThresholdSpin->setAccessibleName(tr("Dedup threshold"));
+    m_dedupThresholdSpin->setEnabled(m_settings.deduplicateMode == "perceptual");
+    spritesheetForm->addRow(tr("Dedup Threshold:"), m_dedupThresholdSpin);
+
+    connect(m_deduplicateModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+        m_dedupThresholdSpin->setEnabled(m_deduplicateModeCombo->currentData().toString() == "perceptual");
+    });
+
+    m_incrementalLayoutCheck = new QCheckBox(tr("Incremental Layout"), this);
+    m_incrementalLayoutCheck->setChecked(m_settings.incrementalLayout);
+    m_incrementalLayoutCheck->setToolTip(tr("Reuse positions for unchanged sprites, preventing cascading coordinate changes"));
+    m_incrementalLayoutCheck->setAccessibleName(tr("Incremental layout"));
+    spritesheetForm->addRow("", m_incrementalLayoutCheck);
+
+    // Frame Detection controls
+    auto* frameDetectionDesc = new QLabel(tr("Options for spratframes sprite detection when importing spritesheets."), this);
+    frameDetectionDesc->setWordWrap(true);
+    frameDetectionDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    spritesheetForm->addRow(frameDetectionDesc);
+
+    m_framesHasRectanglesCheck = new QCheckBox(tr("Has rectangles"), this);
+    m_framesHasRectanglesCheck->setChecked(m_settings.framesHasRectangles);
+    m_framesHasRectanglesCheck->setToolTip(tr("Spritesheet has rectangle borders around sprites"));
+    m_framesHasRectanglesCheck->setAccessibleName(tr("Has rectangles"));
+    spritesheetForm->addRow("", m_framesHasRectanglesCheck);
+
+    m_framesRectangleColorEdit = new QLineEdit(m_settings.framesRectangleColor, this);
+    m_framesRectangleColorEdit->setPlaceholderText(tr("255,0,255 or #FF00FF"));
+    m_framesRectangleColorEdit->setToolTip(tr("Color of rectangle borders (default: 255,0,255)"));
+    m_framesRectangleColorEdit->setAccessibleName(tr("Rectangle color"));
+    m_framesRectangleColorEdit->setEnabled(m_settings.framesHasRectangles);
+    spritesheetForm->addRow(tr("Rectangle Color:"), m_framesRectangleColorEdit);
+
+    connect(m_framesHasRectanglesCheck, &QCheckBox::toggled,
+            m_framesRectangleColorEdit, &QLineEdit::setEnabled);
+
+    m_framesToleranceSpin = new QSpinBox(this);
+    m_framesToleranceSpin->setRange(1, 100);
+    m_framesToleranceSpin->setValue(m_settings.framesTolerance);
+    m_framesToleranceSpin->setToolTip(tr("Distance tolerance for sprite grouping (default: 1)"));
+    m_framesToleranceSpin->setAccessibleName(tr("Tolerance"));
+    spritesheetForm->addRow(tr("Tolerance:"), m_framesToleranceSpin);
+
+    m_framesMinSizeSpin = new QSpinBox(this);
+    m_framesMinSizeSpin->setRange(1, 1000);
+    m_framesMinSizeSpin->setValue(m_settings.framesMinSize);
+    m_framesMinSizeSpin->setToolTip(tr("Minimum sprite size in pixels (default: 4)"));
+    m_framesMinSizeSpin->setAccessibleName(tr("Min size"));
+    spritesheetForm->addRow(tr("Min Size:"), m_framesMinSizeSpin);
+
+    m_framesMaxSpritesSpin = new QSpinBox(this);
+    m_framesMaxSpritesSpin->setRange(1, 100000);
+    m_framesMaxSpritesSpin->setValue(m_settings.framesMaxSprites);
+    m_framesMaxSpritesSpin->setToolTip(tr("Maximum number of sprites to extract (default: 10000)"));
+    m_framesMaxSpritesSpin->setAccessibleName(tr("Max sprites"));
+    spritesheetForm->addRow(tr("Max Sprites:"), m_framesMaxSpritesSpin);
+
+    auto* syncDesc = new QLabel(tr("Synchronize the project with a source folder on disk."), this);
+    syncDesc->setWordWrap(true);
+    syncDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    spritesheetForm->addRow(syncDesc);
+
     m_syncModeCombo = new QComboBox(this);
     m_syncModeCombo->addItem(tr("None (no sync)"), (int)SyncMode::None);
     m_syncModeCombo->addItem(tr("Manual (sync on demand)"), (int)SyncMode::Manual);
@@ -94,6 +161,11 @@ void SettingsDialog::setupUi() {
     m_framesEditorGroup = new QGroupBox(tr("Frames Editor"), content);
     QFormLayout* framesEditorForm = new QFormLayout(m_framesEditorGroup);
 
+    auto* canvasDesc = new QLabel(tr("Background colors and transparency for the sprite frame editor."), this);
+    canvasDesc->setWordWrap(true);
+    canvasDesc->setStyleSheet("color: #666; margin-bottom: 4px;");
+    framesEditorForm->addRow(canvasDesc);
+
     m_canvasColorBtn = createColorButton(m_settings.workspaceColor);
     m_canvasColorBtn->setToolTip(tr("Color of the workspace area outside sprites"));
     m_canvasColorBtn->setAccessibleName(tr("Workspace color"));
@@ -112,6 +184,11 @@ void SettingsDialog::setupUi() {
     m_checkerboardCheck->setAccessibleName(tr("Transparency checkerboard"));
     framesEditorForm->addRow("", m_checkerboardCheck);
 
+    auto* onionSkinDesc = new QLabel(tr("Onion skin shows ghost overlays of other checked frames."), this);
+    onionSkinDesc->setWordWrap(true);
+    onionSkinDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    framesEditorForm->addRow(onionSkinDesc);
+
     m_onionSkinOpacitySpin = new QSpinBox(this);
     m_onionSkinOpacitySpin->setRange(0, 100);
     m_onionSkinOpacitySpin->setSuffix(tr(" %"));
@@ -123,6 +200,11 @@ void SettingsDialog::setupUi() {
     m_propagateEditsCheck->setChecked(m_settings.propagateEditsToChecked);
     m_propagateEditsCheck->setToolTip(tr("Automatically apply pivot and marker edits to all checked frames simultaneously"));
     framesEditorForm->addRow("", m_propagateEditsCheck);
+
+    auto* navigationDesc = new QLabel(tr("Behavior when switching between frames."), this);
+    navigationDesc->setWordWrap(true);
+    navigationDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    framesEditorForm->addRow(navigationDesc);
 
     m_flipbookModeCombo = new QComboBox(this);
     m_flipbookModeCombo->addItem(tr("None"), "none");
@@ -154,6 +236,11 @@ void SettingsDialog::setupUi() {
     connect(m_flipbookModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [updateZoomComboEnabled](int) { updateZoomComboEnabled(); });
 
+    auto* trimRectDesc = new QLabel(tr("Trim rect marks the tightest bounding area around sprite content."), this);
+    trimRectDesc->setWordWrap(true);
+    trimRectDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    framesEditorForm->addRow(trimRectDesc);
+
     m_trimRectColorBtn = createColorButton(m_settings.trimRectColor);
     m_trimRectColorBtn->setToolTip(tr("Color of the trim area boundary rectangle"));
     m_trimRectColorBtn->setAccessibleName(tr("Trim rect color"));
@@ -175,7 +262,11 @@ void SettingsDialog::setupUi() {
     m_trimRectStyleCombo->setAccessibleName(tr("Trim rect style"));
     framesEditorForm->addRow(tr("Trim Rect Style:"), m_trimRectStyleCombo);
 
-    // Grid overlay controls
+    auto* gridDesc = new QLabel(tr("Overlay grid for aligning sprite content."), this);
+    gridDesc->setWordWrap(true);
+    gridDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    framesEditorForm->addRow(gridDesc);
+
     m_gridColorBtn = createColorButton(m_settings.gridColor);
     m_gridColorBtn->setToolTip(tr("Color of the grid overlay lines (supports transparency)"));
     m_gridColorBtn->setAccessibleName(tr("Grid color"));
@@ -367,6 +458,106 @@ void SettingsDialog::setupUi() {
     contentLayout->addWidget(m_navigatorGroup);
     m_navigatorGroup->setVisible(m_initialSection == Section::SpritesNavigator);
 
+    // Nine-Slice Editor Group
+    m_nineSliceGroup = new QGroupBox(tr("Nine-Slice Editor"), content);
+    QFormLayout* nineSliceForm = new QFormLayout(m_nineSliceGroup);
+
+    m_nineSliceZoomOnChangeCombo = new QComboBox(this);
+    m_nineSliceZoomOnChangeCombo->addItem(tr("Fit to frame"), "fit");
+    m_nineSliceZoomOnChangeCombo->addItem(tr("100%"),         "reset_100");
+    m_nineSliceZoomOnChangeCombo->addItem(tr("No change (keep last)"), "no_change");
+    {
+        int idx = m_nineSliceZoomOnChangeCombo->findData(nineSliceZoomOnChangeToString(m_settings.nineSliceZoomOnChange));
+        if (idx >= 0) m_nineSliceZoomOnChangeCombo->setCurrentIndex(idx);
+    }
+    m_nineSliceZoomOnChangeCombo->setToolTip(tr("How zoom behaves when selecting a nine-slice definition"));
+    nineSliceForm->addRow(tr("Zoom on definition change:"), m_nineSliceZoomOnChangeCombo);
+
+    // Slice Line
+    auto* sliceLineDesc = new QLabel(tr("Slice lines are the four draggable borders that define the nine-slice insets."), this);
+    sliceLineDesc->setWordWrap(true);
+    sliceLineDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    nineSliceForm->addRow(sliceLineDesc);
+
+    m_nineSliceLineColorBtn = createColorButton(m_settings.nineSliceLineColor);
+    m_nineSliceLineColorBtn->setToolTip(tr("Color of the four slice lines"));
+    connect(m_nineSliceLineColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColorWithAlpha(m_nineSliceLineColorBtn, m_settings.nineSliceLineColor);
+    });
+    nineSliceForm->addRow(tr("Slice Line Color:"), m_nineSliceLineColorBtn);
+
+    m_nineSliceLineStyleCombo = new QComboBox(this);
+    m_nineSliceLineStyleCombo->addItem(tr("None"),       (int)Qt::NoPen);
+    m_nineSliceLineStyleCombo->addItem(tr("Solid"),      (int)Qt::SolidLine);
+    m_nineSliceLineStyleCombo->addItem(tr("Dash"),       (int)Qt::DashLine);
+    m_nineSliceLineStyleCombo->addItem(tr("Dot"),        (int)Qt::DotLine);
+    m_nineSliceLineStyleCombo->addItem(tr("DashDot"),    (int)Qt::DashDotLine);
+    m_nineSliceLineStyleCombo->addItem(tr("DashDotDot"), (int)Qt::DashDotDotLine);
+    {
+        int idx = m_nineSliceLineStyleCombo->findData((int)m_settings.nineSliceLineStyle);
+        if (idx >= 0) m_nineSliceLineStyleCombo->setCurrentIndex(idx);
+    }
+    m_nineSliceLineStyleCombo->setToolTip(tr("Visual style of the slice lines"));
+    nineSliceForm->addRow(tr("Slice Line Style:"), m_nineSliceLineStyleCombo);
+
+    m_nineSliceLabelColorBtn = createColorButton(m_settings.nineSliceLabelColor);
+    m_nineSliceLabelColorBtn->setToolTip(tr("Color of the L/T/R/B labels next to slice lines"));
+    connect(m_nineSliceLabelColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColorWithAlpha(m_nineSliceLabelColorBtn, m_settings.nineSliceLabelColor);
+    });
+    nineSliceForm->addRow(tr("Label Color:"), m_nineSliceLabelColorBtn);
+
+    m_nineSliceResizeHandleColorBtn = createColorButton(m_settings.nineSliceResizeHandleColor);
+    m_nineSliceResizeHandleColorBtn->setToolTip(tr("Color of the resize handles on the canvas edges"));
+    connect(m_nineSliceResizeHandleColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColorWithAlpha(m_nineSliceResizeHandleColorBtn, m_settings.nineSliceResizeHandleColor);
+    });
+    nineSliceForm->addRow(tr("Resize Handle Color:"), m_nineSliceResizeHandleColorBtn);
+
+    // Slice Colors
+    auto* sliceColorsDesc = new QLabel(tr("Overlay colors that identify each region of the nine-slice grid."), this);
+    sliceColorsDesc->setWordWrap(true);
+    sliceColorsDesc->setStyleSheet("color: #666; margin-bottom: 4px; margin-top: 8px;");
+    nineSliceForm->addRow(sliceColorsDesc);
+
+    m_nineSliceOverlayOpacitySpin = new QSpinBox(this);
+    m_nineSliceOverlayOpacitySpin->setRange(0, 100);
+    m_nineSliceOverlayOpacitySpin->setSuffix(tr(" %"));
+    m_nineSliceOverlayOpacitySpin->setValue(m_settings.nineSliceOverlayOpacity);
+    m_nineSliceOverlayOpacitySpin->setToolTip(tr("Global opacity multiplier applied to all overlay colors (0 = invisible, 100 = full color alpha)"));
+    nineSliceForm->addRow(tr("Overlay Opacity:"), m_nineSliceOverlayOpacitySpin);
+
+    m_nineSliceCornerColorBtn = createColorButton(m_settings.nineSliceCornerColor);
+    m_nineSliceCornerColorBtn->setToolTip(tr("Overlay color for the four corner regions"));
+    connect(m_nineSliceCornerColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColor(m_nineSliceCornerColorBtn, m_settings.nineSliceCornerColor);
+    });
+    nineSliceForm->addRow(tr("Corner Color:"), m_nineSliceCornerColorBtn);
+
+    m_nineSliceCenterColorBtn = createColorButton(m_settings.nineSliceCenterColor);
+    m_nineSliceCenterColorBtn->setToolTip(tr("Overlay color for the center region"));
+    connect(m_nineSliceCenterColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColor(m_nineSliceCenterColorBtn, m_settings.nineSliceCenterColor);
+    });
+    nineSliceForm->addRow(tr("Middle Color:"), m_nineSliceCenterColorBtn);
+
+    m_nineSliceEdgeLRColorBtn = createColorButton(m_settings.nineSliceEdgeLRColor);
+    m_nineSliceEdgeLRColorBtn->setToolTip(tr("Overlay color for the left and right edge regions"));
+    connect(m_nineSliceEdgeLRColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColor(m_nineSliceEdgeLRColorBtn, m_settings.nineSliceEdgeLRColor);
+    });
+    nineSliceForm->addRow(tr("Left and Right Color:"), m_nineSliceEdgeLRColorBtn);
+
+    m_nineSliceEdgeTBColorBtn = createColorButton(m_settings.nineSliceEdgeTBColor);
+    m_nineSliceEdgeTBColorBtn->setToolTip(tr("Overlay color for the top and bottom edge regions"));
+    connect(m_nineSliceEdgeTBColorBtn, &QPushButton::clicked, this, [this]() {
+        pickColor(m_nineSliceEdgeTBColorBtn, m_settings.nineSliceEdgeTBColor);
+    });
+    nineSliceForm->addRow(tr("Top and Bottom Color:"), m_nineSliceEdgeTBColorBtn);
+
+    contentLayout->addWidget(m_nineSliceGroup);
+    m_nineSliceGroup->setVisible(m_initialSection == Section::NineSlice);
+
 #ifndef Q_OS_WASM
     m_cliGroup = new QGroupBox(tr("CLI Tools"), content);
     QFormLayout* cliForm = new QFormLayout(m_cliGroup);
@@ -491,6 +682,13 @@ void SettingsDialog::resetToDefaults() {
     if (deduplicateIndex >= 0) {
         m_deduplicateModeCombo->setCurrentIndex(deduplicateIndex);
     }
+    if (m_dedupThresholdSpin) m_dedupThresholdSpin->setValue(AppSettings().dedupThreshold);
+    if (m_incrementalLayoutCheck) m_incrementalLayoutCheck->setChecked(AppSettings().incrementalLayout);
+    if (m_framesHasRectanglesCheck) m_framesHasRectanglesCheck->setChecked(AppSettings().framesHasRectangles);
+    if (m_framesRectangleColorEdit) m_framesRectangleColorEdit->setText(AppSettings().framesRectangleColor);
+    if (m_framesToleranceSpin) m_framesToleranceSpin->setValue(AppSettings().framesTolerance);
+    if (m_framesMinSizeSpin) m_framesMinSizeSpin->setValue(AppSettings().framesMinSize);
+    if (m_framesMaxSpritesSpin) m_framesMaxSpritesSpin->setValue(AppSettings().framesMaxSprites);
 
     int borderIndex = m_borderStyleCombo->findData((int)m_settings.borderStyle);
     if (borderIndex >= 0) {
@@ -514,6 +712,23 @@ void SettingsDialog::resetToDefaults() {
     if (syncIndex >= 0) {
         m_syncModeCombo->setCurrentIndex(syncIndex);
     }
+
+    if (m_nineSliceZoomOnChangeCombo) {
+        int idx = m_nineSliceZoomOnChangeCombo->findData(nineSliceZoomOnChangeToString(AppSettings().nineSliceZoomOnChange));
+        if (idx >= 0) m_nineSliceZoomOnChangeCombo->setCurrentIndex(idx);
+    }
+    if (m_nineSliceLineColorBtn)         updateColorButton(m_nineSliceLineColorBtn,         AppSettings().nineSliceLineColor);
+    if (m_nineSliceLineStyleCombo) {
+        int idx = m_nineSliceLineStyleCombo->findData((int)AppSettings().nineSliceLineStyle);
+        if (idx >= 0) m_nineSliceLineStyleCombo->setCurrentIndex(idx);
+    }
+    if (m_nineSliceLabelColorBtn)        updateColorButton(m_nineSliceLabelColorBtn,        AppSettings().nineSliceLabelColor);
+    if (m_nineSliceResizeHandleColorBtn) updateColorButton(m_nineSliceResizeHandleColorBtn, AppSettings().nineSliceResizeHandleColor);
+    if (m_nineSliceOverlayOpacitySpin)   m_nineSliceOverlayOpacitySpin->setValue(AppSettings().nineSliceOverlayOpacity);
+    if (m_nineSliceCornerColorBtn)       updateColorButton(m_nineSliceCornerColorBtn,       AppSettings().nineSliceCornerColor);
+    if (m_nineSliceCenterColorBtn)       updateColorButton(m_nineSliceCenterColorBtn,       AppSettings().nineSliceCenterColor);
+    if (m_nineSliceEdgeLRColorBtn)       updateColorButton(m_nineSliceEdgeLRColorBtn,       AppSettings().nineSliceEdgeLRColor);
+    if (m_nineSliceEdgeTBColorBtn)       updateColorButton(m_nineSliceEdgeTBColorBtn,       AppSettings().nineSliceEdgeTBColor);
 }
 
 AppSettings SettingsDialog::getSettings() const {
@@ -521,6 +736,13 @@ AppSettings SettingsDialog::getSettings() const {
     s.showCheckerboard = m_checkerboardCheck->isChecked();
     s.borderStyle = (Qt::PenStyle)m_borderStyleCombo->currentData().toInt();
     s.deduplicateMode = m_deduplicateModeCombo->currentData().toString();
+    if (m_dedupThresholdSpin) s.dedupThreshold = m_dedupThresholdSpin->value();
+    if (m_incrementalLayoutCheck) s.incrementalLayout = m_incrementalLayoutCheck->isChecked();
+    if (m_framesHasRectanglesCheck) s.framesHasRectangles = m_framesHasRectanglesCheck->isChecked();
+    if (m_framesRectangleColorEdit) s.framesRectangleColor = m_framesRectangleColorEdit->text().trimmed();
+    if (m_framesToleranceSpin) s.framesTolerance = m_framesToleranceSpin->value();
+    if (m_framesMinSizeSpin) s.framesMinSize = m_framesMinSizeSpin->value();
+    if (m_framesMaxSpritesSpin) s.framesMaxSprites = m_framesMaxSpritesSpin->value();
     s.syncMode = (SyncMode)m_syncModeCombo->currentData().toInt();
     if (m_onionSkinOpacitySpin) s.onionSkinOpacity = m_onionSkinOpacitySpin->value();
     if (m_propagateEditsCheck) s.propagateEditsToChecked = m_propagateEditsCheck->isChecked();
@@ -540,6 +762,12 @@ AppSettings SettingsDialog::getSettings() const {
     if (m_spritePreviewCheck) s.spritePreviewEnabled = m_spritePreviewCheck->isChecked();
     if (m_tooltipDelaySpin)   s.spritePreviewDelay   = m_tooltipDelaySpin->value();
     if (m_groupSimilarCheck)  s.navigatorGroupSimilar = m_groupSimilarCheck->isChecked();
+    if (m_nineSliceZoomOnChangeCombo)
+        s.nineSliceZoomOnChange = nineSliceZoomOnChangeFromString(m_nineSliceZoomOnChangeCombo->currentData().toString());
+    if (m_nineSliceLineStyleCombo)
+        s.nineSliceLineStyle = (Qt::PenStyle)m_nineSliceLineStyleCombo->currentData().toInt();
+    if (m_nineSliceOverlayOpacitySpin)
+        s.nineSliceOverlayOpacity = m_nineSliceOverlayOpacitySpin->value();
     return s;
 }
 

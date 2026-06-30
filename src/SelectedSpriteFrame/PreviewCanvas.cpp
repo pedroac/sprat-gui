@@ -119,11 +119,17 @@ QRect PreviewCanvas::cachedTrimRect() {
     if (m_trimWatcher.isRunning())
         return m_trimCache.rect;   // return stale (or empty) rect while computing
 
-    // Cache miss: stamp the cache, clear the stale rect, launch background compute.
+    // Cache miss: stamp the cache, clear the stale rect, compute trim rect.
     m_trimCache.path      = path;
     m_trimCache.timestamp = ts;
     m_trimCache.rect      = {};
 
+#ifdef Q_OS_WASM
+    // WASM builds are single-threaded — compute synchronously.
+    m_trimCache.rect = PreviewCanvas::computeTrimRect(
+        QImage(path).convertToFormat(QImage::Format_ARGB32));
+    return m_trimCache.rect;
+#else
     // The background lambda loads and scans the image (safe on any thread).
     // The result is delivered back to the main thread via invokeMethod.
     // We capture `path` by value so we can guard against sprites that changed
@@ -144,6 +150,7 @@ QRect PreviewCanvas::cachedTrimRect() {
     }));
 
     return {};
+#endif
 }
 
 void PreviewCanvas::updateTrimRectItem() {

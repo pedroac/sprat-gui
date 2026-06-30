@@ -31,6 +31,14 @@ SpratProfile genericDefaultProfile(const QString& name = QString()) {
     p.sort = "none";
     p.gpuCompress = "";
     p.dilate = 0;
+    p.imageFormat = "png";
+    p.imageQuality = 100;
+    p.zopfli = false;
+    p.frameLines = false;
+    p.frameLineWidth = 1;
+    p.frameLineColor = "255,0,0,255";
+    p.atlasIndex = -1;
+    p.autoAnimations = false;
     return p;
 }
 
@@ -107,6 +115,17 @@ QVector<SpratProfile> sanitizeProfiles(const QVector<SpratProfile>& profiles) {
         }
         if (p.dilate < 0) {
             p.dilate = 0;
+        }
+        p.imageFormat = p.imageFormat.trimmed().toLower();
+        if (p.imageFormat != "png" && p.imageFormat != "webp" && p.imageFormat != "avif") {
+            p.imageFormat = "png";
+        }
+        p.imageQuality = qBound(0, p.imageQuality, 100);
+        if (p.frameLineWidth < 1) {
+            p.frameLineWidth = 1;
+        }
+        if (p.atlasIndex < -1) {
+            p.atlasIndex = -1;
         }
         seen.append(p.name);
         cleaned.append(p);
@@ -346,6 +365,34 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
             if (ok) {
                 current.dilate = n;
             }
+        } else if (key == "image_format") {
+            current.imageFormat = value;
+        } else if (key == "image_quality") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.imageQuality = n;
+            }
+        } else if (key == "zopfli") {
+            current.zopfli = toBool(value, current.zopfli);
+        } else if (key == "frame_lines") {
+            current.frameLines = toBool(value, current.frameLines);
+        } else if (key == "frame_line_width") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.frameLineWidth = n;
+            }
+        } else if (key == "frame_line_color") {
+            current.frameLineColor = value;
+        } else if (key == "atlas_index") {
+            bool ok = false;
+            int n = value.toInt(&ok);
+            if (ok) {
+                current.atlasIndex = n;
+            }
+        } else if (key == "auto_animations") {
+            current.autoAnimations = toBool(value, current.autoAnimations);
         }
     }
 
@@ -428,6 +475,30 @@ bool SpratProfilesConfig::saveProfileDefinitions(const QVector<SpratProfile>& pr
         }
         if (p.dilate > 0) {
             out << "dilate=" << p.dilate << "\n";
+        }
+        if (p.imageFormat != "png") {
+            out << "image_format=" << p.imageFormat << "\n";
+        }
+        if (p.imageQuality != 100) {
+            out << "image_quality=" << p.imageQuality << "\n";
+        }
+        if (p.zopfli) {
+            out << "zopfli=true\n";
+        }
+        if (p.frameLines) {
+            out << "frame_lines=true\n";
+            if (p.frameLineWidth > 1) {
+                out << "frame_line_width=" << p.frameLineWidth << "\n";
+            }
+            if (!p.frameLineColor.isEmpty() && p.frameLineColor != "255,0,0,255") {
+                out << "frame_line_color=" << p.frameLineColor << "\n";
+            }
+        }
+        if (p.atlasIndex >= 0) {
+            out << "atlas_index=" << p.atlasIndex << "\n";
+        }
+        if (p.autoAnimations) {
+            out << "auto_animations=true\n";
         }
     }
 

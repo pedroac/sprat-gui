@@ -13,6 +13,8 @@ struct SaveConfig {
     QStringList profiles;
     bool profilesGlobal = true;
     QString scaleFilter;
+    int     colors = 0;    // 0 = off, 2-256 = color count for quantization
+    bool    dither = false;
     bool syncSprites = false;
     QString postExportCommand;
     QString atlasSubdir;

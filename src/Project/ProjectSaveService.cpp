@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QProcess>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
@@ -516,6 +517,28 @@ bool ProjectSaveService::save(
         if (!config.scaleFilter.isEmpty() && config.scaleFilter != QLatin1String("nearest")) {
             packArgs << "--scale-filter" << config.scaleFilter;
         }
+        if (effectiveProfile.imageFormat != "png") {
+            packArgs << "--format" << effectiveProfile.imageFormat;
+        }
+        if (effectiveProfile.imageQuality >= 0 && effectiveProfile.imageQuality < 100
+            && effectiveProfile.imageFormat != "png") {
+            packArgs << "--quality" << QString::number(effectiveProfile.imageQuality);
+        }
+        if (effectiveProfile.zopfli && effectiveProfile.imageFormat == "png") {
+            packArgs << "--zopfli";
+        }
+        if (effectiveProfile.frameLines) {
+            packArgs << "--frame-lines";
+            if (effectiveProfile.frameLineWidth > 1)
+                packArgs << "--line-width" << QString::number(effectiveProfile.frameLineWidth);
+            if (!effectiveProfile.frameLineColor.isEmpty()
+                && effectiveProfile.frameLineColor != "255,0,0,255")
+                packArgs << "--line-color" << effectiveProfile.frameLineColor;
+        }
+
+        if (effectiveProfile.atlasIndex >= 0) {
+            packArgs << "--atlas-index" << QString::number(effectiveProfile.atlasIndex);
+        }
 
         if (!runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
             const QString packDetails = error;
@@ -530,7 +553,12 @@ bool ProjectSaveService::save(
             return false;
         }
 
-        if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")) {
+        const QString imageExt = hasDds ? ".dds"
+            : effectiveProfile.imageFormat == "webp" ? ".webp"
+            : effectiveProfile.imageFormat == "avif" ? ".avif"
+            : ".png";
+        if (isMultipack && !imageData.startsWith("\x89PNG\r\n\x1a\n")
+            && !imageData.startsWith("RIFF")) {
             QFile imgFile(profileDir.filePath("spritesheet.tar"));
             if (imgFile.open(QIODevice::WriteOnly)) {
                 imgFile.write(imageData);
@@ -541,7 +569,7 @@ bool ProjectSaveService::save(
                 }
             }
         } else {
-            const QString imageFileName = hasDds ? "spritesheet.dds" : "spritesheet.png";
+            const QString imageFileName = QStringLiteral("spritesheet") + imageExt;
             QFile imgFile(profileDir.filePath(imageFileName));
             if (!imgFile.open(QIODevice::WriteOnly) || imgFile.write(imageData) < 0) {
                 error = QString(trPS("Could not write spritesheet for profile '%1'.")).arg(profileName);
@@ -552,6 +580,80 @@ bool ProjectSaveService::save(
                 QFileInfo fi(imgFile.fileName());
                 callbacks.logEntry({ExportLogEntry::Kind::FileWritten, imgFile.fileName(), fi.size()});
             }
+        }
+
+        // Inject nine-slice tokens into layout lines
+        {
+            // Build path→slice token map from project payload
+            QHash<QString, QString> sliceMap;
+            const QJsonArray atlasesArr = projectPayload["atlases"].toArray();
+            for (const auto& aVal : atlasesArr) {
+                const QJsonArray nsArr = aVal.toObject()["nine_slice"].toArray();
+                for (const auto& nsVal : nsArr) {
+                    const QJsonObject ns = nsVal.toObject();
+                    const int l = ns["left"].toInt();
+                    const int t = ns["top"].toInt();
+                    const int r = ns["right"].toInt();
+                    const int b = ns["bottom"].toInt();
+                    const QString h = ns["h_mode"].toString("stretch");
+                    const QString v = ns["v_mode"].toString("stretch");
+                    // Only emit slice token if at least one inset is non-zero
+                    if (l == 0 && t == 0 && r == 0 && b == 0) continue;
+                    const QString token = QStringLiteral("slice=%1,%2,%3,%4,%5,%6")
+                        .arg(l).arg(t).arg(r).arg(b).arg(h).arg(v);
+                    const QJsonArray sprites = ns["sprites"].toArray();
+                    for (const auto& spVal : sprites) {
+                        const QString sp = spVal.toString();
+                        if (!sp.isEmpty()) sliceMap.insert(sp, token);
+                    }
+                }
+            }
+
+            if (!sliceMap.isEmpty()) {
+                // Patch layout lines: for each "sprite " line, append slice token
+                QByteArray patched;
+                const QList<QByteArray> lines = layoutData.split('\n');
+                for (const QByteArray& line : lines) {
+                    QByteArray trimmed = line.trimmed();
+                    if (trimmed.startsWith("sprite ")) {
+                        // Extract the quoted path from the sprite line
+                        int firstQuote = trimmed.indexOf('"');
+                        int secondQuote = (firstQuote >= 0) ? trimmed.indexOf('"', firstQuote + 1) : -1;
+                        if (firstQuote >= 0 && secondQuote > firstQuote) {
+                            QString path = QString::fromUtf8(trimmed.mid(firstQuote + 1, secondQuote - firstQuote - 1));
+                            if (sliceMap.contains(path)) {
+                                patched.append(line);
+                                patched.append(' ');
+                                patched.append(sliceMap[path].toUtf8());
+                                patched.append('\n');
+                                continue;
+                            }
+                        }
+                    }
+                    patched.append(line);
+                    patched.append('\n');
+                }
+                // Remove trailing extra newline (split adds empty last element)
+                if (patched.endsWith("\n\n")) patched.chop(1);
+                layoutData = patched;
+            }
+        }
+
+        // Inject atlas-level colors/dither tokens into every sprite line
+        if (config.colors > 0 || config.dither) {
+            QByteArray extra;
+            if (config.colors > 0) extra += " colors=" + QByteArray::number(config.colors);
+            if (config.dither)     extra += " dither";
+
+            QByteArray patched;
+            for (const QByteArray& line : layoutData.split('\n')) {
+                patched.append(line);
+                if (line.trimmed().startsWith("sprite "))
+                    patched.append(extra);
+                patched.append('\n');
+            }
+            if (patched.endsWith("\n\n")) patched.chop(1);
+            layoutData = patched;
         }
 
         // Save combined layout, markers and animations (absolute paths — for spratconvert)
@@ -593,11 +695,14 @@ bool ProjectSaveService::save(
             convArgs << "--output-dir" << profileDir.absolutePath();
 
             if (isMultipack) {
-                convArgs << "--atlas" << (hasDds ? "atlas_%d.dds" : "atlas_%d.png");
+                convArgs << "--atlas" << (QStringLiteral("atlas_%d") + imageExt);
             } else {
-                convArgs << "--atlas" << (hasDds ? "spritesheet.dds" : "spritesheet.png");
+                convArgs << "--atlas" << (QStringLiteral("spritesheet") + imageExt);
             }
-            
+            if (effectiveProfile.autoAnimations) {
+                convArgs << "--auto-animations";
+            }
+
             if (!runProcess(spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, nullptr)) {
                 error = QString(trPS("Format conversion failed for profile '%1'")).arg(profileName);
                 return false;

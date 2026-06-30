@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QPainter>
 #include <QRegularExpression>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -232,6 +233,16 @@ void NavigatorPanel::setAddSourceButtonVisible(bool visible)
 void NavigatorPanel::setGroupSimilar(bool group)
 {
     m_groupSimilar = group;
+}
+
+void NavigatorPanel::setSpriteBadgeCallback(SpriteBadgeCallback cb)
+{
+    m_badgeCallback = std::move(cb);
+    if (m_spriteTree) {
+        m_spriteTree->setIconSize(m_badgeCallback
+            ? QSize(12 + 2 + 20, 20)   // badge + gap + thumbnail
+            : QSize(20, 20));
+    }
 }
 
 void NavigatorPanel::refresh(const ProjectSession* session, bool showHidden, int atlasFilter)
@@ -501,7 +512,8 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             leaf->setFlags(leaf->flags() | Qt::ItemIsUserCheckable);
             leaf->setCheckState(0, Qt::Unchecked);
         }
-        leaf->setData(0, Qt::UserRole, QVariant::fromValue(spriteByPath.value(path)));
+        const SpritePtr sp = spriteByPath.value(path);
+        leaf->setData(0, Qt::UserRole, QVariant::fromValue(sp));
         auto it = m_iconCache.find(path);
         if (it == m_iconCache.end()) {
             QPixmap pix(path);
@@ -510,8 +522,26 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
                 icon = QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             it = m_iconCache.insert(path, icon);
         }
-        if (!it.value().isNull())
-            leaf->setIcon(0, it.value());
+        if (!it.value().isNull()) {
+            QIcon displayIcon = it.value();
+            if (m_badgeCallback && sp) {
+                // Always allocate [badge | gap | thumbnail] so all items align.
+                constexpr int badgeSize = 12;
+                constexpr int gap       = 2;
+                constexpr int thumbSize = 20;
+                QPixmap combined(badgeSize + gap + thumbSize, thumbSize);
+                combined.fill(Qt::transparent);
+                QPainter painter(&combined);
+                const QIcon badge = m_badgeCallback(sp);
+                if (!badge.isNull()) {
+                    const int badgeY = (thumbSize - badgeSize) / 2;
+                    painter.drawPixmap(0, badgeY, badge.pixmap(badgeSize, badgeSize));
+                }
+                painter.drawPixmap(badgeSize + gap, 0, it.value().pixmap(thumbSize, thumbSize));
+                displayIcon = QIcon(combined);
+            }
+            leaf->setIcon(0, displayIcon);
+        }
     };
 
     auto findOrCreateFolderPath = [&](QTreeWidgetItem* root, const QStringList& parts) -> QTreeWidgetItem* {
@@ -610,7 +640,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         }
 
         for (int si = 0; si < session->sources.size(); ++si) {
-            if (perSource[si].isEmpty()) continue;
+            if (perSource[si].isEmpty() && !session->sources[si].hasError) continue;
             const auto& src = session->sources[si];
             const int hiddenCount = src.hiddenFolders.size();
             const QString nodeText = (!showHidden && hiddenCount > 0)
@@ -644,11 +674,33 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
                 typeLabel = tr("URL");
                 break;
             }
-            sourceNode->setIcon(0, sourceIcon);
-            sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
 
-            SpriteTreeUtils::buildSubTree(m_spriteTree, sourceNode, toEntries(perSource[si]),
-                folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb, m_groupSimilar);
+            if (src.hasError) {
+                sourceNode->setIcon(0, QIcon(":/icons/error.svg"));
+                sourceNode->setToolTip(0, tr("Failed to load — right-click to retry\n%1: %2")
+                    .arg(typeLabel, src.originalPath));
+                // Add a child item showing the error detail
+                const QColor errColor = QApplication::palette().color(QPalette::Disabled, QPalette::Text);
+                auto* errItem = new QTreeWidgetItem(sourceNode);
+                errItem->setText(0, src.errorMessage.isEmpty()
+                    ? tr("Load failed") : src.errorMessage);
+                errItem->setForeground(0, errColor);
+                {
+                    QFont ef = errItem->font(0);
+                    ef.setItalic(true);
+                    errItem->setFont(0, ef);
+                }
+                errItem->setFlags(errItem->flags() & ~Qt::ItemIsUserCheckable);
+                errItem->setData(0, Qt::UserRole + 2, 4);  // type 4 = error detail item
+            } else {
+                sourceNode->setIcon(0, sourceIcon);
+                sourceNode->setToolTip(0, typeLabel + ": " + src.originalPath);
+            }
+
+            if (!perSource[si].isEmpty()) {
+                SpriteTreeUtils::buildSubTree(m_spriteTree, sourceNode, toEntries(perSource[si]),
+                    folderIcon, animGroupIcon, m_checkboxesEnabled, makeLeafCb, m_groupSimilar);
+            }
 
             // ── Hidden-folder placeholders (Sprites workspace only, showHidden ON) ──
             if (atlasFilter < 0 && showHidden && !src.hiddenFolders.isEmpty()) {

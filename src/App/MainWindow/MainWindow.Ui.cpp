@@ -9,6 +9,8 @@
 #include "NavigatorPanel.h"
 #include "PackedAtlasView.h"
 #include "AtlasesManagementWorkspace.h"
+#include "NineSliceWorkspace.h"
+#include "NineSliceEditorCanvas.h"
 #include "UndoCommands.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
@@ -422,6 +424,12 @@ void MainWindow::setupUi() {
         if (m_atlasWorkspace->canvas()) m_atlasWorkspace->canvas()->setDimFilter(query);
     });
 
+    // Page 4: Nine-Slice Workspace
+    m_nineSliceWorkspace = new NineSliceWorkspace(m_session, this);
+    m_mainStack->addWidget(m_nineSliceWorkspace);  // page 3
+    connect(m_nineSliceWorkspace->canvas(), &NineSliceEditorCanvas::imageFileDropped,
+            this, &MainWindow::onLayoutCanvasPathDropped);
+
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
 
@@ -477,6 +485,8 @@ void MainWindow::setupUi() {
             this, [this](bool) { refreshSpriteTree(); });
     connect(m_atlasWorkspace, &AtlasWorkspace::deleteFramesRequested,
             this, &MainWindow::onNavigatorDeleteFrames);
+    connect(m_atlasWorkspace, &AtlasWorkspace::detectFramesRequested,
+            this, &MainWindow::onDetectFramesRequested);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::excludeKeyPressed,
             this, &MainWindow::onNavigatorExcludeKey);
     connect(m_atlasWorkspace, &AtlasWorkspace::addSmartFolderRequested,
@@ -493,6 +503,10 @@ void MainWindow::setupUi() {
             this, &MainWindow::onNavigatorDeleteGroup);
     connect(m_atlasWorkspace, &AtlasWorkspace::autoCreateTimelinesForSourceRequested,
             this, &MainWindow::onNavigatorAutoCreateTimelinesForSource);
+    connect(m_atlasWorkspace, &AtlasWorkspace::removeSourceRequested,
+            this, &MainWindow::onRemoveSourceRequested);
+    connect(m_atlasWorkspace, &AtlasWorkspace::retrySourceRequested,
+            this, &MainWindow::onRetrySourceRequested);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceFolderRequested,
             this, &MainWindow::onLoadFolder);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceImageRequested,
@@ -740,18 +754,27 @@ void MainWindow::setupUi() {
     m_viewMenu->addSeparator();
 
     m_atlasesManagementWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/layout.svg"), tr("Atlases"));
-    m_atlasesManagementWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_M));
+    m_atlasesManagementWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
     m_atlasesManagementWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_atlasesManagementWorkspaceAction);
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
     m_atlasWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/scan.svg"), tr("Sprites"));
-    m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
+    m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_S));
     m_atlasWorkspaceAction->setCheckable(true);
     m_atlasWorkspaceAction->setChecked(true);
     workspaceGroup->addAction(m_atlasWorkspaceAction);
     connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
+
+    m_viewMenu->addSeparator();
+
+    m_nineSliceWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/nine-slice.svg"), tr("Nine-Slice"));
+    m_nineSliceWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_N));
+    m_nineSliceWorkspaceAction->setCheckable(true);
+    workspaceGroup->addAction(m_nineSliceWorkspaceAction);
+    connect(m_nineSliceWorkspaceAction, &QAction::triggered,
+            this, [this]() { switchWorkspace(m_nineSliceWorkspace); });
 
     m_frameAnimWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/film.svg"), tr("Frame Animation"));
     m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
@@ -913,6 +936,11 @@ void MainWindow::setupToolbar() {
         style->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation..."));
     exportationAction->setToolTip(tr("Open exportation settings"));
     connect(exportationAction, &QAction::triggered, this, &MainWindow::onSettingsExportationClicked);
+
+    QAction* nineSliceSettingsAction = settingsMenu->addAction(
+        QIcon(QStringLiteral(":/icons/nine-slice.svg")), tr("Nine-Slice..."));
+    nineSliceSettingsAction->setToolTip(tr("Open nine-slice editor settings"));
+    connect(nineSliceSettingsAction, &QAction::triggered, this, &MainWindow::onSettingsNineSliceClicked);
 
 #ifndef Q_OS_WASM
     QAction* cliToolsAction = settingsMenu->addAction(
@@ -1085,10 +1113,11 @@ void MainWindow::updateUiState() {
     if (m_atlasWorkspaceAction)         m_atlasWorkspaceAction->setEnabled(viewEnabled);
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
+    if (m_nineSliceWorkspaceAction)     m_nineSliceWorkspaceAction->setEnabled(viewEnabled);
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
-    if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace) return;
+    if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace || m_currentWorkspace == m_nineSliceWorkspace) return;
 
     if (hasModels) {
         m_mainStack->hide();
@@ -1119,7 +1148,7 @@ void MainWindow::updateMainContentView() {
     const QString projectFilePathUi = m_projectController ? m_projectController->projectFilePath() : QString();
     const bool hasProject = !projectFilePathUi.isEmpty();
 
-    if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace) {
+    if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace && m_currentWorkspace != m_nineSliceWorkspace) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1200,6 +1229,13 @@ void MainWindow::refreshSpriteTree() {
         if (m_currentWorkspace == m_frameAnimWorkspace && atlasCombo)
             atlasFilter = atlasCombo->currentData().toInt();
         navigatorPanel->refresh(m_session, m_atlasWorkspace->showHiddenItems(), atlasFilter);
+
+        // Also refresh the NineSlice workspace navigator so it stays in sync
+        if (m_nineSliceWorkspace) {
+            auto* nineSliceNav = m_nineSliceWorkspace->navigatorPanel();
+            if (nineSliceNav)
+                nineSliceNav->refresh(m_session, false);
+        }
         return;
     }
 
@@ -1615,7 +1651,7 @@ void MainWindow::onAboutClicked() {
         "<p>A spritesheet packing and animation authoring tool.</p>"
         "<p>"
           "<b>Author:</b> Pedro Amaral Couto<br>"
-          "<b>License:</b> MIT<br>"
+          "<b>License:</b> <a href=\"https://mit-license.org/\">MIT</a><br>"
           "<b>CLI version:</b> " SPRAT_CLI_VERSION
         "</p>"
         "<p><a href=\"https://pedroac.itch.io/sprat\">https://pedroac.itch.io/sprat</a></p>"
@@ -1626,6 +1662,8 @@ void MainWindow::onAboutClicked() {
           "libarchive &mdash; ZIP/tar archive handling<br>"
           "zlib &mdash; ZIP compression<br>"
           "CMake &mdash; build system</p>"
+        "<p><b>Icons</b><br>"
+          "SVG icons from <a href=\"https://www.svgrepo.com\">SVG Repo</a></p>"
     );
 }
 

@@ -68,6 +68,7 @@ class CliSetupController;
 class LayoutCanvas;
 class ExportWorkspace;
 class FrameAnimationWorkspace;
+class NineSliceWorkspace;
 #include "ILayoutContext.h"
 #include "IWorkspace.h"
 #include "AtlasWorkspace.h"
@@ -316,6 +317,9 @@ private slots:
 
     // === Sources ===
     void removeSource(int index);
+    void onDetectFramesRequested(const QString& imagePath);
+    void onRemoveSourceRequested(int sourceIndex);
+    void onRetrySourceRequested(int sourceIndex);
     void onSyncSourceRequested(int sourceIndex);
     void onSyncLayoutRequested(int sourceIndex);
 
@@ -764,6 +768,7 @@ public:
     void onSettingsFramesEditorClicked();
     void onSettingsAtlasLayoutClicked();
     void onSettingsExportationClicked();
+    void onSettingsNineSliceClicked();
 #ifndef Q_OS_WASM
     void onSettingsCliToolsClicked();
 #endif
@@ -799,7 +804,7 @@ public:
      * @param imagePath Path to the image file
      * @param action Action to take (Replace or Merge)
      */
-    void loadImageWithFrameDetection(const QString& imagePath, DropAction action);
+    void loadImageWithFrameDetection(const QString& imagePath, DropAction action, bool hideSingleFrame = false);
 
     /**
      * @brief Loads a tar file and extracts frames.
@@ -882,6 +887,8 @@ private:
     QAction*        m_frameAnimWorkspaceAction        = nullptr;
     QAction*        m_exportationWorkspaceAction      = nullptr;
     QAction*        m_atlasesManagementWorkspaceAction = nullptr;
+    NineSliceWorkspace* m_nineSliceWorkspace = nullptr;
+    QAction*        m_nineSliceWorkspaceAction = nullptr;
 
     // Layout Canvas Area
     QStackedWidget* m_profileSelectorStack = nullptr;
@@ -937,6 +944,7 @@ private:
     QPlainTextEdit* m_cliInstallLog = nullptr;
     QString m_loadingUiMessage = "Loading...";
     bool m_mergeReplaceAllDuplicates = true;
+    bool m_detectFramesHideSingleFrame = false;
     QTimer* m_watchModePeriodicCheckTimer = nullptr;
 
     // Temporary storage for transparency processing continuation

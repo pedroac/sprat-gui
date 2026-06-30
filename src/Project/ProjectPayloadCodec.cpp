@@ -110,6 +110,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     if (!input.sources.isEmpty()) {
         QJsonArray sourcesArr;
         for (const auto& src : input.sources) {
+            if (src.hasError) continue;  // don't persist failed sources
             QJsonObject sObj;
             sObj["name"] = src.name;
             sObj["type"] = sourceTypeToString(src.type);
@@ -203,6 +204,8 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             }
             eoObj["transform"]    = atlas.exportConfig.transform;
             eoObj["scale_filter"] = atlas.exportConfig.scaleFilter;
+            if (atlas.exportConfig.colors > 0) eoObj["colors"] = atlas.exportConfig.colors;
+            if (atlas.exportConfig.dither)     eoObj["dither"]  = true;
             aObj["export_override"] = eoObj;
 
             // Sprite paths — excluded atlas paths are derived at runtime via syncExcludedAtlas()
@@ -234,6 +237,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
                 atArr.append(tObj);
             }
             aObj["timelines"] = atArr;
+
             atlasesArr.append(aObj);
         }
         root["atlases"] = atlasesArr;
@@ -288,6 +292,17 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
                 QJsonArray aliasArr;
                 for (const auto& a : s->aliases) aliasArr.append(a);
                 sObj["aliases"] = aliasArr;
+            }
+            if (s->isNineSliced) {
+                sObj["is_nine_sliced"] = true;
+                sObj["ns_left"]   = s->nsLeft;
+                sObj["ns_top"]    = s->nsTop;
+                sObj["ns_right"]  = s->nsRight;
+                sObj["ns_bottom"] = s->nsBottom;
+                sObj["ns_h_mode"] = s->nsHMode;
+                sObj["ns_v_mode"] = s->nsVMode;
+                if (s->nsTargetWidth  > 0) sObj["ns_target_width"]  = s->nsTargetWidth;
+                if (s->nsTargetHeight > 0) sObj["ns_target_height"] = s->nsTargetHeight;
             }
 
             QString key = QDir(input.currentFolder).relativeFilePath(s->path);
@@ -409,6 +424,36 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
 
     QJsonObject markersInfo = root["spritemarkers"].toObject();
     QJsonObject spritesState = markersInfo["sprites"].toObject();
+
+    // Build migration map from old atlas-level nine_slice format (v4 files written before per-sprite format)
+    struct NsMigration {
+        int left = 0, top = 0, right = 0, bottom = 0;
+        QString hMode = QStringLiteral("stretch"), vMode = QStringLiteral("stretch");
+    };
+    QHash<QString, NsMigration> nsMigrationMap;
+    {
+        const QDir spDir(currentFolder);
+        for (const auto& aVal : root["atlases"].toArray()) {
+            const QJsonObject aObj = aVal.toObject();
+            for (const auto& nsVal : aObj["nine_slice"].toArray()) {
+                const QJsonObject nsObj = nsVal.toObject();
+                NsMigration ns;
+                ns.left   = nsObj["left"].toInt(0);
+                ns.top    = nsObj["top"].toInt(0);
+                ns.right  = nsObj["right"].toInt(0);
+                ns.bottom = nsObj["bottom"].toInt(0);
+                ns.hMode  = nsObj["h_mode"].toString(QStringLiteral("stretch"));
+                ns.vMode  = nsObj["v_mode"].toString(QStringLiteral("stretch"));
+                for (const auto& spVal : nsObj["sprites"].toArray()) {
+                    QString sp = spVal.toString();
+                    if (!sp.isEmpty() && QDir::isRelativePath(sp) && !currentFolder.isEmpty())
+                        sp = spDir.filePath(sp);
+                    if (!sp.isEmpty()) nsMigrationMap.insert(sp, ns);
+                }
+            }
+        }
+    }
+
     for (auto& model : layoutModels) {
         for (auto& sprite : model.sprites) {
             QString key = QDir(currentFolder).relativeFilePath(sprite->path);
@@ -431,6 +476,27 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             if (state["has_pivot"].toBool() && state.contains("pivot_x") && state.contains("pivot_y")) {
                 sprite->pivotX = state["pivot_x"].toInt();
                 sprite->pivotY = state["pivot_y"].toInt();
+            }
+            sprite->isNineSliced = state["is_nine_sliced"].toBool(false);
+            if (!sprite->isNineSliced && nsMigrationMap.contains(sprite->path)) {
+                const auto& ns = nsMigrationMap[sprite->path];
+                sprite->isNineSliced = true;
+                sprite->nsLeft   = ns.left;
+                sprite->nsTop    = ns.top;
+                sprite->nsRight  = ns.right;
+                sprite->nsBottom = ns.bottom;
+                sprite->nsHMode  = ns.hMode;
+                sprite->nsVMode  = ns.vMode;
+            }
+            if (sprite->isNineSliced) {
+                sprite->nsLeft   = state["ns_left"].toInt(sprite->nsLeft);
+                sprite->nsTop    = state["ns_top"].toInt(sprite->nsTop);
+                sprite->nsRight  = state["ns_right"].toInt(sprite->nsRight);
+                sprite->nsBottom = state["ns_bottom"].toInt(sprite->nsBottom);
+                sprite->nsHMode        = state["ns_h_mode"].toString(sprite->nsHMode);
+                sprite->nsVMode        = state["ns_v_mode"].toString(sprite->nsVMode);
+                sprite->nsTargetWidth  = state["ns_target_width"].toInt(0);
+                sprite->nsTargetHeight = state["ns_target_height"].toInt(0);
             }
             if (!state.contains("markers")) {
                 continue;
@@ -766,6 +832,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 }
                 atlas.exportConfig.transform   = eo["transform"].toString();
                 atlas.exportConfig.scaleFilter = eo["scale_filter"].toString();
+                atlas.exportConfig.colors      = eo["colors"].toInt(0);
+                atlas.exportConfig.dither      = eo["dither"].toBool(false);
             }
 
             // Sprite paths — excluded atlas paths are derived at runtime; skip loading them
@@ -782,6 +850,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             }
 
             atlas.timelines = parseTimelines(aObj["timelines"].toArray(), 8);
+
             out.atlases.append(atlas);
         }
         // Compat: if no excluded atlas was stored, append one now

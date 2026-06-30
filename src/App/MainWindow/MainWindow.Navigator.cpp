@@ -238,10 +238,13 @@ void MainWindow::onNavigatorExcludeKey(QTreeWidgetItem* item)
     if (item->data(0, Qt::UserRole + 2).toInt() != 0) return;
 
     // Source nodes (top-level folder roots) store their index in UserRole+1
-    // but have no UserRole sprite data. DEL has no defined action for them.
+    // but have no UserRole sprite data. DEL removes the source.
     const bool isSourceNode = item->data(0, Qt::UserRole + 1).isValid()
                               && !item->data(0, Qt::UserRole).isValid();
-    if (isSourceNode) return;
+    if (isSourceNode) {
+        onRemoveSourceRequested(item->data(0, Qt::UserRole + 1).toInt());
+        return;
+    }
 
     const bool isLeaf  = item->childCount() == 0 && item->data(0, Qt::UserRole).isValid();
     const bool isGroup = item->childCount() > 0;
@@ -832,6 +835,14 @@ void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)
         if (tp) tp->selectTimeline(m_session->selectedTimelineIndex);
         refreshAnimationTest();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Action: Detect frames in a single image (from sprite context menu)
+// ---------------------------------------------------------------------------
+void MainWindow::onDetectFramesRequested(const QString& imagePath)
+{
+    loadImageWithFrameDetection(imagePath, DropAction::Merge, true);
 }
 
 // ---------------------------------------------------------------------------

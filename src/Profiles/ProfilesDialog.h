@@ -31,6 +31,8 @@ private:
     void saveEditorsToProfile(int row);
     void loadEditorsFromProfile(int row);
     void refreshThreadsEnabledState();
+    void refreshFormatDependentState();
+    void refreshFrameLinesDependentState();
     QString uniqueProfileName(const QString& base) const;
 
     QListWidget* m_listWidget = nullptr;
@@ -57,6 +59,14 @@ private:
     QComboBox* m_sortCombo = nullptr;
     QComboBox* m_gpuCompressCombo = nullptr;
     QSpinBox* m_dilateSpin = nullptr;
+    QComboBox* m_imageFormatCombo = nullptr;
+    QSpinBox* m_imageQualitySpin = nullptr;
+    QCheckBox* m_zopfliCheck = nullptr;
+    QCheckBox* m_frameLinesCheck = nullptr;
+    QSpinBox* m_frameLineWidthSpin = nullptr;
+    QLineEdit* m_frameLineColorEdit = nullptr;
+    QSpinBox* m_atlasIndexSpin = nullptr;
+    QCheckBox* m_autoAnimationsCheck = nullptr;
 
     QVector<SpratProfile> m_profiles;
     int m_currentRow = -1;

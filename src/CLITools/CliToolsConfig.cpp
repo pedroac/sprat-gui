@@ -52,6 +52,13 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.borderStyle = static_cast<Qt::PenStyle>(
         settings.value("settings/border_style", static_cast<int>(out.borderStyle)).toInt());
     out.deduplicateMode = settings.value("settings/deduplicate_mode", out.deduplicateMode).toString();
+    out.dedupThreshold = settings.value("settings/dedup_threshold", out.dedupThreshold).toInt();
+    out.incrementalLayout = settings.value("settings/incremental_layout", out.incrementalLayout).toBool();
+    out.framesHasRectangles = settings.value("settings/frames_has_rectangles", false).toBool();
+    out.framesRectangleColor = settings.value("settings/frames_rectangle_color", "").toString();
+    out.framesTolerance = settings.value("settings/frames_tolerance", 1).toInt();
+    out.framesMinSize = settings.value("settings/frames_min_size", 4).toInt();
+    out.framesMaxSprites = settings.value("settings/frames_max_sprites", 10000).toInt();
     out.syncMode = syncModeFromString(settings.value("settings/sync_mode", syncModeToString(out.syncMode)).toString());
     out.theme = settings.value("settings/theme", out.theme).toString();
     out.onionSkinOpacity        = settings.value("settings/onion_skin_opacity", out.onionSkinOpacity).toInt();
@@ -86,6 +93,7 @@ AppSettings CliToolsConfig::loadAppSettings() {
     out.gridOffsetY     = settings.value("settings/grid_offset_y",     out.gridOffsetY).toInt();
     if (settings.contains("settings/grid_color"))
         out.gridColor = QColor(settings.value("settings/grid_color").toString());
+    out.nineSliceOverlayOpacity = settings.value("settings/nine_slice_overlay_opacity", out.nineSliceOverlayOpacity).toInt();
     return out;
 }
 
@@ -118,6 +126,13 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/detection_selected_color", settings.detectionSelectedColor.name(QColor::HexArgb));
     qsettings.setValue("settings/border_style", static_cast<int>(settings.borderStyle));
     qsettings.setValue("settings/deduplicate_mode", settings.deduplicateMode);
+    qsettings.setValue("settings/dedup_threshold", settings.dedupThreshold);
+    qsettings.setValue("settings/incremental_layout", settings.incrementalLayout);
+    qsettings.setValue("settings/frames_has_rectangles", settings.framesHasRectangles);
+    qsettings.setValue("settings/frames_rectangle_color", settings.framesRectangleColor);
+    qsettings.setValue("settings/frames_tolerance", settings.framesTolerance);
+    qsettings.setValue("settings/frames_min_size", settings.framesMinSize);
+    qsettings.setValue("settings/frames_max_sprites", settings.framesMaxSprites);
     qsettings.setValue("settings/sync_mode", syncModeToString(settings.syncMode));
     qsettings.setValue("settings/theme", settings.theme);
     qsettings.setValue("settings/default_projects_folder", settings.defaultProjectsFolder);
@@ -145,6 +160,7 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/grid_offset_x",    settings.gridOffsetX);
     qsettings.setValue("settings/grid_offset_y",    settings.gridOffsetY);
     qsettings.setValue("settings/grid_color",       settings.gridColor.name(QColor::HexArgb));
+    qsettings.setValue("settings/nine_slice_overlay_opacity", settings.nineSliceOverlayOpacity);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

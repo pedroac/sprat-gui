@@ -46,6 +46,8 @@ public:
     // --- Settings setters ---
     void setSyncMode(SyncMode mode);
     void setDeduplicateMode(const QString& mode);
+    void setDedupThreshold(int v);
+    void setIncrementalLayout(bool v);
     void setLayoutZoomOnChange(LayoutZoomOnChange mode);
     void setEnableAnimation(bool v);
     void setCLIReady(bool ready);
@@ -139,6 +141,8 @@ private:
 
     SyncMode             m_syncMode           = SyncMode::Watch;
     QString              m_deduplicateMode    = "none";
+    int                  m_dedupThreshold     = 5;
+    bool                 m_incrementalLayout  = false;
     LayoutZoomOnChange   m_layoutZoomOnChange = LayoutZoomOnChange::NoChange;
     bool                 m_cliReady           = false;
     bool                 m_mergeReplaceAllDuplicates = true;

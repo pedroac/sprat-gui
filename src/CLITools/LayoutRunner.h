@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QFuture>
 #include <QString>
 #include <QStringList>
 #include <QMutex>
@@ -18,6 +19,8 @@ struct LayoutRunConfig {
     int sourceResolutionHeight = 0;
     bool retryWithoutTrim = false;
     QString deduplicateMode = "none";
+    int dedupThreshold = 5;
+    bool incrementalLayout = false;
 };
 
 struct LayoutResult {
@@ -51,6 +54,9 @@ private:
 #ifndef SPRAT_EMBEDDED_CLI
     std::atomic<bool> m_stopRequested{false};
     std::atomic<bool> m_running{false};
+#endif
+#ifndef Q_OS_WASM
+    QFuture<void> m_future;
 #endif
     QMutex* m_mutex = nullptr;
     LayoutRunConfig m_currentConfig;

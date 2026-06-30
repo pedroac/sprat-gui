@@ -143,6 +143,7 @@ signals:
     // ── Navigator ─────────────────────────────────────────────────────────────
     void showHiddenToggled(bool show);
     void deleteFramesRequested(const QStringList& paths);
+    void detectFramesRequested(const QString& imagePath);
     void addSmartFolderRequested();
     void addFramesToFolderRequested(const QString& subfolder);
     void addToTimelineRequested(const QStringList& paths);
@@ -150,6 +151,8 @@ signals:
     void createGroupRequested(const QStringList& paths, const QString& parentFolder);
     void deleteGroupRequested(QTreeWidgetItem* item);
     void autoCreateTimelinesForSourceRequested(int sourceIndex);
+    void removeSourceRequested(int sourceIndex);
+    void retrySourceRequested(int sourceIndex);
     void spriteDroppedToTimeline(const QStringList& paths, const QString& targetFolder);
     void spriteSelected(SpritePtr sprite);
     void canvasSelectionChanged(const QList<SpritePtr>& selection);

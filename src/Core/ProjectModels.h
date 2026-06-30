@@ -27,6 +27,8 @@ struct ProjectSource {
     QString cachedFolderPath;
     QStringList excludedFiles;
     QStringList hiddenFolders;
+    bool    hasError     = false;
+    QString errorMessage;
 };
 
 /**
@@ -43,6 +45,8 @@ struct AtlasExportConfig {
     QStringList profiles;
     QString     transform;
     QString     scaleFilter;
+    int         colors = 0;    // 0 = off, 2-256 = color count for quantization
+    bool        dither = false;
 };
 
 /**

@@ -19,6 +19,8 @@
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
+#include <QSpinBox>
+#include <QCheckBox>
 #include <QTableWidget>
 #include <QTreeWidget>
 #include <QHeaderView>
@@ -317,6 +319,34 @@ void ExportWorkspace::setupUi() {
     exportGrid->addWidget(new QLabel(tr("Scale filter:"), exportGroup), 2, 0, Qt::AlignVCenter);
     exportGrid->addWidget(m_scaleFilterCombo, 2, 1, 1, 2);
 
+    // Row 3: Colors — color quantization applied to the atlas image
+    m_colorsSpin = new QSpinBox(exportGroup);
+    m_colorsSpin->setRange(0, 256);
+    m_colorsSpin->setValue(0);
+    m_colorsSpin->setSpecialValueText(tr("Off"));
+    m_colorsSpin->setToolTip(tr("Color quantization for the atlas image (0 = off, 2-256 = color count)"));
+    connect(m_colorsSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v) {
+        if (v == 1) { m_colorsSpin->setValue(2); return; }
+        for (int i = 0; i < m_atlasConfigs.size(); ++i) {
+            m_atlasConfigs[i].second.colors = v;
+            emit atlasExportConfigChanged(m_atlasConfigs[i].first, m_atlasConfigs[i].second);
+        }
+    });
+    exportGrid->addWidget(new QLabel(tr("Colors:"), exportGroup), 3, 0, Qt::AlignVCenter);
+    exportGrid->addWidget(m_colorsSpin, 3, 1, 1, 2);
+
+    // Row 4: Dither
+    m_ditherCheck = new QCheckBox(tr("Dither"), exportGroup);
+    m_ditherCheck->setToolTip(tr("Enable dithering when color quantization is active"));
+    connect(m_ditherCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        for (int i = 0; i < m_atlasConfigs.size(); ++i) {
+            m_atlasConfigs[i].second.dither = checked;
+            emit atlasExportConfigChanged(m_atlasConfigs[i].first, m_atlasConfigs[i].second);
+        }
+    });
+    exportGrid->addWidget(new QLabel(tr(""), exportGroup), 4, 0);
+    exportGrid->addWidget(m_ditherCheck, 4, 1, 1, 2);
+
     exportLayout->addLayout(exportGrid);
 
     // Post-export command row
@@ -535,6 +565,18 @@ void ExportWorkspace::populate(const QVector<SpratProfile>& profiles,
         if (idx >= 0) m_scaleFilterCombo->setCurrentIndex(idx);
     }
 
+    // Restore colors and dither
+    if (m_colorsSpin) {
+        m_colorsSpin->blockSignals(true);
+        m_colorsSpin->setValue(lastConfig.colors);
+        m_colorsSpin->blockSignals(false);
+    }
+    if (m_ditherCheck) {
+        m_ditherCheck->blockSignals(true);
+        m_ditherCheck->setChecked(lastConfig.dither);
+        m_ditherCheck->blockSignals(false);
+    }
+
     // Restore post-export command
     if (m_postExportCommandEdit)
         m_postExportCommandEdit->setText(lastConfig.postExportCommand);
@@ -567,6 +609,21 @@ void ExportWorkspace::setAtlasNames(const QStringList& names, int activeSessionI
 void ExportWorkspace::setAtlasExportConfigs(const QList<QPair<int,AtlasExportConfig>>& configs,
                                              const QStringList& atlasNames) {
     m_atlasConfigs = configs;
+
+    // Seed the global colors/dither controls from the first atlas config.
+    if (!configs.isEmpty()) {
+        const AtlasExportConfig& first = configs.first().second;
+        if (m_colorsSpin) {
+            m_colorsSpin->blockSignals(true);
+            m_colorsSpin->setValue(first.colors);
+            m_colorsSpin->blockSignals(false);
+        }
+        if (m_ditherCheck) {
+            m_ditherCheck->blockSignals(true);
+            m_ditherCheck->setChecked(first.dither);
+            m_ditherCheck->blockSignals(false);
+        }
+    }
 
     if (!m_atlasOverridesTable || !m_atlasOverridesGroup) return;
 
@@ -643,6 +700,9 @@ void ExportWorkspace::setAtlasExportConfigs(const QList<QPair<int,AtlasExportCon
                 newCfg.profiles = m_atlasConfigs[row].second.profiles;
             newCfg.transform   = transformOverrideCombo->currentData().toString();
             newCfg.scaleFilter = sfOverrideCombo->currentData().toString();
+            // Preserve colors/dither from the global controls
+            if (m_colorsSpin)  newCfg.colors = m_colorsSpin->value();
+            if (m_ditherCheck) newCfg.dither = m_ditherCheck->isChecked();
             if (row < m_atlasConfigs.size())
                 m_atlasConfigs[row].second = newCfg;
             emit atlasExportConfigChanged(sessionIdx, newCfg);
@@ -740,6 +800,8 @@ SaveConfig ExportWorkspace::getConfig() const {
     if (m_scaleFilterCombo) {
         config.scaleFilter = m_scaleFilterCombo->currentData().toString();
     }
+    if (m_colorsSpin)  config.colors = m_colorsSpin->value();
+    if (m_ditherCheck) config.dither = m_ditherCheck->isChecked();
     if (m_profileCombo && m_profileCombo->count() > 0) {
         const QString name = m_profileCombo->currentData().toString();
         if (!name.isEmpty()) config.profiles.append(name);

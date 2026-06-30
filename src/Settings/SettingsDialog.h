@@ -21,6 +21,7 @@ public:
         AtlasLayout,
         Exportation,
         SpritesNavigator,
+        NineSlice,
 #ifndef Q_OS_WASM
         CliTools
 #endif
@@ -60,6 +61,7 @@ private:
     QGroupBox* m_atlasLayoutGroup = nullptr;
     QGroupBox* m_exportationGroup = nullptr;
     QGroupBox* m_navigatorGroup = nullptr;
+    QGroupBox* m_nineSliceGroup = nullptr;
 #ifndef Q_OS_WASM
     QGroupBox* m_cliGroup = nullptr;
 #endif
@@ -71,6 +73,13 @@ private:
     QPushButton* m_detectionSelectedColorBtn;
     QComboBox* m_borderStyleCombo;
     QComboBox* m_deduplicateModeCombo;
+    QSpinBox* m_dedupThresholdSpin = nullptr;
+    QCheckBox* m_incrementalLayoutCheck = nullptr;
+    QCheckBox*  m_framesHasRectanglesCheck = nullptr;
+    QLineEdit*  m_framesRectangleColorEdit = nullptr;
+    QSpinBox*   m_framesToleranceSpin = nullptr;
+    QSpinBox*   m_framesMinSizeSpin = nullptr;
+    QSpinBox*   m_framesMaxSpritesSpin = nullptr;
 
 #ifndef Q_OS_WASM
     QLineEdit* m_cliBaseDirEdit;
@@ -108,4 +117,16 @@ private:
     QLineEdit* m_exportDefaultFolderEdit = nullptr;
     QComboBox* m_exportDefaultFormatCombo = nullptr;
     QComboBox* m_exportDefaultScaleFilterCombo = nullptr;
+
+    // Nine-Slice Editor controls
+    QComboBox*   m_nineSliceZoomOnChangeCombo    = nullptr;
+    QPushButton* m_nineSliceLineColorBtn         = nullptr;
+    QComboBox*   m_nineSliceLineStyleCombo       = nullptr;
+    QPushButton* m_nineSliceLabelColorBtn        = nullptr;
+    QPushButton* m_nineSliceResizeHandleColorBtn = nullptr;
+    QSpinBox*    m_nineSliceOverlayOpacitySpin   = nullptr;
+    QPushButton* m_nineSliceCornerColorBtn       = nullptr;
+    QPushButton* m_nineSliceCenterColorBtn       = nullptr;
+    QPushButton* m_nineSliceEdgeLRColorBtn       = nullptr;
+    QPushButton* m_nineSliceEdgeTBColorBtn       = nullptr;
 };

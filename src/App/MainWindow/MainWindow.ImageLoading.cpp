@@ -31,10 +31,11 @@
 #include "AnimationPreviewService.h"
 #include "ProjectController.h"
 
-void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action) {
+void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropAction action, bool hideSingleFrame) {
     if (action == DropAction::Cancel) {
         return;
     }
+    m_detectFramesHideSingleFrame = hideSingleFrame;
 
     if (AnimatedImageImport::isAnimatedGif(imagePath)) {
         if (!m_cliReady || m_isLoading) {
@@ -82,6 +83,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         return;
     }
 
+    m_isCanceled = false;
     m_loadingUiMessage = tr("Detecting frames in image...");
     setLoading(true);
 
@@ -107,6 +109,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         return;
     }
 
+    m_isCanceled = false;
     m_loadingUiMessage = tr("Detecting frames in image...");
     setLoading(true);
 
@@ -122,62 +125,98 @@ void MainWindow::onFrameDetectionFinished() {
 void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetectionTaskResult& result) {
     setLoading(false);
 
-    if (result.detection.frames.isEmpty()) {
-        m_statusLabel->setText(tr("No frames detected, using image as single frame"));
-        handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
+    if (m_isCanceled) {
+        m_statusLabel->setText(tr("Frame detection cancelled"));
         return;
     }
 
-    FrameDetectionDialog dialog(result.imagePath, result.detection.frames, m_settings, result.detection.backgroundColor, this);
-    if (dialog.exec() == QDialog::Accepted) {
-        if (dialog.userAccepted()) {
-            QVector<QRect> selectedFrames = dialog.getSelectedFrames();
-            const DropAction action = result.action;
-            const QString imagePath = result.imagePath;
-            const QColor backgroundColor = result.detection.backgroundColor;
+    const QString imagePath = result.imagePath;
+    FrameDetectionDialog::RedetectFn redetectFn = [this, imagePath](const AppSettings& s) {
+        ProjectController::FramesAdvancedSettings fs;
+        fs.framesHasRectangles = s.framesHasRectangles;
+        fs.framesRectangleColor = s.framesRectangleColor;
+        fs.framesTolerance = s.framesTolerance;
+        fs.framesMinSize = s.framesMinSize;
+        fs.framesMaxSprites = s.framesMaxSprites;
+        m_projectController->setFramesSettings(fs);
+        return m_projectController->detectFramesInImage(imagePath).frames;
+    };
 
-            m_loadingUiMessage = tr("Extracting frames...");
-            setLoading(true);
+    FrameDetectionDialog dialog(result.imagePath, result.detection.frames, m_settings, redetectFn, result.detection.backgroundColor, this);
+    if (m_detectFramesHideSingleFrame)
+        dialog.hideSingleFrameButton();
+    m_detectFramesHideSingleFrame = false;
+    if (dialog.exec() != QDialog::Accepted) {
+        m_statusLabel->setText(tr("Frame detection cancelled"));
+        return;
+    }
 
-            if (action == DropAction::Replace) {
-                m_projectController->clearTempDirs();
-            }
-            auto tempDir = std::make_unique<QTemporaryDir>();
-            if (!tempDir->isValid()) {
-                m_statusLabel->setText(tr("Error: Could not create temporary directory"));
-                setLoading(false);
-                return;
-            }
-            QString tempPath = tempDir->path();
-            m_projectController->addTempDir(std::move(tempDir));
+    {
+        AppSettings updated = dialog.getUpdatedSettings();
+        m_settings.framesHasRectangles = updated.framesHasRectangles;
+        m_settings.framesRectangleColor = updated.framesRectangleColor;
+        m_settings.framesTolerance = updated.framesTolerance;
+        m_settings.framesMinSize = updated.framesMinSize;
+    }
+
+    if (dialog.userAccepted()) {
+        QVector<QRect> selectedFrames = dialog.getSelectedFrames();
+        const DropAction action = result.action;
+        const QColor backgroundColor = result.detection.backgroundColor;
+
+        if (selectedFrames.isEmpty()) {
+            m_statusLabel->setText(tr("Using image as single frame"));
+            handleSingleImageLayout(imagePath, action, backgroundColor);
+            return;
+        }
+
+#ifndef Q_OS_WASM
+        if (m_spratUnpackBin.isEmpty()) {
+            qWarning() << "[FrameExtraction] spratunpack binary not set, cannot extract frames";
+            MessageDialog::warning(this, tr("Error"), tr("spratunpack binary not found."));
+            return;
+        }
+#endif
+
+        m_loadingUiMessage = tr("Extracting frames...");
+        setLoading(true);
+
+        if (action == DropAction::Replace) {
+            m_projectController->clearTempDirs();
+        }
+        auto tempDir = std::make_unique<QTemporaryDir>();
+        if (!tempDir->isValid()) {
+            m_statusLabel->setText(tr("Error: Could not create temporary directory"));
+            setLoading(false);
+            return;
+        }
+        QString tempPath = tempDir->path();
+        m_projectController->addTempDir(std::move(tempDir));
 
 #ifdef Q_OS_WASM
-            auto extractTaskWasm = [this, selectedFrames, imagePath, tempPath, action, backgroundColor]() {
-                ProjectController::FrameExtractionResult res;
-                res.tempPath = tempPath;
-                res.sourcePath = imagePath;
-                res.action = action;
-                res.backgroundColor = backgroundColor;
+        auto extractTaskWasm = [this, selectedFrames, imagePath, tempPath, action, backgroundColor]() {
+            ProjectController::FrameExtractionResult res;
+            res.tempPath = tempPath;
+            res.sourcePath = imagePath;
+            res.action = action;
+            res.backgroundColor = backgroundColor;
 
-                QString framesData = m_projectController->generateSpratFramesFormat(selectedFrames, imagePath);
-                QStringList args;
-                args << imagePath << QStringLiteral("--frames") << QStringLiteral("-") << QStringLiteral("--output") << tempPath;
-                QByteArray framesDataBytes = framesData.toUtf8();
-                res.success = runTool(m_spratUnpackBin, args, &framesDataBytes);
-                return res;
-            };
-            QTimer::singleShot(0, this, [this, extractTaskWasm]() {
-                processFrameExtractionResult(extractTaskWasm());
-            });
+            QString framesData = m_projectController->generateSpratFramesFormat(selectedFrames, imagePath);
+            QStringList args;
+            args << imagePath << QStringLiteral("--frames") << QStringLiteral("-") << QStringLiteral("--output") << tempPath;
+            QByteArray framesDataBytes = framesData.toUtf8();
+            res.success = runTool(m_spratUnpackBin, args, &framesDataBytes);
+            return res;
+        };
+        QTimer::singleShot(0, this, [this, extractTaskWasm]() {
+            processFrameExtractionResult(extractTaskWasm());
+        });
 #else
-            m_projectController->launchFrameExtraction(imagePath, tempPath, action, backgroundColor, selectedFrames);
+        m_projectController->launchFrameExtraction(imagePath, tempPath, action, backgroundColor, selectedFrames);
 #endif
-        } else {
-            m_statusLabel->setText(tr("Using image as single frame"));
-            handleSingleImageLayout(result.imagePath, result.action, result.detection.backgroundColor);
-        }
     } else {
-        m_statusLabel->setText(tr("Frame detection cancelled"));
+        m_statusLabel->setText(tr("Using image as single frame"));
+        handleSingleImageLayout(imagePath, result.action, result.detection.backgroundColor);
     }
 }
 
@@ -186,14 +225,19 @@ void MainWindow::onFrameExtractionFinished() {
 }
 
 void MainWindow::processFrameExtractionResult(const ProjectController::FrameExtractionResult& result) {
+    qInfo() << "[FrameExtraction] processFrameExtractionResult success=" << result.success
+            << "tempPath=" << result.tempPath;
     if (result.success) {
         if (processExtractedFrames(result.tempPath, result.sourcePath,
                 result.action, result.backgroundColor)) {
             scheduleLayoutRebuild(true);
         }
     } else {
+        qWarning() << "[FrameExtraction] spratunpack failed for" << result.sourcePath;
         m_statusLabel->setText(tr("Error running spratunpack"));
         setLoading(false);
+        MessageDialog::warning(this, tr("Load Failed"),
+            tr("Failed to extract frames from image: %1").arg(result.sourcePath));
     }
 }
 
@@ -272,8 +316,12 @@ void MainWindow::processTarExtractionResult(const ProjectController::TarExtracti
             scheduleLayoutRebuild(true);
         }
     } else {
+        const QString msg = tr("Failed to extract archive: %1").arg(result.tarPath);
         m_statusLabel->setText(tr("Error extracting tar file"));
         setLoading(false);
+        MessageDialog::warning(this, tr("Load Failed"), msg);
+        m_projectController->registerFailedSource(result.tarPath, msg);
+        refreshSpriteTree();
     }
 }
 
@@ -406,6 +454,7 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
             
             m_statusLabel->setText(QString(tr("Loaded single image: %1")).arg(sprite->name));
             // Update UI state
+            m_session->rebuildSpriteIndex();
             populateActiveFrameListFromModel();
             refreshSpriteTree();
             updateMainContentView();
@@ -420,10 +469,14 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
 }
 
 bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& sourcePath, DropAction action, const QColor& backgroundColor) {
+    qInfo() << "[FrameExtraction] processExtractedFrames tempPath=" << tempPath
+            << "sourcePath=" << sourcePath;
     // Collect images recursively to preserve subfolder structure from archives
     QStringList framePaths = ImageDiscoveryService::collectImagesRecursive({tempPath});
+    qInfo() << "[FrameExtraction] Found" << framePaths.size() << "images in tempPath";
 
     if (framePaths.isEmpty()) {
+        qWarning() << "[FrameExtraction] No images found in tempPath=" << tempPath;
         m_statusLabel->setText(tr("No image files found after extraction"));
         setLoading(false);
         return false;
@@ -518,6 +571,9 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
 
     // Ensure we generate a list file so spratlayout respects our sort order
     if (!ensureFrameListInput()) {
+        qWarning() << "[FrameExtraction] ensureFrameListInput failed"
+                   << "activeFramePaths.size()=" << m_session->activeFramePaths.size()
+                   << "sourceFolder=" << m_session->sourceFolder;
         m_statusLabel->setText(tr("Error: Could not create frame list for layout"));
         setLoading(false);
         return false;

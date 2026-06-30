@@ -284,6 +284,7 @@ void AtlasWorkspace::setupUi() {
         if (m_session) emit editAliasesRequested(m_session->selectedSprite);
     });
 
+
     connect(m_spriteEditorPanel->handleCombo(), QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &AtlasWorkspace::onHandleComboChanged);
 
@@ -803,9 +804,17 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     auto* tree = m_navigatorPanel->tree();
     QTreeWidgetItem* clickedItem = tree->itemAt(pos);
 
+    const QStringList checkedPaths = SpriteTreeUtils::collectCheckedPaths(tree);
+
+    // Error detail child (type 4) — redirect context menu to the parent source node
+    {
+        const int itemType = clickedItem ? clickedItem->data(0, Qt::UserRole + 2).toInt() : 0;
+        if (itemType == 4 && clickedItem && clickedItem->parent())
+            clickedItem = clickedItem->parent();
+    }
+
     const QStringList clickedPaths = clickedItem
         ? SpriteTreeUtils::collectDescendantPaths(clickedItem) : QStringList();
-    const QStringList checkedPaths = SpriteTreeUtils::collectCheckedPaths(tree);
 
     const bool clickedIsLeaf  = clickedItem && clickedItem->childCount() == 0
                                 && clickedItem->data(0, Qt::UserRole).isValid();
@@ -838,6 +847,17 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     QMenu menu(this);
     bool hadItems = false;
     auto addSep = [&]() { if (hadItems) { menu.addSeparator(); hadItems = false; } };
+
+    // Section 0: frame detection for leaf sprites
+    QAction* detectFramesAction = nullptr;
+    if (clickedIsLeaf) {
+        const auto sprite = clickedItem->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && !sprite->path.isEmpty()) {
+            detectFramesAction = menu.addAction(QIcon(":/icons/scan.svg"), tr("Detect frames..."));
+            hadItems = true;
+            addSep();
+        }
+    }
 
     // Section 1: exclude / delete
     QAction* deleteFrameAction    = nullptr;
@@ -889,9 +909,25 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
 
     // Source node actions
     QAction* autoCreateTimelinesAction = nullptr;
+    QAction* removeSourceAction        = nullptr;
+    QAction* retrySourceAction         = nullptr;
     if (clickedIsSourceNode) {
+        const int sourceIdx = clickedItem->data(0, Qt::UserRole + 1).toInt();
+        const bool sourceHasError = m_session
+            && sourceIdx >= 0 && sourceIdx < m_session->sources.size()
+            && m_session->sources[sourceIdx].hasError;
+
         addSep();
-        autoCreateTimelinesAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create timelines"));
+        if (!sourceHasError) {
+            autoCreateTimelinesAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create timelines"));
+            hadItems = true;
+            menu.addSeparator();
+        } else {
+            retrySourceAction = menu.addAction(QIcon(":/icons/retry.svg"), tr("Retry"));
+            hadItems = true;
+            menu.addSeparator();
+        }
+        removeSourceAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Remove source"));
         hadItems = true;
     }
 
@@ -900,7 +936,11 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     QAction* chosen = menu.exec(tree->viewport()->mapToGlobal(pos));
     if (!chosen) return;
 
-    if      (chosen == deleteFrameAction)                emit deleteFramesRequested(clickedPaths);
+    if      (chosen == detectFramesAction && clickedItem) {
+        const auto sprite = clickedItem->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite) emit detectFramesRequested(sprite->path);
+    }
+    else if (chosen == deleteFrameAction)                emit deleteFramesRequested(clickedPaths);
     else if (chosen == deleteGroupAction && clickedItem) emit deleteGroupRequested(clickedItem);
     else if (chosen == deleteSelectedAction)             emit deleteFramesRequested(checkedPaths);
     else if (chosen == addFramesAction) {
@@ -914,6 +954,14 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     else if (chosen == autoCreateTimelinesAction && clickedItem) {
         const int sourceIdx = clickedItem->data(0, Qt::UserRole + 1).toInt();
         emit autoCreateTimelinesForSourceRequested(sourceIdx);
+    }
+    else if (chosen == removeSourceAction && clickedItem) {
+        const int sourceIdx = clickedItem->data(0, Qt::UserRole + 1).toInt();
+        emit removeSourceRequested(sourceIdx);
+    }
+    else if (chosen == retrySourceAction && clickedItem) {
+        const int sourceIdx = clickedItem->data(0, Qt::UserRole + 1).toInt();
+        emit retrySourceRequested(sourceIdx);
     }
 }
 

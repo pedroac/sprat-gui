@@ -6,7 +6,6 @@ class QLineEdit;
 class QPushButton;
 class QDoubleSpinBox;
 class QComboBox;
-class QSpinBox;
 class QToolButton;
 class PreviewCanvas;
 class ElidedLabel;

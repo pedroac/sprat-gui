@@ -2,6 +2,8 @@
 #include <QWidget>
 #include <QList>
 #include <QPair>
+#include <QSpinBox>
+#include <QCheckBox>
 #include "models.h"
 #include "SpratProfilesConfig.h"
 #include "IWorkspace.h"
@@ -119,6 +121,10 @@ private:
     QTreeWidget* m_logTree      = nullptr;
     QPushButton* m_logRevealBtn = nullptr;
     QString      m_logDestination;
+
+    // Image processing controls (colors / dither)
+    QSpinBox*  m_colorsSpin  = nullptr;
+    QCheckBox* m_ditherCheck = nullptr;
 
     // Saved viewport zoom (persisted across enter/leave cycles)
     double m_savedZoom = -1.0;

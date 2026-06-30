@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "NineSliceWorkspace.h"
 #include "AnimationPreviewPanel.h"
 #include "ExportWorkspace.h"
 #include "FrameAnimationWorkspace.h"
@@ -280,6 +281,43 @@ void MainWindow::removeSource(int index) {
     }
 
     postExecuteRedo();
+}
+
+void MainWindow::onRetrySourceRequested(int sourceIndex) {
+    if (!m_session || sourceIndex < 0 || sourceIndex >= m_session->sources.size()) return;
+    const ProjectSource src = m_session->sources.at(sourceIndex);
+    if (!src.hasError) return;
+
+    // Remove the failed source entry (no undo — there's nothing to undo)
+    m_session->sources.removeAt(sourceIndex);
+    m_session->rebuildSpriteIndex();
+    refreshSpriteTree();
+
+    // Re-initiate loading from the original path
+    if (src.type == SourceType::Url) {
+        tryHandleRemoteUrl(QUrl(src.originalPath), DropAction::Merge);
+    } else {
+        tryHandleDroppedPath(src.originalPath, DropAction::Merge);
+    }
+}
+
+void MainWindow::onRemoveSourceRequested(int sourceIndex) {
+    if (!m_session || sourceIndex < 0 || sourceIndex >= m_session->sources.size()) return;
+
+    const QString sourceName = m_session->sources.at(sourceIndex).name;
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle(tr("Remove Source"));
+    msgBox.setIcon(QMessageBox::Question);
+    msgBox.setText(tr("Remove \"%1\" from this project?").arg(sourceName));
+    msgBox.setInformativeText(
+        tr("All sprites from this source will be removed from the atlas."));
+    auto* removeBtn = msgBox.addButton(tr("Remove Source"), QMessageBox::DestructiveRole);
+    msgBox.addButton(QMessageBox::Cancel);
+    msgBox.setDefaultButton(QMessageBox::Cancel);
+    msgBox.exec();
+
+    if (msgBox.clickedButton() == removeBtn)
+        removeSource(sourceIndex);
 }
 
 void MainWindow::onSyncSourceRequested(int sourceIndex) {
@@ -1040,6 +1078,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         // Sync initial settings
         m_layoutOrchestrator->setSyncMode(m_settings.syncMode);
         m_layoutOrchestrator->setDeduplicateMode(m_settings.deduplicateMode);
+        m_layoutOrchestrator->setDedupThreshold(m_settings.dedupThreshold);
+        m_layoutOrchestrator->setIncrementalLayout(m_settings.incrementalLayout);
         m_layoutOrchestrator->setLayoutZoomOnChange(m_settings.layoutZoomOnChange);
         m_layoutOrchestrator->setCLIReady(m_cliReady);
         m_layoutOrchestrator->setMergeReplaceAllDuplicates(m_mergeReplaceAllDuplicates);
@@ -1202,6 +1242,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             m_projectController->setFramesBinary(paths.framesBinary);
             m_projectController->setConvertBinary(paths.convertBinary);
             m_projectController->setUnpackBinary(paths.unpackBinary);
+            m_projectController->setFramesSettings({
+                m_settings.framesHasRectangles,
+                m_settings.framesRectangleColor,
+                m_settings.framesTolerance,
+                m_settings.framesMinSize,
+                m_settings.framesMaxSprites
+            });
         }
     });
     connect(m_cliSetup, &CliSetupController::installOverlayShowNeeded,
@@ -2113,6 +2160,10 @@ void MainWindow::onSettingsExportationClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::Exportation);
 }
 
+void MainWindow::onSettingsNineSliceClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::NineSlice);
+}
+
 #ifndef Q_OS_WASM
 void MainWindow::onSettingsCliToolsClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::CliTools);
@@ -2202,6 +2253,9 @@ void MainWindow::applySettings() {
     if (m_exportLayoutCanvas) {
         m_exportLayoutCanvas->setSettings(m_settings);
     }
+    if (m_nineSliceWorkspace) {
+        m_nineSliceWorkspace->setSettings(m_settings);
+    }
     auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
     auto* spriteTree = navigatorPanel ? navigatorPanel->tree() : nullptr;
     if (spriteTree) {
@@ -2243,12 +2297,25 @@ void MainWindow::applySettings() {
     if (m_layoutOrchestrator) {
         m_layoutOrchestrator->setSyncMode(m_settings.syncMode);
         m_layoutOrchestrator->setDeduplicateMode(m_settings.deduplicateMode);
+        m_layoutOrchestrator->setDedupThreshold(m_settings.dedupThreshold);
+        m_layoutOrchestrator->setIncrementalLayout(m_settings.incrementalLayout);
         m_layoutOrchestrator->setLayoutZoomOnChange(m_settings.layoutZoomOnChange);
     }
 
     // Propagate settings changes to ExportCoordinator
     if (m_exportCoordinator) {
         m_exportCoordinator->setAppSettings(m_settings);
+    }
+
+    // Propagate frame detection settings to ProjectController
+    if (m_projectController) {
+        m_projectController->setFramesSettings({
+            m_settings.framesHasRectangles,
+            m_settings.framesRectangleColor,
+            m_settings.framesTolerance,
+            m_settings.framesMinSize,
+            m_settings.framesMaxSprites
+        });
     }
 
     // Refresh folder label to add/remove the "(watching)" suffix
@@ -3184,8 +3251,8 @@ void MainWindow::onQuickStart() {
         "<ol>"
         "<li><b>Load sprites</b> &mdash; drag a folder, archive, or image onto the window.</li>"
         "<li><b>Sprites workspace</b> &mdash; select sprites to edit pivots and markers.</li>"
-        "<li><b>Atlas Layout workspace</b> &mdash; choose profiles and review the packed layout.</li>"
         "<li><b>Atlases workspace</b> &mdash; organize sprites across named atlases.</li>"
+        "<li><b>Nine-Slice workspace</b> &mdash; define scalable nine-patch regions for UI sprites.</li>"
         "<li><b>Frame Animation workspace</b> &mdash; build timelines and preview animations.</li>"
         "<li><b>Save</b> &mdash; Ctrl+S saves the project state to <tt>.json</tt> or <tt>.zip</tt>.</li>"
         "<li><b>Exportation workspace</b> &mdash; preview the packed atlas and export to disk.</li>"
@@ -3218,20 +3285,7 @@ void MainWindow::onQuickStart() {
         "add frames, or create timelines in one step.</li>"
         "</ul>"
 
-        "<h3>3 &mdash; Atlas Layout Workspace</h3>"
-        "<p>Open from the toolbar. Fills the window with the layout canvas and a right panel:</p>"
-        "<ul>"
-        "<li><b>Search</b> field &mdash; type to filter visible sprites by name.</li>"
-        "<li><b>View</b> group &mdash; switch the active named atlas, set source resolution, adjust zoom.</li>"
-        "<li><b>Profiles</b> group &mdash; check or uncheck profiles to include them in the layout; "
-        "select one to make it active. Use <i>Manage&hellip;</i> to create custom profiles "
-        "(atlas size limits, padding, trim, rotation, GPU compression, and more).</li>"
-        "<li><b>Pages</b> group &mdash; appears when the active atlas spans multiple texture pages; "
-        "click a page to preview it.</li>"
-        "</ul>"
-        "<p>The layout rebuilds automatically a short time after you stop making changes.</p>"
-
-        "<h3>4 &mdash; Atlases Workspace</h3>"
+        "<h3>3 &mdash; Atlases Workspace</h3>"
         "<p>Open <i>Manage Atlases</i> from the toolbar to organize sprites across named atlases:</p>"
         "<ul>"
         "<li>Add or remove atlases with the <b>Add / Remove</b> buttons; double-click to rename.</li>"
@@ -3251,6 +3305,24 @@ void MainWindow::onQuickStart() {
         "<li>Each named atlas is exported independently and can be previewed in the "
         "Exportation workspace.</li>"
         "</ul>"
+
+        "<h3>4 &mdash; Nine-Slice Workspace</h3>"
+        "<p>Open from the <i>View</i> menu (Alt+N). Mark sprites as nine-sliced and define their "
+        "slice regions:</p>"
+        "<ul>"
+        "<li>Select a sprite in the left navigator. Use the <b>Nine-sliced only</b> filter to show "
+        "only already-marked sprites.</li>"
+        "<li>Enable the <b>Nine-Sliced</b> toggle. The first time, slice lines are placed at "
+        "image thirds automatically.</li>"
+        "<li>Drag the slice lines on the canvas, or type values in the "
+        "<b>L / T / R / B</b> spinboxes.</li>"
+        "<li>Choose <b>horizontal</b> and <b>vertical fill modes</b>: "
+        "<i>stretch</i>, <i>repeat</i>, or <i>mirror</i>.</li>"
+        "<li>Set a <b>target size</b> (W / H) or drag the canvas resize handles to preview "
+        "the nine-slice result at the intended render dimensions.</li>"
+        "<li>Right-click a sprite in the navigator to quickly mark or unmark it.</li>"
+        "</ul>"
+        "<p>Nine-slice definitions are saved in the project and exported with the atlas metadata.</p>"
 
         "<h3>5 &mdash; Frame Animation Workspace</h3>"
         "<p>Open from the toolbar. The Timelines panel lists all animations:</p>"
@@ -3320,10 +3392,10 @@ void MainWindow::onShowHotkeys() {
         "<h3>Workspaces</h3>"
         "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
         "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Sprites workspace</td><td><b>Alt+A</b></td></tr>"
+        "<tr><td>Sprites workspace</td><td><b>Alt+S</b></td></tr>"
+        "<tr><td>Atlases workspace</td><td><b>Alt+A</b></td></tr>"
+        "<tr><td>Nine-Slice workspace</td><td><b>Alt+N</b></td></tr>"
         "<tr><td>Frame Animation workspace</td><td><b>Alt+F</b></td></tr>"
-        "<tr><td>Atlas Layout workspace</td><td><b>Alt+L</b></td></tr>"
-        "<tr><td>Atlases workspace</td><td><b>Alt+M</b></td></tr>"
         "<tr><td>Exportation workspace</td><td><b>Alt+E</b></td></tr>"
         "</table>"
 

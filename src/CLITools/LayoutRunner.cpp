@@ -28,6 +28,9 @@ LayoutRunner::LayoutRunner(QObject* parent) : QObject(parent)
 
 LayoutRunner::~LayoutRunner() {
     stop();
+#ifndef Q_OS_WASM
+    m_future.waitForFinished();
+#endif
 }
 
 void LayoutRunner::stop() {
@@ -222,7 +225,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
 #ifndef SPRAT_EMBEDDED_CLI
     m_running.store(true);
 #endif
-    QThreadPool::globalInstance()->start(task);
+    m_future = QtConcurrent::run(task);
 #endif
 }
 
@@ -295,6 +298,12 @@ QStringList LayoutRunner::buildArguments(const LayoutRunConfig& config) {
 
     if (!config.deduplicateMode.isEmpty() && config.deduplicateMode != "none") {
         args << "--deduplicate" << config.deduplicateMode;
+        if (config.deduplicateMode == "perceptual" && config.dedupThreshold != 5) {
+            args << "--dedup-threshold" << QString::number(config.dedupThreshold);
+        }
+    }
+    if (config.incrementalLayout) {
+        args << "--incremental";
     }
 
     return args;

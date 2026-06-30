@@ -11,7 +11,8 @@ Use this app if you need to:
 3. Edit pivots and markers per sprite visually.
 4. Create animation timelines quickly from frame naming patterns.
 5. Preview and export animations (GIF/video) without manual scripting.
-6. Save/load complete project state (`.json` or `.zip`).
+6. Define nine-slice regions for scalable UI elements (buttons, panels).
+7. Save/load complete project state (`.json` or `.zip`).
 
 If your workflow is already fully automated by scripts and CI, this may be unnecessary. If you need fast visual iteration for game/UI assets, this is likely useful.
 
@@ -51,6 +52,9 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 
 - **Advanced output processing**
   Per-profile GPU texture compression (DXT1/DXT5), artifact reduction via pixel dilation, and sprite deduplication (Exact or Perceptual modes).
+
+- **Nine-slice editing**
+  Mark individual sprites as nine-sliced and define left/top/right/bottom insets using an interactive canvas editor. Set horizontal and vertical fill modes (stretch, repeat, mirror) and preview the result at a configurable target size. Nine-slice definitions are saved in the project and exported with the atlas metadata.
 
 - **Visual customization**
   Customize workspace and sprite frame background colors, toggle transparency checkerboard, and configure sprite border styles.
@@ -155,11 +159,11 @@ For a guided introduction, open **Help → Quick Start** inside the app. For a f
 
 The application is organized into dedicated workspaces, each focusing on a specific part of the asset creation pipeline. You can switch between them using the **Workspace** menu or keyboard shortcuts.
 
-### **Sprites Workspace** (`Alt+A`)
+### **Sprites Workspace** (`Alt+S`)
 The default workspace for importing assets, managing the sprite tree, and editing individual frame metadata (pivots and markers). Use this for the initial setup and fine-tuning of your sprites.
 
 - **Sprite Navigator**
-  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organized by folder. Use `Alt+L` / `Alt+N` to switch quickly via keyboard.
+  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organized by folder.
   - Check sprites individually or by folder; right-click for context actions or press `Delete` to remove selected sprites:
     - Delete selected sprites.
     - Add frames to a folder.
@@ -183,7 +187,7 @@ The default workspace for importing assets, managing the sprite tree, and editin
 
 ![Sprites workspace](README_assets/sprites_workspace.png)
 
-### **Atlases Workspace** (`Alt+M`)
+### **Atlases Workspace** (`Alt+A`)
 Advanced management for projects with multiple texture atlases. Drag and drop sprites between named atlases, manage per-atlas profiles, and organize large asset sets.
 
 - **Manage Atlases**: organize sprites across named atlases: add or remove atlases, rename them, and drag sprites from the sprite tree into a different atlas slot.
@@ -193,6 +197,24 @@ Advanced management for projects with multiple texture atlases. Drag and drop sp
   - Autocreate atlases from source subfolders.
 
 ![Atlases workspace](README_assets/atlases_workspace.png)
+
+### **Nine-Slice Workspace** (`Alt+N`)
+An interactive editor for defining nine-slice (nine-patch) configurations on individual sprites. Useful for scalable UI elements such as buttons and panels that must stretch without distorting corners.
+
+- **Left panel**: sprite navigator with a **Nine-sliced only** filter button to show only marked sprites. Nine-sliced sprites display a badge icon in the tree. Right-click a sprite for quick **Mark as Nine-Sliced** / **Remove Nine-Slice** actions.
+- **Right panel**:
+  - **Nine-Sliced toggle** — enable or disable nine-slicing for the selected sprite.
+  - **Insets** — L / T / R / B spinboxes (px) to set left, top, right, and bottom slice lines. When a sprite is first marked, the lines are initialised to image thirds automatically.
+  - **Fill modes** — separate horizontal (H) and vertical (V) combos: *stretch*, *repeat*, or *mirror*.
+  - **Zoom** — 10–1600 % zoom for the editor canvas.
+  - **Target size** — W / H spinboxes (1–4096 px) to preview the nine-slice result at a given render size. Drag the right/bottom/corner handles on the canvas to resize interactively.
+  - **Grid** — toggles a pixel grid overlay.
+  - **Colorize** — shows colored region hints (corners, left/right edges, top/bottom edges, center).
+- **Canvas**: displays the slice lines as draggable handles and renders a live composite at the target size. Supports zoom (`Ctrl+Wheel`) and pan (`Space+Drag` or `Middle Mouse Drag`).
+
+Nine-slice definitions are saved in the project file and included in atlas metadata on export. Editor appearance (line color, style, region colors, overlay opacity) is configurable in **Settings → Nine-Slice**.
+
+![Nine-Slice workspace](README_assets/9-slices.png)
 
 ### **Frame Animation Workspace** (`Alt+F`)
 Focuses on timeline authoring and animation preview. It provides a dedicated animation panel and test area while keeping the sprite tree accessible for building sequences.
@@ -228,6 +250,7 @@ A full-screen preview and configuration area for final output. Preview exactly h
 ![CLI tools missing dialog](README_assets/clitools_not_found_dialog.png)
 
 - **Visual customization & Synchronization**
+  - **Nine-Slice Settings**: Configure the nine-slice editor appearance in **Settings → Nine-Slice** — slice line color and style, label color, resize handle color, per-region overlay colors (corners, edges, center), overlay opacity, and zoom-on-sprite-change behavior.
   - **Frames Editor Settings**: Configure workspace and sprite frame background colors, toggle the transparency checkerboard, and set sprite border styles in **Settings → Frames Editor**.
     - **Onion skin opacity**: Adjust the transparency of ghost overlays (0–100%).
     - **Flipbook pivot**: Choose which frames trigger flipbook alignment (None, Same Group, or All).
@@ -310,6 +333,12 @@ A full-screen preview and configuration area for final output. Preview exactly h
 - `Ctrl + Wheel`: Zoom preview.
 - `Space + Drag` or `Middle Mouse Drag`: Pan preview.
 
+### **Nine-Slice Editor Canvas**
+- `Ctrl + Wheel`: Zoom canvas.
+- `Space + Drag` or `Middle Mouse Drag`: Pan canvas.
+- Drag a slice line: adjust the corresponding inset.
+- Drag the right/bottom/corner resize handle: change the target preview size.
+
 ### **Animation Test Preview**
 - `Wheel`: Scroll preview viewport.
 - `Ctrl + Wheel`: Change animation preview zoom.
@@ -362,6 +391,8 @@ Generation behavior:
 - `src/Animation/` — animation playback/export logic
 - `src/Animation/Timelines/` — timeline building and operations
 - `src/Animation/Test/` — animation preview test operations
+- `src/NineSlice/` — nine-slice editor canvas and preview widget
+- `src/App/Workspaces/NineSlice/` — nine-slice workspace UI
 - `src/Project/` — project load/save/payload/autosave
 - `src/CLITools/` — CLI discovery/config/install helpers
 - `src/Settings/` — settings dialog/coordinator

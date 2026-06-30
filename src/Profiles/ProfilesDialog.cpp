@@ -44,6 +44,14 @@ SpratProfile makeDefaultProfile(const QString& name) {
     p.sort = "none";
     p.gpuCompress = "";
     p.dilate = 0;
+    p.imageFormat = "png";
+    p.imageQuality = 100;
+    p.zopfli = false;
+    p.frameLines = false;
+    p.frameLineWidth = 1;
+    p.frameLineColor = "255,0,0,255";
+    p.atlasIndex = -1;
+    p.autoAnimations = false;
     return p;
 }
 
@@ -221,7 +229,54 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     m_dilateSpin->setValue(0);
     outputLayout->addRow(tr("Dilate (artifact reduction):"), m_dilateSpin);
 
+    m_imageFormatCombo = new QComboBox(this);
+    m_imageFormatCombo->addItem(tr("PNG"), "png");
+    m_imageFormatCombo->addItem(tr("WebP"), "webp");
+    m_imageFormatCombo->addItem(tr("AVIF"), "avif");
+    outputLayout->addRow(tr("Image format:"), m_imageFormatCombo);
+
+    m_imageQualitySpin = new QSpinBox(this);
+    m_imageQualitySpin->setRange(0, 100);
+    m_imageQualitySpin->setValue(100);
+    m_imageQualitySpin->setToolTip(tr("0-100 (100 = lossless). Only applies to WebP/AVIF."));
+    outputLayout->addRow(tr("Encoding quality:"), m_imageQualitySpin);
+
+    m_zopfliCheck = new QCheckBox(tr("Enabled"), this);
+    m_zopfliCheck->setToolTip(tr("Zopfli PNG compression (slower but smaller). Only applies to PNG."));
+    outputLayout->addRow(tr("Zopfli compression:"), m_zopfliCheck);
+
+    m_atlasIndexSpin = new QSpinBox(this);
+    m_atlasIndexSpin->setRange(-1, 999);
+    m_atlasIndexSpin->setValue(-1);
+    m_atlasIndexSpin->setSpecialValueText(tr("All"));
+    m_atlasIndexSpin->setToolTip(tr("Export only a specific atlas from multipack (-1 = all)."));
+    outputLayout->addRow(tr("Atlas index:"), m_atlasIndexSpin);
+
+    m_autoAnimationsCheck = new QCheckBox(tr("Enabled"), this);
+    m_autoAnimationsCheck->setToolTip(tr("Automatically group frames by naming pattern into animations in the output format."));
+    outputLayout->addRow(tr("Auto-animations:"), m_autoAnimationsCheck);
+
     detailsScrollLayout->addWidget(outputGroup);
+
+    // === Group 5: Debug Overlay ===
+    QGroupBox* debugGroup = new QGroupBox(tr("Debug Overlay"), this);
+    QFormLayout* debugLayout = new QFormLayout(debugGroup);
+
+    m_frameLinesCheck = new QCheckBox(tr("Enabled"), this);
+    m_frameLinesCheck->setToolTip(tr("Draw sprite frame outlines on the atlas."));
+    debugLayout->addRow(tr("Frame lines:"), m_frameLinesCheck);
+
+    m_frameLineWidthSpin = new QSpinBox(this);
+    m_frameLineWidthSpin->setRange(1, 16);
+    m_frameLineWidthSpin->setValue(1);
+    debugLayout->addRow(tr("Line width:"), m_frameLineWidthSpin);
+
+    m_frameLineColorEdit = new QLineEdit(this);
+    m_frameLineColorEdit->setPlaceholderText(tr("R,G,B,A (e.g. 255,0,0,255)"));
+    m_frameLineColorEdit->setText("255,0,0,255");
+    debugLayout->addRow(tr("Line color:"), m_frameLineColorEdit);
+
+    detailsScrollLayout->addWidget(debugGroup);
     detailsScrollLayout->addStretch();
 
     scrollArea->setWidget(detailsWidget);
@@ -239,6 +294,12 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     connect(m_useMaxHeightCheck, &QCheckBox::toggled, m_maxHeightSpin, &QSpinBox::setEnabled);
     connect(m_presetCombo, &QComboBox::currentTextChanged, this, [this](const QString&) {
         refreshThreadsEnabledState();
+    });
+    connect(m_imageFormatCombo, &QComboBox::currentIndexChanged, this, [this](int) {
+        refreshFormatDependentState();
+    });
+    connect(m_frameLinesCheck, &QCheckBox::toggled, this, [this](bool) {
+        refreshFrameLinesDependentState();
     });
     connect(m_listWidget->model(), &QAbstractItemModel::rowsMoved,
             this, [this](const QModelIndex&, int srcFirst, int, const QModelIndex&, int dest) {
@@ -367,6 +428,14 @@ void ProfilesDialog::saveEditorsToProfile(int row) {
     p.sort = m_sortCombo->currentData().toString();
     p.gpuCompress = m_gpuCompressCombo->currentData().toString();
     p.dilate = m_dilateSpin->value();
+    p.imageFormat = m_imageFormatCombo->currentData().toString();
+    p.imageQuality = m_imageQualitySpin->value();
+    p.zopfli = m_zopfliCheck->isChecked();
+    p.frameLines = m_frameLinesCheck->isChecked();
+    p.frameLineWidth = m_frameLineWidthSpin->value();
+    p.frameLineColor = m_frameLineColorEdit->text().trimmed();
+    p.atlasIndex = m_atlasIndexSpin->value();
+    p.autoAnimations = m_autoAnimationsCheck->isChecked();
 
     const QString displayName = !p.label.isEmpty() ? p.label
                               : !p.name.isEmpty()  ? p.name
@@ -399,6 +468,14 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_sortCombo->setEnabled(valid);
     m_gpuCompressCombo->setEnabled(valid);
     m_dilateSpin->setEnabled(valid);
+    m_imageFormatCombo->setEnabled(valid);
+    m_imageQualitySpin->setEnabled(valid);
+    m_zopfliCheck->setEnabled(valid);
+    m_frameLinesCheck->setEnabled(valid);
+    m_frameLineWidthSpin->setEnabled(valid);
+    m_frameLineColorEdit->setEnabled(valid);
+    m_atlasIndexSpin->setEnabled(valid);
+    m_autoAnimationsCheck->setEnabled(valid);
 
     if (!valid) {
         m_nameEdit->clear();
@@ -422,6 +499,14 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
         m_sortCombo->setCurrentIndex(0);
         m_gpuCompressCombo->setCurrentIndex(0);
         m_dilateSpin->setValue(0);
+        m_imageFormatCombo->setCurrentIndex(0);
+        m_imageQualitySpin->setValue(100);
+        m_zopfliCheck->setChecked(false);
+        m_frameLinesCheck->setChecked(false);
+        m_frameLineWidthSpin->setValue(1);
+        m_frameLineColorEdit->setText("255,0,0,255");
+        m_atlasIndexSpin->setValue(-1);
+        m_autoAnimationsCheck->setChecked(false);
         m_updatingEditors = false;
         return;
     }
@@ -470,8 +555,20 @@ void ProfilesDialog::loadEditorsFromProfile(int row) {
     m_gpuCompressCombo->setCurrentIndex(gpuCompressIndex >= 0 ? gpuCompressIndex : 0);
     m_dilateSpin->setValue(p.dilate);
 
+    const int formatIndex = m_imageFormatCombo->findData(p.imageFormat);
+    m_imageFormatCombo->setCurrentIndex(formatIndex >= 0 ? formatIndex : 0);
+    m_imageQualitySpin->setValue(p.imageQuality);
+    m_zopfliCheck->setChecked(p.zopfli);
+    m_frameLinesCheck->setChecked(p.frameLines);
+    m_frameLineWidthSpin->setValue(p.frameLineWidth);
+    m_frameLineColorEdit->setText(p.frameLineColor);
+    m_atlasIndexSpin->setValue(p.atlasIndex);
+    m_autoAnimationsCheck->setChecked(p.autoAnimations);
+
     m_updatingEditors = false;
     refreshThreadsEnabledState();
+    refreshFormatDependentState();
+    refreshFrameLinesDependentState();
 }
 
 void ProfilesDialog::refreshThreadsEnabledState() {
@@ -480,6 +577,25 @@ void ProfilesDialog::refreshThreadsEnabledState() {
     }
     const bool enabled = m_presetCombo->isEnabled() && isCompactPreset(m_presetCombo->currentData().toString());
     m_threadsSpin->setEnabled(enabled);
+}
+
+void ProfilesDialog::refreshFormatDependentState() {
+    if (m_updatingEditors) {
+        return;
+    }
+    const QString format = m_imageFormatCombo->currentData().toString();
+    const bool isPng = (format == "png");
+    m_imageQualitySpin->setEnabled(m_imageFormatCombo->isEnabled() && !isPng);
+    m_zopfliCheck->setEnabled(m_imageFormatCombo->isEnabled() && isPng);
+}
+
+void ProfilesDialog::refreshFrameLinesDependentState() {
+    if (m_updatingEditors) {
+        return;
+    }
+    const bool enabled = m_frameLinesCheck->isEnabled() && m_frameLinesCheck->isChecked();
+    m_frameLineWidthSpin->setEnabled(enabled);
+    m_frameLineColorEdit->setEnabled(enabled);
 }
 
 QString ProfilesDialog::uniqueProfileName(const QString& base) const {

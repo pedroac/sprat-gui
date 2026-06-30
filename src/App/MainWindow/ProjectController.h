@@ -84,12 +84,22 @@ public:
         bool       success       = false;
     };
 
+    struct FramesAdvancedSettings {
+        bool framesHasRectangles = false;
+        QString framesRectangleColor;
+        int framesTolerance = 1;
+        int framesMinSize = 4;
+        int framesMaxSprites = 10000;
+    };
+
     explicit ProjectController(ProjectSession* session, QObject* parent = nullptr);
+    ~ProjectController() override;
 
     // ---- Binary paths (updated after CLI resolution) ----
     void setFramesBinary(const QString& p) { m_framesBinary = p; }
     void setConvertBinary(const QString& p) { m_convertBinary = p; }
     void setUnpackBinary(const QString& p)  { m_unpackBinary  = p; }
+    void setFramesSettings(const FramesAdvancedSettings& s) { m_framesSettings = s; }
     QString framesBinary()  const { return m_framesBinary; }
     QString convertBinary() const { return m_convertBinary; }
     QString unpackBinary()  const { return m_unpackBinary; }
@@ -111,7 +121,7 @@ public:
     void    setPendingImportUrl(const QString& u) { m_pendingImportUrl = u; }
 
     // ---- Cancellation flag (written by MainWindow::onCancelLoading) ----
-    std::atomic<bool>& cancelFlag() { return m_isCanceled; }
+    std::atomic<bool>& cancelFlag() { return *m_isCanceled; }
 
     // ---- Cancel all in-flight operations ----
     void cancelAll();
@@ -182,6 +192,8 @@ public:
     void registerLoadedSource(const QString& sourcePath,
                               DropAction action,
                               const QString& cachedFolderPath = QString());
+    void registerFailedSource(const QString& sourcePath,
+                              const QString& errorMessage);
 
     // ---- Network manager lazy init ----
     QNetworkAccessManager* importNetworkManager();
@@ -222,6 +234,7 @@ private:
 
     // ---- Binary paths ----
     QString m_framesBinary;
+    FramesAdvancedSettings m_framesSettings;
     QString m_convertBinary;
     QString m_unpackBinary;
 
@@ -231,7 +244,7 @@ private:
     bool     m_shouldClearSpritesFolder = false;
     bool     m_sourceFolderIsTemp       = false;
     bool     m_mergeReplaceAllDuplicates = true;
-    std::atomic<bool> m_isCanceled{false};
+    std::shared_ptr<std::atomic<bool>> m_isCanceled;
 
     // ---- Async watchers ----
     QFutureWatcher<ProjectLoadResult>        m_projectLoadWatcher;

@@ -18,8 +18,10 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QSpinBox>
 #include <QStyle>
 #include <QCoreApplication>
 #include <QMap>

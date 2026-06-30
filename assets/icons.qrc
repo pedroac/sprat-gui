@@ -4,6 +4,8 @@
         <file alias="crop.svg">icons/crop-svgrepo-com.svg</file>
         <file alias="drag.svg">icons/drag-svgrepo-com.svg</file>
         <file alias="grid.svg">icons/grid-svgrepo-com.svg</file>
+        <file alias="nine-slice.svg">icons/grid-nine-svgrepo-com.svg</file>
+        <file alias="colorize.svg">icons/color-switch-svgrepo-com.svg</file>
         <file alias="location.svg">icons/location-on-svgrepo-com.svg</file>
         <file alias="timeline.svg">icons/timeline-svgrepo-com.svg</file>
         <file alias="layout.svg">icons/layout-svgrepo-com.svg</file>
@@ -35,5 +37,16 @@
         <file alias="image.svg">icons/image-svgrepo-com.svg</file>
         <file alias="internet.svg">icons/internet-svgrepo-com.svg</file>
         <file alias="package-compressed.svg">icons/package-compressed-svgrepo-com.svg</file>
+        <file alias="stretch-h.svg">icons/stretch-horizontal2-svgrepo-com.svg</file>
+        <file alias="stretch-v.svg">icons/stretch-vertical2-svgrepo-com.svg</file>
+        <file alias="repeat-h.svg">icons/column-triple-svgrepo-com.svg</file>
+        <file alias="repeat-v.svg">icons/row-triple-svgrepo-com.svg</file>
+        <file alias="mirror-h.svg">icons/reflection-horizontal-svgrepo-com.svg</file>
+        <file alias="mirror-v.svg">icons/reflection-vertical-svgrepo-com.svg</file>
+        <file alias="disabled.svg">icons/disabled-svgrepo-com.svg</file>
+        <file alias="filter.svg">icons/filter-svgrepo-com(1).svg</file>
+        <file alias="drag-handle.svg">icons/drag-handle-dots-1-svgrepo-com.svg</file>
+        <file alias="resize-handle.svg">icons/resize-handle-svgrepo-com.svg</file>
+        <file alias="retry.svg">icons/sync-svgrepo-com.svg</file>
     </qresource>
 </RCC>

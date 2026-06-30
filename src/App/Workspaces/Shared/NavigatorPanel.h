@@ -1,9 +1,11 @@
 #pragma once
+#include <functional>
 #include <QAbstractItemView>
 #include <QHash>
 #include <QIcon>
 #include <QWidget>
 #include "ProjectModels.h"
+#include "SpriteModels.h"
 
 class NavigatorTreeWidget;
 class ProjectSession;
@@ -85,6 +87,15 @@ public:
     /** Enable or disable grouping of similar (animation-sequence) sprites under a parent node. */
     void setGroupSimilar(bool group);
 
+    /**
+     * @brief Callback type that returns a badge icon to overlay on a sprite's thumbnail.
+     * Return a null QIcon() for sprites that should have no badge.
+     */
+    using SpriteBadgeCallback = std::function<QIcon(const SpritePtr&)>;
+
+    /** Set a callback that returns a badge icon per sprite (or null icon for no badge). */
+    void setSpriteBadgeCallback(SpriteBadgeCallback cb);
+
 signals:
     /** Emitted when the user selects a different atlas in the combo. */
     void atlasIndexChanged(int sessionAtlasIndex);
@@ -116,4 +127,5 @@ private:
     bool                 m_checkboxesEnabled = true;
     bool                 m_groupSimilar      = true;
     QHash<QString, QIcon> m_iconCache;
+    SpriteBadgeCallback  m_badgeCallback;
 };

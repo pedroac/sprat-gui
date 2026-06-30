@@ -24,6 +24,14 @@ struct SpratProfile {
     QString sort = "none";
     QString gpuCompress = "";  // "" = none, "dxt1", "dxt5"
     int dilate = 0;             // 0 = disabled, N = passes
+    QString imageFormat = "png";    // "png", "webp", "avif"
+    int imageQuality = 100;         // 0-100 (100 = lossless)
+    bool zopfli = false;            // Zopfli PNG optimization
+    bool frameLines = false;        // Draw sprite outlines
+    int frameLineWidth = 1;         // Line thickness in pixels
+    QString frameLineColor = "255,0,0,255"; // R,G,B,A
+    int atlasIndex = -1;            // -1 = all atlases, >= 0 = export only this atlas
+    bool autoAnimations = false;    // Pass --auto-animations to spratconvert
 };
 
 class SpratProfilesConfig {
