@@ -153,6 +153,9 @@ signals:
     void autoCreateTimelinesForSourceRequested(int sourceIndex);
     void removeSourceRequested(int sourceIndex);
     void retrySourceRequested(int sourceIndex);
+    void unhideGroupRequested(int sourceIdx, const QString& relPath);
+    void reincludeFromSourceRequested(int sourceIdx, const QString& relPath);
+    void reincludeAllFromSourceRequested(int sourceIdx);
     void spriteDroppedToTimeline(const QStringList& paths, const QString& targetFolder);
     void spriteSelected(SpritePtr sprite);
     void canvasSelectionChanged(const QList<SpritePtr>& selection);

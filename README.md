@@ -93,6 +93,42 @@ Use the layout canvas context menu to manage individual frames without reloading
 
 See [WASM_DEPLOYMENT.md](WASM_DEPLOYMENT.md) for deployment instructions.
 
+## Download & Install
+
+Pre-built binaries are available on **[itch.io](https://pedroac.itch.io/sprat)**. The CLI tools (`spratlayout`, `spratframes`, `spratpack`) are already embedded or bundled — no separate installation is required.
+
+### Linux
+
+1. Download `sprat-gui-linux.AppImage`.
+2. Make it executable:
+   ```bash
+   chmod +x sprat-gui-linux.AppImage
+   ```
+3. Run it:
+   ```bash
+   ./sprat-gui-linux.AppImage
+   ```
+
+For GIF export, install **ImageMagick** (`magick` or `convert` in `$PATH`). For video export, install **FFmpeg** (`ffmpeg` in `$PATH`).
+
+### Windows
+
+1. Download `sprat-gui-windows.zip`.
+2. Extract the archive to any folder.
+3. Run `sprat-gui.exe` inside the extracted folder.
+
+All Qt runtime DLLs and CLI tools are included in the ZIP — the application is fully portable and requires no installer. Windows may show a SmartScreen warning the first time you run it because the executable is unsigned; click **More info → Run anyway** to proceed.
+
+### macOS
+
+1. Download `sprat-gui-macos.dmg`.
+2. Open the `.dmg` file and drag `sprat-gui.app` to your **Applications** folder.
+3. On first launch, macOS Gatekeeper will block the app because it is not notarized. To open it anyway:
+   - Right-click (or Control-click) `sprat-gui.app` in Finder and choose **Open**.
+   - Click **Open** in the dialog that appears.
+
+The CLI tools are bundled inside the `.app` bundle and require no separate installation.
+
 ## Build
 
 ### Linux / WASM

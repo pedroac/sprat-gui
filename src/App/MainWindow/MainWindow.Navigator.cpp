@@ -785,6 +785,63 @@ void MainWindow::onNavigatorReincludeFromSource(int sourceIdx, const QString& re
 }
 
 // ---------------------------------------------------------------------------
+// Action: Re-include all previously excluded sprites from a source.  Undoable.
+// ---------------------------------------------------------------------------
+void MainWindow::onNavigatorReincludeAllFromSource(int sourceIdx)
+{
+    if (!m_session || sourceIdx < 0 || sourceIdx >= m_session->sources.size()) return;
+    auto& src = m_session->sources[sourceIdx];
+    if (src.excludedFiles.isEmpty()) return;
+
+    const QString cleanedCache = QDir::cleanPath(
+        src.cachedFolderPath.isEmpty() ? src.originalPath : src.cachedFolderPath);
+
+    const QStringList savedActivePaths = m_session->activeFramePaths;
+    const QStringList relPaths = src.excludedFiles;
+
+    src.excludedFiles.clear();
+
+    QStringList newActivePaths = m_session->activeFramePaths;
+    for (const QString& relPath : relPaths) {
+        const QString absPath = cleanedCache + '/' + relPath;
+        if (QFile::exists(absPath) && !newActivePaths.contains(absPath))
+            newActivePaths.append(absPath);
+    }
+    m_session->activeFramePaths = newActivePaths;
+
+    if (!ensureFrameListInput()) {
+        src.excludedFiles = relPaths;
+        m_session->activeFramePaths = savedActivePaths;
+        MessageDialog::warning(this, tr("Re-include"), tr("Could not create temporary frame list."));
+        return;
+    }
+
+    const int neutralIdx = m_session->neutralAtlasIndex();
+    if (neutralIdx >= 0 && neutralIdx < m_session->atlases.size()) {
+        AtlasEntry& neutral = m_session->atlases[neutralIdx];
+        for (const QString& relPath : relPaths) {
+            const QString absPath = cleanedCache + '/' + relPath;
+            if (!neutral.spritePaths.contains(absPath))
+                neutral.spritePaths.append(absPath);
+        }
+    }
+    syncExcludedAtlas();
+    if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
+        m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
+
+    scheduleLayoutRebuild();
+    refreshSpriteTree();
+
+    m_undoStack->push(new ExcludeGroupFromSourceCommand(
+        &src.excludedFiles, &m_session->activeFramePaths,
+        relPaths, savedActivePaths, newActivePaths,
+        false,
+        [this]() { return ensureFrameListInput(); },
+        [this]() { scheduleLayoutRebuild(false); refreshSpriteTree(); }
+    ));
+}
+
+// ---------------------------------------------------------------------------
 // Action: Auto-create timelines from child groups
 // ---------------------------------------------------------------------------
 void MainWindow::onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup)

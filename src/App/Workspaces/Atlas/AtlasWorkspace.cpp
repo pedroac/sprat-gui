@@ -832,13 +832,24 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     // Special item types: hidden-folder (1), excluded item (2), excluded-section header (3)
     if (clickedItemType > 0) {
         QMenu menu(this);
+        const int sourceIdx = clickedItem->data(0, Qt::UserRole + 3).toInt();
         if (clickedItemType == 1) {
-            menu.addAction(tr("Unhide \"%1\"").arg(clickedItem->text(0)));
+            const QString relPath = clickedItem->data(0, Qt::UserRole + 4).toString();
+            QAction* act = menu.addAction(tr("Unhide \"%1\"").arg(clickedItem->text(0)));
+            connect(act, &QAction::triggered, this, [this, sourceIdx, relPath]() {
+                emit unhideGroupRequested(sourceIdx, relPath);
+            });
         } else if (clickedItemType == 2) {
             const QString relPath = clickedItem->data(0, Qt::UserRole + 4).toString();
-            menu.addAction(tr("Re-include \"%1\"").arg(QFileInfo(relPath).fileName()));
+            QAction* act = menu.addAction(tr("Re-include \"%1\"").arg(QFileInfo(relPath).fileName()));
+            connect(act, &QAction::triggered, this, [this, sourceIdx, relPath]() {
+                emit reincludeFromSourceRequested(sourceIdx, relPath);
+            });
         } else if (clickedItemType == 3) {
-            menu.addAction(tr("Re-include all"));
+            QAction* act = menu.addAction(tr("Re-include all"));
+            connect(act, &QAction::triggered, this, [this, sourceIdx]() {
+                emit reincludeAllFromSourceRequested(sourceIdx);
+            });
         }
         menu.exec(tree->viewport()->mapToGlobal(pos));
         return;

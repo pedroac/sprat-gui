@@ -866,6 +866,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             if (srcNode->child(j)->data(0, Qt::UserRole + 2).toInt() == 3) {
                 QTreeWidgetItem* trash = srcNode->takeChild(j);
                 srcNode->insertChild(0, trash);
+                trash->setExpanded(true);
                 break;
             }
         }

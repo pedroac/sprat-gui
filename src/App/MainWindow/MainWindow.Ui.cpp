@@ -528,6 +528,12 @@ void MainWindow::setupUi() {
             this, &MainWindow::updateOnionSkinDisplay);
     connect(m_atlasWorkspace, &AtlasWorkspace::spriteDroppedToTimeline,
             this, &MainWindow::onSpritesDroppedToTimeline);
+    connect(m_atlasWorkspace, &AtlasWorkspace::unhideGroupRequested,
+            this, &MainWindow::onNavigatorUnhideGroup);
+    connect(m_atlasWorkspace, &AtlasWorkspace::reincludeFromSourceRequested,
+            this, &MainWindow::onNavigatorReincludeFromSource);
+    connect(m_atlasWorkspace, &AtlasWorkspace::reincludeAllFromSourceRequested,
+            this, &MainWindow::onNavigatorReincludeAllFromSource);
 
     // 2. Animation Timelines panel
     auto* timelineEditorPanel = new TimelineEditorPanel(m_session, m_undoStack, this);
@@ -882,11 +888,13 @@ void MainWindow::setupToolbar() {
     m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
     connect(m_exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
 
+#ifndef Q_OS_WASM
     fileMenu->addSeparator();
     QAction* quitAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogCloseButton), tr("Quit"));
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
+#endif
 
     QMenu* editMenu = mainMenuBar->addMenu(tr("&Edit"));
     QAction* undoAction = editMenu->addAction(
@@ -1009,6 +1017,10 @@ void MainWindow::setupZoomShortcuts() {
             targetSpin = m_exportWorkspace->zoomSpin();
         }
 
+        if (!targetSpin && m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace
+                && (fw == m_nineSliceWorkspace || m_nineSliceWorkspace->isAncestorOf(fw))) {
+            targetSpin = m_nineSliceWorkspace->zoomSpin();
+        }
         if (!targetSpin) {
             return;
         }
@@ -1051,6 +1063,11 @@ void MainWindow::setupZoomShortcuts() {
                 if (m_packedAtlasView) m_packedAtlasView->setZoomManual(true);
                 m_exportWorkspace->zoomSpin()->setValue(100.0);
             }
+        } else if (m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace
+                   && (fw == m_nineSliceWorkspace || m_nineSliceWorkspace->isAncestorOf(fw))) {
+            auto* nsCanvas = m_nineSliceWorkspace->canvas();
+            if (fitToContent) { nsCanvas->setZoomManual(false); nsCanvas->initialFit(); }
+            else              { nsCanvas->setZoomManual(true);  m_nineSliceWorkspace->zoomSpin()->setValue(100.0); }
         }
     };
 

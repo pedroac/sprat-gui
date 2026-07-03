@@ -35,6 +35,7 @@ public:
 
     void setSettings(const AppSettings& settings);
     NineSliceEditorCanvas* canvas() const { return m_canvas; }
+    QDoubleSpinBox* zoomSpin() const { return m_zoomSpin; }
     NavigatorPanel* navigatorPanel() const { return m_navigatorPanel; }
 
 signals:

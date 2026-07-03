@@ -694,6 +694,7 @@ private:
     void onNavigatorUnhideGroup(int sourceIdx, const QString& relPath);
     void onNavigatorExcludeGroup(QTreeWidgetItem* groupItem);
     void onNavigatorReincludeFromSource(int sourceIdx, const QString& relPath);
+    void onNavigatorReincludeAllFromSource(int sourceIdx);
     QString absolutePathForNavItem(QTreeWidgetItem* item) const;
     void onNavigatorAutoCreateTimelines(QTreeWidgetItem* parentGroup);
     void onNavigatorAutoCreateTimelinesForSource(int sourceIndex);

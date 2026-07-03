@@ -427,8 +427,9 @@ void NineSliceEditorCanvas::initialFit()
         fitInView(m_imageItem, Qt::KeepAspectRatio);
         QTransform t = transform();
         double z = t.m11();
-        if (z > m_maxZoom) setZoom(m_maxZoom);
-        else if (z < m_minZoom) setZoom(m_minZoom);
+        if (z > m_maxZoom) { setZoom(m_maxZoom); return; }
+        if (z < m_minZoom) { setZoom(m_minZoom); return; }
+        emit zoomChanged(z);
     }
 }
 

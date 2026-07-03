@@ -271,9 +271,6 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
 {
     FrameDetectionResult result;
 
-#ifdef Q_OS_WASM
-    return result;
-#else
     QStringList args;
     if (m_framesSettings.framesHasRectangles) {
         args << "--has-rectangles";
@@ -355,7 +352,6 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
         }
     }
     return result;
-#endif // Q_OS_WASM
 }
 
 // ---------------------------------------------------------------------------

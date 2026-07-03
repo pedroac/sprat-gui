@@ -244,7 +244,7 @@ void NineSliceWorkspace::setupUi()
     connect(m_canvas, &NineSliceEditorCanvas::zoomChanged,
             this, &NineSliceWorkspace::onCanvasZoomChanged);
     connect(m_zoomSpin, qOverload<double>(&QDoubleSpinBox::valueChanged),
-            this, [this](double v) { m_canvas->setZoom(v / 100.0); });
+            this, [this](double v) { m_canvas->setZoomManual(true); m_canvas->setZoom(v / 100.0); });
     connect(m_widthSpin, qOverload<int>(&QSpinBox::valueChanged),
             this, [this](int v) { m_canvas->setTargetSize(v, m_heightSpin->value()); });
     connect(m_heightSpin, qOverload<int>(&QSpinBox::valueChanged),

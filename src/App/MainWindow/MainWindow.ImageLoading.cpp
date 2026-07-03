@@ -78,10 +78,12 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         return;
     }
 
+#ifndef SPRAT_EMBEDDED_CLI
     if (m_spratFramesBin.isEmpty()) {
         MessageDialog::warning(this, tr("Error"), tr("spratframes binary not found."));
         return;
     }
+#endif
 
     m_isCanceled = false;
     m_loadingUiMessage = tr("Detecting frames in image...");
