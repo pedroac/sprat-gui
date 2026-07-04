@@ -266,6 +266,17 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# macOS Tahoe (Xcode 26) removed the AGL framework; Qt 6.5.x still lists it as
+# a link dependency.  Defining an empty INTERFACE target named AGL here causes
+# CMake to resolve all "AGL" entries in Qt imported-target INTERFACE_LINK_LIBRARIES
+# against this stub instead of falling through to the framework path that emits
+# -framework AGL and causes a linker error.
+if(APPLE)
+    if(NOT TARGET AGL)
+        add_library(AGL INTERFACE IMPORTED GLOBAL)
+    endif()
+endif()
+
 # === Find Dependencies ===
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
