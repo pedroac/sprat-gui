@@ -498,7 +498,7 @@ void AtlasWorkspace::updateUiState(bool hasProject, bool isLoading, bool cliRead
 }
 
 void AtlasWorkspace::setCanvasZoom(double percent) {
-    if (m_canvas) m_canvas->setZoom(percent / 100.0);
+    if (m_canvas) { m_canvas->setZoomManual(true); m_canvas->setZoom(percent / 100.0); }
 }
 
 void AtlasWorkspace::applyMarkers(SpritePtr sprite, const QVector<NamedPoint>& points) {
@@ -716,7 +716,7 @@ void AtlasWorkspace::onCoordUnitChanged() {
 
 void AtlasWorkspace::onLayoutZoomChanged(double value) {
     m_layoutZoom = value;
-    if (m_canvas) m_canvas->setZoom(value / 100.0);
+    if (m_canvas) { m_canvas->setZoomManual(true); m_canvas->setZoom(value / 100.0); }
     emit canvasZoomChanged(value);
 }
 

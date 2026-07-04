@@ -79,11 +79,12 @@ jobs:
         shell: bash
         run: |
           # macOS Tahoe / Xcode 26 removed the legacy AGL framework;
-          # Qt 6.5.x references it in several cmake files.
-          find "$QT_ROOT_DIR" -name '*.cmake' -exec \
-            grep -l 'AGL' {} + | while read -r f; do
+          # Qt 6.5.x references it in cmake, prl, and pc files.
+          find "$QT_ROOT_DIR" \( -name '*.cmake' -o -name '*.prl' -o -name '*.pc' \) \
+            -exec grep -l 'AGL' {} + | while read -r f; do
             echo "Patching AGL from: $f"
-            sed -i '' 's/-framework AGL//g; s/;AGL//g; s/AGL;//g' "$f"
+            sed -i '' \
+              's/-framework AGL//g; s/-framework;AGL//g; s/;AGL//g; s/AGL;//g' "$f"
           done
 
       - name: Configure
