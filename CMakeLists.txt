@@ -281,6 +281,46 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
+if(APPLE)
+    # Qt 6.5.x pre-built binaries have -framework AGL hardcoded in their cmake
+    # imported-target properties.  AGL was removed from macOS Tahoe (Xcode 26);
+    # strip it from every relevant target property now that find_package has run
+    # and the imported targets exist.  The add_library(AGL ...) stub above
+    # handles the bare "AGL" target-name form; this loop handles the raw
+    # "-framework AGL" flag-string form that bypasses target resolution.
+    foreach(_agl_tgt IN ITEMS
+            Qt6::Gui Qt6::GuiPrivate
+            Qt6::Widgets Qt6::WidgetsPrivate
+            Qt6::OpenGL Qt6::OpenGLWidgets Qt6::OpenGLPrivate
+            Qt6::QCocoaIntegrationPlugin)
+        if(NOT TARGET ${_agl_tgt})
+            continue()
+        endif()
+        foreach(_agl_prop IN ITEMS
+                INTERFACE_LINK_LIBRARIES INTERFACE_LINK_OPTIONS
+                IMPORTED_LINK_DEPENDENT_LIBRARIES
+                IMPORTED_LINK_DEPENDENT_LIBRARIES_RELEASE
+                IMPORTED_LINK_DEPENDENT_LIBRARIES_RELWITHDEBINFO
+                IMPORTED_LINK_DEPENDENT_LIBRARIES_DEBUG
+                IMPORTED_LINK_DEPENDENT_LIBRARIES_MINSIZEREL)
+            get_target_property(_agl_v ${_agl_tgt} ${_agl_prop})
+            if(NOT _agl_v)
+                continue()
+            endif()
+            string(REPLACE "-framework AGL"  ""  _agl_v "${_agl_v}")
+            string(REPLACE "-framework;AGL"  ""  _agl_v "${_agl_v}")
+            string(REPLACE ";AGL;"           ";" _agl_v "${_agl_v}")
+            string(REPLACE ";AGL"            ""  _agl_v "${_agl_v}")
+            string(REPLACE "AGL;"            ""  _agl_v "${_agl_v}")
+            string(REPLACE "AGL"             ""  _agl_v "${_agl_v}")
+            string(REGEX REPLACE ";+"        ";" _agl_v "${_agl_v}")
+            string(REGEX REPLACE "^;|;$"     ""  _agl_v "${_agl_v}")
+            set_target_properties(${_agl_tgt} PROPERTIES ${_agl_prop} "${_agl_v}")
+        endforeach()
+    endforeach()
+    unset(_agl_tgt _agl_prop _agl_v)
+endif()
+
 # === Source Files ===
 set(PROJECT_SOURCES
     src/App/main.cpp
