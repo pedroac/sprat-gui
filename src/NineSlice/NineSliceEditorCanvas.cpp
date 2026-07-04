@@ -421,10 +421,18 @@ void NineSliceEditorCanvas::setFillModes(const QString& hMode, const QString& vM
     renderComposite();
 }
 
+void NineSliceEditorCanvas::setResizableAxes(bool h, bool v)
+{
+    if (m_sourcePixmap.isNull()) return;
+    m_rightHandle ->setVisible(h);
+    m_bottomHandle->setVisible(v);
+    m_cornerHandle->setVisible(h && v);
+}
+
 void NineSliceEditorCanvas::initialFit()
 {
     if (m_imageItem) {
-        fitInView(m_imageItem, Qt::KeepAspectRatio);
+        fitInView(m_scene->sceneRect(), Qt::KeepAspectRatio);
         QTransform t = transform();
         double z = t.m11();
         if (z > m_maxZoom) { setZoom(m_maxZoom); return; }
@@ -456,10 +464,13 @@ void NineSliceEditorCanvas::resizeTo(int w, int h)
     emit targetSizeChanged(m_targetSize.width(), m_targetSize.height());
 }
 
-// Draw a source tile into destRect, applying hMode / vMode (stretch / repeat / mirror).
-// Mixed cases (one axis stretch, one axis tile) are handled correctly:
-//   hStretch + vTile  → each tiled row is scaled to the full destination width
-//   hTile   + vStretch → each tiled column is scaled to the full destination height
+// Draw a source tile into destRect, applying hMode / vMode.
+// Supported modes: stretch / repeat / mirror / fixed
+//   stretch → scale tile to fill the axis
+//   repeat  → tile the axis
+//   mirror  → tile with alternating flips
+//   fixed   → draw one copy centered on that axis at natural size (clipped if needed)
+// Mixed-axis cases (e.g. hStretch + vRepeat) are handled correctly.
 static void drawTiled(QPainter& painter, const QPixmap& tile,
                       const QRect& destRect,
                       const QString& hMode, const QString& vMode)
@@ -477,43 +488,55 @@ static void drawTiled(QPainter& painter, const QPixmap& tile,
         return;
     }
 
+    // Axis span: one draw call along a single axis.
+    // destOff : destination offset (pixels from the dest origin)
+    // drawSize: size in dest pixels (0 = fill the entire axis, i.e. stretch)
+    // srcOff  : source pixel offset (non-zero when a fixed tile is clipped)
+    // flip    : mirror-flip this tile along this axis
+    struct Span { int destOff; int drawSize; int srcOff; bool flip; };
+
+    auto makeSpans = [](const QString& mode, int destSize, int tileSize) {
+        QVector<Span> v;
+        if (mode == QLatin1String("stretch")) {
+            v.push_back({0, 0, 0, false}); // drawSize == 0 → stretch to full axis
+        } else if (mode == QLatin1String("fixed")) {
+            int off    = (destSize - tileSize) / 2;
+            int srcOff = (off < 0) ? -off : 0;
+            int dstOff = qMax(0, off);
+            int draw   = qMin(tileSize - srcOff, destSize - dstOff);
+            if (draw > 0)
+                v.push_back({dstOff, draw, srcOff, false});
+        } else {
+            bool mirror = (mode == QLatin1String("mirror"));
+            for (int pos = 0, idx = 0; pos < destSize; pos += tileSize, ++idx)
+                v.push_back({pos, qMin(tileSize, destSize - pos), 0, mirror && (idx & 1)});
+        }
+        return v;
+    };
+
+    const QVector<Span> hSpans = makeSpans(hMode, destRect.width(),  tw);
+    const QVector<Span> vSpans = makeSpans(vMode, destRect.height(), th);
+
     QPixmap tiled(destRect.size());
     tiled.fill(Qt::transparent);
     QPainter tp(&tiled);
 
-    if (hStretch) {
-        // Stretch horizontally, tile vertically
-        for (int y = 0; y < destRect.height(); y += th) {
+    for (const Span& vs : vSpans) {
+        for (const Span& hs : hSpans) {
             QPixmap src = tile;
-            if (vMode == QLatin1String("mirror") && ((y / th) & 1))
-                src = src.transformed(QTransform().scale(1, -1));
-            int drawH = qMin(th, destRect.height() - y);
-            tp.drawPixmap(QRect(0, y, destRect.width(), drawH),
-                          src, QRect(0, 0, tw, drawH));
-        }
-    } else if (vStretch) {
-        // Tile horizontally, stretch vertically
-        for (int x = 0; x < destRect.width(); x += tw) {
-            QPixmap src = tile;
-            if (hMode == QLatin1String("mirror") && ((x / tw) & 1))
-                src = src.transformed(QTransform().scale(-1, 1));
-            int drawW = qMin(tw, destRect.width() - x);
-            tp.drawPixmap(QRect(x, 0, drawW, destRect.height()),
-                          src, QRect(0, 0, drawW, th));
-        }
-    } else {
-        // Tile both axes
-        for (int y = 0; y < destRect.height(); y += th) {
-            for (int x = 0; x < destRect.width(); x += tw) {
-                QPixmap src = tile;
-                if (hMode == QLatin1String("mirror") && ((x / tw) & 1))
-                    src = src.transformed(QTransform().scale(-1, 1));
-                if (vMode == QLatin1String("mirror") && ((y / th) & 1))
-                    src = src.transformed(QTransform().scale(1, -1));
-                int drawW = qMin(tw, destRect.width()  - x);
-                int drawH = qMin(th, destRect.height() - y);
-                tp.drawPixmap(x, y, src, 0, 0, drawW, drawH);
-            }
+            if (hs.flip) src = src.transformed(QTransform().scale(-1, 1));
+            if (vs.flip) src = src.transformed(QTransform().scale(1, -1));
+
+            const int dstX = hs.destOff;
+            const int dstY = vs.destOff;
+            const int dstW = (hs.drawSize == 0) ? destRect.width()  : hs.drawSize;
+            const int dstH = (vs.drawSize == 0) ? destRect.height() : vs.drawSize;
+            const int srcX = hs.srcOff;
+            const int srcY = vs.srcOff;
+            const int srcW = (hs.drawSize == 0) ? tw : hs.drawSize;
+            const int srcH = (vs.drawSize == 0) ? th : vs.drawSize;
+
+            tp.drawPixmap(QRect(dstX, dstY, dstW, dstH), src, QRect(srcX, srcY, srcW, srcH));
         }
     }
 

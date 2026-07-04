@@ -869,6 +869,7 @@ private:
     QDockWidget* m_atlasDock = nullptr;
     QDockWidget* m_animationDock = nullptr;
     QDockWidget* m_debugDock = nullptr;
+    bool m_debugDockPinned = false; // true once the user explicitly shows the dock
     QPlainTextEdit* m_logWidget = nullptr;
     QLineEdit*      m_logFilterEdit = nullptr;
     QPushButton*    m_logFilterCli = nullptr;

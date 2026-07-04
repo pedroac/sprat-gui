@@ -43,6 +43,9 @@
         <file alias="repeat-v.svg">icons/row-triple-svgrepo-com.svg</file>
         <file alias="mirror-h.svg">icons/reflection-horizontal-svgrepo-com.svg</file>
         <file alias="mirror-v.svg">icons/reflection-vertical-svgrepo-com.svg</file>
+        <file alias="fixed-h.svg">icons/fixed-horizontal-svgrepo-com.svg</file>
+        <file alias="fixed-v.svg">icons/fixed-vertical-svgrepo-com.svg</file>
+        <file alias="slice-lines.svg">icons/slice-lines-svgrepo-com.svg</file>
         <file alias="disabled.svg">icons/disabled-svgrepo-com.svg</file>
         <file alias="filter.svg">icons/filter-svgrepo-com(1).svg</file>
         <file alias="drag-handle.svg">icons/drag-handle-dots-1-svgrepo-com.svg</file>

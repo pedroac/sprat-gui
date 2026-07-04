@@ -103,6 +103,8 @@ public:
     void setOverlayVisible(bool visible);
     void setSliceLinesVisible(bool visible);
     void setTargetSize(int width, int height);
+    void setResizableAxes(bool h, bool v);
+    QSize sourceSize() const { return m_sourcePixmap.size(); }
     int leftInset()   const { return m_insetLeft;   }
     int topInset()    const { return m_insetTop;    }
     int rightInset()  const { return m_insetRight;  }

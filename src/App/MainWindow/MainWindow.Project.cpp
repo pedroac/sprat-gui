@@ -1784,7 +1784,7 @@ void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
     } else if (ws == m_exportWorkspace) {
         if (m_atlasDock)     m_atlasDock->hide();
         if (m_animationDock) m_animationDock->hide();
-        if (m_debugDock)     m_debugDock->hide();
+        if (m_debugDock && !m_debugDockPinned) m_debugDock->hide();
         if (m_exportWorkspace && m_session) {
             QStringList atlasNames;
             QList<int>  sessionIndices;

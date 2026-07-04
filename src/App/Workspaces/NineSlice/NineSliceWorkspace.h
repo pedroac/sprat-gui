@@ -56,6 +56,7 @@ private:
     void loadSprite(const QString& path);
     void saveCurrentSprite();
     void applyNineSliceFilter();
+    void updateFixedDimensions();
 
     ProjectSession* m_session = nullptr;
     bool m_updatingUi = false;
@@ -77,6 +78,7 @@ private:
     QDoubleSpinBox* m_zoomSpin   = nullptr;
     QSpinBox*       m_widthSpin  = nullptr;
     QSpinBox*       m_heightSpin = nullptr;
+    QPushButton*    m_linesCheck    = nullptr;
     QPushButton*    m_gridCheck     = nullptr;
     QPushButton*    m_colorizeCheck = nullptr;
 

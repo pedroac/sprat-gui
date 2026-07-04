@@ -2,11 +2,13 @@
 #include "ArchiveExtractor.h"
 #include "ViewUtils.h"
 
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsScene>
+#include <QImageReader>
 #include <QLabel>
 #include <QPixmap>
 #include <QResizeEvent>
@@ -163,12 +165,19 @@ void PackedAtlasView::setImage(const QByteArray& pngData) {
         return;
     }
 
-    QPixmap pixmap;
-    if (!pixmap.loadFromData(pngData, "PNG")) {
-        setError(tr("Could not decode PNG image"));
+    // Atlas sheets can exceed Qt's default 256 MB allocation limit.
+    // Use QImageReader directly so we get the real error string on failure.
+    QBuffer buf;
+    buf.setData(pngData);
+    buf.open(QIODevice::ReadOnly);
+    QImageReader reader(&buf, "PNG");
+    reader.setAllocationLimit(0);
+    const QImage img = reader.read();
+    if (img.isNull()) {
+        setError(tr("Could not decode PNG image: %1").arg(reader.errorString()));
         return;
     }
-    showPixmap(pixmap, QString());
+    showPixmap(QPixmap::fromImage(img), QString());
 }
 
 void PackedAtlasView::showPixmap(const QPixmap& pixmap, const QString& bannerText) {

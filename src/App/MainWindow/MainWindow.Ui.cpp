@@ -794,7 +794,18 @@ void MainWindow::setupUi() {
     debugShortcut->setShortcut(QKeySequence(Qt::Key_F12));
     addAction(debugShortcut);
     connect(debugShortcut, &QAction::triggered, this, [this]() {
-        if (m_debugDock) m_debugDock->setVisible(!m_debugDock->isVisible());
+        if (!m_debugDock) return;
+        if (m_debugDock->isVisible()) {
+            m_debugDockPinned = false;
+            m_debugDock->hide();
+        } else {
+            m_debugDockPinned = true;
+            m_debugDock->show();
+        }
+    });
+    // Clear the pin when the user closes the dock via its title-bar button.
+    connect(m_debugDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (!visible) m_debugDockPinned = false;
     });
 
     // Help menu (added last so it sits on the right)
@@ -1154,7 +1165,7 @@ void MainWindow::updateUiState() {
         m_mainStack->show();
         if (m_atlasDock) m_atlasDock->hide();
         if (m_animationDock) m_animationDock->hide();
-        if (m_debugDock) m_debugDock->hide();
+        if (m_debugDock && !m_debugDockPinned) m_debugDock->hide();
     }
 }
 

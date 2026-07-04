@@ -132,10 +132,12 @@ void NineSliceWorkspace::setupUi()
     m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-h.svg")), QStringLiteral("stretch"));
     m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-h.svg")),  QStringLiteral("repeat"));
     m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-h.svg")),  QStringLiteral("mirror"));
+    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-h.svg")),   QStringLiteral("fixed"));
     m_vModeCombo = new QComboBox;
     m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-v.svg")), QStringLiteral("stretch"));
     m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-v.svg")),  QStringLiteral("repeat"));
     m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-v.svg")),  QStringLiteral("mirror"));
+    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-v.svg")),   QStringLiteral("fixed"));
     {
         auto* sep = new QFrame;
         sep->setFrameShape(QFrame::VLine);
@@ -191,6 +193,12 @@ void NineSliceWorkspace::setupUi()
         m_heightSpin->setSuffix(QStringLiteral(" px"));
         row->addWidget(new QLabel(tr("H:")));
         row->addWidget(m_heightSpin);
+
+        m_linesCheck = new QPushButton(QIcon(QStringLiteral(":/icons/slice-lines.svg")), tr("Lines"), this);
+        m_linesCheck->setCheckable(true);
+        m_linesCheck->setChecked(true);
+        m_linesCheck->setToolTip(tr("Show or hide the nine-slice guide lines"));
+        row->addWidget(m_linesCheck);
 
         m_gridCheck = new QPushButton(QIcon(QStringLiteral(":/icons/grid.svg")), tr("Grid"), this);
         m_gridCheck->setCheckable(true);
@@ -255,6 +263,8 @@ void NineSliceWorkspace::setupUi()
         m_settings.showGrid = checked;
         m_canvas->setSettings(m_settings);
     });
+    connect(m_linesCheck, &QPushButton::toggled,
+            m_canvas, &NineSliceEditorCanvas::setSliceLinesVisible);
     connect(m_colorizeCheck, &QPushButton::toggled,
             m_canvas, &NineSliceEditorCanvas::setOverlayVisible);
 
@@ -365,9 +375,10 @@ void NineSliceWorkspace::loadSprite(const QString& path)
         m_canvas->setSpriteImage(path);
         m_canvas->setInsets(sp->nsLeft, sp->nsTop, sp->nsRight, sp->nsBottom);
         m_canvas->setFillModes(sp->nsHMode, sp->nsVMode);
-        m_canvas->setSliceLinesVisible(true);
+        m_canvas->setSliceLinesVisible(m_linesCheck->isChecked());
         if (sp->nsTargetWidth > 0 && sp->nsTargetHeight > 0)
             m_canvas->setTargetSize(sp->nsTargetWidth, sp->nsTargetHeight);
+        updateFixedDimensions();
     } else {
         m_canvas->clearSprite();
     }
@@ -481,8 +492,29 @@ void NineSliceWorkspace::onFillModeChanged()
 {
     if (m_updatingUi) return;
     m_canvas->setFillModes(m_hModeCombo->currentText(), m_vModeCombo->currentText());
+    updateFixedDimensions();
     saveCurrentSprite();
     emit definitionsChanged();
+}
+
+void NineSliceWorkspace::updateFixedDimensions()
+{
+    const bool hFixed = (m_hModeCombo->currentText() == QLatin1String("fixed"));
+    const bool vFixed = (m_vModeCombo->currentText() == QLatin1String("fixed"));
+    const QSize src = m_canvas->sourceSize();
+
+    {
+        QSignalBlocker bw(m_widthSpin), bh(m_heightSpin);
+        if (hFixed && src.isValid()) m_widthSpin->setValue(src.width());
+        if (vFixed && src.isValid()) m_heightSpin->setValue(src.height());
+    }
+    m_widthSpin->setEnabled(!hFixed);
+    m_heightSpin->setEnabled(!vFixed);
+
+    if ((hFixed || vFixed) && src.isValid())
+        m_canvas->setTargetSize(m_widthSpin->value(), m_heightSpin->value());
+
+    m_canvas->setResizableAxes(!hFixed, !vFixed);
 }
 
 void NineSliceWorkspace::onCanvasZoomChanged(double zoom)
