@@ -178,11 +178,20 @@ jobs:
           if [ -z "$MOUNT_POINT" ]; then echo "Failed to mount DMG"; exit 1; fi
           cp -r "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/MacOS/
           hdiutil unmount "$MOUNT_POINT"
+          # Bundle Qt frameworks/plugins. This rewrites install names, which
+          # invalidates the existing signatures of the app and Qt binaries.
+          macdeployqt dist/sprat-gui.app
+          # Re-sign the whole bundle ad-hoc. Apple Silicon refuses to run
+          # binaries with broken signatures, and Gatekeeper reports such
+          # bundles as "damaged".
+          codesign --force --deep --sign - dist/sprat-gui.app
+          codesign --verify --deep --strict --verbose=2 dist/sprat-gui.app
           # Package DMG
-          macdeployqt dist/sprat-gui.app -dmg
-          mv dist/sprat-gui.dmg sprat-gui-macos.dmg
-          # Package ZIP for in-app auto-update
-          cd dist && zip -r ../sprat-gui-macos.zip sprat-gui.app
+          hdiutil create -volname sprat-gui -srcfolder dist/sprat-gui.app \
+            -ov -format UDZO sprat-gui-macos.dmg
+          # Package ZIP for in-app auto-update. ditto keeps the framework
+          # symlinks intact (zip -r follows them and breaks the signatures).
+          ditto -c -k --keepParent dist/sprat-gui.app sprat-gui-macos.zip
 
       - name: Upload Artifacts
         if: github.ref == 'refs/heads/release'
