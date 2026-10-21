@@ -69,6 +69,7 @@ class LayoutCanvas;
 class ExportWorkspace;
 class FrameAnimationWorkspace;
 class NineSliceWorkspace;
+class NormalMapWorkspace;
 #include "ILayoutContext.h"
 #include "IWorkspace.h"
 #include "AtlasWorkspace.h"
@@ -891,6 +892,8 @@ private:
     QAction*        m_atlasesManagementWorkspaceAction = nullptr;
     NineSliceWorkspace* m_nineSliceWorkspace = nullptr;
     QAction*        m_nineSliceWorkspaceAction = nullptr;
+    NormalMapWorkspace*    m_normalMapWorkspace    = nullptr;
+    QAction*        m_normalMapWorkspaceAction     = nullptr;
 
     // Layout Canvas Area
     QStackedWidget* m_profileSelectorStack = nullptr;

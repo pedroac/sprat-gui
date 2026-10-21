@@ -100,63 +100,22 @@ void NineSliceWorkspace::setupUi()
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(4, 4, 4, 4);
 
-    // -- Nine-Sliced toggle --
+    // -- Top row: Nine-Sliced toggle | Zoom + W/H + Lines/Grid/Colorize
+    //    Lives outside m_configGroup so it is never disabled by it.
     {
         auto* row = new QHBoxLayout;
         row->setContentsMargins(0, 0, 0, 2);
+
         m_nineSlicedBtn = new QPushButton(QIcon(QStringLiteral(":/icons/nine-slice.svg")), tr("Nine-Sliced"), this);
         m_nineSlicedBtn->setCheckable(true);
         m_nineSlicedBtn->setEnabled(false);
         m_nineSlicedBtn->setToolTip(tr("Mark or unmark the selected sprite as nine-sliced"));
         row->addWidget(m_nineSlicedBtn);
-        row->addStretch();
-        rightLayout->addLayout(row);
-    }
 
-    // -- Configuration group --
-    m_configGroup = new QWidget;
-    auto* form = new QFormLayout(m_configGroup);
-    form->setLabelAlignment(Qt::AlignRight);
-
-    auto makeSpin = [&]() -> QSpinBox* {
-        auto* spin = new QSpinBox;
-        spin->setRange(0, 9999);
-        spin->setSuffix(QStringLiteral(" px"));
-        return spin;
-    };
-    m_leftSpin   = makeSpin();
-    m_topSpin    = makeSpin();
-    m_rightSpin  = makeSpin();
-    m_bottomSpin = makeSpin();
-    m_hModeCombo = new QComboBox;
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-h.svg")), QStringLiteral("stretch"));
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-h.svg")),  QStringLiteral("repeat"));
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-h.svg")),  QStringLiteral("mirror"));
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-h.svg")),   QStringLiteral("fixed"));
-    m_vModeCombo = new QComboBox;
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-v.svg")), QStringLiteral("stretch"));
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-v.svg")),  QStringLiteral("repeat"));
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-v.svg")),  QStringLiteral("mirror"));
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-v.svg")),   QStringLiteral("fixed"));
-    {
-        auto* sep = new QFrame;
-        sep->setFrameShape(QFrame::VLine);
-        sep->setFrameShadow(QFrame::Sunken);
-
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel(tr("L:"))); row->addWidget(m_leftSpin);
-        row->addWidget(new QLabel(tr("T:"))); row->addWidget(m_topSpin);
-        row->addWidget(new QLabel(tr("R:"))); row->addWidget(m_rightSpin);
-        row->addWidget(new QLabel(tr("B:"))); row->addWidget(m_bottomSpin);
-        row->addWidget(sep);
-        row->addWidget(new QLabel(tr("H:"))); row->addWidget(m_hModeCombo);
-        row->addWidget(new QLabel(tr("V:"))); row->addWidget(m_vModeCombo);
-        row->addStretch();
-        form->addRow(row);
-    }
-
-    {
-        auto* row = new QHBoxLayout;
+        auto* vSep = new QFrame;
+        vSep->setFrameShape(QFrame::VLine);
+        vSep->setFrameShadow(QFrame::Sunken);
+        row->addWidget(vSep);
 
         // Magnifying glass icon (matches SpriteEditorPanel style)
         {
@@ -211,6 +170,48 @@ void NineSliceWorkspace::setupUi()
         m_colorizeCheck->setToolTip(tr("Show colored region hints (corners, edges, center)"));
         row->addWidget(m_colorizeCheck);
 
+        row->addStretch();
+        rightLayout->addLayout(row);
+    }
+
+    // -- Configuration group: slice options only (disabled when sprite is not nine-sliced) --
+    m_configGroup = new QWidget;
+    auto* form = new QFormLayout(m_configGroup);
+    form->setLabelAlignment(Qt::AlignRight);
+
+    auto makeSpin = [&]() -> QSpinBox* {
+        auto* spin = new QSpinBox;
+        spin->setRange(0, 9999);
+        spin->setSuffix(QStringLiteral(" px"));
+        return spin;
+    };
+    m_leftSpin   = makeSpin();
+    m_topSpin    = makeSpin();
+    m_rightSpin  = makeSpin();
+    m_bottomSpin = makeSpin();
+    m_hModeCombo = new QComboBox;
+    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-h.svg")), QStringLiteral("stretch"));
+    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-h.svg")),  QStringLiteral("repeat"));
+    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-h.svg")),  QStringLiteral("mirror"));
+    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-h.svg")),   QStringLiteral("fixed"));
+    m_vModeCombo = new QComboBox;
+    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-v.svg")), QStringLiteral("stretch"));
+    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-v.svg")),  QStringLiteral("repeat"));
+    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-v.svg")),  QStringLiteral("mirror"));
+    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-v.svg")),   QStringLiteral("fixed"));
+    {
+        auto* sep = new QFrame;
+        sep->setFrameShape(QFrame::VLine);
+        sep->setFrameShadow(QFrame::Sunken);
+
+        auto* row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("L:"))); row->addWidget(m_leftSpin);
+        row->addWidget(new QLabel(tr("T:"))); row->addWidget(m_topSpin);
+        row->addWidget(new QLabel(tr("R:"))); row->addWidget(m_rightSpin);
+        row->addWidget(new QLabel(tr("B:"))); row->addWidget(m_bottomSpin);
+        row->addWidget(sep);
+        row->addWidget(new QLabel(tr("H:"))); row->addWidget(m_hModeCombo);
+        row->addWidget(new QLabel(tr("V:"))); row->addWidget(m_vModeCombo);
         row->addStretch();
         form->addRow(row);
     }
@@ -372,6 +373,7 @@ void NineSliceWorkspace::loadSprite(const QString& path)
 
     m_configGroup->setEnabled(sp->isNineSliced);
     if (sp->isNineSliced) {
+        m_canvas->setReadOnly(false);
         m_canvas->setSpriteImage(path);
         m_canvas->setInsets(sp->nsLeft, sp->nsTop, sp->nsRight, sp->nsBottom);
         m_canvas->setFillModes(sp->nsHMode, sp->nsVMode);
@@ -380,7 +382,12 @@ void NineSliceWorkspace::loadSprite(const QString& path)
             m_canvas->setTargetSize(sp->nsTargetWidth, sp->nsTargetHeight);
         updateFixedDimensions();
     } else {
-        m_canvas->clearSprite();
+        // Show the sprite read-only (no lines/handles, dim overlay, forbidden cursor)
+        m_canvas->clearSprite();  // clears m_currentPath so setSpriteImage always reloads
+        m_canvas->setSpriteImage(path);
+        m_canvas->setSliceLinesVisible(false);
+        m_canvas->setResizableAxes(false, false);
+        m_canvas->setReadOnly(true);
     }
 
     m_updatingUi = false;
@@ -435,6 +442,7 @@ void NineSliceWorkspace::onNavigatorSelectionChanged(QTreeWidgetItem* current, Q
         m_nineSlicedBtn->setEnabled(false);
         m_updatingUi = false;
         m_configGroup->setEnabled(false);
+        m_canvas->setReadOnly(false);
         m_canvas->clearSprite();
     }
 }

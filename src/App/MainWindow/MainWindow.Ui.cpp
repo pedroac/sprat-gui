@@ -11,6 +11,7 @@
 #include "AtlasesManagementWorkspace.h"
 #include "NineSliceWorkspace.h"
 #include "NineSliceEditorCanvas.h"
+#include "NormalMapWorkspace.h"
 #include "UndoCommands.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
@@ -430,6 +431,18 @@ void MainWindow::setupUi() {
     connect(m_nineSliceWorkspace->canvas(), &NineSliceEditorCanvas::imageFileDropped,
             this, &MainWindow::onLayoutCanvasPathDropped);
 
+    // Page 5: Normal Map Workspace
+    m_normalMapWorkspace = new NormalMapWorkspace(m_session, this);
+    m_mainStack->addWidget(m_normalMapWorkspace);  // page 4
+    connect(m_normalMapWorkspace, &NormalMapWorkspace::atlasIndexChanged,
+            this, [this](int atlasIdx) {
+                if (!m_session) return;
+                if (atlasIdx >= 0 && atlasIdx < m_session->atlases.size())
+                    m_session->activeAtlasIndex = atlasIdx;
+            });
+    connect(m_normalMapWorkspace, &NormalMapWorkspace::definitionsChanged,
+            this, [this]() { setWindowModified(true); });
+
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
 
@@ -781,6 +794,13 @@ void MainWindow::setupUi() {
     workspaceGroup->addAction(m_nineSliceWorkspaceAction);
     connect(m_nineSliceWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_nineSliceWorkspace); });
+
+    m_normalMapWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/normal-map.svg"), tr("Normal Map"));
+    m_normalMapWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_M));
+    m_normalMapWorkspaceAction->setCheckable(true);
+    workspaceGroup->addAction(m_normalMapWorkspaceAction);
+    connect(m_normalMapWorkspaceAction, &QAction::triggered,
+            this, [this]() { switchWorkspace(m_normalMapWorkspace); });
 
     m_frameAnimWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/film.svg"), tr("Frame Animation"));
     m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
@@ -1142,10 +1162,13 @@ void MainWindow::updateUiState() {
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
     if (m_nineSliceWorkspaceAction)     m_nineSliceWorkspaceAction->setEnabled(viewEnabled);
+    if (m_normalMapWorkspaceAction)     m_normalMapWorkspaceAction->setEnabled(viewEnabled);
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
-    if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace || m_currentWorkspace == m_nineSliceWorkspace) return;
+    if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace
+            || m_currentWorkspace == m_nineSliceWorkspace
+            || m_currentWorkspace == m_normalMapWorkspace) return;
 
     if (hasModels) {
         m_mainStack->hide();
@@ -1176,7 +1199,9 @@ void MainWindow::updateMainContentView() {
     const QString projectFilePathUi = m_projectController ? m_projectController->projectFilePath() : QString();
     const bool hasProject = !projectFilePathUi.isEmpty();
 
-    if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace && m_currentWorkspace != m_nineSliceWorkspace) {
+    if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace
+            && m_currentWorkspace != m_nineSliceWorkspace
+            && m_currentWorkspace != m_normalMapWorkspace) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1263,6 +1288,16 @@ void MainWindow::refreshSpriteTree() {
             auto* nineSliceNav = m_nineSliceWorkspace->navigatorPanel();
             if (nineSliceNav)
                 nineSliceNav->refresh(m_session, false);
+        }
+        // Refresh companion-map workspace navigators
+        if (m_normalMapWorkspace) {
+            auto* nav = m_normalMapWorkspace->navigatorPanel();
+            if (nav) {
+                int nmAtlasFilter = -1;
+                if (auto* nmCombo = nav->atlasCombo())
+                    nmAtlasFilter = nmCombo->currentData().toInt();
+                nav->refresh(m_session, false, nmAtlasFilter);
+            }
         }
         return;
     }
@@ -1698,10 +1733,12 @@ void MainWindow::onAboutClicked() {
 void MainWindow::updateNavigatorAtlasCombo() {
     if (!m_session) return;
     auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
-    if (navigatorPanel) {
+    if (navigatorPanel)
         navigatorPanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+    if (m_normalMapWorkspace)
+        m_normalMapWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+    if (navigatorPanel)
         return;
-    }
     // Fallback: direct combo manipulation (kept for safety)
     auto* navigatorAtlasCombo = navigatorPanel ? navigatorPanel->atlasCombo() : nullptr;
     if (!navigatorAtlasCombo) return;

@@ -51,5 +51,36 @@
         <file alias="drag-handle.svg">icons/drag-handle-dots-1-svgrepo-com.svg</file>
         <file alias="resize-handle.svg">icons/resize-handle-svgrepo-com.svg</file>
         <file alias="retry.svg">icons/sync-svgrepo-com.svg</file>
+        <file alias="raise.svg">icons/gui-arrow-up-svgrepo-com.svg</file>
+        <file alias="lower.svg">icons/gui-arrow-down-svgrepo-com.svg</file>
+        <file alias="eraser.svg">icons/gui-eraser-svgrepo-com.svg</file>
+        <file alias="palette.svg">icons/gui-palette-svgrepo-com.svg</file>
+        <file alias="pencil.svg">icons/gui-pencil-svgrepo-com.svg</file>
+        <file alias="amb.svg">icons/lamp-svgrepo-com.svg</file>
+        <file alias="normal-map.svg">icons/light-svgrepo-com.svg</file>
+        <file alias="normal-map.png">icons/normal-map.png</file>
+        <file alias="flatten.svg">icons/line-solid-svgrepo-com.svg</file>
+        <file alias="collision-map.svg">icons/overlap-shapes-svgrepo-com.svg</file>
+        <file alias="azimuth.svg">icons/circular-arrow-svgrepo-com.svg</file>
+        <file alias="elevation.svg">icons/angle-svgrepo-com.svg</file>
+        <file alias="smooth.svg">icons/smudge-svgrepo-com.svg</file>
+        <file alias="blur.svg">icons/blend-svgrepo-com.svg</file>
+        <file alias="blend.svg">icons/blend-svgrepo-com.svg</file>
+        <file alias="gradient.svg">icons/gradient-svgrepo-com.svg</file>
+        <file alias="lit.svg">icons/gauge-high-svgrepo-com.svg</file>
+        <file alias="dome.svg">icons/circle2-svgrepo-com.svg</file>
+        <file alias="fill.svg">icons/bucket-svgrepo-com.svg</file>
+        <file alias="move.svg">icons/move-svgrepo-com.svg</file>
+        <file alias="eyedropper.svg">icons/eyedropper-svgrepo-com.svg</file>
+        <file alias="freehand.svg">icons/freehand-svgrepo-com.svg</file>
+        <file alias="magic-wand.svg">icons/magic-wand-svgrepo-com.svg</file>
+        <file alias="eye.svg">icons/eye-svgrepo-com.svg</file>
+        <file alias="height-map.svg">icons/height-map.svg</file>
+        <file alias="depth.svg">icons/depth-chart-svgrepo-com.svg</file>
+        <file alias="color-map.svg">icons/texture-wall-bricks-svgrepo-com.svg</file>
+        <file alias="spray.svg">icons/spray-svgrepo-com.svg</file>
+        <file alias="inflate.svg">icons/balloon-svgrepo-com.svg</file>
+        <file alias="square-dashed.svg">icons/square-dashed-svgrepo-com.svg</file>
+        <file alias="curve.svg">icons/curve-tool-svgrepo-com.svg</file>
     </qresource>
 </RCC>

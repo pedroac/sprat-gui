@@ -193,6 +193,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             aObj["name"]       = atlas.name;
             aObj["is_neutral"] = atlas.isNeutral;
             aObj["is_excluded"] = atlas.isExcluded;
+            if (atlas.hasNormalMap) aObj["has_normal_map"] = true;
             aObj["output_subdir"] = atlas.outputSubdir;
 
             QJsonObject eoObj;
@@ -814,8 +815,9 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             AtlasEntry atlas;
             atlas.id         = aObj["id"].toString();
             atlas.name       = aObj["name"].toString();
-            atlas.isNeutral  = aObj["is_neutral"].toBool(false);
-            atlas.isExcluded = aObj["is_excluded"].toBool(false);
+            atlas.isNeutral   = aObj["is_neutral"].toBool(false);
+            atlas.isExcluded  = aObj["is_excluded"].toBool(false);
+            atlas.hasNormalMap = aObj["has_normal_map"].toBool(false);
             atlas.outputSubdir = aObj["output_subdir"].toString();
 
             {

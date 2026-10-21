@@ -111,6 +111,7 @@ public:
     int bottomInset() const { return m_insetBottom; }
 
     void initialFit() override;
+    void setReadOnly(bool ro);
 
 signals:
     void insetsChanged(int left, int top, int right, int bottom);
@@ -119,6 +120,7 @@ signals:
     void imageFileDropped(const QString& path);
 
 protected:
+    void drawForeground(QPainter* painter, const QRectF& rect) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -162,6 +164,7 @@ private:
 
     AppSettings m_settings;
     bool        m_overlayVisible = true;
+    bool        m_readOnly       = false;
     QPixmap m_sourcePixmap;
     QSize   m_targetSize;
     QString m_currentPath;

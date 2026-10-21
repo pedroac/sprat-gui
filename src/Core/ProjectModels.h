@@ -56,8 +56,9 @@ struct AtlasExportConfig {
 struct AtlasEntry {
     QString id;
     QString name;
-    bool isNeutral = false;
-    bool isExcluded = false;
+    bool isNeutral   = false;
+    bool isExcluded  = false;
+    bool hasNormalMap = false;
     QStringList spritePaths;
     QVector<AnimationTimeline> timelines;
     QVector<LayoutModel> layoutModels;

@@ -23,6 +23,16 @@ NavigatorTreeWidget::NavigatorTreeWidget(QWidget* parent)
     m_hoverTimer.setSingleShot(true);
     m_hoverTimer.setInterval(400);
     connect(&m_hoverTimer, &QTimer::timeout, this, &NavigatorTreeWidget::showPreview);
+
+    // Clear hover state before any items are destroyed so m_hoveredItem never
+    // becomes a dangling pointer when the tree is cleared or refreshed.
+    auto cancelHover = [this]() {
+        m_hoverTimer.stop();
+        m_hoveredItem = nullptr;
+        if (m_previewTooltip) m_previewTooltip->hide();
+    };
+    connect(model(), &QAbstractItemModel::modelAboutToBeReset, this, cancelHover);
+    connect(model(), &QAbstractItemModel::rowsAboutToBeRemoved, this, cancelHover);
 }
 
 void NavigatorTreeWidget::setPreviewDelay(int ms) {

@@ -756,6 +756,29 @@ void NineSliceEditorCanvas::updateGridItem()
     m_gridItem = grid;
 }
 
+void NineSliceEditorCanvas::setReadOnly(bool ro)
+{
+    m_readOnly = ro;
+    viewport()->setCursor(ro ? Qt::ForbiddenCursor : Qt::ArrowCursor);
+
+    const bool interactive = !ro;
+    m_lineLeft->setEnabled(interactive);
+    m_lineTop->setEnabled(interactive);
+    m_lineRight->setEnabled(interactive);
+    m_lineBottom->setEnabled(interactive);
+    m_rightHandle->setEnabled(interactive);
+    m_bottomHandle->setEnabled(interactive);
+    m_cornerHandle->setEnabled(interactive);
+
+    viewport()->update();
+}
+
+void NineSliceEditorCanvas::drawForeground(QPainter* painter, const QRectF& rect)
+{
+    if (m_readOnly)
+        painter->fillRect(rect, QColor(0, 0, 0, 70));
+}
+
 void NineSliceEditorCanvas::dragEnterEvent(QDragEnterEvent* event)
 {
     if (event->mimeData()->hasFormat(QStringLiteral("application/x-sprat-sprite"))
