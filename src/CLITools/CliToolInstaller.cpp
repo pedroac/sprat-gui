@@ -247,19 +247,22 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
     emit installLog("Mounting DMG and copying files...");
+    // The CLI goes in the bundle's Resources/cli, where resolveBinary() looks
+    // for it; Contents/MacOS must hold only code for the bundle to stay signable.
+    const QString cliDir = QDir(appDir).absoluteFilePath(QStringLiteral("../Resources/cli"));
     // Use hdiutil to mount and cp while preserving structure
     // Paths are safely quoted using shellQuote() to prevent shell injection
     QString script = QString("set -euo pipefail\n"
                              "MOUNT_POINT=$(hdiutil mount %1 | grep -o '/Volumes/.*' | head -n 1)\n"
                              "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
-                             "mkdir -p %2/cli\n"
-                             "cp -R \"$MOUNT_POINT\"/. %2/cli/ 2>/dev/null || true\n"
+                             "mkdir -p %2\n"
+                             "cp -R \"$MOUNT_POINT\"/. %2/ 2>/dev/null || true\n"
                              "hdiutil unmount \"$MOUNT_POINT\"\n"
                              "echo \"Checking installed CLI tool versions:\"\n"
                              "echo \"Expected version: %3\"\n"
                              "echo \"---\"\n"
                              "for tool in spratlayout spratpack spratconvert spratframes spratunpack; do\n"
-                             "  installed_version=$(%2/cli/$tool --version 2>&1 | grep -oP 'v\\d+\\.\\d+\\.\\d+(?:[.\\-][a-zA-Z0-9]+)*' | head -1)\n"
+                             "  installed_version=$(%2/$tool --version 2>&1 | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+([.-][a-zA-Z0-9]+)*' | head -1)\n"
                              "  echo \"$tool: $installed_version\"\n"
                              "  if [ \"$installed_version\" != \"%3\" ]; then\n"
                              "    echo \"ERROR: Version mismatch for $tool! Expected %3 but got $installed_version\" >&2\n"
@@ -267,18 +270,18 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "  fi\n"
                              "done\n"
                              "echo \"Moving configuration and transforms...\"\n"
-                             "PROFILES_PATH=$(%2/cli/spratlayout --default-profiles-config)\n"
-                             "TRANSFORMS_DIR=$(%2/cli/spratconvert --transforms-dir)\n"
-                             "if [ -f \"%2/cli/spratprofiles.cfg\" ]; then\n"
+                             "PROFILES_PATH=$(%2/spratlayout --default-profiles-config)\n"
+                             "TRANSFORMS_DIR=$(%2/spratconvert --transforms-dir)\n"
+                             "if [ -f %2/spratprofiles.cfg ]; then\n"
                              "  mkdir -p \"$(dirname \"$PROFILES_PATH\")\"\n"
-                             "  cp \"%2/cli/spratprofiles.cfg\" \"$PROFILES_PATH\"\n"
+                             "  cp %2/spratprofiles.cfg \"$PROFILES_PATH\"\n"
                              "fi\n"
-                             "if [ -d \"%2/cli/transforms\" ]; then\n"
+                             "if [ -d %2/transforms ]; then\n"
                              "  mkdir -p \"$TRANSFORMS_DIR\"\n"
-                             "  cp -R \"%2/cli/transforms/.\" \"$TRANSFORMS_DIR/\"\n"
+                             "  cp -R %2/transforms/. \"$TRANSFORMS_DIR/\"\n"
                              "fi\n"
                              "echo \"---\"\n"
-                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(shellQuote(filePath), shellQuote(appDir), shellQuote(expectedVersion));
+                             "echo \"Successfully installed all sprat-cli tools with version %3\"").arg(shellQuote(filePath), shellQuote(cliDir), shellQuote(expectedVersion));
     m_installProcess->start("bash", QStringList() << "-c" << script);
 #endif
 #endif

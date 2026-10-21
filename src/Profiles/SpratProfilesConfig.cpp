@@ -153,6 +153,9 @@ QString SpratProfilesConfig::findProfilesConfigPath() {
     candidates << QDir(appDir).filePath("spratprofiles.cfg");
     candidates << QDir(appDir).filePath("bin/spratprofiles.cfg");
     candidates << QDir(appDir).filePath("cli/spratprofiles.cfg");
+#ifdef Q_OS_MACOS
+    candidates << QDir(appDir).filePath("../Resources/cli/spratprofiles.cfg");
+#endif
 
     for (const QString& candidate : candidates) {
         if (QFile::exists(candidate)) {
@@ -180,6 +183,9 @@ QVector<SpratProfile> SpratProfilesConfig::loadProfileDefinitions(QString* error
     candidates << QDir(appDir).filePath("spratprofiles.cfg");
     candidates << QDir(appDir).filePath("bin/spratprofiles.cfg");
     candidates << QDir(appDir).filePath("cli/spratprofiles.cfg");
+#ifdef Q_OS_MACOS
+    candidates << QDir(appDir).filePath("../Resources/cli/spratprofiles.cfg");
+#endif
 
     QString path;
     for (const QString& candidate : candidates) {

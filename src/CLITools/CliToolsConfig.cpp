@@ -262,6 +262,16 @@ QString CliToolsConfig::resolveBinary(const QString& name, const QString& baseDi
         return cliFi.absoluteFilePath();
     }
 
+#ifdef Q_OS_MACOS
+    // 2.2 Check the app bundle's Resources/cli. The bundled CLI lives there,
+    // next to its spratprofiles.cfg and transforms/, because Contents/MacOS
+    // must hold only code for the bundle to be signable.
+    QFileInfo bundleCliFi(appDir.filePath(QString("../Resources/cli/%1").arg(executableName)));
+    if (bundleCliFi.exists() && bundleCliFi.isExecutable()) {
+        return bundleCliFi.absoluteFilePath();
+    }
+#endif
+
     // 3. Check current directory
     QFileInfo localFi(QDir::current().filePath(executableName));
     if (localFi.exists() && localFi.isExecutable()) {

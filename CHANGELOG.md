@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprites workspace: trim rect now defaults to on
 - Atlas Sprites: deduplication mode now defaults to Exact instead of None
 
+### Fixed
+- macOS: the app no longer shows as "damaged" and refuses to open (seen on macOS 27 beta). The bundle is now re-signed after packaging, and the bundled sprat-cli tools, profiles config and transforms moved from `Contents/MacOS` to `Contents/Resources/cli`, since non-code files in `Contents/MacOS` made the bundle unsignable
+- macOS: installing sprat-cli from the app now puts it where the app looks for it, and copies the profiles config and transforms correctly
+
 ## [0.8.0] - 2026-06-15
 
 ### Added

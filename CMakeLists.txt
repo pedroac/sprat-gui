@@ -576,7 +576,12 @@ target_link_libraries(sprat-gui PRIVATE
 # Copy sprat-cli assets (config and transforms) for host builds
 if(NOT EMSCRIPTEN)
     if(SPRAT_CLI_SOURCE_DIR AND EXISTS "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg")
-        set(SPRAT_ASSETS_DEST "$<TARGET_FILE_DIR:sprat-gui>")
+        if(APPLE)
+            # Contents/MacOS must hold only code, or codesign rejects the bundle.
+            set(SPRAT_ASSETS_DEST "$<TARGET_BUNDLE_CONTENT_DIR:sprat-gui>/Resources/cli")
+        else()
+            set(SPRAT_ASSETS_DEST "$<TARGET_FILE_DIR:sprat-gui>")
+        endif()
         add_custom_command(TARGET sprat-gui POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg"

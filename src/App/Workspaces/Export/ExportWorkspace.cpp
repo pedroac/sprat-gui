@@ -82,6 +82,9 @@ const TransformsCache& loadAvailableTransforms() {
         searchDirs << QDir(appDir).filePath("transforms");
         searchDirs << QDir(appDir).filePath("bin/transforms");
         searchDirs << QDir(appDir).filePath("cli/transforms");
+#ifdef Q_OS_MACOS
+        searchDirs << QDir(appDir).filePath("../Resources/cli/transforms");
+#endif
 
         for (const QString& dirPath : searchDirs) {
             QDir dir(dirPath);
