@@ -209,8 +209,18 @@ if(NOT LibArchive_FOUND)
     endif()
 endif()
 
-if(SPRAT_EMBEDDED_CLI)
-    add_definitions(-DSPRAT_EMBEDDED_CLI)
+# The end-to-end tests run exports through sprat-cli: linked in when the CLI is embedded,
+# otherwise through executables built from the same sprat-cli source.
+option(SPRAT_E2E_TESTS "Build the end-to-end export tests (builds sprat-cli when it is not embedded)" ON)
+set(_sprat_build_cli ${SPRAT_EMBEDDED_CLI})
+if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
+    set(_sprat_build_cli ON)
+endif()
+
+if(_sprat_build_cli)
+    if(SPRAT_EMBEDDED_CLI)
+        add_definitions(-DSPRAT_EMBEDDED_CLI)
+    endif()
     set(SPRAT_DOWNLOAD_STB ON CACHE BOOL "Download STB headers for sprat-cli" FORCE)
 
     # Force C++20 for sprat-cli
@@ -258,22 +268,24 @@ if(SPRAT_EMBEDDED_CLI)
         set(SPRAT_CLI_SOURCE_DIR "${sprat_cli_SOURCE_DIR}")
     endif()
 
-    include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
+    if(SPRAT_EMBEDDED_CLI)
+        include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
 
-    # Since sprat-cli v0.19, run_spratpack lives in the spratpack executable rather than
-    # spratcore, because its optional codecs are configured on that target. Build the
-    # command into a library that mirrors spratpack's settings so the same codecs are used.
-    add_library(spratpackcommand STATIC
-        "${SPRAT_CLI_SOURCE_DIR}/src/commands/spratpack_command.cpp")
-    target_compile_definitions(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,COMPILE_DEFINITIONS>)
-    target_compile_options(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,COMPILE_OPTIONS>)
-    target_include_directories(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,INCLUDE_DIRECTORIES>)
-    # PUBLIC so a static library's link dependencies reach sprat-gui's link line.
-    target_link_libraries(spratpackcommand PUBLIC $<TARGET_PROPERTY:spratpack,LINK_LIBRARIES>)
-    target_link_directories(spratpackcommand PUBLIC $<TARGET_PROPERTY:spratpack,LINK_DIRECTORIES>)
-    # sprat-cli sets some definitions (e.g. SPRAT_VERSION) per directory, not per target.
-    get_directory_property(_sprat_cli_definitions DIRECTORY "${SPRAT_CLI_SOURCE_DIR}" COMPILE_DEFINITIONS)
-    target_compile_definitions(spratpackcommand PRIVATE ${_sprat_cli_definitions})
+        # Since sprat-cli v0.19, run_spratpack lives in the spratpack executable rather than
+        # spratcore, because its optional codecs are configured on that target. Build the
+        # command into a library that mirrors spratpack's settings so the same codecs are used.
+        add_library(spratpackcommand STATIC
+            "${SPRAT_CLI_SOURCE_DIR}/src/commands/spratpack_command.cpp")
+        target_compile_definitions(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,COMPILE_DEFINITIONS>)
+        target_compile_options(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,COMPILE_OPTIONS>)
+        target_include_directories(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,INCLUDE_DIRECTORIES>)
+        # PUBLIC so a static library's link dependencies reach sprat-gui's link line.
+        target_link_libraries(spratpackcommand PUBLIC $<TARGET_PROPERTY:spratpack,LINK_LIBRARIES>)
+        target_link_directories(spratpackcommand PUBLIC $<TARGET_PROPERTY:spratpack,LINK_DIRECTORIES>)
+        # sprat-cli sets some definitions (e.g. SPRAT_VERSION) per directory, not per target.
+        get_directory_property(_sprat_cli_definitions DIRECTORY "${SPRAT_CLI_SOURCE_DIR}" COMPILE_DEFINITIONS)
+        target_compile_definitions(spratpackcommand PRIVATE ${_sprat_cli_definitions})
+    endif()
 endif()
 
 # === Qt6 Configuration ===
@@ -662,14 +674,51 @@ if(BUILD_TESTING)
     set_tests_properties(sprat-gui-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
+if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
+    # End-to-end export tests: ProjectSaveService through the real sprat-cli tools.
+    add_executable(sprat-gui-e2e
+        tests/e2e/ExportPipelineTests.cpp
+        tests/e2e/ExportPipelineTests.h
+        src/Project/ProjectSaveService.cpp
+        src/SpriteSheetLayout/LayoutParser.cpp
+        src/Core/ArchiveExtractor.cpp
+    )
+    target_include_directories(sprat-gui-e2e PRIVATE
+        src/Core
+        src/Project
+        src/Profiles
+        src/CLITools
+        src/SpriteSheetLayout
+    )
+    target_link_libraries(sprat-gui-e2e PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Test
+        LibArchive::LibArchive
+    )
+    set(_e2e_environment "QT_QPA_PLATFORM=offscreen")
+    if(SPRAT_EMBEDDED_CLI)
+        target_sources(sprat-gui-e2e PRIVATE src/CLITools/EmbeddedCli.cpp)
+        target_link_libraries(sprat-gui-e2e PRIVATE spratpackcommand spratcore)
+    else()
+        add_dependencies(sprat-gui-e2e spratlayout spratpack spratconvert)
+        list(APPEND _e2e_environment "SPRAT_CLI_DIR=$<TARGET_FILE_DIR:spratlayout>")
+    endif()
+    add_test(NAME sprat-gui-e2e COMMAND sprat-gui-e2e)
+    set_tests_properties(sprat-gui-e2e PROPERTIES ENVIRONMENT "${_e2e_environment}")
+endif()
+
 # === Windows Deployment & Launcher ===
 if(WIN32)
     # Move the GUI and tests into a 'bin' subdirectory to share DLLs
     # and keep the root directory clean.
     set_target_properties(sprat-gui PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-    if(TARGET sprat-gui-tests)
-        set_target_properties(sprat-gui-tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-    endif()
+    foreach(_test_target sprat-gui-tests sprat-gui-e2e)
+        if(TARGET ${_test_target})
+            set_target_properties(${_test_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+        endif()
+    endforeach()
 
     # Generate a batch file in the root to launch the GUI
     file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/sprat.bat"
