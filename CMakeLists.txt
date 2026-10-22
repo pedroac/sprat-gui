@@ -265,21 +265,15 @@ if(SPRAT_EMBEDDED_CLI)
     # command into a library that mirrors spratpack's settings so the same codecs are used.
     add_library(spratpackcommand STATIC
         "${SPRAT_CLI_SOURCE_DIR}/src/commands/spratpack_command.cpp")
-    foreach(_spratpack_property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES LINK_LIBRARIES LINK_DIRECTORIES)
-        get_target_property(_spratpack_value spratpack ${_spratpack_property})
-        if(_spratpack_value)
-            set_property(TARGET spratpackcommand PROPERTY ${_spratpack_property} "${_spratpack_value}")
-            # A static library's link dependencies must reach sprat-gui's link line.
-            if(_spratpack_property MATCHES "^LINK_")
-                set_property(TARGET spratpackcommand PROPERTY INTERFACE_${_spratpack_property} "${_spratpack_value}")
-            endif()
-        endif()
-    endforeach()
+    target_compile_definitions(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,COMPILE_DEFINITIONS>)
+    target_compile_options(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,COMPILE_OPTIONS>)
+    target_include_directories(spratpackcommand PRIVATE $<TARGET_PROPERTY:spratpack,INCLUDE_DIRECTORIES>)
+    # PUBLIC so a static library's link dependencies reach sprat-gui's link line.
+    target_link_libraries(spratpackcommand PUBLIC $<TARGET_PROPERTY:spratpack,LINK_LIBRARIES>)
+    target_link_directories(spratpackcommand PUBLIC $<TARGET_PROPERTY:spratpack,LINK_DIRECTORIES>)
     # sprat-cli sets some definitions (e.g. SPRAT_VERSION) per directory, not per target.
-    get_directory_property(_spratpack_value DIRECTORY "${SPRAT_CLI_SOURCE_DIR}" COMPILE_DEFINITIONS)
-    if(_spratpack_value)
-        target_compile_definitions(spratpackcommand PRIVATE ${_spratpack_value})
-    endif()
+    get_directory_property(_sprat_cli_definitions DIRECTORY "${SPRAT_CLI_SOURCE_DIR}" COMPILE_DEFINITIONS)
+    target_compile_definitions(spratpackcommand PRIVATE ${_sprat_cli_definitions})
 endif()
 
 # === Qt6 Configuration ===
@@ -717,15 +711,17 @@ if(WIN32)
     # spratpackcommand links spratpack's optional codecs; sprat-cli copies their DLLs only
     # next to spratpack.exe, so copy the ones it found (cached by find_file) here too.
     if(SPRAT_EMBEDDED_CLI)
-        foreach(_codec_dll ZOPFLIPNG_DLL SQUISH_DLL WEBP_DLL AVIF_DLL)
-            if(${_codec_dll})
-                add_custom_command(TARGET sprat-gui POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${${_codec_dll}}"
-                    $<TARGET_FILE_DIR:sprat-gui>
-                    COMMENT "Copying runtime dependency ${${_codec_dll}}"
-                )
+        set(_codec_dlls "")
+        foreach(_codec_dll_var ZOPFLIPNG_DLL SQUISH_DLL WEBP_DLL AVIF_DLL)
+            if(${_codec_dll_var})
+                list(APPEND _codec_dlls "${${_codec_dll_var}}")
             endif()
         endforeach()
+        if(_codec_dlls)
+            add_custom_command(TARGET sprat-gui POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_codec_dlls} $<TARGET_FILE_DIR:sprat-gui>
+                COMMENT "Copying sprat-cli codec DLLs"
+            )
+        endif()
     endif()
 endif()

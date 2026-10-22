@@ -208,10 +208,6 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                      setStatus, shouldCancel]() {
         ExportResult result;
 
-        auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& /*step*/, const QByteArray* input, QByteArray* output, QByteArray* errorOutput) {
-            return m_cfg.runTool(tool, args, input, output, errorOutput);
-        };
-
         QVector<ExportLogEntry> logEntries;
         auto logEntryFn = [&logEntries](const ExportLogEntry& e) { logEntries.append(e); };
 
@@ -241,7 +237,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 result.savedDestination,
                 result.error,
                 deduplicateMode,
-                {nullptr, setStatus, shouldCancel, runToolBound, logEntryFn}
+                {nullptr, setStatus, shouldCancel, m_cfg.runTool, logEntryFn}
             );
         } else {
             // Multi-atlas: export each atlas to its own subdirectory
@@ -288,7 +284,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                     atlasDestination,
                     atlasError,
                     deduplicateMode,
-                    {nullptr, setStatus, shouldCancel, runToolBound, logEntryFn}
+                    {nullptr, setStatus, shouldCancel, m_cfg.runTool, logEntryFn}
                 );
                 if (!ok) {
                     result.success = false;

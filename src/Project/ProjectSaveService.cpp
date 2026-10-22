@@ -339,36 +339,30 @@ bool ProjectSaveService::save(
     }
 
     auto runProcess = [&](const QString& tool, const QStringList& args, const QString& step, const QByteArray* inputData = nullptr, QByteArray* outputData = nullptr) -> bool {
+        bool ok = false;
+        QByteArray stderrData;
 #ifdef SPRAT_EMBEDDED_CLI
-        QString toolName = QFileInfo(tool).baseName();
+        const QString toolName = QFileInfo(tool).baseName();
         if (toolName.startsWith("sprat")) {
             // Use EmbeddedCli for sprat-* tools
             CliResult embeddedResult = EmbeddedCli::run(
                 toolName,
                 args,
                 inputData ? *inputData : QByteArray());
-            
             if (outputData) *outputData = embeddedResult.stdOut;
-            if (embeddedResult.exitCode != 0) {
-                const QString stderrText = QString::fromUtf8(embeddedResult.stdErr).trimmed();
-                if (!stderrText.isEmpty()) {
-                    error = stderrText;
-                } else {
-                    error = trPS("Command failed: %1").arg(step);
-                }
-                return false;
-            }
-            return true;
-        }
+            ok = embeddedResult.exitCode == 0;
+            stderrData = embeddedResult.stdErr;
+        } else
 #endif
-        if (!runProcessFunc) return false;
-        QByteArray stderrData;
-        if (!runProcessFunc(tool, args, step, inputData, outputData, &stderrData)) {
+        {
+            if (!runProcessFunc) return false;
+            ok = runProcessFunc(tool, args, inputData, outputData, &stderrData);
+        }
+        if (!ok) {
             const QString stderrText = QString::fromUtf8(stderrData).trimmed();
             error = stderrText.isEmpty() ? trPS("Command failed: %1").arg(step) : stderrText;
-            return false;
         }
-        return true;
+        return ok;
     };
 
     auto findProfile = [&](const QString& profileName) -> const SpratProfile* {
@@ -381,6 +375,8 @@ bool ProjectSaveService::save(
     };
 
     constexpr double kScaleMatchTolerance = 1e-6;
+    // Set once spratpack rejects --zopfli, so later profiles don't repeat the failed run.
+    bool zopfliUnavailable = false;
     for (const QString& profileNameRaw : config.profiles) {
         const QString profileName = profileNameRaw.trimmed();
         if (profileName.isEmpty()) {
@@ -536,7 +532,8 @@ bool ProjectSaveService::save(
             && effectiveProfile.imageFormat != "png") {
             packArgs << "--quality" << QString::number(effectiveProfile.imageQuality);
         }
-        if (effectiveProfile.zopfli && effectiveProfile.imageFormat == "png") {
+        const bool wantsZopfli = effectiveProfile.zopfli && effectiveProfile.imageFormat == "png";
+        if (wantsZopfli && !zopfliUnavailable) {
             packArgs << "--zopfli";
         }
         if (effectiveProfile.frameLines) {
@@ -552,28 +549,28 @@ bool ProjectSaveService::save(
             packArgs << "--atlas-index" << QString::number(effectiveProfile.atlasIndex);
         }
 
-        bool packSuccess = runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData);
+        const QString packStep = trPS("Packing failed for profile '%1'").arg(profileName);
+        bool packSuccess = runProcess(spratPackBin, packArgs, packStep, &layoutData, &imageData);
         // sprat-cli builds without Zopfli reject --zopfli; write a plain PNG rather than fail the export.
         // Only that error names zopflipng (the library name is not translated).
         if (!packSuccess && packArgs.contains("--zopfli")
             && error.contains(QLatin1String("zopflipng"), Qt::CaseInsensitive)) {
+            zopfliUnavailable = true;
             const QString zopfliError = error;
             packArgs.removeAll("--zopfli");
-            imageData.clear();
-            packSuccess = runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData);
-            if (packSuccess) {
-                if (callbacks.logEntry) {
-                    callbacks.logEntry({ExportLogEntry::Kind::Info,
-                        QString(trPS("Zopfli compression is not available in this sprat-cli build; "
-                                     "profile '%1' was saved as a regular PNG.")).arg(profileName), -1});
-                }
-            } else {
+            packSuccess = runProcess(spratPackBin, packArgs, packStep, &layoutData, &imageData);
+            if (!packSuccess) {
                 error = zopfliError;
             }
         }
+        if (packSuccess && wantsZopfli && zopfliUnavailable && callbacks.logEntry) {
+            callbacks.logEntry({ExportLogEntry::Kind::Info,
+                trPS("Zopfli compression is not available in this sprat-cli build; "
+                     "profile '%1' was saved as a regular PNG.").arg(profileName), -1});
+        }
         if (!packSuccess) {
             const QString packDetails = error;
-            error = QString(trPS("Packing failed for profile '%1'")).arg(profileName);
+            error = packStep;
             if (!packDetails.isEmpty()) {
                 error += QStringLiteral("\n\n") + packDetails;
             }
@@ -734,8 +731,14 @@ bool ProjectSaveService::save(
                 convArgs << "--auto-animations";
             }
 
-            if (!runProcess(spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, nullptr)) {
-                error = QString(trPS("Format conversion failed for profile '%1'")).arg(profileName);
+            const QString convertStep = trPS("Format conversion failed for profile '%1'").arg(profileName);
+            if (!runProcess(spratConvertBin, convArgs, convertStep, &combinedInput, nullptr)) {
+                // Keep the tool's message: transforms explain what to change (e.g. rotation direction).
+                const QString convertDetails = error;
+                error = convertStep;
+                if (!convertDetails.isEmpty()) {
+                    error += QStringLiteral("\n\n") + convertDetails;
+                }
                 return false;
             }
             if (callbacks.logEntry)
