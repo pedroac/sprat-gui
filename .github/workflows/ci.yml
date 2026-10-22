@@ -28,27 +28,7 @@ jobs:
       # breakage (paths, encodings, bundled CLI) shows up before a release. Packaging steps
       # below still run only on the release branch.
       - id: set-matrix
-<<<<<<< HEAD
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            BRANCH="${{ github.base_ref }}"
-          else
-            # Extracts 'release' from 'refs/heads/release'
-            BRANCH=$(echo "${{ github.ref }}" | sed 's|refs/heads/||')
-          fi
-          echo "Detected branch: $BRANCH"
-          if [ "$BRANCH" == "release" ]; then
-            echo 'matrix=["ubuntu-latest", "windows-2022", "macos-latest"]' >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual runs on other branches also build and package macOS,
-            # so the DMG can be tested without publishing a release.
-            echo 'matrix=["ubuntu-latest", "macos-latest"]' >> $GITHUB_OUTPUT
-          else
-            echo 'matrix=["ubuntu-latest"]' >> $GITHUB_OUTPUT
-          fi
-=======
         run: echo 'matrix=["ubuntu-latest", "windows-2022", "macos-latest"]' >> $GITHUB_OUTPUT
->>>>>>> main
 
   build:
     needs: prepare
