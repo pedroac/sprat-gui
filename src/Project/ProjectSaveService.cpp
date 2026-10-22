@@ -32,6 +32,12 @@ namespace {
         const QString p = preset.trimmed().toLower();
         return p == "quality" || p == "small";
     }
+
+    /// Returns true when the output format expects rotated sprites turned counter-clockwise.
+    /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
+    bool transformRequiresCcwRotation(const QString& transform) {
+        return transform.trimmed().compare(QLatin1String("libgdx"), Qt::CaseInsensitive) == 0;
+    }
 }
 
 bool ProjectSaveService::writeProjectJson(
@@ -333,37 +339,30 @@ bool ProjectSaveService::save(
     }
 
     auto runProcess = [&](const QString& tool, const QStringList& args, const QString& step, const QByteArray* inputData = nullptr, QByteArray* outputData = nullptr) -> bool {
+        bool ok = false;
+        QByteArray stderrData;
 #ifdef SPRAT_EMBEDDED_CLI
-        QString toolName = QFileInfo(tool).baseName();
+        const QString toolName = QFileInfo(tool).baseName();
         if (toolName.startsWith("sprat")) {
             // Use EmbeddedCli for sprat-* tools
             CliResult embeddedResult = EmbeddedCli::run(
                 toolName,
                 args,
                 inputData ? *inputData : QByteArray());
-            
             if (outputData) *outputData = embeddedResult.stdOut;
-            if (embeddedResult.exitCode != 0) {
-                const QString stderrText = QString::fromUtf8(embeddedResult.stdErr).trimmed();
-                if (!stderrText.isEmpty()) {
-                    error = stderrText;
-                } else {
-                    error = trPS("Command failed: %1").arg(step);
-                }
-                return false;
-            }
-            return true;
-        }
+            ok = embeddedResult.exitCode == 0;
+            stderrData = embeddedResult.stdErr;
+        } else
 #endif
-        if (!runProcessFunc) return false;
-        if (!runProcessFunc(tool, args, step, inputData, outputData)) {
-            // Error handling is complex here since we don't have access to process.readAllStandardError() directly,
-            // so we assume runProcessFunc either handles it or we'll get a general failure.
-            // For now, let's assume if it returns false, it already set an appropriate error if possible.
-            // But we can't easily set 'error' from here without changing the lambda.
-            return false;
+        {
+            if (!runProcessFunc) return false;
+            ok = runProcessFunc(tool, args, inputData, outputData, &stderrData);
         }
-        return true;
+        if (!ok) {
+            const QString stderrText = QString::fromUtf8(stderrData).trimmed();
+            error = stderrText.isEmpty() ? trPS("Command failed: %1").arg(step) : stderrText;
+        }
+        return ok;
     };
 
     auto findProfile = [&](const QString& profileName) -> const SpratProfile* {
@@ -376,6 +375,8 @@ bool ProjectSaveService::save(
     };
 
     constexpr double kScaleMatchTolerance = 1e-6;
+    // Set once spratpack rejects --zopfli, so later profiles don't repeat the failed run.
+    bool zopfliUnavailable = false;
     for (const QString& profileNameRaw : config.profiles) {
         const QString profileName = profileNameRaw.trimmed();
         if (profileName.isEmpty()) {
@@ -414,9 +415,13 @@ bool ProjectSaveService::save(
             }
         }
 
+        // The canvas layout is always clockwise, so it can't be reused for a counter-clockwise format.
+        const bool needsCcwRotation = effectiveProfile.allowRotation
+            && transformRequiresCcwRotation(config.transform);
         QByteArray layoutData;
         bool usingCachedLayout = false;
-        if (!cachedLayoutData.isEmpty() &&
+        if (!needsCcwRotation &&
+            !cachedLayoutData.isEmpty() &&
             profileName == selectedProfileName &&
             std::abs(cachedLayoutScale - profileScale) < kScaleMatchTolerance) {
             layoutData = cachedLayoutData.toUtf8();
@@ -466,6 +471,9 @@ bool ProjectSaveService::save(
             }
             if (effectiveProfile.allowRotation) {
                 layoutArgs << "--rotate";
+                if (needsCcwRotation) {
+                    layoutArgs << "--rotate-direction" << "ccw";
+                }
             }
             if (effectiveProfile.multipack) {
                 layoutArgs << "--multipack";
@@ -524,7 +532,8 @@ bool ProjectSaveService::save(
             && effectiveProfile.imageFormat != "png") {
             packArgs << "--quality" << QString::number(effectiveProfile.imageQuality);
         }
-        if (effectiveProfile.zopfli && effectiveProfile.imageFormat == "png") {
+        const bool wantsZopfli = effectiveProfile.zopfli && effectiveProfile.imageFormat == "png";
+        if (wantsZopfli && !zopfliUnavailable) {
             packArgs << "--zopfli";
         }
         if (effectiveProfile.frameLines) {
@@ -540,9 +549,28 @@ bool ProjectSaveService::save(
             packArgs << "--atlas-index" << QString::number(effectiveProfile.atlasIndex);
         }
 
-        if (!runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
+        const QString packStep = trPS("Packing failed for profile '%1'").arg(profileName);
+        bool packSuccess = runProcess(spratPackBin, packArgs, packStep, &layoutData, &imageData);
+        // sprat-cli builds without Zopfli reject --zopfli; write a plain PNG rather than fail the export.
+        // Only that error names zopflipng (the library name is not translated).
+        if (!packSuccess && packArgs.contains("--zopfli")
+            && error.contains(QLatin1String("zopflipng"), Qt::CaseInsensitive)) {
+            zopfliUnavailable = true;
+            const QString zopfliError = error;
+            packArgs.removeAll("--zopfli");
+            packSuccess = runProcess(spratPackBin, packArgs, packStep, &layoutData, &imageData);
+            if (!packSuccess) {
+                error = zopfliError;
+            }
+        }
+        if (packSuccess && wantsZopfli && zopfliUnavailable && callbacks.logEntry) {
+            callbacks.logEntry({ExportLogEntry::Kind::Info,
+                trPS("Zopfli compression is not available in this sprat-cli build; "
+                     "profile '%1' was saved as a regular PNG.").arg(profileName), -1});
+        }
+        if (!packSuccess) {
             const QString packDetails = error;
-            error = QString(trPS("Packing failed for profile '%1'")).arg(profileName);
+            error = packStep;
             if (!packDetails.isEmpty()) {
                 error += QStringLiteral("\n\n") + packDetails;
             }
@@ -703,8 +731,14 @@ bool ProjectSaveService::save(
                 convArgs << "--auto-animations";
             }
 
-            if (!runProcess(spratConvertBin, convArgs, QString(trPS("Format conversion failed for profile '%1'")).arg(profileName), &combinedInput, nullptr)) {
-                error = QString(trPS("Format conversion failed for profile '%1'")).arg(profileName);
+            const QString convertStep = trPS("Format conversion failed for profile '%1'").arg(profileName);
+            if (!runProcess(spratConvertBin, convArgs, convertStep, &combinedInput, nullptr)) {
+                // Keep the tool's message: transforms explain what to change (e.g. rotation direction).
+                const QString convertDetails = error;
+                error = convertStep;
+                if (!convertDetails.isEmpty()) {
+                    error += QStringLiteral("\n\n") + convertDetails;
+                }
                 return false;
             }
             if (callbacks.logEntry)

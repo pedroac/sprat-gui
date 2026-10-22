@@ -997,6 +997,7 @@ ctest --output-on-failure
 - `TestCoreModels.cpp` - Data structure operations
 - `TestImageDiscovery.cpp` - Image discovery service
 - `TestProjectSession.cpp` - Session state management
+- `e2e/ExportPipelineTests.cpp` - End-to-end exports through the real sprat-cli tools (`sprat-gui-e2e` target). Generates sprites, runs `ProjectSaveService`, and checks the written atlases and metadata. Paths include spaces and non-ASCII characters. Embedded builds run the CLI in-process; other builds also build sprat-cli's executables and pass their folder in `SPRAT_CLI_DIR`. Turn off with `-DSPRAT_E2E_TESTS=OFF`. CI runs it on Linux, Windows and macOS.
 
 ### Code Organization Tips
 

@@ -12,7 +12,8 @@ public:
         std::function<void(bool)>            setLoading;
         std::function<void(const QString&)>  setStatus;
         std::function<bool()>                shouldCancel;
-        std::function<bool(const QString&, const QStringList&, const QString&, const QByteArray*, QByteArray*)> runProcess;
+        /// Runs an external tool: (tool, args, stdin, stdout, stderr); returns success.
+        std::function<bool(const QString&, const QStringList&, const QByteArray*, QByteArray*, QByteArray*)> runProcess;
         std::function<void(const ExportLogEntry&)> logEntry;  // optional
     };
 
