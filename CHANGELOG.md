@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprites workspace: trim rect now defaults to on
 - Atlas Sprites: deduplication mode now defaults to Exact instead of None
 
+### Fixed
+- Export: LibGDX exports with sprite rotation enabled no longer fail; the layout now rotates sprites counter-clockwise, as libGDX expects
+- Export: profiles with Zopfli enabled no longer fail when the sprat-cli build lacks Zopfli; the atlas is saved as a regular PNG and the export log says so
+
+### Dependencies
+- Updated sprat-cli to v0.19.5
+
 ## [0.8.0] - 2026-06-15
 
 ### Added

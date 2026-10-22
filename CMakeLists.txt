@@ -259,6 +259,27 @@ if(SPRAT_EMBEDDED_CLI)
     endif()
 
     include_directories("${SPRAT_CLI_SOURCE_DIR}/src")
+
+    # Since sprat-cli v0.19, run_spratpack lives in the spratpack executable rather than
+    # spratcore, because its optional codecs are configured on that target. Build the
+    # command into a library that mirrors spratpack's settings so the same codecs are used.
+    add_library(spratpackcommand STATIC
+        "${SPRAT_CLI_SOURCE_DIR}/src/commands/spratpack_command.cpp")
+    foreach(_spratpack_property COMPILE_DEFINITIONS INCLUDE_DIRECTORIES LINK_LIBRARIES LINK_DIRECTORIES)
+        get_target_property(_spratpack_value spratpack ${_spratpack_property})
+        if(_spratpack_value)
+            set_property(TARGET spratpackcommand PROPERTY ${_spratpack_property} "${_spratpack_value}")
+            # A static library's link dependencies must reach sprat-gui's link line.
+            if(_spratpack_property MATCHES "^LINK_")
+                set_property(TARGET spratpackcommand PROPERTY INTERFACE_${_spratpack_property} "${_spratpack_value}")
+            endif()
+        endif()
+    endforeach()
+    # sprat-cli sets some definitions (e.g. SPRAT_VERSION) per directory, not per target.
+    get_directory_property(_spratpack_value DIRECTORY "${SPRAT_CLI_SOURCE_DIR}" COMPILE_DEFINITIONS)
+    if(_spratpack_value)
+        target_compile_definitions(spratpackcommand PRIVATE ${_spratpack_value})
+    endif()
 endif()
 
 # === Qt6 Configuration ===
@@ -581,7 +602,7 @@ if(EMSCRIPTEN)
 endif()
 
 if(SPRAT_EMBEDDED_CLI)
-    target_link_libraries(sprat-gui PRIVATE spratcore)
+    target_link_libraries(sprat-gui PRIVATE spratpackcommand spratcore)
 endif()
 
 

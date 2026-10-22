@@ -32,6 +32,12 @@ namespace {
         const QString p = preset.trimmed().toLower();
         return p == "quality" || p == "small";
     }
+
+    /// Returns true when the output format expects rotated sprites turned counter-clockwise.
+    /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
+    bool transformRequiresCcwRotation(const QString& transform) {
+        return transform.trimmed().compare(QLatin1String("libgdx"), Qt::CaseInsensitive) == 0;
+    }
 }
 
 bool ProjectSaveService::writeProjectJson(
@@ -414,9 +420,13 @@ bool ProjectSaveService::save(
             }
         }
 
+        // The canvas layout is always clockwise, so it can't be reused for a counter-clockwise format.
+        const bool needsCcwRotation = effectiveProfile.allowRotation
+            && transformRequiresCcwRotation(config.transform);
         QByteArray layoutData;
         bool usingCachedLayout = false;
-        if (!cachedLayoutData.isEmpty() &&
+        if (!needsCcwRotation &&
+            !cachedLayoutData.isEmpty() &&
             profileName == selectedProfileName &&
             std::abs(cachedLayoutScale - profileScale) < kScaleMatchTolerance) {
             layoutData = cachedLayoutData.toUtf8();
@@ -466,6 +476,9 @@ bool ProjectSaveService::save(
             }
             if (effectiveProfile.allowRotation) {
                 layoutArgs << "--rotate";
+                if (needsCcwRotation) {
+                    layoutArgs << "--rotate-direction" << "ccw";
+                }
             }
             if (effectiveProfile.multipack) {
                 layoutArgs << "--multipack";
@@ -540,7 +553,24 @@ bool ProjectSaveService::save(
             packArgs << "--atlas-index" << QString::number(effectiveProfile.atlasIndex);
         }
 
-        if (!runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData)) {
+        bool packSuccess = runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData);
+        // sprat-cli builds without Zopfli reject --zopfli; write a plain PNG rather than fail the export.
+        if (!packSuccess && packArgs.contains("--zopfli")) {
+            const QString zopfliError = error;
+            packArgs.removeAll("--zopfli");
+            imageData.clear();
+            packSuccess = runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData);
+            if (packSuccess) {
+                if (callbacks.logEntry) {
+                    callbacks.logEntry({ExportLogEntry::Kind::Info,
+                        QString(trPS("Zopfli compression is not available in this sprat-cli build; "
+                                     "profile '%1' was saved as a regular PNG.")).arg(profileName), -1});
+                }
+            } else {
+                error = zopfliError;
+            }
+        }
+        if (!packSuccess) {
             const QString packDetails = error;
             error = QString(trPS("Packing failed for profile '%1'")).arg(profileName);
             if (!packDetails.isEmpty()) {
