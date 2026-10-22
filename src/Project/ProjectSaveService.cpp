@@ -362,11 +362,10 @@ bool ProjectSaveService::save(
         }
 #endif
         if (!runProcessFunc) return false;
-        if (!runProcessFunc(tool, args, step, inputData, outputData)) {
-            // Error handling is complex here since we don't have access to process.readAllStandardError() directly,
-            // so we assume runProcessFunc either handles it or we'll get a general failure.
-            // For now, let's assume if it returns false, it already set an appropriate error if possible.
-            // But we can't easily set 'error' from here without changing the lambda.
+        QByteArray stderrData;
+        if (!runProcessFunc(tool, args, step, inputData, outputData, &stderrData)) {
+            const QString stderrText = QString::fromUtf8(stderrData).trimmed();
+            error = stderrText.isEmpty() ? trPS("Command failed: %1").arg(step) : stderrText;
             return false;
         }
         return true;
@@ -555,7 +554,9 @@ bool ProjectSaveService::save(
 
         bool packSuccess = runProcess(spratPackBin, packArgs, QString(trPS("Packing failed for profile '%1'")).arg(profileName), &layoutData, &imageData);
         // sprat-cli builds without Zopfli reject --zopfli; write a plain PNG rather than fail the export.
-        if (!packSuccess && packArgs.contains("--zopfli")) {
+        // Only that error names zopflipng (the library name is not translated).
+        if (!packSuccess && packArgs.contains("--zopfli")
+            && error.contains(QLatin1String("zopflipng"), Qt::CaseInsensitive)) {
             const QString zopfliError = error;
             packArgs.removeAll("--zopfli");
             imageData.clear();

@@ -713,4 +713,19 @@ if(WIN32)
             endforeach()
         endif()
     endforeach()
+
+    # spratpackcommand links spratpack's optional codecs; sprat-cli copies their DLLs only
+    # next to spratpack.exe, so copy the ones it found (cached by find_file) here too.
+    if(SPRAT_EMBEDDED_CLI)
+        foreach(_codec_dll ZOPFLIPNG_DLL SQUISH_DLL WEBP_DLL AVIF_DLL)
+            if(${_codec_dll})
+                add_custom_command(TARGET sprat-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${${_codec_dll}}"
+                    $<TARGET_FILE_DIR:sprat-gui>
+                    COMMENT "Copying runtime dependency ${${_codec_dll}}"
+                )
+            endif()
+        endforeach()
+    endif()
 endif()

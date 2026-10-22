@@ -208,8 +208,8 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                      setStatus, shouldCancel]() {
         ExportResult result;
 
-        auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& /*step*/, const QByteArray* input, QByteArray* output) {
-            return m_cfg.runTool(tool, args, input, output, nullptr);
+        auto runToolBound = [this](const QString& tool, const QStringList& args, const QString& /*step*/, const QByteArray* input, QByteArray* output, QByteArray* errorOutput) {
+            return m_cfg.runTool(tool, args, input, output, errorOutput);
         };
 
         QVector<ExportLogEntry> logEntries;
