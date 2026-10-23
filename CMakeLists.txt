@@ -303,6 +303,15 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
+# Qt 6.5's FindWrapOpenGL links the legacy AGL framework, which recent macOS SDKs no longer ship.
+if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+    get_target_property(_wrap_opengl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+    if(_wrap_opengl_libs)
+        list(FILTER _wrap_opengl_libs EXCLUDE REGEX "AGL")
+        set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES INTERFACE_LINK_LIBRARIES "${_wrap_opengl_libs}")
+    endif()
+endif()
+
 # === Source Files ===
 set(PROJECT_SOURCES
     src/App/main.cpp
