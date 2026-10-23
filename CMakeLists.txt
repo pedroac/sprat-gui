@@ -726,6 +726,19 @@ if(WIN32)
         endif()
     endforeach()
 
+    # sprat-cli takes paths as narrow strings, which Windows reads in the process code page.
+    # Qt hands it UTF-8, so every executable that runs the CLI in-process needs a UTF-8 code page.
+    if(MSVC)
+        set(_utf8_manifest "${CMAKE_CURRENT_SOURCE_DIR}/deploy/windows/sprat-gui.manifest")
+    else()
+        set(_utf8_manifest "${CMAKE_CURRENT_SOURCE_DIR}/deploy/windows/sprat-gui-manifest.rc")
+    endif()
+    foreach(_cli_target sprat-gui sprat-gui-e2e)
+        if(TARGET ${_cli_target})
+            target_sources(${_cli_target} PRIVATE "${_utf8_manifest}")
+        endif()
+    endforeach()
+
     # Generate a batch file in the root to launch the GUI
     file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/sprat.bat"
          CONTENT "@echo off\nstart \"\" \"%~dp0bin\\sprat-gui.exe\" %*\n")
