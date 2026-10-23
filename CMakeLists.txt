@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Qt 6.5 supports macOS 11 and later. Without a deployment target, binaries only run on the
+# build machine's macOS version or newer. It must be set before project().
+if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version to run on")
+endif()
+
 project(sprat-gui LANGUAGES CXX)
 
 if(EMSCRIPTEN)
@@ -214,6 +221,17 @@ endif()
 option(SPRAT_E2E_TESTS "Build the end-to-end export tests (builds sprat-cli when it is not embedded)" ON)
 set(_sprat_build_cli ${SPRAT_EMBEDDED_CLI})
 if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
+    set(_sprat_build_cli ON)
+endif()
+
+# The macOS app bundle carries sprat-cli's tools in Contents/Resources/cli. They are built
+# here from the same source, so they match the app's architectures and minimum macOS.
+set(_sprat_bundle_cli OFF)
+if(APPLE AND NOT SPRAT_EMBEDDED_CLI)
+    option(SPRAT_BUNDLE_CLI "Build sprat-cli's tools into the macOS app bundle" ON)
+    set(_sprat_bundle_cli ${SPRAT_BUNDLE_CLI})
+endif()
+if(_sprat_bundle_cli)
     set(_sprat_build_cli ON)
 endif()
 
@@ -642,6 +660,19 @@ if(NOT EMSCRIPTEN)
     else()
         message(STATUS "sprat-cli assets not found; skipping spratprofiles.cfg/transforms copy")
     endif()
+endif()
+
+if(_sprat_bundle_cli)
+    set(_sprat_bundled_tools spratlayout spratpack spratconvert spratframes spratunpack)
+    add_dependencies(sprat-gui ${_sprat_bundled_tools})
+    foreach(_tool IN LISTS _sprat_bundled_tools)
+        add_custom_command(TARGET sprat-gui POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:${_tool}>"
+            "$<TARGET_BUNDLE_CONTENT_DIR:sprat-gui>/Resources/cli/$<TARGET_FILE_NAME:${_tool}>"
+            COMMENT "Bundling ${_tool}..."
+        )
+    endforeach()
 endif()
 
 if(EMSCRIPTEN)

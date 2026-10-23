@@ -74,9 +74,18 @@ jobs:
         run: |
           CLI_TAG=$(tr -d '\r' < DEPENDENCIES | xargs)
           echo "Embedding CLI version: $CLI_TAG"
+          platform_args=()
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # One app for Apple Silicon and Intel Macs. Homebrew's libraries are built for
+            # the runner only and aren't on users' Macs, so CMake must not find them;
+            # dependencies it can't find in the SDK are built from source instead.
+            platform_args=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+                           "-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local")
+          fi
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
             -DSPRAT_EMBEDDED_CLI=${{ matrix.embedded_cli }} \
-            -DSPRAT_CLI_VERSION="$CLI_TAG"
+            -DSPRAT_CLI_VERSION="$CLI_TAG" \
+            "${platform_args[@]}"
 
       - name: Strip AGL from generated link command (macOS)
         if: runner.os == 'macOS'
@@ -121,10 +130,18 @@ jobs:
             exit 1
           }
 
+      # The macOS smoke tests also run the app's Intel slice, which needs Rosetta.
+      - name: Install Rosetta (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+
       # Starts the built app on the real platform plugin, checks its window opens, then
       # opens a ZIP of sprites through the GUI and lays it out with the "fast" profile.
-      # macOS builds call sprat-cli as separate tools, which aren't installed here,
-      # so they only check that the window opens.
+      # On macOS this runs both slices of the universal app, with the sprat-cli tools
+      # bundled in Contents/Resources/cli; under arch -x86_64 those run as x86_64 too.
       - name: Smoke test (build)
         shell: bash
         run: |
@@ -133,7 +150,11 @@ jobs:
           case "$RUNNER_OS" in
             Linux)   deploy/smoke-test.sh build/sprat-gui "${import[@]}" ;;
             Windows) deploy/smoke-test.sh build/bin/Release/sprat-gui.exe "${import[@]}" ;;
-            macOS)   deploy/smoke-test.sh build/sprat-gui.app/Contents/MacOS/sprat-gui ;;
+            macOS)
+              app=build/sprat-gui.app/Contents/MacOS/sprat-gui
+              deploy/smoke-test.sh "$app" "${import[@]}"
+              arch -x86_64 /bin/bash deploy/smoke-test.sh "$app" "${import[@]}"
+              ;;
           esac
 
       - name: Package (Linux)
@@ -190,18 +211,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir dist
-          cp -r build/sprat-gui.app dist/
-          # Bundle sprat-cli (read version from DEPENDENCIES) into the App Bundle.
-          # It goes in Contents/Resources/cli with its spratprofiles.cfg and
-          # transforms/ (the tools look for them next to their executable);
-          # Contents/MacOS must hold only code, or codesign rejects the bundle.
-          cli_version=$(cat DEPENDENCIES | xargs)
-          curl -fL -o cli.dmg "https://github.com/pedroac/sprat-cli/releases/download/$cli_version/sprat-cli-macos-x64.dmg"
-          MOUNT_POINT=$(hdiutil mount cli.dmg | grep -o '/Volumes/.*' | head -n 1)
-          if [ -z "$MOUNT_POINT" ]; then echo "Failed to mount DMG"; exit 1; fi
-          mkdir -p dist/sprat-gui.app/Contents/Resources/cli
-          cp -r "$MOUNT_POINT"/* dist/sprat-gui.app/Contents/Resources/cli/
-          hdiutil unmount "$MOUNT_POINT"
+          # The build already put sprat-cli's tools, spratprofiles.cfg and transforms/ in
+          # Contents/Resources/cli (the tools look for them next to their executable),
+          # built universal from the version in DEPENDENCIES. sprat-cli's own macOS
+          # release is arm64-only and links Homebrew libraries, so it isn't used.
+          cp -R build/sprat-gui.app dist/
           # Bundle Qt frameworks/plugins. This rewrites install names, which
           # invalidates the existing signatures of the app and Qt binaries.
           macdeployqt dist/sprat-gui.app
@@ -214,6 +228,7 @@ jobs:
             -exec codesign --force --sign - {} \;
           codesign --force --deep --sign - dist/sprat-gui.app
           codesign --verify --deep --strict --verbose=2 dist/sprat-gui.app
+          deploy/macos/check-bundle.sh dist/sprat-gui.app 11.0
           # Package DMG
           hdiutil create -volname sprat-gui -srcfolder dist/sprat-gui.app \
             -ov -format UDZO sprat-gui-macos.dmg
@@ -222,22 +237,35 @@ jobs:
           ditto -c -k --keepParent dist/sprat-gui.app sprat-gui-macos.zip
 
       # Starts what we ship, so missing DLLs, frameworks, Qt plugins, sprat-cli assets
-      # or a broken signature fail the build instead of reaching users.
+      # or a broken signature fail the build instead of reaching users. On macOS it opens
+      # the app from the ZIP (in-app updates, itch.io) and from the DMG, as users get it,
+      # and runs both the Apple Silicon and the Intel slice.
       - name: Smoke test (package)
         shell: bash
         run: |
+          import=(--require-cli --smoke-test-zip tests/assets/streets_of_fight_files.zip
+                  --smoke-test-profile fast --smoke-test-expect-sprites 63)
           case "$RUNNER_OS" in
             Linux)   packaged=sprat-gui-linux.AppImage; export APPIMAGE_EXTRACT_AND_RUN=1 ;;
             Windows) packaged=dist/sprat-gui.exe ;;
-            macOS)   packaged=dist/sprat-gui.app/Contents/MacOS/sprat-gui ;;
+            macOS)   packaged=sprat-gui-macos.zip ;;
           esac
           if [ ! -e "$packaged" ]; then
             echo "No package was built in this run; skipping."
             exit 0
           fi
-          deploy/smoke-test.sh "$packaged" --require-cli \
-            --smoke-test-zip tests/assets/streets_of_fight_files.zip \
-            --smoke-test-profile fast --smoke-test-expect-sprites 63
+          if [ "$RUNNER_OS" != "macOS" ]; then
+            deploy/smoke-test.sh "$packaged" "${import[@]}"
+            exit 0
+          fi
+          ditto -x -k sprat-gui-macos.zip from-zip
+          mount_point=$(hdiutil attach -nobrowse -readonly sprat-gui-macos.dmg | grep -o '/Volumes/.*' | head -n 1)
+          if [ -z "$mount_point" ]; then echo "Failed to mount sprat-gui-macos.dmg"; exit 1; fi
+          for app in from-zip/sprat-gui.app "$mount_point/sprat-gui.app"; do
+            deploy/smoke-test.sh "$app/Contents/MacOS/sprat-gui" "${import[@]}"
+            arch -x86_64 /bin/bash deploy/smoke-test.sh "$app/Contents/MacOS/sprat-gui" "${import[@]}"
+          done
+          hdiutil detach "$mount_point"
 
       - name: Upload Artifacts
         if: github.ref == 'refs/heads/release' || (github.event_name == 'workflow_dispatch' && runner.os == 'macOS')

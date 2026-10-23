@@ -14,6 +14,7 @@
 #include <QPainter>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
 #include <chrono>
@@ -147,6 +148,8 @@ static void finishSmokeTest(int result) {
 /// @return A SmokeTestResult exit code
 static int runSmokeTestChecks(const QWidget& mainWindow, bool requireCli) {
     smokeTestLog(QStringLiteral("platform: %1").arg(QGuiApplication::platformName()));
+    // The slice of a universal macOS binary that is running (x86_64 under Rosetta).
+    smokeTestLog(QStringLiteral("architecture: %1").arg(QSysInfo::buildCpuArchitecture()));
     smokeTestLog(QStringLiteral("application dir: %1").arg(QCoreApplication::applicationDirPath()));
 
     if (!mainWindow.isVisible()) {
