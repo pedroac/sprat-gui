@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS: the app no longer shows as "damaged" and refuses to open (seen on macOS 27 beta). The bundle is now re-signed after packaging, and the bundled sprat-cli tools, profiles config and transforms moved from `Contents/MacOS` to `Contents/Resources/cli`, since non-code files in `Contents/MacOS` made the bundle unsignable
 - macOS: installing sprat-cli from the app now puts it where the app looks for it, and copies the profiles config and transforms correctly
 - macOS: the app now runs on Intel Macs and on macOS 11 and later. It is a universal (Apple Silicon and Intel) build, and its bundled sprat-cli tools no longer need Rosetta or Homebrew libraries
+- The app no longer crashes when quitting after sprites were loaded (seen on macOS)
 - Export: LibGDX exports with sprite rotation enabled no longer fail; the layout now rotates sprites counter-clockwise, as libGDX expects
 - Export: profiles with Zopfli enabled no longer fail when the sprat-cli build lacks Zopfli; the atlas is saved as a regular PNG and the export log says so
 - Windows: loading and exporting sprites from folders whose names contain non-ASCII characters (e.g. `spritës`, `雪`) no longer fails (requires Windows 10 version 1903 or later)

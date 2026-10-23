@@ -31,8 +31,15 @@ NavigatorTreeWidget::NavigatorTreeWidget(QWidget* parent)
         m_hoveredItem = nullptr;
         if (m_previewTooltip) m_previewTooltip->hide();
     };
-    connect(model(), &QAbstractItemModel::modelAboutToBeReset, this, cancelHover);
-    connect(model(), &QAbstractItemModel::rowsAboutToBeRemoved, this, cancelHover);
+    m_cancelHoverOnReset = connect(model(), &QAbstractItemModel::modelAboutToBeReset, this, cancelHover);
+    m_cancelHoverOnRemove = connect(model(), &QAbstractItemModel::rowsAboutToBeRemoved, this, cancelHover);
+}
+
+NavigatorTreeWidget::~NavigatorTreeWidget() {
+    // QTreeWidget's destructor resets the model after this class's members are destroyed,
+    // which would run cancelHover on the destroyed m_hoverTimer and m_previewTooltip.
+    disconnect(m_cancelHoverOnReset);
+    disconnect(m_cancelHoverOnRemove);
 }
 
 void NavigatorTreeWidget::setPreviewDelay(int ms) {
