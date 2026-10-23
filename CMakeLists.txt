@@ -250,6 +250,11 @@ if(_sprat_build_cli)
         endif()
     endif()
 
+    # sprat-cli's own test suite needs tools such as ImageMagick and is covered by its CI;
+    # keep it out of this build's ctest run.
+    set(_sprat_gui_build_testing ${BUILD_TESTING})
+    set(BUILD_TESTING OFF)
+
     if(_sprat_use_local)
         set(SPRAT_CLI_SOURCE_DIR "${SPRAT_CLI_LOCAL_DIR}")
         if(NOT TARGET spratcore)
@@ -267,6 +272,7 @@ if(_sprat_build_cli)
         FetchContent_MakeAvailable(sprat_cli)
         set(SPRAT_CLI_SOURCE_DIR "${sprat_cli_SOURCE_DIR}")
     endif()
+    set(BUILD_TESTING ${_sprat_gui_build_testing})
 
     if(SPRAT_EMBEDDED_CLI)
         include_directories("${SPRAT_CLI_SOURCE_DIR}/src")

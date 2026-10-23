@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev imagemagick
+          sudo apt-get install -y libgl1-mesa-dev
 
       - name: Configure
         shell: bash
@@ -90,9 +90,6 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release
-
-      - name: Install Python test dependencies
-        run: pip install Pillow
 
       - name: Test (Unix)
         if: runner.os != 'Windows'
