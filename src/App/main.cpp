@@ -12,10 +12,14 @@
 #include <QStyleOptionButton>
 #include <QStyleOptionToolButton>
 #include <QPainter>
+#include <QSettings>
 #include <QStandardPaths>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <thread>
 
 // Increases the gap between icon and text in QPushButton / QToolButton from Qt's
 // hardcoded 4 px to kIconTextSpacing.
@@ -93,7 +97,11 @@ enum SmokeTestResult {
     SMOKE_TEST_CLI_MISSING = 3,
     SMOKE_TEST_IMPORT_FAILED = 4,
     SMOKE_TEST_IMPORT_TIMED_OUT = 5,
+    SMOKE_TEST_QUIT_HUNG = 6,
 };
+
+// How long the app may take to quit once the smoke test has its result.
+static constexpr int SMOKE_TEST_QUIT_GRACE_MS = 10000;
 
 // Writes straight to stderr: Windows GUI builds drop qInfo() output when stderr is redirected.
 static void smokeTestLog(const QString& message) {
@@ -107,7 +115,31 @@ static void isolateSmokeTestSettings() {
     QStandardPaths::setTestModeEnabled(true);
     const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
     QDir(QDir(configDir).filePath(QStringLiteral("sprat"))).removeRecursively();
+
+    // Skip the first-run "choose a projects folder" prompt: onboarding isn't under test,
+    // and on macOS its native folder panel can't be closed by QCoreApplication::exit().
+    // Test mode doesn't redirect DocumentsLocation, so keep the folder inside the test config.
+    const QString projectsFolder = QDir(configDir).filePath(QStringLiteral("sprat/Sprat Projects"));
+    QDir().mkpath(projectsFolder);
+    QSettings settings(CliToolsConfig::configPath(), QSettings::IniFormat);
+    settings.setValue(QStringLiteral("settings/default_projects_folder"), projectsFolder);
+    settings.sync();
+
     smokeTestLog(QStringLiteral("settings dir: %1/sprat (fresh)").arg(configDir));
+}
+
+/// Ends the smoke test with result. If the app hasn't quit SMOKE_TEST_QUIT_GRACE_MS later
+/// (a native modal loop or a hang during shutdown), reports that and exits with
+/// SMOKE_TEST_QUIT_HUNG instead of leaving CI to time out.
+static void finishSmokeTest(int result) {
+    QCoreApplication::exit(result);
+    std::thread([result]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(SMOKE_TEST_QUIT_GRACE_MS));
+        smokeTestLog(QStringLiteral("FAIL: the app did not quit within %1 s of the result (%2)")
+                         .arg(SMOKE_TEST_QUIT_GRACE_MS / 1000)
+                         .arg(result));
+        std::_Exit(SMOKE_TEST_QUIT_HUNG);
+    }).detach();
 }
 
 /// Checks that the main window is on screen and, when requireCli is set, that the
@@ -151,7 +183,7 @@ static void runSmokeTestImport(MainWindow& mainWindow, const QString& zipPath, c
     QObject::connect(timeout, &QTimer::timeout, &mainWindow, []() {
         smokeTestLog(QStringLiteral("FAIL: import did not finish within %1 s (a dialog may be open)")
                          .arg(SMOKE_TEST_IMPORT_TIMEOUT_MS / 1000));
-        QCoreApplication::exit(SMOKE_TEST_IMPORT_TIMED_OUT);
+        finishSmokeTest(SMOKE_TEST_IMPORT_TIMED_OUT);
     });
     timeout->start(SMOKE_TEST_IMPORT_TIMEOUT_MS);
 
@@ -172,11 +204,11 @@ static void runSmokeTestImport(MainWindow& mainWindow, const QString& zipPath, c
             }
             if (!error.isEmpty()) {
                 smokeTestLog(QStringLiteral("FAIL: %1").arg(error));
-                QCoreApplication::exit(SMOKE_TEST_IMPORT_FAILED);
+                finishSmokeTest(SMOKE_TEST_IMPORT_FAILED);
                 return;
             }
             smokeTestLog(QStringLiteral("PASS"));
-            QCoreApplication::exit(SMOKE_TEST_PASSED);
+            finishSmokeTest(SMOKE_TEST_PASSED);
         });
 }
 
@@ -359,6 +391,10 @@ int main(int argc, char *argv[]) {
 
     // Create main window
     MainWindow mainWindow;
+    if (smokeTest) {
+        // An update dialog would interrupt the test and try to replace the build under test.
+        mainWindow.setUpdateCheckEnabled(false);
+    }
 
     // Show window and ensure it has focus for keyboard input
     QTimer::singleShot(100, &mainWindow, [&mainWindow]() {
@@ -385,8 +421,8 @@ int main(int argc, char *argv[]) {
             const int result = runSmokeTestChecks(mainWindow, requireCli);
             if (result != SMOKE_TEST_PASSED || zipPath.isEmpty()) {
                 if (result == SMOKE_TEST_PASSED) smokeTestLog(QStringLiteral("PASS"));
-                // exit() also leaves any modal dialog's event loop opened during startup.
-                QCoreApplication::exit(result);
+                // exit() also leaves any Qt modal dialog's event loop opened during startup.
+                finishSmokeTest(result);
                 return;
             }
             runSmokeTestImport(mainWindow, zipPath, profile, folders, expectedSprites);

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: LibGDX exports with sprite rotation enabled no longer fail; the layout now rotates sprites counter-clockwise, as libGDX expects
 - Export: profiles with Zopfli enabled no longer fail when the sprat-cli build lacks Zopfli; the atlas is saved as a regular PNG and the export log says so
 - Windows: loading and exporting sprites from folders whose names contain non-ASCII characters (e.g. `spritës`, `雪`) no longer fails (requires Windows 10 version 1903 or later)
+- Updates: the update prompt no longer offers an older release (e.g. v0.11.0 to a v0.12.0 build); it only appears when a newer version is published
 
 ### Dependencies
 - Updated sprat-cli to v0.19.5

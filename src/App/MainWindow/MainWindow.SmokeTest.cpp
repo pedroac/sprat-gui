@@ -62,10 +62,12 @@ QStringList answerFolderPicker(QDialog& dialog, const QStringList& folders, QStr
     return toPick;
 }
 
-/// Window title plus label text, so an unexpected dialog can be reported.
+/// Window title plus the visible label text, so an unexpected dialog can be reported.
 QString describeDialog(const QWidget& dialog) {
     QStringList parts{dialog.windowTitle()};
     for (const QLabel* label : dialog.findChildren<QLabel*>()) {
+        // Skip labels on hidden pages, such as a stacked widget's later steps.
+        if (!label->isVisibleTo(&dialog)) continue;
         if (!label->text().trimmed().isEmpty()) parts << label->text().trimmed();
     }
     return parts.join(QStringLiteral(": "));

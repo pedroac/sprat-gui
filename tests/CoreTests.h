@@ -7,4 +7,5 @@ private slots:
     void testMarkerKindConversions();
     void testMarkerNameNormalization();
     void testResolutionUtils();
+    void testUpdateOffersOnlyNewerVersions();
 };
