@@ -12,6 +12,7 @@
 # On Linux without a display, the app runs under xvfb-run. Exit codes from the app:
 #   2 = main window not shown, 3 = sprat-cli assets missing,
 #   4 = ZIP import or layout failed (including any unexpected dialog), 5 = import timed out,
+#   6 = the app did not quit within 10 s of the result,
 #   124 (timeout) or 142 (perl alarm) = the whole run timed out.
 set -uo pipefail
 
