@@ -101,6 +101,16 @@ jobs:
         run: |
           $env:PATH = "$env:PATH;$(Get-Location)\build\Release;$env:Qt6_DIR\bin"
           ctest --test-dir build --output-on-failure -C Release
+          if ($LASTEXITCODE -ne 0) {
+            # ctest shows nothing when a test dies before writing output (e.g. a missing DLL),
+            # so rerun the e2e tests directly with QTest output in a file and report the exit code.
+            $env:QT_QPA_PLATFORM = "offscreen"
+            $e2e = Get-ChildItem build -Recurse -Filter sprat-gui-e2e.exe | Select-Object -First 1
+            & $e2e.FullName -o "e2e-output.txt,txt"
+            "sprat-gui-e2e exit code: 0x{0:X8}" -f $LASTEXITCODE
+            if (Test-Path e2e-output.txt) { Get-Content e2e-output.txt }
+            exit 1
+          }
 
       - name: Package (Linux)
         if: runner.os == 'Linux' && github.ref == 'refs/heads/release'
