@@ -355,6 +355,15 @@ if(APPLE)
     unset(_agl_tgt)
     unset(_agl_prop)
     unset(_agl_v)
+
+    # Qt 6.5's FindWrapOpenGL also links AGL through WrapOpenGL::WrapOpenGL.
+    if(TARGET WrapOpenGL::WrapOpenGL)
+        get_target_property(_wrap_opengl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+        if(_wrap_opengl_libs)
+            list(FILTER _wrap_opengl_libs EXCLUDE REGEX "AGL")
+            set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES INTERFACE_LINK_LIBRARIES "${_wrap_opengl_libs}")
+        endif()
+    endif()
 endif()
 
 # === Source Files ===
@@ -778,6 +787,16 @@ if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
     if(SPRAT_EMBEDDED_CLI)
         target_sources(sprat-gui-e2e PRIVATE src/CLITools/EmbeddedCli.cpp)
         target_link_libraries(sprat-gui-e2e PRIVATE spratpackcommand spratcore)
+        # The in-process CLI looks for its assets next to the test executable.
+        add_custom_command(TARGET sprat-gui-e2e POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SPRAT_CLI_SOURCE_DIR}/spratprofiles.cfg"
+            "$<TARGET_FILE_DIR:sprat-gui-e2e>/spratprofiles.cfg"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SPRAT_CLI_SOURCE_DIR}/transforms"
+            "$<TARGET_FILE_DIR:sprat-gui-e2e>/transforms"
+            COMMENT "Copying sprat-cli assets for sprat-gui-e2e..."
+        )
     else()
         add_dependencies(sprat-gui-e2e spratlayout spratpack spratconvert)
         list(APPEND _e2e_environment "SPRAT_CLI_DIR=$<TARGET_FILE_DIR:spratlayout>")
