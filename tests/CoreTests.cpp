@@ -41,3 +41,23 @@ void CoreTests::testResolutionUtils() {
 
     QCOMPARE(formatResolutionText(800, 600), QString("800x600"));
 }
+
+#ifndef Q_OS_WASM
+#include "UpdateChecker.h"
+#endif
+
+void CoreTests::testUpdateOffersOnlyNewerVersions() {
+#ifdef Q_OS_WASM
+    QSKIP("The web build has no updater");
+#else
+    QVERIFY(UpdateChecker::isNewerVersion("v0.12.1", "v0.12.0"));
+    QVERIFY(UpdateChecker::isNewerVersion("v0.13.0", "v0.12.0"));
+    QVERIFY(UpdateChecker::isNewerVersion("v1.0.0", "v0.99.9"));
+    QVERIFY(UpdateChecker::isNewerVersion("0.12.10", "v0.12.9")); // numeric, not text order
+
+    QVERIFY(!UpdateChecker::isNewerVersion("v0.11.0", "v0.12.0")); // never downgrade
+    QVERIFY(!UpdateChecker::isNewerVersion("v0.12.0", "v0.12.0"));
+    QVERIFY(!UpdateChecker::isNewerVersion("", "v0.12.0"));
+    QVERIFY(!UpdateChecker::isNewerVersion("latest", "v0.12.0"));
+#endif
+}

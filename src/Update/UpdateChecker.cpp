@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QVersionNumber>
 
 static constexpr const char* kReleasesApiUrl =
     "https://api.github.com/repos/pedroac/sprat-gui/releases/latest";
@@ -13,6 +14,19 @@ UpdateChecker::UpdateChecker(QObject* parent)
       m_networkManager(new QNetworkAccessManager(this)) {
     connect(m_networkManager, &QNetworkAccessManager::finished,
             this, &UpdateChecker::onReplyFinished);
+}
+
+static QVersionNumber parseVersion(const QString& version) {
+    QString text = version.trimmed();
+    if (text.startsWith(QLatin1Char('v'), Qt::CaseInsensitive)) text.remove(0, 1);
+    return QVersionNumber::fromString(text);
+}
+
+bool UpdateChecker::isNewerVersion(const QString& candidate, const QString& current) {
+    const QVersionNumber candidateVersion = parseVersion(candidate);
+    const QVersionNumber currentVersion = parseVersion(current);
+    if (candidateVersion.isNull() || currentVersion.isNull()) return false;
+    return candidateVersion > currentVersion;
 }
 
 void UpdateChecker::check() {
@@ -50,7 +64,9 @@ void UpdateChecker::onReplyFinished(QNetworkReply* reply) {
         return;
     }
 
-    if (tagName == QString(SPRAT_GUI_VERSION)) {
+    // The latest release can be older than this build (e.g. a build from a newer tag
+    // before its release is published), so only offer real upgrades.
+    if (!isNewerVersion(tagName, QString(SPRAT_GUI_VERSION))) {
         emit noUpdateAvailable();
         return;
     }

@@ -664,6 +664,9 @@ if(BUILD_TESTING)
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
     )
+    if(NOT EMSCRIPTEN)
+        target_sources(sprat-gui-tests PRIVATE src/Update/UpdateChecker.cpp)
+    endif()
 
     target_include_directories(sprat-gui-tests PRIVATE
         tests
@@ -674,6 +677,7 @@ if(BUILD_TESTING)
         src/Project
         src/Core
         src/SpriteSheetLayout
+        src/Update
     )
 
     target_link_libraries(sprat-gui-tests PRIVATE

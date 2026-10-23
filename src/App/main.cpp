@@ -359,6 +359,10 @@ int main(int argc, char *argv[]) {
 
     // Create main window
     MainWindow mainWindow;
+    if (smokeTest) {
+        // An update dialog would interrupt the test and try to replace the build under test.
+        mainWindow.setUpdateCheckEnabled(false);
+    }
 
     // Show window and ensure it has focus for keyboard input
     QTimer::singleShot(100, &mainWindow, [&mainWindow]() {

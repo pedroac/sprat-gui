@@ -3499,6 +3499,7 @@ void MainWindow::setSourceFolderIsTemp(bool isTemp) {
 
 #ifndef Q_OS_WASM
 void MainWindow::checkForUpdates() {
+    if (!m_updateCheckEnabled) return;
     auto* checker = new UpdateChecker(this);
     connect(checker, &UpdateChecker::updateAvailable, this,
             [this](const UpdateChecker::ReleaseInfo& info) {

@@ -121,6 +121,10 @@ public:
     void runSmokeTestImport(const QString& zipPath, const QString& profile, const QStringList& folders,
                             std::function<void(const SmokeTestImportResult&)> done);
 
+    /// Turns off the startup check for a newer release (on by default). Call before the
+    /// check runs, a few seconds after construction.
+    void setUpdateCheckEnabled(bool enabled) { m_updateCheckEnabled = enabled; }
+
 #ifdef Q_OS_WASM
     static MainWindow* wasmInstance();
     void onWasmFilePicked(const QString& path, int mode);
@@ -950,6 +954,7 @@ private:
 #endif
     bool m_cliReady = false;
     bool m_isLoading = false;
+    bool m_updateCheckEnabled = true;
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
     std::atomic<bool> m_isCanceled{false};
