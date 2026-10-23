@@ -37,7 +37,7 @@ NavigatorTreeWidget::NavigatorTreeWidget(QWidget* parent)
 
 NavigatorTreeWidget::~NavigatorTreeWidget() {
     // QTreeWidget's destructor resets the model after this class's members are destroyed,
-    // which would run cancelHover on the destroyed m_hoverTimer and m_previewTooltip.
+    // which would run cancelHover on the destroyed m_hoverTimer.
     disconnect(m_cancelHoverOnReset);
     disconnect(m_cancelHoverOnRemove);
 }
