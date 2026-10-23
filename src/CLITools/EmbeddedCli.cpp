@@ -3,7 +3,9 @@
 #include <sstream>
 #include <vector>
 #include <string>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include "commands/entrypoints.h"
 
 std::atomic<bool> EmbeddedCli::m_stopRequested{false};
@@ -28,7 +30,13 @@ CliResult EmbeddedCli::run(const QString& command, const QStringList& args, cons
     // Prepare arguments
     std::vector<std::string> stdArgs;
     stdArgs.reserve(args.size() + 1);
-    stdArgs.push_back(command.toStdString());
+    // sprat-cli finds spratprofiles.cfg and transforms/ next to argv[0]; a bare command name
+    // would make it search the working directory, so point it at the application directory.
+    QString argv0 = command;
+    if (QCoreApplication::instance()) {
+        argv0 = QDir(QCoreApplication::applicationDirPath()).filePath(command);
+    }
+    stdArgs.push_back(argv0.toStdString());
     for (const QString& arg : args) {
         stdArgs.push_back(arg.toStdString());
     }
