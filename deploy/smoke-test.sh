@@ -46,11 +46,54 @@ else
     runner+=(perl -e 'alarm shift; exec @ARGV or die "exec failed: $!\n"' "$timeout_seconds")
 fi
 
+# Prints the crashed thread's stack from the crash report macOS writes for a crashed app
+# (ReportCrash writes it a few seconds after the crash).
+print_macos_crash_report() {
+    local reports_dir="$HOME/Library/Logs/DiagnosticReports"
+    local name report=""
+    name="$(basename "$executable")"
+    for _ in $(seq 1 30); do
+        report="$(find "$reports_dir" -maxdepth 1 -name "$name*.ips" -newer "$started_marker" 2>/dev/null | head -n 1)"
+        [ -n "$report" ] && break
+        sleep 1
+    done
+    if [ -z "$report" ]; then
+        echo "[smoke-test] no crash report found in $reports_dir" >&2
+        return
+    fi
+    echo "[smoke-test] crash report: $report" >&2
+    # A .ips file is a JSON header line followed by a JSON body.
+    python3 - "$report" >&2 <<'PYTHON' || cat "$report" >&2
+import json, sys
+with open(sys.argv[1]) as f:
+    f.readline()
+    body = json.load(f)
+exception = body.get("exception", {})
+print("exception:", exception.get("type"), exception.get("signal"), exception.get("subtype", ""))
+images = body.get("usedImages", [])
+crashed = body.get("faultingThread", 0)
+for index, thread in enumerate(body.get("threads", [])):
+    if index != crashed and not thread.get("triggered"):
+        continue
+    print(f"thread {index} ({thread.get('name') or thread.get('queue') or 'unnamed'}):")
+    for number, frame in enumerate(thread.get("frames", [])):
+        image = images[frame["imageIndex"]].get("name", "?") if frame.get("imageIndex", -1) < len(images) else "?"
+        symbol = frame.get("symbol", hex(frame.get("imageOffset", 0)))
+        print(f"  {number:2} {image:28} {symbol} + {frame.get('symbolLocation', 0)}")
+PYTHON
+}
+
+started_marker="$(mktemp)"
 echo "[smoke-test] running $executable"
 "${runner[@]}" "$executable" --smoke-test "$@"
 exit_code=$?
 
 if [ "$exit_code" -ne 0 ]; then
     echo "[smoke-test] FAIL: $executable exited with code $exit_code" >&2
+    # 128 + signal number means the app crashed; 142 is perl's alarm ending a hung run.
+    if [ "$(uname -s)" = "Darwin" ] && [ "$exit_code" -gt 128 ] && [ "$exit_code" -ne 142 ]; then
+        print_macos_crash_report
+    fi
 fi
+rm -f "$started_marker"
 exit "$exit_code"
