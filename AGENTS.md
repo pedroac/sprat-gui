@@ -998,6 +998,7 @@ ctest --output-on-failure
 - `TestImageDiscovery.cpp` - Image discovery service
 - `TestProjectSession.cpp` - Session state management
 - `e2e/ExportPipelineTests.cpp` - End-to-end exports through the real sprat-cli tools (`sprat-gui-e2e` target). Generates sprites, runs `ProjectSaveService`, and checks the written atlases and metadata. Paths include spaces and non-ASCII characters. Embedded builds run the CLI in-process; other builds also build sprat-cli's executables and pass their folder in `SPRAT_CLI_DIR`. Turn off with `-DSPRAT_E2E_TESTS=OFF`. CI runs it on Linux, Windows and macOS.
+- `deploy/smoke-test.sh <executable> [--require-cli]` - Starts the app with `--smoke-test` on the real platform plugin (under `xvfb-run` on headless Linux) and fails if the main window does not appear (exit 2) or, with `--require-cli`, if sprat-cli's transforms or profiles config can't be found (exit 3). This is the only check that the app actually opens: ctest runs offscreen and never creates `MainWindow`. CI runs it on the build output on every push, and on the AppImage, Windows `dist/` folder and macOS `.app` whenever packaging runs.
 
 ### Code Organization Tips
 

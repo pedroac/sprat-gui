@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QGuiApplication>
 #include <QLocale>
 #include <QTranslator>
 #include <QTimer>
@@ -12,6 +14,7 @@
 #include <QPainter>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
+#include <cstdio>
 
 // Increases the gap between icon and text in QPushButton / QToolButton from Qt's
 // hardcoded 4 px to kIconTextSpacing.
@@ -76,6 +79,53 @@ private:
                               bool(state & State_Enabled), text, QPalette::ButtonText);
     }
 };
+
+// Checked by --smoke-test once the main window has had time to appear.
+static constexpr int SMOKE_TEST_DELAY_MS = 3000;
+
+// Exit codes for --smoke-test, so CI logs say which check failed.
+enum SmokeTestResult {
+    SMOKE_TEST_PASSED = 0,
+    SMOKE_TEST_WINDOW_NOT_SHOWN = 2,
+    SMOKE_TEST_CLI_MISSING = 3,
+};
+
+// Writes straight to stderr: Windows GUI builds drop qInfo() output when stderr is redirected.
+static void smokeTestLog(const QString& message) {
+    std::fprintf(stderr, "[smoke-test] %s\n", message.toLocal8Bit().constData());
+    std::fflush(stderr);
+}
+
+/// Checks that the main window is on screen and, when requireCli is set, that the
+/// sprat-cli tools, transforms and profiles config can be found.
+/// @return A SmokeTestResult exit code
+static int runSmokeTestChecks(const QWidget& mainWindow, bool requireCli) {
+    smokeTestLog(QStringLiteral("platform: %1").arg(QGuiApplication::platformName()));
+    smokeTestLog(QStringLiteral("application dir: %1").arg(QCoreApplication::applicationDirPath()));
+
+    if (!mainWindow.isVisible()) {
+        smokeTestLog(QStringLiteral("FAIL: main window is not visible"));
+        return SMOKE_TEST_WINDOW_NOT_SHOWN;
+    }
+
+    const CliPaths cliPaths = CliToolsConfig::loadCliPaths();
+    const QString transformsDir = CliToolsConfig::queryTransformsDir(cliPaths.convertBinary);
+    const QString profilesConfig = CliToolsConfig::queryDefaultProfilesConfig(cliPaths.layoutBinary);
+    const bool transformsFound = !transformsDir.isEmpty() && QFileInfo(transformsDir).isDir();
+    const bool profilesFound = !profilesConfig.isEmpty() && QFileInfo(profilesConfig).isFile();
+    smokeTestLog(QStringLiteral("transforms dir: %1 (%2)")
+                     .arg(transformsDir, transformsFound ? "found" : "missing"));
+    smokeTestLog(QStringLiteral("profiles config: %1 (%2)")
+                     .arg(profilesConfig, profilesFound ? "found" : "missing"));
+
+    if (requireCli && (!transformsFound || !profilesFound)) {
+        smokeTestLog(QStringLiteral("FAIL: sprat-cli assets not found"));
+        return SMOKE_TEST_CLI_MISSING;
+    }
+
+    smokeTestLog(QStringLiteral("PASS"));
+    return SMOKE_TEST_PASSED;
+}
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -242,6 +292,16 @@ int main(int argc, char *argv[]) {
         mainWindow.setFocus();
         mainWindow.activateWindow();
     });
+
+    // --smoke-test lets CI check that a built or packaged app starts and shows its window.
+    const QStringList arguments = QCoreApplication::arguments();
+    if (arguments.contains(QStringLiteral("--smoke-test"))) {
+        const bool requireCli = arguments.contains(QStringLiteral("--require-cli"));
+        QTimer::singleShot(SMOKE_TEST_DELAY_MS, &mainWindow, [&mainWindow, requireCli]() {
+            // exit() also leaves any modal dialog's event loop opened during startup.
+            QCoreApplication::exit(runSmokeTestChecks(mainWindow, requireCli));
+        });
+    }
 
     // Start Qt event loop
     return app.exec();
