@@ -40,8 +40,8 @@ for tool in "${bundled_tools[@]}"; do
 done
 
 machO_count=0
-while IFS= read -r -d '' file; do
-    file -b "$file" | grep -q 'Mach-O' || continue
+# One file(1) run for the whole bundle; it prints "<path>|<description>" per file.
+while IFS= read -r file; do
     machO_count=$((machO_count + 1))
     relative="${file#"$bundle"/}"
     archs=$(lipo -archs "$file")
@@ -70,7 +70,7 @@ while IFS= read -r -d '' file; do
             esac
         done < <(otool -arch "$arch" -L "$file" | tail -n +2 | awk '{ print $1 }')
     done
-done < <(find "$bundle" -type f -print0)
+done < <(find "$bundle" -type f -exec file -F '|' {} + | awk -F '|' '/Mach-O/ { print $1 }')
 
 if [ "$machO_count" -eq 0 ]; then
     fail "no Mach-O files found in $bundle"

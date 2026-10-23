@@ -26,20 +26,16 @@ NavigatorTreeWidget::NavigatorTreeWidget(QWidget* parent)
 
     // Clear hover state before any items are destroyed so m_hoveredItem never
     // becomes a dangling pointer when the tree is cleared or refreshed.
-    auto cancelHover = [this]() {
-        m_hoverTimer.stop();
-        m_hoveredItem = nullptr;
-        if (m_previewTooltip) m_previewTooltip->hide();
-    };
-    m_cancelHoverOnReset = connect(model(), &QAbstractItemModel::modelAboutToBeReset, this, cancelHover);
-    m_cancelHoverOnRemove = connect(model(), &QAbstractItemModel::rowsAboutToBeRemoved, this, cancelHover);
+    // The timer is the context object: QTreeWidget's destructor resets the model after
+    // this class's members are gone, and Qt drops these connections with the timer.
+    connect(model(), &QAbstractItemModel::modelAboutToBeReset, &m_hoverTimer, [this]() { cancelHover(); });
+    connect(model(), &QAbstractItemModel::rowsAboutToBeRemoved, &m_hoverTimer, [this]() { cancelHover(); });
 }
 
-NavigatorTreeWidget::~NavigatorTreeWidget() {
-    // QTreeWidget's destructor resets the model after this class's members are destroyed,
-    // which would run cancelHover on the destroyed m_hoverTimer.
-    disconnect(m_cancelHoverOnReset);
-    disconnect(m_cancelHoverOnRemove);
+void NavigatorTreeWidget::cancelHover() {
+    m_hoverTimer.stop();
+    m_hoveredItem = nullptr;
+    if (m_previewTooltip) m_previewTooltip->hide();
 }
 
 void NavigatorTreeWidget::setPreviewDelay(int ms) {
@@ -48,11 +44,7 @@ void NavigatorTreeWidget::setPreviewDelay(int ms) {
 
 void NavigatorTreeWidget::setPreviewEnabled(bool enabled) {
     m_previewEnabled = enabled;
-    if (!enabled) {
-        m_hoverTimer.stop();
-        m_hoveredItem = nullptr;
-        if (m_previewTooltip) m_previewTooltip->hide();
-    }
+    if (!enabled) cancelHover();
 }
 
 void NavigatorTreeWidget::mouseMoveEvent(QMouseEvent* event) {
@@ -68,9 +60,7 @@ void NavigatorTreeWidget::mouseMoveEvent(QMouseEvent* event) {
     }
 
     if (!sprite) {
-        m_hoverTimer.stop();
-        m_hoveredItem = nullptr;
-        if (m_previewTooltip) m_previewTooltip->hide();
+        cancelHover();
         return;
     }
 
@@ -85,9 +75,7 @@ void NavigatorTreeWidget::mouseMoveEvent(QMouseEvent* event) {
 
 void NavigatorTreeWidget::leaveEvent(QEvent* event) {
     QTreeWidget::leaveEvent(event);
-    m_hoverTimer.stop();
-    m_hoveredItem = nullptr;
-    if (m_previewTooltip) m_previewTooltip->hide();
+    cancelHover();
 }
 
 void NavigatorTreeWidget::showPreview() {

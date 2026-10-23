@@ -9,7 +9,9 @@
 #                                   repeatable (default: the top-level folders)
 #   --smoke-test-expect-sprites <n> fail unless the layout has exactly n sprites
 #
-# On Linux without a display, the app runs under xvfb-run. Exit codes from the app:
+# On Linux without a display, the app runs under xvfb-run. On an Apple Silicon Mac, a universal
+# app runs twice: natively, then its x86_64 slice under Rosetta (which must be installed).
+# Exit codes from the app:
 #   2 = main window not shown, 3 = sprat-cli assets missing,
 #   4 = ZIP import or layout failed (including any unexpected dialog), 5 = import timed out,
 #   6 = the app did not quit within 10 s of the result,
@@ -48,7 +50,9 @@ fi
 
 # Prints the crashed thread's stack from the crash report macOS writes for a crashed app
 # (ReportCrash writes it a few seconds after the crash).
+# $1 is a file created just before the app started.
 print_macos_crash_report() {
+    local started_marker="$1"
     local reports_dir="$HOME/Library/Logs/DiagnosticReports"
     local name report=""
     name="$(basename "$executable")"
@@ -83,17 +87,39 @@ for index, thread in enumerate(body.get("threads", [])):
 PYTHON
 }
 
-started_marker="$(mktemp)"
-echo "[smoke-test] running $executable"
-"${runner[@]}" "$executable" --smoke-test "$@"
-exit_code=$?
+# Runs the app once and reports a failure. $1 is the slice to run (an arch(1) architecture),
+# or empty for the default; the rest are the app's options.
+run_app() {
+    local slice="$1"
+    shift
+    local launcher=() started_marker="" exit_code
+    [ -n "$slice" ] && launcher=(arch "-$slice")
+    [ "$(uname -s)" = "Darwin" ] && started_marker="$(mktemp)"
 
-if [ "$exit_code" -ne 0 ]; then
-    echo "[smoke-test] FAIL: $executable exited with code $exit_code" >&2
-    # 128 + signal number means the app crashed; 142 is perl's alarm ending a hung run.
-    if [ "$(uname -s)" = "Darwin" ] && [ "$exit_code" -gt 128 ] && [ "$exit_code" -ne 142 ]; then
-        print_macos_crash_report
+    echo "[smoke-test] running $executable${slice:+ ($slice)}"
+    # ${a[@]+...} because macOS's bash 3.2 treats an empty array as unset under set -u.
+    "${runner[@]}" ${launcher[@]+"${launcher[@]}"} "$executable" --smoke-test "$@"
+    exit_code=$?
+
+    if [ "$exit_code" -ne 0 ]; then
+        echo "[smoke-test] FAIL: $executable${slice:+ ($slice)} exited with code $exit_code" >&2
+        # 128 + signal number means the app crashed; 142 is perl's alarm ending a hung run.
+        if [ -n "$started_marker" ] && [ "$exit_code" -gt 128 ] && [ "$exit_code" -ne 142 ]; then
+            print_macos_crash_report "$started_marker"
+        fi
+    fi
+    [ -n "$started_marker" ] && rm -f "$started_marker"
+    return "$exit_code"
+}
+
+slices=("")
+if [ "$(uname -s)" = "Darwin" ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+    archs=" $(lipo -archs "$executable" 2>/dev/null) "
+    if [[ "$archs" == *" arm64 "* && "$archs" == *" x86_64 "* ]]; then
+        slices=(arm64 x86_64)
     fi
 fi
-rm -f "$started_marker"
-exit "$exit_code"
+
+for slice in "${slices[@]}"; do
+    run_app "$slice" "$@" || exit $?
+done

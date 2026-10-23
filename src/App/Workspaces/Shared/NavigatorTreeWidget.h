@@ -8,7 +8,6 @@ class NavigatorTreeWidget : public QTreeWidget {
     Q_OBJECT
 public:
     explicit NavigatorTreeWidget(QWidget* parent = nullptr);
-    ~NavigatorTreeWidget() override;
 
     /** Enable or disable the hover sprite preview tooltip. */
     void setPreviewEnabled(bool enabled);
@@ -38,9 +37,9 @@ private:
     QTreeWidgetItem*      m_hoveredItem     = nullptr;
     QPoint                m_hoverGlobalPos;
     QTimer                m_hoverTimer;
-    // Model signals that cancel the hover; disconnected in the destructor (see there).
-    QMetaObject::Connection m_cancelHoverOnReset;
-    QMetaObject::Connection m_cancelHoverOnRemove;
+
+    // Stops the pending preview, forgets the hovered item and hides the tooltip.
+    void cancelHover();
 
     // Sets the check state for all visible items between 'from' and 'to' (inclusive, visual order).
     void setCheckStateRange(QTreeWidgetItem* from, QTreeWidgetItem* to, Qt::CheckState state);

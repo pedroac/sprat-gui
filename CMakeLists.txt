@@ -231,12 +231,10 @@ endif()
 
 # The macOS app bundle carries sprat-cli's tools in Contents/Resources/cli. They are built
 # here from the same source, so they match the app's architectures and minimum macOS.
-set(_sprat_bundle_cli OFF)
-if(APPLE AND NOT SPRAT_EMBEDDED_CLI)
-    option(SPRAT_BUNDLE_CLI "Build sprat-cli's tools into the macOS app bundle" ON)
-    set(_sprat_bundle_cli ${SPRAT_BUNDLE_CLI})
-endif()
-if(_sprat_bundle_cli)
+include(CMakeDependentOption)
+cmake_dependent_option(SPRAT_BUNDLE_CLI "Build sprat-cli's tools into the macOS app bundle" ON
+                       "APPLE;NOT SPRAT_EMBEDDED_CLI" OFF)
+if(SPRAT_BUNDLE_CLI)
     set(_sprat_build_cli ON)
 endif()
 
@@ -662,22 +660,22 @@ if(NOT EMSCRIPTEN)
                 COMMENT "Copying transforms directory..."
             )
         endif()
+        if(SPRAT_BUNDLE_CLI)
+            # Next to spratprofiles.cfg and transforms/, where the tools look for them.
+            set(_sprat_bundled_tools spratlayout spratpack spratconvert spratframes spratunpack)
+            add_dependencies(sprat-gui ${_sprat_bundled_tools})
+            foreach(_tool IN LISTS _sprat_bundled_tools)
+                add_custom_command(TARGET sprat-gui POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:${_tool}>"
+                    "${SPRAT_ASSETS_DEST}/$<TARGET_FILE_NAME:${_tool}>"
+                    COMMENT "Bundling ${_tool}..."
+                )
+            endforeach()
+        endif()
     else()
         message(STATUS "sprat-cli assets not found; skipping spratprofiles.cfg/transforms copy")
     endif()
-endif()
-
-if(_sprat_bundle_cli)
-    set(_sprat_bundled_tools spratlayout spratpack spratconvert spratframes spratunpack)
-    add_dependencies(sprat-gui ${_sprat_bundled_tools})
-    foreach(_tool IN LISTS _sprat_bundled_tools)
-        add_custom_command(TARGET sprat-gui POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:${_tool}>"
-            "$<TARGET_BUNDLE_CONTENT_DIR:sprat-gui>/Resources/cli/$<TARGET_FILE_NAME:${_tool}>"
-            COMMENT "Bundling ${_tool}..."
-        )
-    endforeach()
 endif()
 
 if(EMSCRIPTEN)
