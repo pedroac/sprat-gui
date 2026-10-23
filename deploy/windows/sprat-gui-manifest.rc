@@ -1,0 +1,2 @@
+// Embeds sprat-gui.manifest for toolchains that do not merge .manifest sources (MinGW).
+1 24 "sprat-gui.manifest"
