@@ -192,6 +192,11 @@ if(NOT LibArchive_FOUND)
     
     set(ENABLE_ZLIB ON CACHE BOOL "" FORCE)
     set(ENABLE_BZIP2 OFF CACHE BOOL "" FORCE)
+    # None of the archive types the app opens need these. libarchive would otherwise link
+    # whatever copy pkg-config finds (on macOS, Homebrew's, built for the build machine only).
+    set(ENABLE_ZSTD OFF CACHE BOOL "" FORCE)
+    set(ENABLE_LZ4 OFF CACHE BOOL "" FORCE)
+    set(ENABLE_LIBB2 OFF CACHE BOOL "" FORCE)
     set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)
     set(ENABLE_EXPAT OFF CACHE BOOL "" FORCE)
     
