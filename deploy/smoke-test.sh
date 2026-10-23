@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Starts a built or packaged sprat-gui with --smoke-test and fails if it does not open.
 #
-# Usage: deploy/smoke-test.sh <executable> [--require-cli]
-#   --require-cli  also fail when the sprat-cli tools, transforms or profiles config are missing
+# Usage: deploy/smoke-test.sh <executable> [options]
+#   --require-cli                   fail when sprat-cli's transforms or profiles config are missing
+#   --smoke-test-zip <zip>          then open this ZIP of images through the GUI and lay it out
+#   --smoke-test-profile <name>     layout profile for the ZIP (default: fast)
+#   --smoke-test-folder <folder>    folder to tick in the folder picker, relative to the ZIP root;
+#                                   repeatable (default: the top-level folders)
+#   --smoke-test-expect-sprites <n> fail unless the layout has exactly n sprites
 #
 # On Linux without a display, the app runs under xvfb-run. Exit codes from the app:
 #   2 = main window not shown, 3 = sprat-cli assets missing,
-#   124 (timeout) or 142 (perl alarm) = timed out.
+#   4 = ZIP import or layout failed (including any unexpected dialog), 5 = import timed out,
+#   124 (timeout) or 142 (perl alarm) = the whole run timed out.
 set -uo pipefail
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <executable> [--require-cli]" >&2
+    echo "Usage: $0 <executable> [options]" >&2
     exit 64
 fi
 

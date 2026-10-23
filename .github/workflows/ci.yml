@@ -116,14 +116,18 @@ jobs:
             exit 1
           }
 
-      # Starts the built app on the real platform plugin and checks its window opens.
-      # macOS builds call sprat-cli as separate tools, which aren't installed here.
+      # Starts the built app on the real platform plugin, checks its window opens, then
+      # opens a ZIP of sprites through the GUI and lays it out with the "fast" profile.
+      # macOS builds call sprat-cli as separate tools, which aren't installed here,
+      # so they only check that the window opens.
       - name: Smoke test (build)
         shell: bash
         run: |
+          import=(--require-cli --smoke-test-zip tests/assets/streets_of_fight_files.zip
+                  --smoke-test-profile fast --smoke-test-expect-sprites 67)
           case "$RUNNER_OS" in
-            Linux)   deploy/smoke-test.sh build/sprat-gui --require-cli ;;
-            Windows) deploy/smoke-test.sh build/bin/Release/sprat-gui.exe --require-cli ;;
+            Linux)   deploy/smoke-test.sh build/sprat-gui "${import[@]}" ;;
+            Windows) deploy/smoke-test.sh build/bin/Release/sprat-gui.exe "${import[@]}" ;;
             macOS)   deploy/smoke-test.sh build/sprat-gui.app/Contents/MacOS/sprat-gui ;;
           esac
 
@@ -209,7 +213,9 @@ jobs:
             echo "No package was built in this run; skipping."
             exit 0
           fi
-          deploy/smoke-test.sh "$packaged" --require-cli
+          deploy/smoke-test.sh "$packaged" --require-cli \
+            --smoke-test-zip tests/assets/streets_of_fight_files.zip \
+            --smoke-test-profile fast --smoke-test-expect-sprites 67
 
       - name: Upload Artifacts
         if: github.ref == 'refs/heads/release'

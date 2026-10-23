@@ -323,6 +323,7 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.Events.cpp
     src/App/MainWindow/MainWindow.LayoutFlow.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
+    src/App/MainWindow/MainWindow.SmokeTest.cpp
     src/App/MainWindow/MainWindow.Navigator.cpp
     src/App/Workspaces/Shared/NavigatorTreeWidget.h
     src/App/Workspaces/Shared/NavigatorTreeWidget.cpp

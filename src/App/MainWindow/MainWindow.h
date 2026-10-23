@@ -102,6 +102,25 @@ public:
      */
     ~MainWindow() override;
 
+    /// What runSmokeTestImport() reports once the layout is on the canvas or has failed.
+    struct SmokeTestImportResult {
+        QString error;              ///< Empty on success
+        QString profile;            ///< Layout profile in use when the run ended
+        int spriteCount = 0;
+        QStringList atlasSizes;     ///< "W x H" per atlas
+        QStringList pickedFolders;  ///< Folders ticked in the folder picker, if it opened
+    };
+
+    /// Loads a ZIP of images with the given layout profile, as the Open dialog would,
+    /// once the CLI tools are ready. Used by --smoke-test to check the whole import flow.
+    /// @param zipPath ZIP of images
+    /// @param profile Layout profile name from spratprofiles.cfg, such as "fast"
+    /// @param folders Folders, relative to the ZIP root, to tick when the folder picker opens;
+    ///                empty ticks the top-level folders. Any other dialog fails the run.
+    /// @param done Called once, when the sprites are on the canvas or the run failed
+    void runSmokeTestImport(const QString& zipPath, const QString& profile, const QStringList& folders,
+                            std::function<void(const SmokeTestImportResult&)> done);
+
 #ifdef Q_OS_WASM
     static MainWindow* wasmInstance();
     void onWasmFilePicked(const QString& path, int mode);
