@@ -524,6 +524,7 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
 
         emit statusMessageChanged(tr("Error running layout"));
         emit loadingStateChanged(false);
+        emit layoutFailed(details);
         qCritical() << "spratlayout process failed. Exit code:" << result.exitCode
                     << "Error:" << result.error << "Output:" << result.output;
 
@@ -723,6 +724,7 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
 
                 m_pendingChangeCount = 0;
                 qInfo() << "[Layout] setModelsAsync finished";
+                emit layoutAppliedToCanvas();
 
                 if (m_layoutRunPending) {
                     const bool q = m_layoutRunPendingQuiet;
@@ -744,6 +746,7 @@ void LayoutOrchestrator::onRunnerError(const QString& details) {
 
     emit statusMessageChanged(tr("Error running layout process"));
     emit loadingStateChanged(false);
+    emit layoutFailed(details);
     qCritical() << "spratlayout process error:" << details;
 
     if (!m_layoutFailureDialogShown) {

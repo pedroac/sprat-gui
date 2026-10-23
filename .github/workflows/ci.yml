@@ -64,6 +64,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev
+          # Xvfb and the xcb libraries Qt's xcb platform plugin loads, for the smoke tests.
+          sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-randr0 libxcb-shape0 \
+            libxcb-xfixes0 libxcb-xinerama0
 
       - name: Configure
         shell: bash
@@ -113,6 +117,21 @@ jobs:
             if (Test-Path e2e-output.txt) { Get-Content e2e-output.txt }
             exit 1
           }
+
+      # Starts the built app on the real platform plugin, checks its window opens, then
+      # opens a ZIP of sprites through the GUI and lays it out with the "fast" profile.
+      # macOS builds call sprat-cli as separate tools, which aren't installed here,
+      # so they only check that the window opens.
+      - name: Smoke test (build)
+        shell: bash
+        run: |
+          import=(--require-cli --smoke-test-zip tests/assets/streets_of_fight_files.zip
+                  --smoke-test-profile fast --smoke-test-expect-sprites 67)
+          case "$RUNNER_OS" in
+            Linux)   deploy/smoke-test.sh build/sprat-gui "${import[@]}" ;;
+            Windows) deploy/smoke-test.sh build/bin/Release/sprat-gui.exe "${import[@]}" ;;
+            macOS)   deploy/smoke-test.sh build/sprat-gui.app/Contents/MacOS/sprat-gui ;;
+          esac
 
       - name: Package (Linux)
         if: runner.os == 'Linux' && github.ref == 'refs/heads/release'
@@ -198,6 +217,24 @@ jobs:
           # Package ZIP for in-app auto-update. ditto keeps the framework
           # symlinks intact (zip -r follows them and breaks the signatures).
           ditto -c -k --keepParent dist/sprat-gui.app sprat-gui-macos.zip
+
+      # Starts what we ship, so missing DLLs, frameworks, Qt plugins, sprat-cli assets
+      # or a broken signature fail the build instead of reaching users.
+      - name: Smoke test (package)
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   packaged=sprat-gui-linux.AppImage; export APPIMAGE_EXTRACT_AND_RUN=1 ;;
+            Windows) packaged=dist/sprat-gui.exe ;;
+            macOS)   packaged=dist/sprat-gui.app/Contents/MacOS/sprat-gui ;;
+          esac
+          if [ ! -e "$packaged" ]; then
+            echo "No package was built in this run; skipping."
+            exit 0
+          fi
+          deploy/smoke-test.sh "$packaged" --require-cli \
+            --smoke-test-zip tests/assets/streets_of_fight_files.zip \
+            --smoke-test-profile fast --smoke-test-expect-sprites 67
 
       - name: Upload Artifacts
         if: github.ref == 'refs/heads/release' || (github.event_name == 'workflow_dispatch' && runner.os == 'macOS')

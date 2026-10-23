@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QGuiApplication>
 #include <QLocale>
 #include <QTranslator>
 #include <QTimer>
@@ -12,6 +14,7 @@
 #include <QPainter>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
+#include <cstdio>
 
 // Increases the gap between icon and text in QPushButton / QToolButton from Qt's
 // hardcoded 4 px to kIconTextSpacing.
@@ -76,6 +79,112 @@ private:
                               bool(state & State_Enabled), text, QPalette::ButtonText);
     }
 };
+
+// Checked by --smoke-test once the main window has had time to appear.
+static constexpr int SMOKE_TEST_DELAY_MS = 3000;
+// How long --smoke-test-zip may take to extract the ZIP and lay out its sprites.
+static constexpr int SMOKE_TEST_IMPORT_TIMEOUT_MS = 60000;
+
+// Exit codes for --smoke-test, so CI logs say which check failed.
+enum SmokeTestResult {
+    SMOKE_TEST_PASSED = 0,
+    SMOKE_TEST_WINDOW_NOT_SHOWN = 2,
+    SMOKE_TEST_CLI_MISSING = 3,
+    SMOKE_TEST_IMPORT_FAILED = 4,
+    SMOKE_TEST_IMPORT_TIMED_OUT = 5,
+};
+
+// Writes straight to stderr: Windows GUI builds drop qInfo() output when stderr is redirected.
+static void smokeTestLog(const QString& message) {
+    std::fprintf(stderr, "[smoke-test] %s\n", message.toLocal8Bit().constData());
+    std::fflush(stderr);
+}
+
+/// Checks that the main window is on screen and, when requireCli is set, that the
+/// sprat-cli tools, transforms and profiles config can be found.
+/// @return A SmokeTestResult exit code
+static int runSmokeTestChecks(const QWidget& mainWindow, bool requireCli) {
+    smokeTestLog(QStringLiteral("platform: %1").arg(QGuiApplication::platformName()));
+    smokeTestLog(QStringLiteral("application dir: %1").arg(QCoreApplication::applicationDirPath()));
+
+    if (!mainWindow.isVisible()) {
+        smokeTestLog(QStringLiteral("FAIL: main window is not visible"));
+        return SMOKE_TEST_WINDOW_NOT_SHOWN;
+    }
+
+    const CliPaths cliPaths = CliToolsConfig::loadCliPaths();
+    const QString transformsDir = CliToolsConfig::queryTransformsDir(cliPaths.convertBinary);
+    const QString profilesConfig = CliToolsConfig::queryDefaultProfilesConfig(cliPaths.layoutBinary);
+    const bool transformsFound = !transformsDir.isEmpty() && QFileInfo(transformsDir).isDir();
+    const bool profilesFound = !profilesConfig.isEmpty() && QFileInfo(profilesConfig).isFile();
+    smokeTestLog(QStringLiteral("transforms dir: %1 (%2)")
+                     .arg(transformsDir, transformsFound ? "found" : "missing"));
+    smokeTestLog(QStringLiteral("profiles config: %1 (%2)")
+                     .arg(profilesConfig, profilesFound ? "found" : "missing"));
+
+    if (requireCli && (!transformsFound || !profilesFound)) {
+        smokeTestLog(QStringLiteral("FAIL: sprat-cli assets not found"));
+        return SMOKE_TEST_CLI_MISSING;
+    }
+
+    return SMOKE_TEST_PASSED;
+}
+
+/// Opens zipPath through the GUI with the given layout profile, then exits with a SmokeTestResult.
+/// @param expectedSprites Sprite count the layout must have, or -1 for any non-zero count
+static void runSmokeTestImport(MainWindow& mainWindow, const QString& zipPath, const QString& profile,
+                               const QStringList& folders, int expectedSprites) {
+    smokeTestLog(QStringLiteral("importing %1 with profile '%2'").arg(zipPath, profile));
+
+    auto* timeout = new QTimer(&mainWindow);
+    timeout->setSingleShot(true);
+    QObject::connect(timeout, &QTimer::timeout, &mainWindow, []() {
+        smokeTestLog(QStringLiteral("FAIL: import did not finish within %1 s (a dialog may be open)")
+                         .arg(SMOKE_TEST_IMPORT_TIMEOUT_MS / 1000));
+        QCoreApplication::exit(SMOKE_TEST_IMPORT_TIMED_OUT);
+    });
+    timeout->start(SMOKE_TEST_IMPORT_TIMEOUT_MS);
+
+    mainWindow.runSmokeTestImport(zipPath, profile, folders,
+        [timeout, expectedSprites](const MainWindow::SmokeTestImportResult& result) {
+            timeout->stop();
+            if (!result.pickedFolders.isEmpty()) {
+                smokeTestLog(QStringLiteral("folders picked: %1")
+                                 .arg(result.pickedFolders.join(QStringLiteral(", "))));
+            }
+            smokeTestLog(QStringLiteral("profile in use: %1").arg(result.profile));
+            smokeTestLog(QStringLiteral("sprites: %1, atlases: %2")
+                             .arg(result.spriteCount)
+                             .arg(result.atlasSizes.join(QStringLiteral(", "))));
+            QString error = result.error;
+            if (error.isEmpty() && expectedSprites >= 0 && result.spriteCount != expectedSprites) {
+                error = QStringLiteral("expected %1 sprites, got %2").arg(expectedSprites).arg(result.spriteCount);
+            }
+            if (!error.isEmpty()) {
+                smokeTestLog(QStringLiteral("FAIL: %1").arg(error));
+                QCoreApplication::exit(SMOKE_TEST_IMPORT_FAILED);
+                return;
+            }
+            smokeTestLog(QStringLiteral("PASS"));
+            QCoreApplication::exit(SMOKE_TEST_PASSED);
+        });
+}
+
+/// Returns the values after every occurrence of option in arguments.
+static QStringList smokeTestOptionValues(const QStringList& arguments, const QString& option) {
+    QStringList values;
+    for (int i = 0; i + 1 < arguments.size(); ++i) {
+        if (arguments.at(i) == option) values << arguments.at(i + 1);
+    }
+    return values;
+}
+
+/// Returns the value after option in arguments, or defaultValue when it is absent.
+static QString smokeTestOptionValue(const QStringList& arguments, const QString& option,
+                                    const QString& defaultValue = QString()) {
+    const QStringList values = smokeTestOptionValues(arguments, option);
+    return values.isEmpty() ? defaultValue : values.first();
+}
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -242,6 +351,32 @@ int main(int argc, char *argv[]) {
         mainWindow.setFocus();
         mainWindow.activateWindow();
     });
+
+    // --smoke-test lets CI check that a built or packaged app starts and shows its window,
+    // and with --smoke-test-zip, that it can open a ZIP of images and lay out a spritesheet.
+    const QStringList arguments = QCoreApplication::arguments();
+    if (arguments.contains(QStringLiteral("--smoke-test"))) {
+        const bool requireCli = arguments.contains(QStringLiteral("--require-cli"));
+        const QString zipPath = smokeTestOptionValue(arguments, QStringLiteral("--smoke-test-zip"));
+        const QString profile = smokeTestOptionValue(arguments, QStringLiteral("--smoke-test-profile"),
+                                                     QStringLiteral("fast"));
+        const QStringList folders = smokeTestOptionValues(arguments, QStringLiteral("--smoke-test-folder"));
+        bool expectedSpritesGiven = false;
+        int expectedSprites = smokeTestOptionValue(arguments, QStringLiteral("--smoke-test-expect-sprites"))
+                                  .toInt(&expectedSpritesGiven);
+        if (!expectedSpritesGiven) expectedSprites = -1;
+        QTimer::singleShot(SMOKE_TEST_DELAY_MS, &mainWindow,
+                           [&mainWindow, requireCli, zipPath, profile, folders, expectedSprites]() {
+            const int result = runSmokeTestChecks(mainWindow, requireCli);
+            if (result != SMOKE_TEST_PASSED || zipPath.isEmpty()) {
+                if (result == SMOKE_TEST_PASSED) smokeTestLog(QStringLiteral("PASS"));
+                // exit() also leaves any modal dialog's event loop opened during startup.
+                QCoreApplication::exit(result);
+                return;
+            }
+            runSmokeTestImport(mainWindow, zipPath, profile, folders, expectedSprites);
+        });
+    }
 
     // Start Qt event loop
     return app.exec();

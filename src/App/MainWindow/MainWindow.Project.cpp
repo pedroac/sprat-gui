@@ -1265,6 +1265,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
     } else {
         // Show selection dialog (blocking, but scan was async)
         QDialog dialog(this);
+        dialog.setObjectName(QStringLiteral("frameFolderPickerDialog"));
         dialog.setWindowTitle(tr("Select frame folders"));
         dialog.setModal(true);
         QVBoxLayout* layout = new QVBoxLayout(&dialog);
