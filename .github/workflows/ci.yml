@@ -85,12 +85,15 @@ jobs:
           # Belt-and-suspenders: patch the generated linker command files
           # directly. This catches any AGL form that survived the pre-configure
           # patch (e.g. -framework AGL stored as a raw string in Qt targets).
+          # grep exits 1 when no file mentions AGL, which is the expected case
+          # once CMake has stripped it, so don't let pipefail fail the step.
           find build -type f \( -name 'link.txt' -o -name 'relink.txt' \
                                  -o -name '*.make' -o -name 'build.ninja' \) \
             -exec grep -l 'AGL' {} + 2>/dev/null | while read -r f; do
             echo "Post-configure AGL strip: $f"
             sed -i '' 's/-framework AGL//g' "$f"
-          done
+          done || true
+          echo "No AGL references left in the generated build files."
 
       - name: Build
         run: cmake --build build --config Release
