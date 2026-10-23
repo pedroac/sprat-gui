@@ -12,6 +12,7 @@
 #include <QStyleOptionButton>
 #include <QStyleOptionToolButton>
 #include <QPainter>
+#include <QStandardPaths>
 #include "MainWindow.h"
 #include "CliToolsConfig.h"
 #include <cstdio>
@@ -98,6 +99,15 @@ enum SmokeTestResult {
 static void smokeTestLog(const QString& message) {
     std::fprintf(stderr, "[smoke-test] %s\n", message.toLocal8Bit().constData());
     std::fflush(stderr);
+}
+
+/// Points every QStandardPaths location at Qt's test folders and clears sprat's settings there,
+/// so a smoke test sees a fresh install's defaults and never touches the user's own settings.
+static void isolateSmokeTestSettings() {
+    QStandardPaths::setTestModeEnabled(true);
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    QDir(QDir(configDir).filePath(QStringLiteral("sprat"))).removeRecursively();
+    smokeTestLog(QStringLiteral("settings dir: %1/sprat (fresh)").arg(configDir));
 }
 
 /// Checks that the main window is on screen and, when requireCli is set, that the
@@ -215,6 +225,11 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     app.setStyle(new SpratStyle());
+
+    const bool smokeTest = QCoreApplication::arguments().contains(QStringLiteral("--smoke-test"));
+    if (smokeTest) {
+        isolateSmokeTestSettings();
+    }
 
     // Increase pixmap cache to prevent thrashing on sprite-heavy projects
     // Default is 10 MB; 256 MB is better for projects with 500+ sprites
@@ -355,7 +370,7 @@ int main(int argc, char *argv[]) {
     // --smoke-test lets CI check that a built or packaged app starts and shows its window,
     // and with --smoke-test-zip, that it can open a ZIP of images and lay out a spritesheet.
     const QStringList arguments = QCoreApplication::arguments();
-    if (arguments.contains(QStringLiteral("--smoke-test"))) {
+    if (smokeTest) {
         const bool requireCli = arguments.contains(QStringLiteral("--require-cli"));
         const QString zipPath = smokeTestOptionValue(arguments, QStringLiteral("--smoke-test-zip"));
         const QString profile = smokeTestOptionValue(arguments, QStringLiteral("--smoke-test-profile"),

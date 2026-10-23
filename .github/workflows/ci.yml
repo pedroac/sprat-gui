@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           import=(--require-cli --smoke-test-zip tests/assets/streets_of_fight_files.zip
-                  --smoke-test-profile fast --smoke-test-expect-sprites 67)
+                  --smoke-test-profile fast --smoke-test-expect-sprites 63)
           case "$RUNNER_OS" in
             Linux)   deploy/smoke-test.sh build/sprat-gui "${import[@]}" ;;
             Windows) deploy/smoke-test.sh build/bin/Release/sprat-gui.exe "${import[@]}" ;;
@@ -234,7 +234,7 @@ jobs:
           fi
           deploy/smoke-test.sh "$packaged" --require-cli \
             --smoke-test-zip tests/assets/streets_of_fight_files.zip \
-            --smoke-test-profile fast --smoke-test-expect-sprites 67
+            --smoke-test-profile fast --smoke-test-expect-sprites 63
 
       - name: Upload Artifacts
         if: github.ref == 'refs/heads/release' || (github.event_name == 'workflow_dispatch' && runner.os == 'macOS')
