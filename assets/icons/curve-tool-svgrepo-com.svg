@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path d="M4 19 Q12 3 20 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
-  <circle cx="4"  cy="19" r="2.2" fill="currentColor"/>
-  <circle cx="20" cy="19" r="2.2" fill="currentColor"/>
-  <circle cx="12" cy="7"  r="1.4" fill="currentColor" opacity="0.55"/>
-  <line x1="4" y1="19" x2="12" y2="7"  stroke="currentColor" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.45"/>
-  <line x1="20" y1="19" x2="12" y2="7" stroke="currentColor" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.45"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M4 19 Q12 3 20 19"/><circle cx="4" cy="19" r="2.2" fill="currentColor"/><circle cx="20" cy="19" r="2.2" fill="currentColor"/><circle cx="12" cy="7" r="1.4" fill="currentColor" opacity=".55"/><line x1="4" x2="12" y1="19" y2="7" stroke="currentColor" stroke-dasharray="2 2" stroke-width=".8" opacity=".45"/><line x1="20" x2="12" y1="19" y2="7" stroke="currentColor" stroke-dasharray="2 2" stroke-width=".8" opacity=".45"/></svg>
