@@ -28,6 +28,11 @@ if [ ! -e "$executable" ]; then
     echo "[smoke-test] FAIL: $executable does not exist" >&2
     exit 1
 fi
+# timeout and xvfb-run look up a name without a slash in PATH, not in the current folder.
+case "$executable" in
+    */*) ;;
+    *) executable="./$executable" ;;
+esac
 
 runner=()
 if [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
