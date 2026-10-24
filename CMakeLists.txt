@@ -442,6 +442,8 @@ set(PROJECT_SOURCES
     src/CLITools/CliToolsConfig.cpp
     src/CLITools/SpratCliLocator.cpp
     src/CLITools/CliToolsConfig.h
+    src/CLITools/LayoutArguments.cpp
+    src/CLITools/LayoutArguments.h
     src/CLITools/LayoutRunner.cpp
     src/CLITools/LayoutRunner.h
     src/CLITools/SourceFolderWatcher.cpp
@@ -768,6 +770,7 @@ if(BUILD_TESTING)
         src/Project/ImageDiscoveryService.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
+        src/CLITools/LayoutArguments.cpp
     )
     if(NOT EMSCRIPTEN)
         target_sources(sprat-gui-tests PRIVATE src/Update/UpdateChecker.cpp)
@@ -783,6 +786,8 @@ if(BUILD_TESTING)
         src/Core
         src/SpriteSheetLayout
         src/Update
+        src/CLITools
+        src/Profiles
     )
 
     target_link_libraries(sprat-gui-tests PRIVATE
@@ -807,6 +812,7 @@ if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
         src/Project/ProjectSaveService.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
+        src/CLITools/LayoutArguments.cpp
     )
     target_include_directories(sprat-gui-e2e PRIVATE
         src/Core

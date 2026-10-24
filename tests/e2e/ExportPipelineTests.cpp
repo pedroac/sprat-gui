@@ -136,7 +136,7 @@ ExportPipelineTests::ExportRun ExportPipelineTests::exportSprites(
         config, spritesDir, {}, spritesDir, {profile}, profile.name,
         toolPath(QStringLiteral("spratlayout")), toolPath(QStringLiteral("spratpack")),
         toolPath(QStringLiteral("spratconvert")), QJsonObject(), savedDestination, run.error,
-        QStringLiteral("none"), callbacks);
+        QStringLiteral("none"), 5, callbacks);
     return run;
 }
 

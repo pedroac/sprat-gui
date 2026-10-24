@@ -28,6 +28,16 @@ QVector<int> fromJsonArray(const QJsonValue& value) {
     return out;
 }
 
+// Before schema 5, "raw" named the built-in layout-text export; since then it is
+// sprat-cli's raw.jsonnet transform.
+QString readTransform(const QJsonValue& value, int schemaVersion) {
+    const QString transform = value.toString();
+    if (schemaVersion < 5 && transform == QLatin1String("raw")) {
+        return kLayoutTextTransform;
+    }
+    return transform;
+}
+
 bool isValidCliPath(const QString& path) {
     if (path.isEmpty()) {
         return true; // Empty path is allowed (use default)
@@ -45,7 +55,7 @@ bool isValidCliPath(const QString& path) {
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
-    root["schema_version"] = 4;
+    root["schema_version"] = 5;
     root["written_by"] = QStringLiteral("sprat-gui");
     root["written_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
 
@@ -637,10 +647,11 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         }
     }
 
+    const int schemaVersion = root["schema_version"].toInt(1);
     QJsonObject saveOpts = root["save_options"].toObject();
     out.saveConfig.destination = saveOpts["destination"].toString();
     out.saveConfig.outputPath = saveOpts["output_path"].toString();
-    out.saveConfig.transform = saveOpts["transform"].toString();
+    out.saveConfig.transform = readTransform(saveOpts["transform"], schemaVersion);
     QJsonArray profilesArr = saveOpts["profiles"].toArray();
     out.saveConfig.profiles.reserve(profilesArr.size());
     for (const auto& pVal : profilesArr) {
@@ -655,7 +666,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         ExportPreset p;
         p.name               = po["name"].toString();
         p.outputPath         = po["output_path"].toString();
-        p.transform          = po["transform"].toString();
+        p.transform          = readTransform(po["transform"], schemaVersion);
         p.scaleFilter        = po["scale_filter"].toString();
         p.postExportCommand  = po["post_export_command"].toString();
         for (const auto& prv : po["profiles"].toArray())
@@ -802,7 +813,6 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         return result;
     };
 
-    const int schemaVersion = root["schema_version"].toInt(1);
     const QJsonArray atlasesArr = root["atlases"].toArray();
 
     if (schemaVersion >= 4 && !atlasesArr.isEmpty()) {
@@ -832,7 +842,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                     if (!legacyProfile.isEmpty())
                         atlas.exportConfig.profiles.append(legacyProfile);
                 }
-                atlas.exportConfig.transform   = eo["transform"].toString();
+                atlas.exportConfig.transform   = readTransform(eo["transform"], schemaVersion);
                 atlas.exportConfig.scaleFilter = eo["scale_filter"].toString();
                 atlas.exportConfig.colors      = eo["colors"].toInt(0);
                 atlas.exportConfig.dither      = eo["dither"].toBool(false);

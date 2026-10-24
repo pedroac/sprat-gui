@@ -2,6 +2,12 @@
 #include <QString>
 #include <QStringList>
 
+/// Transform id of the built-in export that writes sprat-cli's own text files
+/// (layout.txt, markers.txt, animations.txt) without running spratconvert.
+/// Projects older than schema 5 stored it as "raw", which sprat-cli now uses
+/// for its own raw.jsonnet transform.
+inline const QString kLayoutTextTransform = QStringLiteral("layout-text");
+
 /**
  * @struct SaveConfig
  * @brief Configuration for saving the project/spritesheet.

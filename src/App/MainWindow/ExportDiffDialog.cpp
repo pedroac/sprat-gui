@@ -9,6 +9,7 @@
 #include <QTreeWidgetItem>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QStyle>
 #include <QApplication>
@@ -33,14 +34,15 @@ QString spriteSheetExtension(const QString& profileName,
     return QStringLiteral(".png");
 }
 
-// Returns the filename written by spratconvert for a given transform name.
-// spratconvert produces "<transform_stem>.<extension>" where extension is
-// declared by each transform's Jsonnet template.
-// Returns an empty string for transforms that produce multiple files with
-// unpredictable names (unity.anim) or for unrecognised transform IDs.
-QString transformOutputFilename(const QString& transform) {
+// Returns the files spratconvert writes into --output-dir for a transform:
+// "<transform>.<extension>", with the extension declared by each Jsonnet template.
+// unity.* transforms are named by their variant ("json.json"), and unity.meta after
+// the atlas image ("spritesheet.png.meta"). unity.anim writes one file per animation,
+// whose names are not predicted. Returns an empty list for unrecognised transforms.
+QStringList transformOutputFilenames(const QString& transform, const QString& sheetFileName) {
     static const QHash<QString, QString> kExt{
         {QStringLiteral("json"),         QStringLiteral(".json")},
+        {QStringLiteral("raw"),          QStringLiteral(".sprat")},
         {QStringLiteral("xml"),          QStringLiteral(".xml")},
         {QStringLiteral("csv"),          QStringLiteral(".csv")},
         {QStringLiteral("css"),          QStringLiteral(".css")},
@@ -51,14 +53,15 @@ QString transformOutputFilename(const QString& transform) {
         {QStringLiteral("phaser-hash"),  QStringLiteral(".json")},
         {QStringLiteral("phaser-array"), QStringLiteral(".json")},
         {QStringLiteral("phaser-anims"), QStringLiteral(".json")},
-        // unity.json and unity.meta are single-file transforms.
-        {QStringLiteral("unity.json"),   QStringLiteral(".json")},
-        {QStringLiteral("unity.meta"),   QStringLiteral(".meta")},
-        // unity.anim produces one .anim file per animation (unpredictable names).
     };
+    const QString unityJson = QStringLiteral("json.json");
+    const QString unityMeta = sheetFileName + QStringLiteral(".meta");
+    if (transform == QLatin1String("unity.json")) return {unityJson};
+    if (transform == QLatin1String("unity.meta")) return {unityMeta};
+    if (transform == QLatin1String("unity"))      return {unityJson, unityMeta};
     const auto it = kExt.constFind(transform);
-    if (it == kExt.constEnd()) return {};  // unknown / multi-file transform
-    return transform + it.value();
+    if (it == kExt.constEnd()) return {};
+    return {transform + it.value()};
 }
 
 QString effectiveTransform(const AtlasEntry& atlas, const SaveConfig& config) {
@@ -118,7 +121,7 @@ QVector<ExportDiffDialog::DiffEntry> ExportDiffDialog::buildEntries(
             const QString sheetPath = QDir(dir).filePath(QStringLiteral("spritesheet") + ext);
             entries.append({sheetPath, QFile::exists(sheetPath), false});
 
-            if (transform == QStringLiteral("raw")) {
+            if (transform == kLayoutTextTransform) {
                 for (const QString& name : {QStringLiteral("layout.txt"),
                                              QStringLiteral("markers.txt"),
                                              QStringLiteral("animations.txt")}) {
@@ -126,8 +129,8 @@ QVector<ExportDiffDialog::DiffEntry> ExportDiffDialog::buildEntries(
                     entries.append({p, QFile::exists(p), false});
                 }
             } else if (!transform.isEmpty() && transform != QStringLiteral("none")) {
-                const QString metaFile = transformOutputFilename(transform);
-                if (!metaFile.isEmpty()) {
+                const QString sheetFileName = QFileInfo(sheetPath).fileName();
+                for (const QString& metaFile : transformOutputFilenames(transform, sheetFileName)) {
                     const QString metaPath = QDir(dir).filePath(metaFile);
                     entries.append({metaPath, QFile::exists(metaPath), false});
                 }

@@ -191,6 +191,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
     const QString sourceFolder = m_cfg.session->sourceFolder;
     QVector<SpratProfile> profiles = m_cfg.layoutContext->configuredProfiles();
     const QString deduplicateMode = m_settings.deduplicateMode;
+    const int dedupThreshold = m_settings.dedupThreshold;
     const QString spratLayoutBin = m_layoutBinary;
     const QString spratPackBin = m_packBinary;
     const QString spratConvertBin = m_convertBinary;
@@ -202,7 +203,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                      layoutSourcePath,
                      sourceFolder,
                      profiles        = std::move(profiles),
-                     deduplicateMode,
+                     deduplicateMode, dedupThreshold,
                      spratLayoutBin, spratPackBin, spratConvertBin,
                      projectPayload  = std::move(projectPayload),
                      setStatus, shouldCancel]() {
@@ -237,6 +238,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 result.savedDestination,
                 result.error,
                 deduplicateMode,
+                dedupThreshold,
                 {nullptr, setStatus, shouldCancel, m_cfg.runTool, logEntryFn}
             );
         } else {
@@ -284,6 +286,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                     atlasDestination,
                     atlasError,
                     deduplicateMode,
+                    dedupThreshold,
                     {nullptr, setStatus, shouldCancel, m_cfg.runTool, logEntryFn}
                 );
                 if (!ok) {
@@ -454,6 +457,9 @@ void ExportCoordinator::doRunPreviewPack() {
     const double  cachedLayoutScale = m_cfg.session->cachedLayoutScale;
     const QString lastProfile      = m_cfg.session->lastSuccessfulProfile;
     const QString deduplicateMode  = m_settings.deduplicateMode;
+    const int     dedupThreshold   = m_settings.dedupThreshold;
+    const QSize   sourceResolution = m_cfg.layoutOrchestrator
+        ? m_cfg.layoutOrchestrator->sourceResolution() : QSize();
     const QVector<SpratProfile> profiles = m_cfg.layoutContext->configuredProfiles();
     const auto canceledPtr = m_previewPackCanceled;
 
@@ -545,25 +551,15 @@ void ExportCoordinator::doRunPreviewPack() {
             && cachedLayout.contains(QLatin1String("atlas "))) {
             layoutData = cachedLayout.toUtf8();
         } else {
-            QStringList layoutArgs;
-            if (!layoutInputPath.isEmpty()) layoutArgs << layoutInputPath;
-            if (!effectiveProfile.preset.trimmed().isEmpty())
-                layoutArgs << "--preset" << effectiveProfile.preset.trimmed();
-            if (effectiveProfile.maxWidth > 0)
-                layoutArgs << "--max-width" << QString::number(effectiveProfile.maxWidth);
-            if (effectiveProfile.maxHeight > 0)
-                layoutArgs << "--max-height" << QString::number(effectiveProfile.maxHeight);
-            layoutArgs << "--padding" << QString::number(qMax(0, effectiveProfile.padding));
-            if (effectiveProfile.extrude > 0)
-                layoutArgs << "--extrude" << QString::number(effectiveProfile.extrude);
-            layoutArgs << "--scale" << QString::number(profileScale);
-            if (effectiveProfile.trimTransparent) layoutArgs << "--trim-transparent";
-            if (effectiveProfile.allowRotation)   layoutArgs << "--rotate";
-            if (effectiveProfile.multipack)        layoutArgs << "--multipack";
-            if (!effectiveProfile.sort.trimmed().isEmpty())
-                layoutArgs << "--sort" << effectiveProfile.sort.trimmed();
-            if (!deduplicateMode.isEmpty() && deduplicateMode != QLatin1String("none"))
-                layoutArgs << "--deduplicate" << deduplicateMode;
+            LayoutRunConfig layoutConfig;
+            layoutConfig.sourceFolderPath = layoutInputPath;
+            layoutConfig.profile = effectiveProfile;
+            layoutConfig.scale = profileScale;
+            layoutConfig.sourceResolutionWidth = sourceResolution.width();
+            layoutConfig.sourceResolutionHeight = sourceResolution.height();
+            layoutConfig.deduplicateMode = deduplicateMode;
+            layoutConfig.dedupThreshold = dedupThreshold;
+            const QStringList layoutArgs = buildLayoutArguments(layoutConfig);
 
             QByteArray layoutStderr;
             if (!m_cfg.runTool(layoutBin, layoutArgs, nullptr, &layoutData, &layoutStderr)) {

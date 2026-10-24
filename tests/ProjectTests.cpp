@@ -35,6 +35,42 @@ void ProjectTests::testProjectPayloadBuildStoresListSource() {
     QCOMPARE(framePaths.at(0).toString(), QString("/tmp/project/a/frame_0.png"));
 }
 
+void ProjectTests::testProjectPayloadMigratesLegacyRawTransform() {
+    auto payloadWithRawTransform = [](int schemaVersion) {
+        QJsonObject root;
+        root["schema_version"] = schemaVersion;
+        root["save_options"] = QJsonObject{{"transform", "raw"}};
+        root["export_presets"] = QJsonArray{QJsonObject{{"name", "preset"}, {"transform", "raw"}}};
+        root["atlases"] = QJsonArray{QJsonObject{
+            {"id", "atlas"}, {"name", "atlas"},
+            {"export_override", QJsonObject{{"transform", "raw"}}}}};
+        return root;
+    };
+
+    auto atlasTransform = [](const ProjectPayloadApplyResult& result) {
+        for (const AtlasEntry& atlas : result.atlases) {
+            if (atlas.id == QLatin1String("atlas")) return atlas.exportConfig.transform;
+        }
+        return QStringLiteral("<missing atlas>");
+    };
+
+    // Before schema 5, "raw" was the built-in layout-text export.
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult legacy =
+        ProjectPayloadCodec::applyToLayout(payloadWithRawTransform(4), "/tmp/project", layoutModels);
+    QCOMPARE(legacy.saveConfig.transform, kLayoutTextTransform);
+    QCOMPARE(legacy.exportPresets.size(), 1);
+    QCOMPARE(legacy.exportPresets.first().transform, kLayoutTextTransform);
+    QCOMPARE(atlasTransform(legacy), kLayoutTextTransform);
+
+    // From schema 5 on, "raw" is sprat-cli's raw.jsonnet transform.
+    const ProjectPayloadApplyResult current =
+        ProjectPayloadCodec::applyToLayout(payloadWithRawTransform(5), "/tmp/project", layoutModels);
+    QCOMPARE(current.saveConfig.transform, QString("raw"));
+    QCOMPARE(current.exportPresets.first().transform, QString("raw"));
+    QCOMPARE(atlasTransform(current), QString("raw"));
+}
+
 void ProjectTests::testProjectFileLoaderLoad() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());

@@ -170,8 +170,8 @@ The UI must be **usable, performant, and useful** for game developers and UI art
 
 #### Version Pinning
 - **sprat-cli**: Always use the **latest released version**
-  - Check GitHub releases: https://github.com/LiquidityC/sprat-cli/releases
-  - Update `CMakeLists.txt` when new versions are available
+  - Check GitHub releases: https://github.com/pedroac/sprat-cli/releases
+  - Update the tag in `DEPENDENCIES` when new versions are available (`CMakeLists.txt` reads it)
   - Test thoroughly when updating major/minor versions
   - Document breaking changes in CHANGELOG.md
 
@@ -505,6 +505,10 @@ Integration with sprat-cli toolchain (see [Integration with sprat-cli](#integrat
 - Check local installation
 - Fall back to embedded (WASM)
 
+#### LayoutArguments
+- `buildLayoutArguments()` turns a `LayoutRunConfig` (input, profile, source resolution, dedup, rotation direction) into `spratlayout` arguments
+- The layout canvas (`LayoutRunner`), the export (`ProjectSaveService`) and the export preview (`ExportCoordinator`) all use it, so they lay sprites out the same way. Add new layout options here, not at a call site
+
 #### LayoutRunner
 - Execute `spratlayout` for sprite packing
 - Parse output metadata
@@ -568,10 +572,10 @@ Per-profile output processing configuration.
 **Key Classes**:
 
 #### SpratProfilesConfig
-- Load profile definitions from `spratprofiles.cfg`
-- Parse GPU compression modes (DXT1, DXT5)
-- Parse dilation settings (0-16 passes)
-- Resolution management
+- Load profile definitions from sprat-cli's `spratprofiles.cfg`
+- Layout keys map to `spratlayout` flags (`mode`, `optimize`, `max_width`, `padding`, ...)
+- Packing keys map to `spratpack` flags (`dilate`, `gpu_compress` = `dxt1`/`dxt5`, `image_format`, ...)
+- Resolution management (`target_resolution`, `resolution_reference`)
 
 #### ProfilesDialog
 - Create/edit profiles
@@ -580,10 +584,16 @@ Per-profile output processing configuration.
 
 **Profile Structure**:
 ```cfg
-[profile_name]
-compression=dxt5
-dilation=2
-resolution=256
+[profile mobile]
+label=Mobile
+mode=compact
+optimize=gpu
+max_width=2048
+max_height=2048
+padding=2
+trim_transparent=true
+dilate=2
+gpu_compress=dxt5
 ```
 
 ### 8. Core (`src/Core/`)
@@ -637,10 +647,13 @@ sprat-cli is the backend command-line toolchain that performs the actual sprite 
 
 | Tool | Purpose | Invoked From |
 |------|---------|--------------|
-| `spratframes` | Detect individual frames in sprite sheets | Frame Detection Dialog |
-| `spratlayout` | Generate optimal sprite packing layout | LayoutRunner service |
-| `spratpack` | Apply compression and transformations | Animation export |
-| `spratconvert` | Format conversion and resizing | Profile application |
+| `spratframes` | Detect individual frames in sprite sheets | Frame Detection Dialog (`ProjectController`) |
+| `spratunpack` | Cut detected frames out of a sprite sheet | Frame extraction (`ProjectController`) |
+| `spratlayout` | Compute sprite positions; prints layout text | `LayoutRunner`, export (`ProjectSaveService`, `ExportCoordinator`) |
+| `spratpack` | Draw the atlas image from layout text (PNG/WebP/AVIF/DDS, dilate, extrude) | Export (`ProjectSaveService`, `ExportCoordinator`) |
+| `spratconvert` | Turn layout text into engine metadata through Jsonnet transforms (`json`, `godot`, `raw`, ...) | Export (`ProjectSaveService`) |
+
+The GUI's own "Layout text" export format (`kLayoutTextTransform`, id `layout-text`) writes sprat-cli's text files (`layout.txt`, `markers.txt`, `animations.txt`) and skips spratconvert. Projects before schema 5 stored it as `raw`; `ProjectPayloadCodec` migrates that, because `raw` is now a sprat-cli transform.
 
 ### CLI Integration Flow
 
@@ -651,15 +664,17 @@ User Action (e.g., "Generate Layout")
 MainWindow.LayoutFlow.cpp
          │
          ▼
-LayoutRunner.execute()
+LayoutRunner::run()
          │
          ├─ Validate CLI tool exists
          │
-         ├─ Build command: spratlayout input.json -o output.json
+         ├─ Build command: spratlayout <folder> [options]
+         │     (or spratlayout --stdin-list with paths on stdin)
          │
-         ├─ Execute via QProcess
+         ├─ Execute via QProcess on a QtConcurrent thread
+         │     (EmbeddedCli::run in-process for embedded/WASM builds)
          │
-         └─ Parse JSON output
+         └─ LayoutParser::parse() reads the layout text
               │
               ▼
          Update ProjectSession
@@ -671,10 +686,10 @@ LayoutRunner.execute()
 ### CLI Installation
 
 **On First Use**:
-1. Check `~/.local/bin/spratlayout` exists
-2. If not, check sibling `../sprat-cli` directory
-3. If not, download from GitHub (if network available)
-4. Install to `~/.local/bin/`
+1. Look for the tools (`CliToolsConfig`): configured paths, `PATH`, `~/.local/bin/`
+2. If missing, `CliToolInstaller` installs the version pinned in `DEPENDENCIES`:
+   - Linux: builds from source into `~/.local/bin/`, using a `../sprat-cli` checkout (relative to the working directory) only when its `VERSION` matches, otherwise cloning the release tag; the built tools' `--version` is checked before anything is installed
+   - Windows/macOS: downloads the release asset from GitHub
 
 **Configuration**: `CliToolsConfig` manages paths and versions
 
@@ -683,13 +698,15 @@ LayoutRunner.execute()
 ### Execution Model
 
 ```cpp
-// In LayoutRunner::execute()
+// In LayoutRunner::run(), on a QtConcurrent thread
 QProcess process;
-process.start("spratlayout", arguments);
-process.waitForFinished();
+process.setProgram(layoutBinary);
+process.setArguments(buildArguments(config));
+process.start();
+// ... stream stdout into m_stdoutBuffer while the process runs ...
 
-// Parse JSON output
-QJsonDocument output = QJsonDocument::fromJson(process.readAllStandardOutput());
+// Back on the UI thread
+QVector<LayoutModel> models = LayoutParser::parse(layoutText, folder, currentFolder);
 ```
 
 **Error Handling**:
@@ -755,7 +772,7 @@ MainWindow.LayoutFlow.cpp
          ├─ Show Profile Selection (if needed)
          │
          ▼
-LayoutRunner.execute("spratlayout")
+LayoutRunner::run() (spratlayout)
          │
          ▼
 Update LayoutCanvas
@@ -815,7 +832,7 @@ MainWindow.TimelineEditor.cpp
 2. Generate Layout (Optional: Frame Detection)
    ├─ FrameDetectionDialog (optional auto-detect or manual split)
    ├─ LayoutRunner executes "spratlayout"
-   ├─ Parse output JSON
+   ├─ LayoutParser parses the layout text
    └─ Create LayoutModel with sprites
 
 3. Edit Sprites

@@ -6,4 +6,5 @@ class LayoutTests : public QObject {
 private slots:
     void testLayoutParserHandlesEscapedQuotes();
     void testTimelineBuilderParsesSupportedPatterns();
+    void testLayoutArgumentsIncludeResolutionAndDedupThreshold();
 };

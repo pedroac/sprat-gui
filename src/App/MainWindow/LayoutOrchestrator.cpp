@@ -173,6 +173,16 @@ void LayoutOrchestrator::schedule(bool immediate, bool skipCapture) {
 
 // --- buildConfig ---
 
+QSize LayoutOrchestrator::sourceResolution() const {
+    int width = 0;
+    int height = 0;
+    if (m_cfg.resolutionCombo
+        && parseResolutionText(m_cfg.resolutionCombo->currentText(), width, height)) {
+        return {width, height};
+    }
+    return {};
+}
+
 LayoutRunConfig LayoutOrchestrator::buildConfig() const {
     LayoutRunConfig cfg;
 
@@ -282,13 +292,9 @@ void LayoutOrchestrator::run(bool quiet) {
 
     config.scale = 1.0;
 
-    int sourceResolutionWidth = 0;
-    int sourceResolutionHeight = 0;
-    if (m_cfg.resolutionCombo) {
-        parseResolutionText(m_cfg.resolutionCombo->currentText(), sourceResolutionWidth, sourceResolutionHeight);
-    }
-    config.sourceResolutionWidth = sourceResolutionWidth;
-    config.sourceResolutionHeight = sourceResolutionHeight;
+    const QSize sourceResolution = this->sourceResolution();
+    config.sourceResolutionWidth = sourceResolution.width();
+    config.sourceResolutionHeight = sourceResolution.height();
     config.retryWithoutTrim = m_retryWithoutTrimOnFailure;
     config.deduplicateMode = m_deduplicateMode;
     config.dedupThreshold = m_dedupThreshold;

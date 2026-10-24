@@ -305,7 +305,7 @@ void ExportWorkspace::setupUi() {
 
     // Row 1: Format — combo spans cols 1–2 to reach the same right edge as Post-export command
     m_transformCombo = new QComboBox(exportGroup);
-    m_transformCombo->addItem(tr("Raw (sprat-cli format)"), QStringLiteral("raw"));
+    m_transformCombo->addItem(tr("Layout text (sprat-cli files)"), kLayoutTextTransform);
     // Transform list is populated lazily on first populate() call so the
     // constructor doesn't block waiting for a subprocess (queryTransformsDir).
     exportGrid->addWidget(new QLabel(tr("Format:"), exportGroup), 1, 0, Qt::AlignVCenter);
@@ -666,7 +666,7 @@ void ExportWorkspace::setAtlasExportConfigs(const QList<QPair<int,AtlasExportCon
         // Column 1: Transform/format combo
         auto* transformOverrideCombo = new QComboBox(m_atlasOverridesTable);
         transformOverrideCombo->addItem(tr("(default)"), QString());
-        transformOverrideCombo->addItem(tr("Raw (sprat-cli format)"), QStringLiteral("raw"));
+        transformOverrideCombo->addItem(tr("Layout text (sprat-cli files)"), kLayoutTextTransform);
         if (!cache.transforms.isEmpty()) {
             for (const TransformInfo& t : cache.transforms)
                 transformOverrideCombo->addItem(makeTransformIcon(t.icon, cache.dir), t.name, t.id);

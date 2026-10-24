@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame Animation workspace: onion skin now defaults to off
 - Sprites workspace: trim rect now defaults to on
 - Atlas Sprites: deduplication mode now defaults to Exact instead of None
+- Export: the "Raw (sprat-cli format)" format is now called "Layout text (sprat-cli files)", so it can't be confused with sprat-cli's new `raw` format. Saved projects keep their choice
 
 ### Fixed
 - macOS: the app no longer shows as "damaged" and refuses to open (seen on macOS 27 beta). The bundle is now re-signed after packaging, and the bundled sprat-cli tools, profiles config and transforms moved from `Contents/MacOS` to `Contents/Resources/cli`, since non-code files in `Contents/MacOS` made the bundle unsignable
@@ -20,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: LibGDX exports with sprite rotation enabled no longer fail; the layout now rotates sprites counter-clockwise, as libGDX expects
 - Export: profiles with Zopfli enabled no longer fail when the sprat-cli build lacks Zopfli; the atlas is saved as a regular PNG and the export log says so
 - Windows: loading and exporting sprites from folders whose names contain non-ASCII characters (e.g. `spritës`, `雪`) no longer fails (requires Windows 10 version 1903 or later)
+- Linux: installing sprat-cli from the app no longer replaces the installed tools with a different version when a `sprat-cli` checkout of another version sits next to the working folder; that checkout is only used when its version matches, and the built tools are checked before anything is installed
+- Export: with perceptual deduplication, the export now uses the similarity threshold from Settings, like the layout canvas, instead of always the default
+- Export: the preview now shows the atlas at the profile's target resolution, like the exported file
+- Export: the list of files an export will create or overwrite now names the Unity metadata files correctly (`json.json`, `spritesheet.png.meta`)
 - Updates: the update prompt no longer offers an older release (e.g. v0.11.0 to a v0.12.0 build); it only appears when a newer version is published
 
 ### Dependencies

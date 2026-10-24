@@ -110,9 +110,14 @@ set -euo pipefail
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
-# Try to use local sprat-cli copy first (sibling directory)
-local_sprat_cli="$(cd "$(dirname "%1")/.." 2>/dev/null && pwd)/sprat-cli" 2>/dev/null || true
-if [ -d "$local_sprat_cli" ] && [ -f "$local_sprat_cli/CMakeLists.txt" ]; then
+# Use a sprat-cli checkout beside the working directory (a development setup) when it is
+# the required version, as CMakeLists.txt does; otherwise clone the release tag.
+local_sprat_cli="$(cd .. 2>/dev/null && pwd)/sprat-cli"
+local_version=""
+if [ -f "$local_sprat_cli/VERSION" ]; then
+  local_version=$(tr -d '[:space:]' < "$local_sprat_cli/VERSION")
+fi
+if [ -f "$local_sprat_cli/CMakeLists.txt" ] && [ "$local_version" = "%1" ]; then
   echo "Found local sprat-cli at $local_sprat_cli, using it instead of cloning"
   cp -r "$local_sprat_cli" "$workdir/sprat-cli"
   # Clean up build artifacts to avoid CMakeCache.txt conflicts
@@ -120,7 +125,7 @@ if [ -d "$local_sprat_cli" ] && [ -f "$local_sprat_cli/CMakeLists.txt" ]; then
   rm -rf "$workdir/sprat-cli/build" "$workdir/sprat-cli/build_test" "$workdir/sprat-cli/build_debug" "$workdir/sprat-cli/build_release" "$workdir/sprat-cli/build_win"
   rm -rf "$workdir/sprat-cli/CMakeCache.txt" "$workdir/sprat-cli/CMakeFiles" "$workdir/sprat-cli/cmake_install.cmake" "$workdir/sprat-cli/compile_commands.json"
 else
-  echo "No local sprat-cli found, cloning from GitHub..."
+  echo "No local sprat-cli %1 found, cloning from GitHub..."
   cd "$workdir"
   git clone --depth 1 --branch %1 https://github.com/pedroac/sprat-cli.git 2>&1 | grep -E "(Cloning|fatal|error)" || true
 fi
@@ -131,6 +136,21 @@ cat VERSION
 echo "---"
 cmake -DSPRAT_DOWNLOAD_STB=ON .
 make -j$(nproc 2>/dev/null || echo 1)
+
+# Check the built tools before installing, so a wrong version never replaces working ones.
+echo "Checking built CLI tool versions:"
+echo "Expected version: %1"
+echo "---"
+for tool in spratlayout spratpack spratconvert spratframes spratunpack; do
+  built_version=$("./$tool" --version 2>&1 | grep -oP 'v\d+\.\d+\.\d+(?:[.\-][a-zA-Z0-9]+)*' | head -1)
+  echo "$tool: $built_version"
+  if [ "$built_version" != "%1" ]; then
+    echo "ERROR: Version mismatch for $tool! Expected %1 but got $built_version" >&2
+    exit 1
+  fi
+done
+echo "---"
+
 mkdir -p "$HOME/.local/bin"
 install -m 0755 spratlayout spratpack spratconvert spratframes spratunpack "$HOME/.local/bin/"
 
@@ -146,18 +166,6 @@ if [ -d "transforms" ]; then
   cp -r transforms/. "$TRANSFORMS_DIR/"
 fi
 
-echo "Checking installed CLI tool versions:"
-echo "Expected version: %1"
-echo "---"
-for tool in spratlayout spratpack spratconvert spratframes spratunpack; do
-  installed_version=$("$HOME/.local/bin/$tool" --version 2>&1 | grep -oP 'v\d+\.\d+\.\d+(?:[.\-][a-zA-Z0-9]+)*' | head -1)
-  echo "$tool: $installed_version"
-  if [ "$installed_version" != "%1" ]; then
-    echo "ERROR: Version mismatch for $tool! Expected %1 but got $installed_version" >&2
-    exit 1
-  fi
-done
-echo "---"
 echo "Successfully installed all sprat-cli tools with version %1"
 )SCRIPT").arg(m_cliVersion);
 

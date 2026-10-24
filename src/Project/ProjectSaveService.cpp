@@ -2,6 +2,7 @@
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
 #include "ArchiveExtractor.h"
+#include "LayoutArguments.h"
 
 #ifdef SPRAT_EMBEDDED_CLI
 #include "EmbeddedCli.h"
@@ -26,11 +27,6 @@
 namespace {
     QString trPS(const char* text) {
         return QCoreApplication::translate("ProjectSaveService", text);
-    }
-
-    bool isCompactPreset(const QString& preset) {
-        const QString p = preset.trimmed().toLower();
-        return p == "quality" || p == "small";
     }
 
     /// Returns true when the output format expects rotated sprites turned counter-clockwise.
@@ -79,6 +75,7 @@ bool ProjectSaveService::save(
     QString& savedDestination,
     QString& error,
     const QString& deduplicateMode,
+    int dedupThreshold,
     SaveCallbacks callbacks
 ) {
     Q_UNUSED(sourceFolder);
@@ -395,10 +392,7 @@ bool ProjectSaveService::save(
             effectiveProfile.padding = 0;
             effectiveProfile.trimTransparent = false;
         }
-        const int profilePadding = qMax(0, effectiveProfile.padding);
-        const int profileExtrude = qMax(0, effectiveProfile.extrude);
         const double profileScale = qBound(0.01, effectiveProfile.scale, 1.0);
-        const bool profileTrimTransparent = effectiveProfile.trimTransparent;
 
         // When atlasSubdir is set, nest the atlas inside the profile folder:
         //   <destination>/<profileName>/<atlasSubdir>/
@@ -432,58 +426,18 @@ bool ProjectSaveService::save(
             }
         }
         if (!usingCachedLayout) {
-            QStringList layoutArgs;
-            layoutArgs << layoutPathForSave;
-            if (!effectiveProfile.preset.trimmed().isEmpty()) {
-                layoutArgs << "--preset" << effectiveProfile.preset.trimmed();
+            LayoutRunConfig layoutConfig;
+            layoutConfig.sourceFolderPath = layoutPathForSave;
+            layoutConfig.profile = effectiveProfile;
+            layoutConfig.scale = profileScale;
+            if (hasSourceResolution) {
+                layoutConfig.sourceResolutionWidth = sourceResolutionWidth;
+                layoutConfig.sourceResolutionHeight = sourceResolutionHeight;
             }
-            if (effectiveProfile.maxWidth > 0) {
-                layoutArgs << "--max-width" << QString::number(effectiveProfile.maxWidth);
-            }
-            if (effectiveProfile.maxHeight > 0) {
-                layoutArgs << "--max-height" << QString::number(effectiveProfile.maxHeight);
-            }
-            if (isCompactPreset(effectiveProfile.preset) && effectiveProfile.threads > 0) {
-                layoutArgs << "--threads" << QString::number(effectiveProfile.threads);
-            }
-            const bool hasTargetResolution = effectiveProfile.targetResolutionUseSource ||
-                (effectiveProfile.targetResolutionWidth > 0 && effectiveProfile.targetResolutionHeight > 0);
-            if (hasSourceResolution && hasTargetResolution) {
-                const int targetResolutionWidth = effectiveProfile.targetResolutionUseSource
-                    ? sourceResolutionWidth
-                    : effectiveProfile.targetResolutionWidth;
-                const int targetResolutionHeight = effectiveProfile.targetResolutionUseSource
-                    ? sourceResolutionHeight
-                    : effectiveProfile.targetResolutionHeight;
-                layoutArgs << "--source-resolution" << formatResolutionText(sourceResolutionWidth, sourceResolutionHeight);
-                layoutArgs << "--target-resolution" << formatResolutionText(targetResolutionWidth, targetResolutionHeight);
-                if (!effectiveProfile.resolutionReference.trimmed().isEmpty()) {
-                    layoutArgs << "--resolution-reference" << effectiveProfile.resolutionReference.trimmed();
-                }
-            }
-            layoutArgs << "--padding" << QString::number(profilePadding);
-            if (profileExtrude > 0) {
-                layoutArgs << "--extrude" << QString::number(profileExtrude);
-            }
-            layoutArgs << "--scale" << QString::number(profileScale);
-            if (profileTrimTransparent) {
-                layoutArgs << "--trim-transparent";
-            }
-            if (effectiveProfile.allowRotation) {
-                layoutArgs << "--rotate";
-                if (needsCcwRotation) {
-                    layoutArgs << "--rotate-direction" << "ccw";
-                }
-            }
-            if (effectiveProfile.multipack) {
-                layoutArgs << "--multipack";
-            }
-            if (!effectiveProfile.sort.trimmed().isEmpty()) {
-                layoutArgs << "--sort" << effectiveProfile.sort.trimmed();
-            }
-            if (!deduplicateMode.isEmpty() && deduplicateMode != "none") {
-                layoutArgs << "--deduplicate" << deduplicateMode;
-            }
+            layoutConfig.rotateCounterClockwise = needsCcwRotation;
+            layoutConfig.deduplicateMode = deduplicateMode;
+            layoutConfig.dedupThreshold = dedupThreshold;
+            QStringList layoutArgs = buildLayoutArguments(layoutConfig);
 
             bool layoutSuccess = false;
             while (!layoutSuccess) {
@@ -691,7 +645,7 @@ bool ProjectSaveService::save(
         if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
         combinedInput.append(animContent.toUtf8());
 
-        if (config.transform == QStringLiteral("raw")) {
+        if (config.transform == kLayoutTextTransform) {
             struct RawFile { QString name; QByteArray data; };
             const RawFile rawFiles[] = {
                 { QStringLiteral("layout.txt"),     layoutData              },
@@ -713,7 +667,7 @@ bool ProjectSaveService::save(
             }
         }
 
-        if (config.transform != "none" && config.transform != "raw" && !spratConvertBin.isEmpty()) {
+        if (config.transform != "none" && config.transform != kLayoutTextTransform && !spratConvertBin.isEmpty()) {
             updateStatus(QString(trPS("Formatting output for profile '%1'...")).arg(profileName));
             if (checkCanceled()) {
                 return false;

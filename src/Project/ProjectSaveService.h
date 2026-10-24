@@ -31,6 +31,7 @@ public:
         QString& savedDestination,
         QString& error,
         const QString& deduplicateMode = "none",
+        int dedupThreshold = 5,
         SaveCallbacks callbacks = {}
     );
 

@@ -71,11 +71,11 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   - `spratconvert` (optional for format transforms)
   *(If the app detects them missing it will offer to download and build them for you.)*
   *(libsquish is bundled in sprat-cli and built alongside it for DXT texture compression.)*
-  - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratframes`, `spratlayout`, `spratpack`, and `spratconvert` from it, or let you point Settings directly at those binaries.
+  - If you already have the `sprat-cli` repository checked out as a sibling to this project (for example `../sprat-cli`), build that copy and the GUI will automatically pick up `spratframes`, `spratunpack`, `spratlayout`, `spratpack`, and `spratconvert` from it, or let you point Settings directly at those binaries.
 - Optional export tools:
   - ImageMagick (`magick` or `convert`) for GIF
   - FFmpeg (`ffmpeg`) for video
-When the installer downloads the CLI tools for you, it clones the latest `main` branch of `sprat-cli` (`git clone --depth 1 --branch main https://github.com/pedroac/sprat-cli.git`) before building.
+When the installer builds the CLI tools for you (Linux), it clones the `sprat-cli` release tag pinned in `DEPENDENCIES` (`git clone --depth 1 --branch <tag> https://github.com/pedroac/sprat-cli.git`), or uses a `../sprat-cli` checkout of that same version, and checks the built tools' versions before installing them to `~/.local/bin`.
 
 ## Local CLI development
 

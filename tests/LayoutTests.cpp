@@ -1,4 +1,5 @@
 #include "LayoutTests.h"
+#include "LayoutArguments.h"
 #include "LayoutParser.h"
 #include "TimelineBuilder.h"
 #include "models.h"
@@ -59,4 +60,36 @@ void LayoutTests::testTimelineBuilderParsesSupportedPatterns() {
 
     const TimelineSeed* punch = findSeed("Punch");
     QVERIFY(punch != nullptr);
+}
+
+void LayoutTests::testLayoutArgumentsIncludeResolutionAndDedupThreshold() {
+    // The export and its preview build their spratlayout arguments here too, so a
+    // profile's target resolution and the perceptual threshold reach every run.
+    LayoutRunConfig config;
+    config.sourceFolderPath = QStringLiteral("/tmp/frames");
+    config.profile.allowRotation = true;
+    config.profile.targetResolutionWidth = 1280;
+    config.profile.targetResolutionHeight = 720;
+    config.sourceResolutionWidth = 1920;
+    config.sourceResolutionHeight = 1080;
+    config.rotateCounterClockwise = true;
+    config.deduplicateMode = QStringLiteral("perceptual");
+    config.dedupThreshold = 9;
+
+    const QStringList args = buildLayoutArguments(config);
+    QCOMPARE(args.first(), QStringLiteral("/tmp/frames"));
+    auto valueOf = [&](const QString& flag) {
+        const int index = args.indexOf(flag);
+        return index >= 0 && index + 1 < args.size() ? args.at(index + 1) : QString();
+    };
+    QCOMPARE(valueOf(QStringLiteral("--source-resolution")), QStringLiteral("1920x1080"));
+    QCOMPARE(valueOf(QStringLiteral("--target-resolution")), QStringLiteral("1280x720"));
+    QCOMPARE(valueOf(QStringLiteral("--rotate-direction")), QStringLiteral("ccw"));
+    QCOMPARE(valueOf(QStringLiteral("--deduplicate")), QStringLiteral("perceptual"));
+    QCOMPARE(valueOf(QStringLiteral("--dedup-threshold")), QStringLiteral("9"));
+
+    // Without a source resolution there is nothing to scale from.
+    config.sourceResolutionWidth = 0;
+    config.sourceResolutionHeight = 0;
+    QVERIFY(!buildLayoutArguments(config).contains(QStringLiteral("--target-resolution")));
 }

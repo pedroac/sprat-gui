@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QStringList>
 #include <QPointer>
+#include <QSize>
 #include <QVariantAnimation>
 #include <functional>
 #include <atomic>
@@ -75,6 +76,8 @@ public:
 
     bool isDirty() const { return m_layoutDirty; }
     int  layoutGeneration() const { return m_layoutGeneration; }
+    /// Source resolution picked in the Atlas workspace; empty when none is set.
+    QSize sourceResolution() const;
 
 signals:
     void layoutFinished(QVector<LayoutModel> models, QStringList selectedPaths, QString primaryPath);
