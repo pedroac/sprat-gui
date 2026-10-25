@@ -3,6 +3,7 @@
 #include "ResolutionUtils.h"
 #include "ArchiveExtractor.h"
 #include "LayoutArguments.h"
+#include "NineSliceInsets.h"
 
 #ifdef SPRAT_EMBEDDED_CLI
 #include "EmbeddedCli.h"
@@ -24,6 +25,8 @@
 #include <QTextStream>
 #include <QtGlobal>
 
+#include <cmath>
+
 namespace {
     QString trPS(const char* text) {
         return QCoreApplication::translate("ProjectSaveService", text);
@@ -31,8 +34,81 @@ namespace {
 
     /// Returns true when the output format expects rotated sprites turned counter-clockwise.
     /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
+    /// `text` as a quoted string of sprat-cli's text formats: quotes and
+    /// backslashes are escaped, and line breaks, which can't be represented
+    /// (each record is one line), become spaces.
+    QString cliQuoted(QString text) {
+        text.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+        text.replace(QLatin1Char('"'), QLatin1String("\\\""));
+        text.replace(QLatin1Char('\r'), QLatin1Char(' '));
+        text.replace(QLatin1Char('\n'), QLatin1Char(' '));
+        return QLatin1Char('"') + text + QLatin1Char('"');
+    }
+
+    bool isMarkerKind(const QString& kind) {
+        return kind == QLatin1String("point") || kind == QLatin1String("circle")
+            || kind == QLatin1String("rectangle") || kind == QLatin1String("polygon");
+    }
+
     bool transformRequiresCcwRotation(const QString& transform) {
         return transform.trimmed().compare(QLatin1String("libgdx"), Qt::CaseInsensitive) == 0;
+    }
+
+    /// The layout's "scale" line, or 1 when it has none.
+    double layoutScale(const QByteArray& layoutData) {
+        for (const QByteArray& line : layoutData.split('\n')) {
+            const QByteArray trimmed = line.trimmed();
+            if (trimmed.startsWith("scale ")) {
+                bool ok = false;
+                const double scale = trimmed.mid(6).trimmed().toDouble(&ok);
+                if (ok && scale > 0.0) return scale;
+            }
+        }
+        return 1.0;
+    }
+
+    /// Size of a sprite's original image in original-image pixels, the size
+    /// sprat-cli checks slice insets against, read from its layout line
+    /// (`sprite "path" x,y w,h [left,top right,bottom] [rotated] ...`).
+    /// Mirrors sprat-cli: the packed size may come from rounding, so the
+    /// original can be up to half an atlas pixel larger than w / scale, and a
+    /// nine-patch's 1px marker border, kept in the trim, is not part of it.
+    /// Returns an invalid size when the line can't be read.
+    QSize layoutSpriteSourceSize(const QByteArray& spriteLine, const QString& path, double scale) {
+        const int closingQuote = spriteLine.indexOf('"', spriteLine.indexOf('"') + 1);
+        if (closingQuote < 0) return {};
+        const QList<QByteArray> tokens =
+            spriteLine.mid(closingQuote + 1).simplified().split(' ');
+        auto pair = [&](int index, int& a, int& b) {
+            if (index >= tokens.size()) return false;
+            const QList<QByteArray> parts = tokens[index].split(',');
+            bool okA = false;
+            bool okB = false;
+            if (parts.size() == 2) {
+                a = parts[0].toInt(&okA);
+                b = parts[1].toInt(&okB);
+            }
+            return okA && okB;
+        };
+        int x = 0, y = 0, w = 0, h = 0;
+        if (!pair(0, x, y) || !pair(1, w, h)) return {};
+        int trimLeft = 0, trimTop = 0, trimRight = 0, trimBottom = 0;
+        if (pair(2, trimLeft, trimTop) && !pair(3, trimRight, trimBottom)) return {};
+        if (path.endsWith(QLatin1String(".9.png")) && trimLeft >= 1 && trimTop >= 1
+                && trimRight >= 1 && trimBottom >= 1) {
+            --trimLeft;
+            --trimTop;
+            --trimRight;
+            --trimBottom;
+        }
+        const bool rotated = tokens.contains("rotated");
+        const int packedW = rotated ? h : w;
+        const int packedH = rotated ? w : h;
+        auto original = [scale](int packed) {
+            return scale == 1.0 ? packed
+                                : static_cast<int>(std::floor((packed + 0.5) / scale));
+        };
+        return {original(packedW) + trimLeft + trimRight, original(packedH) + trimTop + trimBottom};
     }
 }
 
@@ -182,7 +258,7 @@ bool ProjectSaveService::save(
         bool hasPivotMarker = false;
         
         QString spritePath = it.key();
-        markersStream << "path \"" << spritePath << "\"\n";
+        markersStream << "path " << cliQuoted(spritePath) << "\n";
 
         for (auto markerIt = markersArr.begin(); markerIt != markersArr.end(); ++markerIt) {
             QJsonObject markerObj = markerIt->toObject();
@@ -194,8 +270,12 @@ bool ProjectSaveService::save(
             if (markerKindStr.isEmpty()) {
                 markerKindStr = "point";
             }
+            // The kind is written as a bare token; skip anything sprat-cli wouldn't read.
+            if (!isMarkerKind(markerKindStr)) {
+                continue;
+            }
             
-            markersStream << "- marker \"" << markerName << "\" " << markerKindStr;
+            markersStream << "- marker " << cliQuoted(markerName) << " " << markerKindStr;
             
             if (markerKindStr == "point") {
                 markersStream << " " << markerObj["x"].toInt() << "," << markerObj["y"].toInt();
@@ -244,7 +324,7 @@ bool ProjectSaveService::save(
         for (const auto& a : spriteState["aliases"].toArray()) {
             const QString alias = a.toString().trimmed();
             if (!alias.isEmpty())
-                markersStream << "alias \"" << alias << "\" \"" << canonicalName << "\"\n";
+                markersStream << "alias " << cliQuoted(alias) << " " << cliQuoted(canonicalName) << "\n";
         }
     }
 
@@ -263,10 +343,10 @@ bool ProjectSaveService::save(
             timelineFps = 8;
         }
         
-        animStream << "animation \"" << timeline["name"].toString() << "\" " << timelineFps << "\n";
+        animStream << "animation " << cliQuoted(timeline["name"].toString()) << " " << timelineFps << "\n";
         const QString aliasOf = timeline["alias_of"].toString();
         if (!aliasOf.isEmpty()) {
-            animStream << "alias \"" << aliasOf << "\"";
+            animStream << "alias " << cliQuoted(aliasOf);
             const bool hFlip = timeline["h_flip"].toBool();
             const bool vFlip = timeline["v_flip"].toBool();
             if (hFlip || vFlip) {
@@ -278,7 +358,7 @@ bool ProjectSaveService::save(
         } else {
             QJsonArray frames = timeline["frames"].toArray();
             for (const auto& fVal : frames) {
-                animStream << "- frame \"" << fVal.toString() << "\"\n";
+                animStream << "- frame " << cliQuoted(fVal.toString()) << "\n";
             }
         }
         animStream << "\n";
@@ -566,33 +646,30 @@ bool ProjectSaveService::save(
 
         // Inject nine-slice tokens into layout lines
         {
-            // Build path→slice token map from project payload
-            QHash<QString, QString> sliceMap;
-            const QJsonArray atlasesArr = projectPayload["atlases"].toArray();
-            for (const auto& aVal : atlasesArr) {
-                const QJsonArray nsArr = aVal.toObject()["nine_slice"].toArray();
-                for (const auto& nsVal : nsArr) {
-                    const QJsonObject ns = nsVal.toObject();
-                    const int l = ns["left"].toInt();
-                    const int t = ns["top"].toInt();
-                    const int r = ns["right"].toInt();
-                    const int b = ns["bottom"].toInt();
-                    const QString h = ns["h_mode"].toString("stretch");
-                    const QString v = ns["v_mode"].toString("stretch");
-                    // Only emit slice token if at least one inset is non-zero
-                    if (l == 0 && t == 0 && r == 0 && b == 0) continue;
-                    const QString token = QStringLiteral("slice=%1,%2,%3,%4,%5,%6")
-                        .arg(l).arg(t).arg(r).arg(b).arg(h).arg(v);
-                    const QJsonArray sprites = ns["sprites"].toArray();
-                    for (const auto& spVal : sprites) {
-                        const QString sp = spVal.toString();
-                        if (!sp.isEmpty()) sliceMap.insert(sp, token);
-                    }
-                }
+            // Nine-sliced sprites, keyed by path like the markers file. The per-sprite
+            // state holds the insets set in the Nine-Slice workspace.
+            struct SliceSpec {
+                NineSliceInsets insets;
+                QString hMode;
+                QString vMode;
+            };
+            QHash<QString, SliceSpec> sliceMap;
+            for (auto it = spritesState.begin(); it != spritesState.end(); ++it) {
+                const QJsonObject state = it.value().toObject();
+                if (!state["is_nine_sliced"].toBool(false)) continue;
+                const SliceSpec spec{
+                    {state["ns_left"].toInt(), state["ns_top"].toInt(),
+                     state["ns_right"].toInt(), state["ns_bottom"].toInt()},
+                    nineSliceFillModeOrDefault(state["ns_h_mode"].toString()),
+                    nineSliceFillModeOrDefault(state["ns_v_mode"].toString())};
+                // Only emit a slice token if at least one inset is non-zero
+                if (spec.insets == NineSliceInsets{}) continue;
+                sliceMap.insert(it.key(), spec);
             }
 
             if (!sliceMap.isEmpty()) {
                 // Patch layout lines: for each "sprite " line, append slice token
+                const double scale = layoutScale(layoutData);
                 QByteArray patched;
                 const QList<QByteArray> lines = layoutData.split('\n');
                 for (const QByteArray& line : lines) {
@@ -603,10 +680,21 @@ bool ProjectSaveService::save(
                         int secondQuote = (firstQuote >= 0) ? trimmed.indexOf('"', firstQuote + 1) : -1;
                         if (firstQuote >= 0 && secondQuote > firstQuote) {
                             QString path = QString::fromUtf8(trimmed.mid(firstQuote + 1, secondQuote - firstQuote - 1));
-                            if (sliceMap.contains(path)) {
+                            const auto spec = sliceMap.constFind(path);
+                            if (spec != sliceMap.constEnd()) {
+                                // sprat-cli rejects insets that don't fit the image, which
+                                // projects saved before the editor enforced it may hold.
+                                NineSliceInsets insets = spec->insets;
+                                const QSize source = layoutSpriteSourceSize(trimmed, path, scale);
+                                if (source.isValid()) {
+                                    insets = fitNineSliceInsets(insets, source.width(), source.height());
+                                }
+                                const QString token = QStringLiteral("slice=%1,%2,%3,%4,%5,%6")
+                                    .arg(insets.left).arg(insets.top).arg(insets.right)
+                                    .arg(insets.bottom).arg(spec->hMode, spec->vMode);
                                 patched.append(line);
                                 patched.append(' ');
-                                patched.append(sliceMap[path].toUtf8());
+                                patched.append(token.toUtf8());
                                 patched.append('\n');
                                 continue;
                             }

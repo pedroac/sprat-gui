@@ -430,6 +430,8 @@ void MainWindow::setupUi() {
     m_mainStack->addWidget(m_nineSliceWorkspace);  // page 3
     connect(m_nineSliceWorkspace->canvas(), &NineSliceEditorCanvas::imageFileDropped,
             this, &MainWindow::onLayoutCanvasPathDropped);
+    connect(m_nineSliceWorkspace, &NineSliceWorkspace::definitionsChanged,
+            this, &MainWindow::markWorkspaceEdited);
 
     // Page 5: Normal Map Workspace
     m_normalMapWorkspace = new NormalMapWorkspace(m_session, this);
@@ -441,7 +443,7 @@ void MainWindow::setupUi() {
                     m_session->activeAtlasIndex = atlasIdx;
             });
     connect(m_normalMapWorkspace, &NormalMapWorkspace::definitionsChanged,
-            this, [this]() { setWindowModified(true); });
+            this, &MainWindow::markWorkspaceEdited);
 
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);

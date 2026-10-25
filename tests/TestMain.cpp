@@ -8,6 +8,7 @@
 #include "CoreTests.h"
 #include "ImageDiscoveryTests.h"
 #include "ProjectSessionTests.h"
+#include "NineSliceWorkspaceTests.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -35,6 +36,9 @@ int main(int argc, char** argv) {
 
     ProjectSessionTests projectSessionTests;
     runTest(&projectSessionTests);
+
+    NineSliceWorkspaceTests nineSliceWorkspaceTests;
+    runTest(&nineSliceWorkspaceTests);
 
     return status;
 }

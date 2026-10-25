@@ -579,6 +579,13 @@ private:
      * @brief Updates the UI state based on current application state.
      */
     void updateUiState();
+    /// Shows the title bar's unsaved marker when the undo stack or a workspace has unsaved edits.
+    void updateWindowModified();
+    /// Records an edit that the undo stack doesn't track.
+    void markWorkspaceEdited();
+    /// Clears the unsaved state after the project was saved, loaded or replaced.
+    /// @param clearHistory Also drops the undo history (loading), instead of marking it saved
+    void markProjectUnmodified(bool clearHistory);
 
     /**
      * @brief Updates the main content view.
@@ -985,6 +992,8 @@ private:
 
     // === Undo/Redo & Recent Projects ===
     QUndoStack* m_undoStack = nullptr;
+    /// Edits not recorded on the undo stack (Nine-Slice, Normal Map) since the last save or load.
+    bool m_hasUnsavedWorkspaceEdits = false;
     QStringList m_recentProjects;
 
     // === Export Presets ===

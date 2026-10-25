@@ -26,9 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: the preview now shows the atlas at the profile's target resolution, like the exported file
 - Export: the list of files an export will create or overwrite now names the Unity metadata files correctly (`json.json`, `spritesheet.png.meta`)
 - Updates: the update prompt no longer offers an older release (e.g. v0.11.0 to a v0.12.0 build); it only appears when a newer version is published
+- Nine-Slice workspace: insets can no longer add up to more than the sprite (left + right within its width, top + bottom within its height), and the preview no longer clamps them to half the sprite. Projects saved with insets that don't fit get the right and bottom insets reduced when the sprite is opened or exported, instead of failing to export
+- Export: nine-slice insets set in the Nine-Slice workspace are now written to the export
+- Nine-Slice workspace: opening it no longer resets the first sprite's insets, fill modes and size
+- Edits in the Nine-Slice and Normal Map workspaces now count as unsaved changes: the app asks to save them before closing, and saving clears the unsaved marker in the title bar
+- Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 
 ### Dependencies
-- Updated sprat-cli to v0.19.6
+- Updated sprat-cli to v0.21.0
 - macOS: the bundled sprat-cli tools are built from source with the app instead of being taken from sprat-cli's macOS release
 
 ## [0.8.0] - 2026-06-15

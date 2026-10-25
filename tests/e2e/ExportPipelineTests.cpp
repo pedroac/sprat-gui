@@ -16,6 +16,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
@@ -120,7 +122,7 @@ QString ExportPipelineTests::toolPath(const QString& toolName) const {
 
 ExportPipelineTests::ExportRun ExportPipelineTests::exportSprites(
     const QString& spritesDir, const QString& destination, const QString& transform,
-    const SpratProfile& profile) const {
+    const SpratProfile& profile, const QJsonObject& projectPayload) const {
     SaveConfig config;
     config.destination = destination;
     config.transform = transform;
@@ -135,7 +137,7 @@ ExportPipelineTests::ExportRun ExportPipelineTests::exportSprites(
     run.ok = ProjectSaveService::save(
         config, spritesDir, {}, spritesDir, {profile}, profile.name,
         toolPath(QStringLiteral("spratlayout")), toolPath(QStringLiteral("spratpack")),
-        toolPath(QStringLiteral("spratconvert")), QJsonObject(), savedDestination, run.error,
+        toolPath(QStringLiteral("spratconvert")), projectPayload, savedDestination, run.error,
         QStringLiteral("none"), 5, callbacks);
     return run;
 }
@@ -278,6 +280,107 @@ void ExportPipelineTests::testUnicodePaths() {
     const QStringList metadataFiles = profileDir.entryList({QStringLiteral("*.json")}, QDir::Files);
     QVERIFY(!metadataFiles.isEmpty());
     QVERIFY(readTextFile(profileDir.filePath(metadataFiles.first())).contains(QStringLiteral("walk_1")));
+}
+
+void ExportPipelineTests::testNineSliceInsetsAreExportedAndFitted() {
+    const QString spritesDir = m_root.filePath(QStringLiteral("nine slice sprites"));
+    QVERIFY(QDir().mkpath(spritesDir));
+    writeSprite(QDir(spritesDir).filePath(QStringLiteral("panel.png")), {32, 32}, Qt::gray);
+    // Trimmed to its 16x16 centre: its insets must still fit the full 32x32 image.
+    writeSprite(QDir(spritesDir).filePath(QStringLiteral("frame.png")), {32, 32}, Qt::gray,
+                QRect(8, 8, 16, 16));
+
+    // Insets that don't fit, as projects saved before the editor kept them fitted may hold.
+    auto slice = [](int left, int top, int right, int bottom) {
+        return QJsonObject{{"is_nine_sliced", true}, {"ns_left", left}, {"ns_top", top},
+                           {"ns_right", right}, {"ns_bottom", bottom},
+                           {"ns_h_mode", "stretch"}, {"ns_v_mode", "repeat"}};
+    };
+    const QJsonObject sprites{{"panel.png", slice(20, 8, 20, 8)}, {"frame.png", slice(4, 4, 30, 30)}};
+    const QJsonObject payload{{"spritemarkers", QJsonObject{{"sprites", sprites}}}};
+
+    const QString destination = m_root.filePath(QStringLiteral("nine slice export"));
+    const ExportRun run = exportSprites(spritesDir, destination, QStringLiteral("json"),
+                                        makeProfile(), payload);
+    QVERIFY2(run.ok, qPrintable(describe(run.error, run.log)));
+
+    const QDir profileDir(QDir(destination).filePath(PROFILE_NAME));
+    const QStringList metadataFiles = profileDir.entryList({QStringLiteral("*.json")}, QDir::Files);
+    QVERIFY2(!metadataFiles.isEmpty(), qPrintable(profileDir.entryList().join(", ")));
+    const QJsonDocument document =
+        QJsonDocument::fromJson(readTextFile(profileDir.filePath(metadataFiles.first())).toUtf8());
+
+    // Slices keyed by file name without extension.
+    QHash<QString, QJsonObject> slices;
+    for (const QJsonValue& value : document.object()["sprites"].toArray()) {
+        const QJsonObject sprite = value.toObject();
+        if (sprite["has_slice"].toBool())
+            slices.insert(QFileInfo(sprite["path"].toString()).completeBaseName(),
+                          sprite["slice"].toObject());
+    }
+    QCOMPARE(slices.size(), 2);
+    auto insets = [](const QJsonObject& s) {
+        return QList<int>{s["left"].toInt(), s["top"].toInt(), s["right"].toInt(), s["bottom"].toInt()};
+    };
+    QCOMPARE(insets(slices.value(QStringLiteral("panel"))), (QList<int>{20, 8, 12, 8}));
+    QCOMPARE(insets(slices.value(QStringLiteral("frame"))), (QList<int>{4, 4, 28, 28}));
+    QCOMPARE(slices.value(QStringLiteral("panel"))["v_mode"].toString(), QStringLiteral("repeat"));
+}
+
+void ExportPipelineTests::testProjectTextCantInjectCliRecords() {
+    const QString spritesDir = m_root.filePath(QStringLiteral("injection sprites"));
+    QVERIFY(QDir().mkpath(spritesDir));
+    writeSprite(QDir(spritesDir).filePath(QStringLiteral("panel.png")), {32, 32}, Qt::gray);
+
+    // A shared project file may hold any string; none of these may start a record of its own.
+    const QString injected = QStringLiteral("\nsprite \"/etc/passwd\" 0,0 1,1\n");
+    const QJsonArray markers{
+        QJsonObject{{"name", QStringLiteral("say \"hi\"") + injected}, {"kind", "point"},
+                    {"x", 3}, {"y", 4}},
+        QJsonObject{{"name", "bogus"}, {"kind", QStringLiteral("point 1,1") + injected}},
+    };
+    const QJsonObject panel{{"is_nine_sliced", true}, {"ns_left", 4}, {"ns_top", 4},
+                            {"ns_right", 4}, {"ns_bottom", 4},
+                            {"ns_h_mode", QStringLiteral("stretch") + injected},
+                            {"ns_v_mode", "mirror"}, {"markers", markers}};
+    const QJsonObject timeline{{"name", QStringLiteral("idle") + injected}, {"fps", 6},
+                               {"frames", QJsonArray{"panel.png"}}};
+    const QJsonObject payload{
+        {"spritemarkers", QJsonObject{{"sprites", QJsonObject{{"panel.png", panel}}}}},
+        {"animations", QJsonObject{{"timelines", QJsonArray{timeline}}}}};
+
+    const QString destination = m_root.filePath(QStringLiteral("injection export"));
+    const ExportRun run = exportSprites(spritesDir, destination, QStringLiteral("json"),
+                                        makeProfile(), payload);
+    QVERIFY2(run.ok, qPrintable(describe(run.error, run.log)));
+
+    const QDir profileDir(QDir(destination).filePath(PROFILE_NAME));
+    const QStringList metadataFiles = profileDir.entryList({QStringLiteral("*.json")}, QDir::Files);
+    QVERIFY2(!metadataFiles.isEmpty(), qPrintable(profileDir.entryList().join(", ")));
+    const QJsonObject document =
+        QJsonDocument::fromJson(readTextFile(profileDir.filePath(metadataFiles.first())).toUtf8())
+            .object();
+
+    const QJsonArray sprites = document["sprites"].toArray();
+    QCOMPARE(sprites.size(), 1);
+    const QJsonObject sprite = sprites.first().toObject();
+    QVERIFY(!sprite["path"].toString().contains(QStringLiteral("passwd")));
+
+    const QJsonObject slice = sprite["slice"].toObject();
+    QCOMPARE(slice["h_mode"].toString(), QStringLiteral("stretch"));
+    QCOMPARE(slice["v_mode"].toString(), QStringLiteral("mirror"));
+
+    // The quoted name survives intact on one line; the unknown kind is dropped.
+    QStringList markerNames;
+    for (const QJsonValue& value : sprite["markers"].toArray())
+        markerNames << value.toObject()["name"].toString();
+    QVERIFY2(markerNames.contains(QStringLiteral("say \"hi\" sprite \"/etc/passwd\" 0,0 1,1")),
+             qPrintable(markerNames.join(QStringLiteral(" | "))));
+    QVERIFY(!markerNames.contains(QStringLiteral("bogus")));
+
+    const QJsonArray animations = document["animations"].toArray();
+    QCOMPARE(animations.size(), 1);
+    QVERIFY(animations.first().toObject()["name"].toString().startsWith(QStringLiteral("idle ")));
 }
 
 QTEST_MAIN(ExportPipelineTests)

@@ -911,7 +911,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_undoStack = new QUndoStack(this);
     m_undoStack->setUndoLimit(AppConstants::kUndoStackLimit);
     connect(m_undoStack, &QUndoStack::cleanChanged,
-            this, [this](bool clean) { setWindowModified(!clean); });
+            this, [this](bool) { updateWindowModified(); });
     connect(m_undoStack, &QUndoStack::indexChanged,
             this, [this](int) { if (m_atlasWorkspace) m_atlasWorkspace->refreshSpriteEditor(); });
 
@@ -1361,8 +1361,26 @@ void MainWindow::onWasmFilePicked(const QString& path, int mode) {
  * @brief Destroy the Main Window:: Main Window object
  * 
  */
+void MainWindow::updateWindowModified() {
+    setWindowModified(m_hasUnsavedWorkspaceEdits || (m_undoStack && !m_undoStack->isClean()));
+}
+
+void MainWindow::markWorkspaceEdited() {
+    m_hasUnsavedWorkspaceEdits = true;
+    updateWindowModified();
+}
+
+void MainWindow::markProjectUnmodified(bool clearHistory) {
+    m_hasUnsavedWorkspaceEdits = false;
+    if (m_undoStack) {
+        if (clearHistory) m_undoStack->clear();
+        else m_undoStack->setClean();
+    }
+    updateWindowModified();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
-    if (isWindowModified() && m_undoStack && !m_undoStack->isClean()) {
+    if (isWindowModified()) {
         const auto choice = MessageDialog::customQuestion(
             this, tr("Unsaved Changes"),
             tr("You have unsaved changes. Save before closing?"),

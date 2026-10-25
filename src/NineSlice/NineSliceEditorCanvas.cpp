@@ -1,4 +1,5 @@
 #include "NineSliceEditorCanvas.h"
+#include "NineSliceInsets.h"
 #include "ViewUtils.h"
 
 #include <QGraphicsSimpleTextItem>
@@ -393,12 +394,13 @@ void NineSliceEditorCanvas::setInsets(int left, int top, int right, int bottom)
 {
     if (m_sourcePixmap.isNull()) return;
 
-    int sw = m_sourcePixmap.width();
-    int sh = m_sourcePixmap.height();
-    m_insetLeft   = qBound(0, left,   sw);
-    m_insetTop    = qBound(0, top,    sh);
-    m_insetRight  = qBound(0, right,  sw);
-    m_insetBottom = qBound(0, bottom, sh);
+    // sprat-cli rejects insets that don't fit the image, so keep them fitted here.
+    const NineSliceInsets fitted = fitNineSliceInsets({left, top, right, bottom},
+                                                      m_sourcePixmap.width(), m_sourcePixmap.height());
+    m_insetLeft   = fitted.left;
+    m_insetTop    = fitted.top;
+    m_insetRight  = fitted.right;
+    m_insetBottom = fitted.bottom;
 
     renderComposite();
 }
@@ -553,11 +555,13 @@ void NineSliceEditorCanvas::renderComposite()
     int sw = m_sourcePixmap.width();
     int sh = m_sourcePixmap.height();
 
-    // Clamp insets so corners never exceed half the source size
-    int l = qBound(0, m_insetLeft,   sw / 2);
-    int r = qBound(0, m_insetRight,  sw / 2);
-    int t = qBound(0, m_insetTop,    sh / 2);
-    int b = qBound(0, m_insetBottom, sh / 2);
+    // Fitted the same way as the exported insets, so the preview matches them.
+    const NineSliceInsets fitted =
+        fitNineSliceInsets({m_insetLeft, m_insetTop, m_insetRight, m_insetBottom}, sw, sh);
+    const int l = fitted.left;
+    const int r = fitted.right;
+    const int t = fitted.top;
+    const int b = fitted.bottom;
 
     QPixmap composite(tw, th);
     composite.fill(Qt::transparent);
@@ -630,20 +634,25 @@ void NineSliceEditorCanvas::updateLineGeometry()
 {
     int tw = m_targetSize.width();
     int th = m_targetSize.height();
+    const int sw = m_sourcePixmap.width();
+    const int sh = m_sourcePixmap.height();
 
-    m_lineLeft->setConstraint(0, tw);
+    // Each line stops where its inset would no longer fit the source image
+    // together with the opposite inset (left + right <= source width), and
+    // before crossing the opposite line.
+    m_lineLeft->setConstraint(0, qMax(0, qMin(tw, sw) - m_insetRight));
     m_lineLeft->setLine(0, 0, 0, th);
     m_lineLeft->setPosition(m_insetLeft);
 
-    m_lineTop->setConstraint(0, th);
+    m_lineTop->setConstraint(0, qMax(0, qMin(th, sh) - m_insetBottom));
     m_lineTop->setLine(0, 0, tw, 0);
     m_lineTop->setPosition(m_insetTop);
 
-    m_lineRight->setConstraint(0, tw);
+    m_lineRight->setConstraint(qMin(tw, qMax(m_insetLeft, tw - (sw - m_insetLeft))), tw);
     m_lineRight->setLine(0, 0, 0, th);
     m_lineRight->setPosition(tw - m_insetRight);
 
-    m_lineBottom->setConstraint(0, th);
+    m_lineBottom->setConstraint(qMin(th, qMax(m_insetTop, th - (sh - m_insetTop))), th);
     m_lineBottom->setLine(0, 0, tw, 0);
     m_lineBottom->setPosition(th - m_insetBottom);
 

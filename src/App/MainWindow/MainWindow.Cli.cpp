@@ -325,7 +325,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
         m_session->cachedLayoutScale = 1.0;
         m_session->activeFramePaths.clear();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
-        if (m_undoStack) m_undoStack->clear();
+        markProjectUnmodified(true);
 
         m_loadingUiMessage = tr("Copying files...");
         setLoading(true);

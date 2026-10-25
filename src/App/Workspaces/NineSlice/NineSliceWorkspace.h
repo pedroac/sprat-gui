@@ -57,6 +57,11 @@ private:
     void saveCurrentSprite();
     void applyNineSliceFilter();
     void updateFixedDimensions();
+    /// Caps each inset spin box at the source size minus the opposite inset, so
+    /// left + right and top + bottom always fit the image, as sprat-cli requires.
+    void updateInsetLimits();
+    /// Lifts the caps set by updateInsetLimits().
+    void resetInsetLimits();
 
     ProjectSession* m_session = nullptr;
     bool m_updatingUi = false;

@@ -483,6 +483,7 @@ set(PROJECT_SOURCES
     src/App/Workspaces/NormalMap/NormalWheelWidget.h
     src/App/Workspaces/NormalMap/NormalWheelWidget.cpp
     src/NineSlice/NineSliceEditorCanvas.h
+    src/NineSlice/NineSliceInsets.h
     src/NineSlice/NineSliceEditorCanvas.cpp
     src/NineSlice/NineSlicePreviewWidget.h
     src/NineSlice/NineSlicePreviewWidget.cpp
@@ -760,6 +761,16 @@ if(BUILD_TESTING)
         tests/CoreTests.cpp
         tests/ImageDiscoveryTests.cpp
         tests/ProjectSessionTests.cpp
+        tests/NineSliceWorkspaceTests.cpp
+        assets/icons.qrc
+        src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
+        src/App/Workspaces/Shared/NavigatorPanel.cpp
+        src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
+        src/App/MainWindow/SpritePreviewTooltip.cpp
+        src/NineSlice/NineSliceEditorCanvas.cpp
+        src/Core/SpriteTreeUtils.cpp
+        src/Core/ViewUtils.cpp
+        src/Core/ZoomableGraphicsView.cpp
         src/Animation/AnimationPreviewService.cpp
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Animation/Timelines/TimelineGenerationService.cpp
@@ -779,6 +790,10 @@ if(BUILD_TESTING)
     target_include_directories(sprat-gui-tests PRIVATE
         tests
         src
+        src/App/MainWindow
+        src/App/Workspaces
+        src/App/Workspaces/NineSlice
+        src/App/Workspaces/Shared
         src/Animation
         src/Animation/Timelines
         src/NineSlice
@@ -796,6 +811,7 @@ if(BUILD_TESTING)
         Qt6::Widgets
         Qt6::Concurrent
         Qt6::Network
+        Qt6::Svg
         Qt6::Test
         LibArchive::LibArchive
     )
@@ -816,6 +832,7 @@ if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
     )
     target_include_directories(sprat-gui-e2e PRIVATE
         src/Core
+        src/NineSlice
         src/Project
         src/Profiles
         src/CLITools

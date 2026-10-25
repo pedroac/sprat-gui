@@ -23,6 +23,11 @@
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
+namespace {
+/// Largest inset the spin boxes accept before a sprite image sets the real limit.
+constexpr int MAX_INSET = 9999;
+}
+
 // ---------------------------------------------------------------------------
 // filterItemNineSliced — recursively hide tree items whose sprite is not nine-sliced
 // Returns true if the item (or any descendant) is visible after filtering.
@@ -181,7 +186,7 @@ void NineSliceWorkspace::setupUi()
 
     auto makeSpin = [&]() -> QSpinBox* {
         auto* spin = new QSpinBox;
-        spin->setRange(0, 9999);
+        spin->setRange(0, MAX_INSET);
         spin->setSuffix(QStringLiteral(" px"));
         return spin;
     };
@@ -189,6 +194,10 @@ void NineSliceWorkspace::setupUi()
     m_topSpin    = makeSpin();
     m_rightSpin  = makeSpin();
     m_bottomSpin = makeSpin();
+    m_leftSpin->setObjectName(QStringLiteral("nineSliceLeftInset"));
+    m_topSpin->setObjectName(QStringLiteral("nineSliceTopInset"));
+    m_rightSpin->setObjectName(QStringLiteral("nineSliceRightInset"));
+    m_bottomSpin->setObjectName(QStringLiteral("nineSliceBottomInset"));
     m_hModeCombo = new QComboBox;
     m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-h.svg")), QStringLiteral("stretch"));
     m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-h.svg")),  QStringLiteral("repeat"));
@@ -295,8 +304,10 @@ void NineSliceWorkspace::enter()
         while (*it) {
             auto sp = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
             if (sp && !sp->path.isEmpty()) {
-                m_currentSpritePath = sp->path;
+                // Select before setting the path: the selection handler saves the
+                // UI into the current sprite, which would wipe this one's insets.
                 tree->setCurrentItem(*it);
+                m_currentSpritePath = sp->path;
                 break;
             }
             ++it;
@@ -355,11 +366,13 @@ void NineSliceWorkspace::loadSprite(const QString& path)
     }
 
     const double prevZoom = m_zoomSpin->value() / 100.0;
+    bool insetsFitted = false;
     m_updatingUi = true;
 
     m_nineSlicedBtn->setEnabled(true);
     m_nineSlicedBtn->setChecked(sp->isNineSliced);
 
+    resetInsetLimits(); // the previous sprite's caps must not clip this one's insets
     m_leftSpin->setValue(sp->nsLeft);
     m_topSpin->setValue(sp->nsTop);
     m_rightSpin->setValue(sp->nsRight);
@@ -376,11 +389,24 @@ void NineSliceWorkspace::loadSprite(const QString& path)
         m_canvas->setReadOnly(false);
         m_canvas->setSpriteImage(path);
         m_canvas->setInsets(sp->nsLeft, sp->nsTop, sp->nsRight, sp->nsBottom);
+        // Projects saved before the editor kept insets fitted may hold ones that
+        // don't fit the image; keep the canvas's fitted insets everywhere.
+        insetsFitted = sp->nsLeft != m_canvas->leftInset() || sp->nsTop != m_canvas->topInset()
+            || sp->nsRight != m_canvas->rightInset() || sp->nsBottom != m_canvas->bottomInset();
+        sp->nsLeft   = m_canvas->leftInset();
+        sp->nsTop    = m_canvas->topInset();
+        sp->nsRight  = m_canvas->rightInset();
+        sp->nsBottom = m_canvas->bottomInset();
+        m_leftSpin->setValue(sp->nsLeft);
+        m_topSpin->setValue(sp->nsTop);
+        m_rightSpin->setValue(sp->nsRight);
+        m_bottomSpin->setValue(sp->nsBottom);
         m_canvas->setFillModes(sp->nsHMode, sp->nsVMode);
         m_canvas->setSliceLinesVisible(m_linesCheck->isChecked());
         if (sp->nsTargetWidth > 0 && sp->nsTargetHeight > 0)
             m_canvas->setTargetSize(sp->nsTargetWidth, sp->nsTargetHeight);
         updateFixedDimensions();
+        updateInsetLimits();
     } else {
         // Show the sprite read-only (no lines/handles, dim overlay, forbidden cursor)
         m_canvas->clearSprite();  // clears m_currentPath so setSpriteImage always reloads
@@ -397,6 +423,7 @@ void NineSliceWorkspace::loadSprite(const QString& path)
         case NineSliceZoomOnChange::Reset100:   m_canvas->setZoom(1.0);      break;
         case NineSliceZoomOnChange::NoChange:   m_canvas->setZoom(prevZoom); break;
     }
+    if (insetsFitted) emit definitionsChanged();
 }
 
 void NineSliceWorkspace::saveCurrentSprite()
@@ -479,6 +506,7 @@ void NineSliceWorkspace::onInsetSpinChanged()
     if (m_updatingUi) return;
     m_canvas->setInsets(m_leftSpin->value(), m_topSpin->value(),
                         m_rightSpin->value(), m_bottomSpin->value());
+    updateInsetLimits();
     saveCurrentSprite();
     emit definitionsChanged();
 }
@@ -487,13 +515,41 @@ void NineSliceWorkspace::onCanvasInsetsChanged(int left, int top, int right, int
 {
     if (m_updatingUi) return;
     m_updatingUi = true;
+    // The canvas keeps its insets fitted; lift the old caps so none is clipped.
+    resetInsetLimits();
     m_leftSpin->setValue(left);
     m_topSpin->setValue(top);
     m_rightSpin->setValue(right);
     m_bottomSpin->setValue(bottom);
+    updateInsetLimits();
     m_updatingUi = false;
     saveCurrentSprite();
     emit definitionsChanged();
+}
+
+void NineSliceWorkspace::resetInsetLimits()
+{
+    const QSignalBlocker blockLeft(m_leftSpin), blockTop(m_topSpin),
+                         blockRight(m_rightSpin), blockBottom(m_bottomSpin);
+    for (QSpinBox* spin : {m_leftSpin, m_topSpin, m_rightSpin, m_bottomSpin})
+        spin->setMaximum(MAX_INSET);
+}
+
+void NineSliceWorkspace::updateInsetLimits()
+{
+    const QSize source = m_canvas->sourceSize();
+    if (!source.isValid()) {
+        resetInsetLimits();
+        return;
+    }
+    const QSignalBlocker blockLeft(m_leftSpin), blockTop(m_topSpin),
+                         blockRight(m_rightSpin), blockBottom(m_bottomSpin);
+    // Left and top first: when stale values overflow, right and bottom give up the
+    // excess, as in fitNineSliceInsets().
+    m_leftSpin->setMaximum(qMax(0, source.width() - m_rightSpin->value()));
+    m_rightSpin->setMaximum(qMax(0, source.width() - m_leftSpin->value()));
+    m_topSpin->setMaximum(qMax(0, source.height() - m_bottomSpin->value()));
+    m_bottomSpin->setMaximum(qMax(0, source.height() - m_topSpin->value()));
 }
 
 void NineSliceWorkspace::onFillModeChanged()

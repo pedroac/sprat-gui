@@ -1,5 +1,6 @@
 #include "ProjectPayloadCodec.h"
 #include "MarkerUtils.h"
+#include "NineSliceInsets.h"
 #include "ResolutionUtils.h"
 
 #include <QDateTime>
@@ -453,8 +454,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 ns.top    = nsObj["top"].toInt(0);
                 ns.right  = nsObj["right"].toInt(0);
                 ns.bottom = nsObj["bottom"].toInt(0);
-                ns.hMode  = nsObj["h_mode"].toString(QStringLiteral("stretch"));
-                ns.vMode  = nsObj["v_mode"].toString(QStringLiteral("stretch"));
+                ns.hMode  = nineSliceFillModeOrDefault(nsObj["h_mode"].toString());
+                ns.vMode  = nineSliceFillModeOrDefault(nsObj["v_mode"].toString());
                 for (const auto& spVal : nsObj["sprites"].toArray()) {
                     QString sp = spVal.toString();
                     if (!sp.isEmpty() && QDir::isRelativePath(sp) && !currentFolder.isEmpty())
@@ -504,8 +505,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 sprite->nsTop    = state["ns_top"].toInt(sprite->nsTop);
                 sprite->nsRight  = state["ns_right"].toInt(sprite->nsRight);
                 sprite->nsBottom = state["ns_bottom"].toInt(sprite->nsBottom);
-                sprite->nsHMode        = state["ns_h_mode"].toString(sprite->nsHMode);
-                sprite->nsVMode        = state["ns_v_mode"].toString(sprite->nsVMode);
+                sprite->nsHMode        = nineSliceFillModeOrDefault(state["ns_h_mode"].toString(sprite->nsHMode));
+                sprite->nsVMode        = nineSliceFillModeOrDefault(state["ns_v_mode"].toString(sprite->nsVMode));
                 sprite->nsTargetWidth  = state["ns_target_width"].toInt(0);
                 sprite->nsTargetHeight = state["ns_target_height"].toInt(0);
             }

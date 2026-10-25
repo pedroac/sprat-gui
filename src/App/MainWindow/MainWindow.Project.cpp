@@ -627,7 +627,7 @@ void MainWindow::onSaveClicked() {
         syncNewSpritesToProjectFolder(projectDir);
     }
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
-    if (m_undoStack) m_undoStack->setClean();
+    markProjectUnmodified(false);
     updateUiState();
 #endif
 }
@@ -737,7 +737,7 @@ void MainWindow::onSaveAsClicked() {
         return;
     }
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
-    if (m_undoStack) m_undoStack->setClean();
+    markProjectUnmodified(false);
     addToRecentProjects(newProjectFilePath);
     updateUiState();
 }
@@ -1082,7 +1082,7 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
     }
 
     // Clear undo history when loading a new project
-    if (m_undoStack) m_undoStack->clear();
+    markProjectUnmodified(true);
 
     // Clear selection state when loading a new project to avoid stale pointers
     m_session->selectedSprite.reset();
