@@ -1,4 +1,5 @@
 #include "ProjectPayloadCodec.h"
+#include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "NineSliceInsets.h"
 #include "ResolutionUtils.h"
@@ -559,17 +560,15 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     out.selectedTimelineFrameRows = fromJsonArray(animInfo["selected_frame_rows"]);
     out.animationFrameIndex = animInfo["animation_frame_index"].toInt(0);
     out.animationPlaying = animInfo["animation_playing"].toBool(false);
-    const int legacyAnimationFps = animInfo["animation_fps"].toInt(8);
+    const int legacyAnimationFps =
+        sanitizedAnimationFps(animInfo["animation_fps"].toInt(DEFAULT_ANIMATION_FPS));
     QJsonArray timelinesArr = animInfo["timelines"].toArray();
     out.timelines.reserve(timelinesArr.size());
     for (const auto& tVal : timelinesArr) {
         QJsonObject tObj = tVal.toObject();
         AnimationTimeline t;
         t.name = tObj["name"].toString();
-        t.fps = tObj["fps"].toInt(legacyAnimationFps);
-        if (t.fps <= 0) {
-            t.fps = 8;
-        }
+        t.fps = sanitizedAnimationFps(tObj["fps"].toInt(legacyAnimationFps));
         QJsonArray framesArr = tObj["frames"].toArray();
         t.frames.reserve(framesArr.size());
         for (const auto& fVal : framesArr) {
@@ -801,8 +800,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             const QJsonObject tObj = tVal.toObject();
             AnimationTimeline t;
             t.name = tObj["name"].toString();
-            t.fps  = tObj["fps"].toInt(legacyFps);
-            if (t.fps <= 0) t.fps = 8;
+            t.fps  = sanitizedAnimationFps(tObj["fps"].toInt(legacyFps));
             const QJsonArray fArr = tObj["frames"].toArray();
             t.frames.reserve(fArr.size());
             for (const auto& fVal : fArr) t.frames.append(fVal.toString());
@@ -862,7 +860,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 }
             }
 
-            atlas.timelines = parseTimelines(aObj["timelines"].toArray(), 8);
+            atlas.timelines = parseTimelines(aObj["timelines"].toArray(), DEFAULT_ANIMATION_FPS);
 
             out.atlases.append(atlas);
         }

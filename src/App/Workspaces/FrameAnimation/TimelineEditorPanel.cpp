@@ -1,4 +1,5 @@
 #include "TimelineEditorPanel.h"
+#include "AnimationModels.h"
 #include "ProjectSession.h"
 #include "TimelineTreeWidget.h"
 #include "TimelineListWidget.h"
@@ -219,8 +220,8 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     nameLayout->addWidget(m_timelineNameEdit);
     nameLayout->addWidget(new QLabel(tr("FPS:"), m_selectedTimelineGroup));
     m_timelineFpsSpin = new QSpinBox(m_selectedTimelineGroup);
-    m_timelineFpsSpin->setRange(1, 60);
-    m_timelineFpsSpin->setValue(8);
+    m_timelineFpsSpin->setRange(1, MAX_ANIMATION_FPS);
+    m_timelineFpsSpin->setValue(DEFAULT_ANIMATION_FPS);
     m_timelineFpsSpin->setEnabled(false);
     m_timelineFpsSpin->setToolTip(tr("Frames per second for animation playback"));
     m_timelineFpsSpin->setAccessibleName(tr("Timeline FPS"));

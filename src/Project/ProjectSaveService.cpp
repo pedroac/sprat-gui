@@ -1,4 +1,5 @@
 #include "ProjectSaveService.h"
+#include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
 #include "ArchiveExtractor.h"
@@ -329,7 +330,9 @@ bool ProjectSaveService::save(
     }
 
     QJsonObject animInfo = projectPayload["animations"].toObject();
-    const int animationFps = animInfo["animation_fps"].toInt(8);
+    // Capped like the project loader does, so a hand-edited project still exports.
+    const int animationFps =
+        sanitizedAnimationFps(animInfo["animation_fps"].toInt(DEFAULT_ANIMATION_FPS));
     QJsonArray timelines = animInfo["timelines"].toArray();
     
     QString animContent;
@@ -338,10 +341,7 @@ bool ProjectSaveService::save(
 
     for (int i = 0; i < timelines.size(); ++i) {
         QJsonObject timeline = timelines[i].toObject();
-        int timelineFps = timeline["fps"].toInt(animationFps);
-        if (timelineFps <= 0) {
-            timelineFps = 8;
-        }
+        const int timelineFps = sanitizedAnimationFps(timeline["fps"].toInt(animationFps));
         
         animStream << "animation " << cliQuoted(timeline["name"].toString()) << " " << timelineFps << "\n";
         const QString aliasOf = timeline["alias_of"].toString();

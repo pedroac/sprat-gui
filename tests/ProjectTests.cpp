@@ -15,6 +15,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <limits>
+
 void ProjectTests::testProjectPayloadBuildStoresListSource() {
     ProjectPayloadBuildInput input;
     input.currentFolder = "/tmp/project";
@@ -69,6 +71,61 @@ void ProjectTests::testProjectPayloadMigratesLegacyRawTransform() {
     QCOMPARE(current.saveConfig.transform, QString("raw"));
     QCOMPARE(current.exportPresets.first().transform, QString("raw"));
     QCOMPARE(atlasTransform(current), QString("raw"));
+}
+
+void ProjectTests::testSanitizedAnimationFps() {
+    QCOMPARE(sanitizedAnimationFps(1), 1);
+    QCOMPARE(sanitizedAnimationFps(MAX_ANIMATION_FPS), MAX_ANIMATION_FPS);
+    QCOMPARE(sanitizedAnimationFps(MAX_ANIMATION_FPS + 1), MAX_ANIMATION_FPS);
+    QCOMPARE(sanitizedAnimationFps(std::numeric_limits<int>::max()), MAX_ANIMATION_FPS);
+    QCOMPARE(sanitizedAnimationFps(0), DEFAULT_ANIMATION_FPS);
+    QCOMPARE(sanitizedAnimationFps(-5), DEFAULT_ANIMATION_FPS);
+    QCOMPARE(MAX_ANIMATION_FPS, 100); // GIF delays are whole hundredths of a second
+}
+
+void ProjectTests::testProjectPayloadCapsAnimationFps() {
+    // A hand-edited project: speeds above the cap, or unset.
+    const QJsonArray timelines{
+        QJsonObject{{"name", "fast"}, {"fps", 1000}},
+        QJsonObject{{"name", "max"}, {"fps", 100}},
+        QJsonObject{{"name", "zero"}, {"fps", 0}},
+        QJsonObject{{"name", "legacy"}},  // takes the file-wide animation_fps
+    };
+    auto fpsOf = [](const QVector<AnimationTimeline>& list, const QString& name) {
+        for (const AnimationTimeline& t : list) {
+            if (t.name == name) return t.fps;
+        }
+        return -1;
+    };
+
+    // Schema 3: one set of timelines.
+    QJsonObject legacy;
+    legacy["schema_version"] = 3;
+    legacy["animations"] = QJsonObject{{"animation_fps", 500}, {"timelines", timelines}};
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult old =
+        ProjectPayloadCodec::applyToLayout(legacy, "/tmp/project", layoutModels);
+    QCOMPARE(fpsOf(old.timelines, "fast"), MAX_ANIMATION_FPS);
+    QCOMPARE(fpsOf(old.timelines, "max"), 100);
+    QCOMPARE(fpsOf(old.timelines, "zero"), DEFAULT_ANIMATION_FPS);
+    QCOMPARE(fpsOf(old.timelines, "legacy"), MAX_ANIMATION_FPS);
+
+    // Schema 4: timelines per atlas.
+    QJsonObject current;
+    current["schema_version"] = 4;
+    current["atlases"] = QJsonArray{QJsonObject{
+        {"id", "atlas"}, {"name", "atlas"}, {"timelines", timelines}}};
+    const ProjectPayloadApplyResult result =
+        ProjectPayloadCodec::applyToLayout(current, "/tmp/project", layoutModels);
+    const AtlasEntry* atlas = nullptr;
+    for (const AtlasEntry& a : result.atlases) {
+        if (a.id == QLatin1String("atlas")) atlas = &a;
+    }
+    QVERIFY(atlas != nullptr);
+    QCOMPARE(fpsOf(atlas->timelines, "fast"), MAX_ANIMATION_FPS);
+    QCOMPARE(fpsOf(atlas->timelines, "max"), 100);
+    QCOMPARE(fpsOf(atlas->timelines, "zero"), DEFAULT_ANIMATION_FPS);
+    QCOMPARE(fpsOf(atlas->timelines, "legacy"), DEFAULT_ANIMATION_FPS);
 }
 
 void ProjectTests::testProjectFileLoaderLoad() {

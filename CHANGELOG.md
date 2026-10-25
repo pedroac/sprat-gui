@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame Animation workspace: onion skin now defaults to off
 - Sprites workspace: trim rect now defaults to on
 - Atlas Sprites: deduplication mode now defaults to Exact instead of None
+- Frame Animation workspace: animations can now run at up to 100 FPS (was 60). Projects with faster animations load capped at 100 FPS, the fastest speed a GIF export can show
 - Export: the "Raw (sprat-cli format)" format is now called "Layout text (sprat-cli files)", so it can't be confused with sprat-cli's new `raw` format. Saved projects keep their choice
 
 ### Fixed
