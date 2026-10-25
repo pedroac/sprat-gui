@@ -5,9 +5,9 @@
 /// Frames per second of an animation with no speed of its own.
 constexpr int DEFAULT_ANIMATION_FPS = 8;
 
-/// Most frames per second an animation may have. GIF frame delays are whole
-/// hundredths of a second, so faster animations could not be exported as GIF.
-/// sprat-cli and sprat-lib (SPRAT_FPS_LIMIT) accept up to 240.
+/// Most frames per second an animation may have, the limit sprat-cli and
+/// sprat-lib (SPRAT_FPS_LIMIT) enforce. GIF frame delays are whole hundredths
+/// of a second, so faster animations could not be exported as GIF anyway.
 constexpr int MAX_ANIMATION_FPS = 100;
 
 /// An fps as it may be stored: 0 or less means unset and becomes the default,

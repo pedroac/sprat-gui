@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 
 ### Dependencies
-- Updated sprat-cli to v0.21.0
+- Updated sprat-cli to v0.22.0, which rejects animations faster than 100 FPS
 - macOS: the bundled sprat-cli tools are built from source with the app instead of being taken from sprat-cli's macOS release
 
 ## [0.8.0] - 2026-06-15
