@@ -343,10 +343,11 @@ bool ProjectSaveService::save(
         QJsonObject timeline = timelines[i].toObject();
         const int timelineFps = sanitizedAnimationFps(timeline["fps"].toInt(animationFps));
         
-        animStream << "animation " << cliQuoted(timeline["name"].toString()) << " " << timelineFps << "\n";
+        animStream << "animation " << cliQuoted(timeline["name"].toString());
         const QString aliasOf = timeline["alias_of"].toString();
         if (!aliasOf.isEmpty()) {
-            animStream << "alias " << cliQuoted(aliasOf);
+            // An alias goes on one line and plays at its source's speed and loop mode.
+            animStream << " alias " << cliQuoted(aliasOf);
             const bool hFlip = timeline["h_flip"].toBool();
             const bool vFlip = timeline["v_flip"].toBool();
             if (hFlip || vFlip) {
@@ -356,6 +357,14 @@ bool ProjectSaveService::save(
             }
             animStream << "\n";
         } else {
+            animStream << " " << timelineFps;
+            // sprat-cli before v0.23.0 reads only the fps, so the mode is ignored there.
+            const AnimationLoopMode loopMode = animationLoopModeFromName(timeline["loop"].toString())
+                                                   .value_or(AnimationLoopMode::Loop);
+            if (loopMode != AnimationLoopMode::Loop) {
+                animStream << " " << animationLoopModeName(loopMode);
+            }
+            animStream << "\n";
             QJsonArray frames = timeline["frames"].toArray();
             for (const auto& fVal : frames) {
                 animStream << "- frame " << cliQuoted(fVal.toString()) << "\n";

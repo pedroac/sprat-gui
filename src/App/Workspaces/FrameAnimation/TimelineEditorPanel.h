@@ -5,6 +5,7 @@
 #include <QPixmap>
 #include <QSize>
 #include <QStringList>
+#include "AnimationModels.h"
 
 class QLineEdit;
 class QLabel;
@@ -48,6 +49,7 @@ public:
     QLabel*             timelineAliasLabel()       const { return m_timelineAliasLabel; }
     QLabel*             timelineFlipLabel()        const { return m_timelineFlipLabel; }
     QComboBox*          timelineFlipCombo()        const { return m_timelineFlipCombo; }
+    QComboBox*          timelineLoopCombo()        const { return m_timelineLoopCombo; }
     QWidget*            timelineDropArea()         const { return m_timelineDropArea; }
     QLabel*             timelineDragHintLabel()    const { return m_timelineDragHintLabel; }
     TimelineListWidget* timelineFramesList()       const { return m_timelineFramesList; }
@@ -97,6 +99,7 @@ private slots:
     void onTimelineFpsChanged(int fps);
     void onTimelineCreateAlias();
     void onTimelineFlipChanged(int index);
+    void onTimelineLoopChanged(int index);
     void onTimelineContextMenu(const QPoint& pos);
     void onTimelineDeleteKey();
     void onTimelineTreeDropCompleted(int draggedIndex, const QString& draggedFolder, const QString& targetFolder);
@@ -111,6 +114,8 @@ private slots:
 private:
     /** Refreshes the list, restores current item, refreshes frames, emits animationDataChanged. */
     void refreshAndSelect();
+    /** Shows @p mode in the loop combo without emitting a change. */
+    void setLoopComboMode(AnimationLoopMode mode);
 
     // Timeline list section
     QWidget*            m_listArea            = nullptr;
@@ -127,6 +132,7 @@ private:
     QLabel*             m_timelineAliasLabel      = nullptr;
     QLabel*             m_timelineFlipLabel       = nullptr;
     QComboBox*          m_timelineFlipCombo       = nullptr;
+    QComboBox*          m_timelineLoopCombo       = nullptr;
     QWidget*            m_timelineDropArea        = nullptr;
     QLabel*             m_timelineDragHintLabel   = nullptr;
     TimelineListWidget* m_timelineFramesList      = nullptr;

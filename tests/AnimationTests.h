@@ -6,4 +6,8 @@ class AnimationTests : public QObject {
 private slots:
     void testAnimationPreviewUsesTimelineBounds();
     void testTimelineGenerationFromLayout();
+    void testAnimationLoopModeNames();
+    void testAnimationPlayOrder();
+    void testPlaybackFollowsLoopMode();
+    void testPlaybackRestartsFinishedOnceAnimation();
 };

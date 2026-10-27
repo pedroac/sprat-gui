@@ -50,13 +50,19 @@ public:
      *
      * @param timelines List of available animation timelines
      * @param selectedTimelineIndex Index of the currently selected timeline
+     * The timeline's loop mode (its source's, for an alias) sets the play
+     * order: ping-pong modes play back to the start, and once modes stop on
+     * their last step and set @p finished.
+     *
      * @param frameIndex Current frame index (will be updated)
+     * @param playStep Position in the loop mode's play order (will be updated)
      * @param elapsedMs Wall-clock milliseconds since the previous tick
      * @param fps Target playback speed in frames per second
+     * @param finished Set to true when a once animation reached its end
      * @return bool True if the frame index changed
      */
     static bool tick(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex,
-                     int& frameIndex, qint64 elapsedMs, int fps);
+                     int& frameIndex, int& playStep, qint64 elapsedMs, int fps, bool& finished);
 
     /**
      * @brief Toggles play/pause state of the animation.
@@ -64,10 +70,13 @@ public:
      * @param timelines List of available animation timelines
      * @param selectedTimelineIndex Index of the currently selected timeline
      * @param fps Frames per second for playback
+     * @param frameIndex Current frame index (reset when a once animation that ended starts again)
+     * @param playStep Position in the loop mode's play order (reset with frameIndex)
      * @param playing Current playing state (will be updated)
      * @param timer Timer used for animation playback (will be started/stopped)
      * @param playPauseButton Play/pause button to update
      * @return bool True if state was toggled, false if no valid timeline selected
      */
-    static bool togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer);
+    static bool togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps,
+                                int& frameIndex, int& playStep, bool& playing, QTimer* timer);
 };

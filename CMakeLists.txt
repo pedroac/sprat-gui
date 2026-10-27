@@ -772,6 +772,8 @@ if(BUILD_TESTING)
         src/Core/ViewUtils.cpp
         src/Core/ZoomableGraphicsView.cpp
         src/Animation/AnimationPreviewService.cpp
+        src/Animation/AnimationPlaybackService.cpp
+        src/Animation/Test/AnimationTestOps.cpp
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp
@@ -795,6 +797,7 @@ if(BUILD_TESTING)
         src/App/Workspaces/NineSlice
         src/App/Workspaces/Shared
         src/Animation
+        src/Animation/Test
         src/Animation/Timelines
         src/NineSlice
         src/Project

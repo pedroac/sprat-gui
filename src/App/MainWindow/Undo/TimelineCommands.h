@@ -452,6 +452,52 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// (1029) SetTimelineLoopModeCommand
+// ---------------------------------------------------------------------------
+class SetTimelineLoopModeCommand : public QUndoCommand {
+public:
+    SetTimelineLoopModeCommand(QVector<AnimationTimeline>* timelines, int index,
+                               AnimationLoopMode oldMode, AnimationLoopMode newMode,
+                               std::function<void()> postExecute,
+                               QUndoCommand* parent = nullptr)
+        : QUndoCommand(QObject::tr("Change Timeline Loop Mode"), parent)
+        , m_timelines(timelines), m_index(index)
+        , m_oldMode(oldMode), m_newMode(newMode)
+        , m_postExecute(std::move(postExecute))
+        , m_skipFirstRedo(true)
+    {}
+
+    void redo() override {
+        if (m_skipFirstRedo) { m_skipFirstRedo = false; return; }
+        if (m_index >= 0 && m_index < m_timelines->size())
+            (*m_timelines)[m_index].loopMode = m_newMode;
+        if (m_postExecute) m_postExecute();
+    }
+
+    void undo() override {
+        if (m_index >= 0 && m_index < m_timelines->size())
+            (*m_timelines)[m_index].loopMode = m_oldMode;
+        if (m_postExecute) m_postExecute();
+    }
+
+    int id() const override { return 1029; }
+
+    bool mergeWith(const QUndoCommand* other) override {
+        const auto* o = static_cast<const SetTimelineLoopModeCommand*>(other);
+        if (o->m_timelines != m_timelines || o->m_index != m_index) return false;
+        m_newMode = o->m_newMode;
+        return true;
+    }
+
+private:
+    QVector<AnimationTimeline>* m_timelines;
+    int m_index;
+    AnimationLoopMode m_oldMode, m_newMode;
+    std::function<void()> m_postExecute;
+    mutable bool m_skipFirstRedo;
+};
+
+// ---------------------------------------------------------------------------
 // (1022) SetTimelineFlipCommand
 // ---------------------------------------------------------------------------
 class SetTimelineFlipCommand : public QUndoCommand {

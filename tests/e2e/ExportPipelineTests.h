@@ -26,6 +26,7 @@ private slots:
     void testUnicodePaths();
     void testNineSliceInsetsAreExportedAndFitted();
     void testProjectTextCantInjectCliRecords();
+    void testAnimationLoopModesAreExported();
 
 private:
     struct ExportRun {

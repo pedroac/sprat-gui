@@ -82,10 +82,16 @@ bool AnimationExportService::exportAnimation(
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
-    const auto& frames = timelines[selectedTimelineIndex].frames;
-    if (frames.isEmpty()) {
+    const auto& timeline = aliasSourceTimeline(timelines, selectedTimelineIndex);
+    if (timeline.frames.isEmpty()) {
         return false;
     }
+    // One pass in the loop mode's order; a GIF repeats it unless the mode plays once.
+    QStringList frames;
+    for (int frameIndex : animationPlayOrder(timeline.frames.size(), timeline.loopMode)) {
+        frames.append(timeline.frames[frameIndex]);
+    }
+    const int gifLoopCount = animationLoopModeRepeats(timeline.loopMode) ? 0 : 1;
 
     QString converterExe = QStandardPaths::findExecutable("magick");
     if (converterExe.isEmpty()) {
@@ -195,7 +201,7 @@ bool AnimationExportService::exportAnimation(
     QProcess proc;
     QStringList args;
     if (useMagick) {
-        args << "-delay" << QString::number(100 / fps) << "-loop" << "0"
+        args << "-delay" << QString::number(100 / fps) << "-loop" << QString::number(gifLoopCount)
              << tempDir.path() + "/frame_*.png" << outPath;
         proc.start(converterExe, args);
     } else if (!ffmpegExe.isEmpty()) {
@@ -220,6 +226,7 @@ bool AnimationExportService::exportAnimation(
     Q_UNUSED(useMagick);
     Q_UNUSED(converterExe);
     Q_UNUSED(ffmpegExe);
+    Q_UNUSED(gifLoopCount);
     bool ok = false;
     #ifdef Q_OS_WASM
         showError(trAnimationExport("Not Supported"), trAnimationExport("Exporting to GIF/Video is not supported in the web version."));

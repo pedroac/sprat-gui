@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Frame Animation workspace: each timeline has a loop mode (Loop, Once, Ping-pong or Ping-pong once). The preview, GIF/video export and exported metadata play it that way; an alias plays the way its source does. Projects saved before keep looping
+
 ### Changed
 - Frame Animation workspace: onion skin now defaults to off
 - Sprites workspace: trim rect now defaults to on
@@ -31,10 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: nine-slice insets set in the Nine-Slice workspace are now written to the export
 - Nine-Slice workspace: opening it no longer resets the first sprite's insets, fill modes and size
 - Edits in the Nine-Slice and Normal Map workspaces now count as unsaved changes: the app asks to save them before closing, and saving clears the unsaved marker in the title bar
+- Export: projects with alias timelines no longer fail to export ("Invalid alias line"); aliases and their flip are now written the way sprat-cli reads them
 - Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 
 ### Dependencies
-- Updated sprat-cli to v0.22.0, which rejects animations faster than 100 FPS
+- Updated sprat-cli to v0.24.0, which adds animation loop modes and rejects animations faster than 100 FPS
 - macOS: the bundled sprat-cli tools are built from source with the app instead of being taken from sprat-cli's macOS release
 
 ## [0.8.0] - 2026-06-15

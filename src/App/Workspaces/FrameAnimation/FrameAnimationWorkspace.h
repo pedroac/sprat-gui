@@ -130,6 +130,7 @@ private:
     // ── Playback state ──────────────────────────────────────────────────────
     QTimer*       m_animTimer      = nullptr;
     int           m_animFrameIndex = 0;
+    int           m_animPlayStep   = 0;  ///< Position in the loop mode's play order
     bool          m_animPlaying    = false;
     QElapsedTimer m_animElapsed;
 

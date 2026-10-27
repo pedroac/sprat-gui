@@ -32,7 +32,8 @@ int selectedTimelineFps(const QVector<AnimationTimeline>& timelines, int selecte
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return 8;
     }
-    return qMax(1, timelines[selectedTimelineIndex].fps);
+    // An alias plays at its source's speed.
+    return qMax(1, aliasSourceTimeline(timelines, selectedTimelineIndex).fps);
 }
 } // namespace
 
@@ -219,6 +220,8 @@ void FrameAnimationWorkspace::onAnimPlayPauseClicked()
         m_session->activeAtlas().timelines,
         m_session->selectedTimelineIndex,
         selectedTimelineFps(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex),
+        m_animFrameIndex,
+        m_animPlayStep,
         m_animPlaying,
         m_animTimer);
     if (m_animPanel->playPauseButton()) {
@@ -228,6 +231,7 @@ void FrameAnimationWorkspace::onAnimPlayPauseClicked()
     }
     if (m_animPlaying && !wasPlaying) {
         m_animElapsed.start();
+        refreshAnimationTest();
     } else if (wasPlaying && !m_animPlaying) {
         emit frameChanged();
     }
@@ -264,11 +268,15 @@ void FrameAnimationWorkspace::onAnimTimerTimeout()
         return;
 #endif
     const qint64 elapsed = m_animElapsed.restart();
+    bool finished = false;
     if (!AnimationPlaybackService::tick(m_session->activeAtlas().timelines, m_session->selectedTimelineIndex,
-                                        m_animFrameIndex, elapsed, fps)) {
+                                        m_animFrameIndex, m_animPlayStep, elapsed, fps, finished)) {
         return;
     }
     refreshAnimationTest();
+    if (finished && m_animPlaying) {
+        onAnimPlayPauseClicked();
+    }
 }
 
 void FrameAnimationWorkspace::refreshAnimationTest()

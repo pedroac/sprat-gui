@@ -16,10 +16,25 @@ bool AnimationTestOps::stepNext(const QStringList& frames, int& frameIndex) {
     return true;
 }
 
-bool AnimationTestOps::tick(const QStringList& frames, int& frameIndex, int count) {
-    if (frames.isEmpty())
+int AnimationTestOps::currentPlayStep(const QVector<int>& playOrder, int frameIndex, int playStep) {
+    if (playStep >= 0 && playStep < playOrder.size() && playOrder[playStep] == frameIndex)
+        return playStep;
+    return qMax(0, playOrder.indexOf(frameIndex));
+}
+
+bool AnimationTestOps::tickPlayOrder(const QVector<int>& playOrder, bool repeats,
+                                     int& frameIndex, int& playStep, int count, bool& finished) {
+    finished = false;
+    if (playOrder.isEmpty())
         return false;
-    const int n = frames.size();
-    frameIndex = ((frameIndex + qMax(1, count)) % n + n) % n;
+    const int n = playOrder.size();
+    playStep = currentPlayStep(playOrder, frameIndex, playStep);
+    if (repeats) {
+        playStep = (playStep + qMax(1, count)) % n;
+    } else {
+        playStep = qMin(playStep + qMax(1, count), n - 1);
+        finished = playStep == n - 1;
+    }
+    frameIndex = playOrder[playStep];
     return true;
 }

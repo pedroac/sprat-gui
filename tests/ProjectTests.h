@@ -8,6 +8,7 @@ private slots:
     void testProjectPayloadMigratesLegacyRawTransform();
     void testSanitizedAnimationFps();
     void testProjectPayloadCapsAnimationFps();
+    void testProjectPayloadKeepsAnimationLoopMode();
     void testProjectFileLoaderLoad();
     void testProjectFileLoaderLoadZip();
     void testAutosaveProjectStoreCreatesMissingParentDir();

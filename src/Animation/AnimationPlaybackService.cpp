@@ -4,19 +4,11 @@
 #include "AnimationTestOps.h"
 
 namespace {
-// Resolve the effective frame list for playback, following alias references.
 const QStringList& effectiveFrames(const QVector<AnimationTimeline>& timelines, int index) {
     static const QStringList kEmpty;
     if (index < 0 || index >= timelines.size())
         return kEmpty;
-    const auto& tl = timelines[index];
-    if (!tl.aliasOf.isEmpty()) {
-        for (const auto& src : timelines) {
-            if (src.name == tl.aliasOf && src.aliasOf.isEmpty())
-                return src.frames;
-        }
-    }
-    return tl.frames;
+    return aliasSourceTimeline(timelines, index).frames;
 }
 }
 
@@ -47,8 +39,11 @@ bool AnimationPlaybackService::next(const QVector<AnimationTimeline>& timelines,
 bool AnimationPlaybackService::tick(const QVector<AnimationTimeline>& timelines,
                                     int selectedTimelineIndex,
                                     int& frameIndex,
+                                    int& playStep,
                                     qint64 elapsedMs,
-                                    int fps) {
+                                    int fps,
+                                    bool& finished) {
+    finished = false;
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -56,10 +51,14 @@ bool AnimationPlaybackService::tick(const QVector<AnimationTimeline>& timelines,
     // Capped at 8 to prevent large jumps after the tab was backgrounded.
     const double msPerFrame = 1000.0 / qMax(1, fps);
     const int count = qBound(1, qRound(static_cast<double>(elapsedMs) / msPerFrame), 8);
-    return AnimationTestOps::tick(effectiveFrames(timelines, selectedTimelineIndex), frameIndex, count);
+    const AnimationTimeline& source = aliasSourceTimeline(timelines, selectedTimelineIndex);
+    return AnimationTestOps::tickPlayOrder(
+        animationPlayOrder(source.frames.size(), source.loopMode),
+        animationLoopModeRepeats(source.loopMode),
+        frameIndex, playStep, count, finished);
 }
 
-bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, bool& playing, QTimer* timer) {
+bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>& timelines, int selectedTimelineIndex, int fps, int& frameIndex, int& playStep, bool& playing, QTimer* timer) {
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -68,6 +67,14 @@ bool AnimationPlaybackService::togglePlayPause(const QVector<AnimationTimeline>&
     }
     playing = !playing;
     if (playing) {
+        // An animation that plays once and already ended starts over.
+        const AnimationTimeline& source = aliasSourceTimeline(timelines, selectedTimelineIndex);
+        const QVector<int> order = animationPlayOrder(source.frames.size(), source.loopMode);
+        if (!animationLoopModeRepeats(source.loopMode)
+                && AnimationTestOps::currentPlayStep(order, frameIndex, playStep) == order.size() - 1) {
+            playStep = 0;
+            frameIndex = order.first();
+        }
 #ifdef Q_OS_WASM
         // In WASM, Qt's event loop is driven by requestAnimationFrame (~60 fps).
         // interval=0 fires on every RAF callback; QElapsedTimer in onAnimTimerTimeout

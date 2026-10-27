@@ -40,6 +40,39 @@ QString readTransform(const QJsonValue& value, int schemaVersion) {
     return transform;
 }
 
+QJsonObject timelineToJson(const AnimationTimeline& t) {
+    QJsonObject tObj;
+    tObj["name"] = t.name;
+    tObj["fps"] = t.fps;
+    QJsonArray framesArr;
+    for (const auto& f : t.frames) {
+        framesArr.append(f);
+    }
+    tObj["frames"] = framesArr;
+    if (!t.aliasOf.isEmpty()) tObj["alias_of"] = t.aliasOf;
+    if (t.hFlip) tObj["h_flip"] = true;
+    if (t.vFlip) tObj["v_flip"] = true;
+    if (t.loopMode != AnimationLoopMode::Loop) tObj["loop"] = animationLoopModeName(t.loopMode);
+    return tObj;
+}
+
+AnimationTimeline timelineFromJson(const QJsonObject& tObj, int defaultFps) {
+    AnimationTimeline t;
+    t.name = tObj["name"].toString();
+    t.fps = sanitizedAnimationFps(tObj["fps"].toInt(defaultFps));
+    const QJsonArray framesArr = tObj["frames"].toArray();
+    t.frames.reserve(framesArr.size());
+    for (const auto& fVal : framesArr) {
+        t.frames.append(fVal.toString());
+    }
+    t.aliasOf = tObj["alias_of"].toString();
+    t.hFlip   = tObj["h_flip"].toBool(false);
+    t.vFlip   = tObj["v_flip"].toBool(false);
+    // Projects saved before loop modes have none, and those animations looped.
+    t.loopMode = animationLoopModeFromName(tObj["loop"].toString()).value_or(AnimationLoopMode::Loop);
+    return t;
+}
+
 bool isValidCliPath(const QString& path) {
     if (path.isEmpty()) {
         return true; // Empty path is allowed (use default)
@@ -173,18 +206,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     animInfo["animation_playing"] = input.animationPlaying;
     QJsonArray timelinesArr;
     for (const auto& t : input.timelines) {
-        QJsonObject tObj;
-        tObj["name"] = t.name;
-        tObj["fps"] = t.fps;
-        QJsonArray framesArr;
-        for (const auto& f : t.frames) {
-            framesArr.append(f);
-        }
-        tObj["frames"] = framesArr;
-        if (!t.aliasOf.isEmpty()) tObj["alias_of"] = t.aliasOf;
-        if (t.hFlip) tObj["h_flip"] = true;
-        if (t.vFlip) tObj["v_flip"] = true;
-        timelinesArr.append(tObj);
+        timelinesArr.append(timelineToJson(t));
     }
     if (!input.timelines.isEmpty()) {
         // Keep legacy field for older consumers that still expect one global fps.
@@ -238,16 +260,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             // Timelines
             QJsonArray atArr;
             for (const auto& t : atlas.timelines) {
-                QJsonObject tObj;
-                tObj["name"] = t.name;
-                tObj["fps"]  = t.fps;
-                QJsonArray fArr;
-                for (const auto& f : t.frames) fArr.append(f);
-                tObj["frames"] = fArr;
-                if (!t.aliasOf.isEmpty()) tObj["alias_of"] = t.aliasOf;
-                if (t.hFlip) tObj["h_flip"] = true;
-                if (t.vFlip) tObj["v_flip"] = true;
-                atArr.append(tObj);
+                atArr.append(timelineToJson(t));
             }
             aObj["timelines"] = atArr;
 
@@ -565,19 +578,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     QJsonArray timelinesArr = animInfo["timelines"].toArray();
     out.timelines.reserve(timelinesArr.size());
     for (const auto& tVal : timelinesArr) {
-        QJsonObject tObj = tVal.toObject();
-        AnimationTimeline t;
-        t.name = tObj["name"].toString();
-        t.fps = sanitizedAnimationFps(tObj["fps"].toInt(legacyAnimationFps));
-        QJsonArray framesArr = tObj["frames"].toArray();
-        t.frames.reserve(framesArr.size());
-        for (const auto& fVal : framesArr) {
-            t.frames.append(fVal.toString());
-        }
-        t.aliasOf = tObj["alias_of"].toString();
-        t.hFlip   = tObj["h_flip"].toBool(false);
-        t.vFlip   = tObj["v_flip"].toBool(false);
-        out.timelines.append(t);
+        out.timelines.append(timelineFromJson(tVal.toObject(), legacyAnimationFps));
     }
 
     out.selectedSpritePath = markersInfo["selected_sprite_path"].toString();
@@ -797,17 +798,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         QVector<AnimationTimeline> result;
         result.reserve(arr.size());
         for (const auto& tVal : arr) {
-            const QJsonObject tObj = tVal.toObject();
-            AnimationTimeline t;
-            t.name = tObj["name"].toString();
-            t.fps  = sanitizedAnimationFps(tObj["fps"].toInt(legacyFps));
-            const QJsonArray fArr = tObj["frames"].toArray();
-            t.frames.reserve(fArr.size());
-            for (const auto& fVal : fArr) t.frames.append(fVal.toString());
-            t.aliasOf = tObj["alias_of"].toString();
-            t.hFlip   = tObj["h_flip"].toBool(false);
-            t.vFlip   = tObj["v_flip"].toBool(false);
-            result.append(t);
+            result.append(timelineFromJson(tVal.toObject(), legacyFps));
         }
         return result;
     };

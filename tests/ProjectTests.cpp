@@ -128,6 +128,56 @@ void ProjectTests::testProjectPayloadCapsAnimationFps() {
     QCOMPARE(fpsOf(atlas->timelines, "legacy"), DEFAULT_ANIMATION_FPS);
 }
 
+void ProjectTests::testProjectPayloadKeepsAnimationLoopMode() {
+    AnimationTimeline pingPong;
+    pingPong.name = "run";
+    pingPong.frames = {"/tmp/project/run_0.png", "/tmp/project/run_1.png"};
+    pingPong.loopMode = AnimationLoopMode::PingPong;
+    AnimationTimeline looping;
+    looping.name = "idle";
+    looping.frames = {"/tmp/project/idle_0.png"};
+
+    AtlasEntry atlas;
+    atlas.id = "atlas";
+    atlas.name = "atlas";
+    atlas.timelines = {pingPong, looping};
+    ProjectPayloadBuildInput input;
+    input.currentFolder = "/tmp/project";
+    input.atlases = {atlas};
+    input.timelines = atlas.timelines;
+
+    const QJsonObject payload = ProjectPayloadCodec::build(input);
+    const QJsonArray saved = payload["animations"].toObject()["timelines"].toArray();
+    QCOMPARE(saved.size(), 2);
+    QCOMPARE(saved[0].toObject()["loop"].toString(), QString("pingpong"));
+    // The default is left out, so the file reads the same in older versions.
+    QVERIFY(!saved[1].toObject().contains("loop"));
+
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult loaded =
+        ProjectPayloadCodec::applyToLayout(payload, "/tmp/project", layoutModels);
+    QCOMPARE(loaded.timelines.size(), 2);
+    QCOMPARE(loaded.timelines[0].loopMode, AnimationLoopMode::PingPong);
+    QCOMPARE(loaded.timelines[1].loopMode, AnimationLoopMode::Loop);
+    const AtlasEntry* loadedAtlas = nullptr;
+    for (const AtlasEntry& a : loaded.atlases) {
+        if (a.id == QLatin1String("atlas")) loadedAtlas = &a;
+    }
+    QVERIFY(loadedAtlas != nullptr);
+    QCOMPARE(loadedAtlas->timelines.size(), 2);
+    QCOMPARE(loadedAtlas->timelines[0].loopMode, AnimationLoopMode::PingPong);
+
+    // An unknown mode in a hand-edited file loads as the default.
+    QJsonObject edited;
+    edited["schema_version"] = 3;
+    edited["animations"] = QJsonObject{{"timelines", QJsonArray{
+        QJsonObject{{"name", "spin"}, {"loop", "bounce"}}}}};
+    const ProjectPayloadApplyResult editedResult =
+        ProjectPayloadCodec::applyToLayout(edited, "/tmp/project", layoutModels);
+    QCOMPARE(editedResult.timelines.size(), 1);
+    QCOMPARE(editedResult.timelines[0].loopMode, AnimationLoopMode::Loop);
+}
+
 void ProjectTests::testProjectFileLoaderLoad() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());

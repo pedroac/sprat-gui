@@ -240,8 +240,26 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
         tr("An alias timeline references another timeline's frames but can have its own flip and transform settings."));
     groupLayout->addWidget(m_timelineAliasLabel);
 
-    // Flip row
+    // Loop mode / flip row
     auto* flipRow = new QHBoxLayout();
+    flipRow->addWidget(new QLabel(tr("Play:"), m_selectedTimelineGroup));
+    m_timelineLoopCombo = new QComboBox(m_selectedTimelineGroup);
+    const struct { QString label; AnimationLoopMode mode; QString tooltip; } loopModes[] = {
+        {tr("Loop"),           AnimationLoopMode::Loop,         tr("Repeat from the first frame")},
+        {tr("Once"),           AnimationLoopMode::Once,         tr("Play once and stop on the last frame")},
+        {tr("Ping-pong"),      AnimationLoopMode::PingPong,     tr("Play forward then backward, and repeat")},
+        {tr("Ping-pong once"), AnimationLoopMode::OncePingPong,
+         tr("Play forward then backward once, and stop on the first frame")},
+    };
+    for (const auto& loopMode : loopModes) {
+        m_timelineLoopCombo->addItem(loopMode.label, static_cast<int>(loopMode.mode));
+        m_timelineLoopCombo->setItemData(m_timelineLoopCombo->count() - 1, loopMode.tooltip, Qt::ToolTipRole);
+    }
+    m_timelineLoopCombo->setToolTip(tr("How the animation plays, here and in exported metadata. "
+                                       "An alias plays the way its source does."));
+    m_timelineLoopCombo->setAccessibleName(tr("Timeline loop mode"));
+    m_timelineLoopCombo->setEnabled(false);
+    flipRow->addWidget(m_timelineLoopCombo);
     m_timelineFlipLabel = new QLabel(tr("Flip:"), m_selectedTimelineGroup);
     m_timelineFlipLabel->setVisible(false);
     flipRow->addWidget(m_timelineFlipLabel);
@@ -293,6 +311,7 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     connect(m_timelineNameEdit, &QLineEdit::editingFinished, this, &TimelineEditorPanel::onTimelineNameChanged);
     connect(m_timelineFpsSpin, &QSpinBox::valueChanged, this, &TimelineEditorPanel::onTimelineFpsChanged);
     connect(m_timelineFlipCombo, &QComboBox::currentIndexChanged, this, &TimelineEditorPanel::onTimelineFlipChanged);
+    connect(m_timelineLoopCombo, &QComboBox::currentIndexChanged, this, &TimelineEditorPanel::onTimelineLoopChanged);
     connect(m_timelineFramesList, &TimelineListWidget::frameDropped, this, &TimelineEditorPanel::onFrameDropped);
     connect(m_timelineFramesList, &TimelineListWidget::frameMoved, this, &TimelineEditorPanel::onFrameMoved);
     connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested, this, &TimelineEditorPanel::onFrameRemoveRequested);
@@ -753,20 +772,15 @@ void TimelineEditorPanel::onTimelineSelectionChanged()
             }
         }
 
-        int fpsToShow = tl.fps;
-        if (isAlias) {
-            for (const auto& src : m_session->activeAtlas().timelines) {
-                if (src.name == tl.aliasOf && src.aliasOf.isEmpty()) {
-                    fpsToShow = src.fps;
-                    break;
-                }
-            }
-        }
+        const AnimationTimeline& source = aliasSourceTimeline(m_session->activeAtlas().timelines, idx);
+        const int fpsToShow = source.fps;
         {
             const QSignalBlocker blocker(m_timelineFpsSpin);
             m_timelineFpsSpin->setValue(fpsToShow);
         }
         m_timelineFpsSpin->setEnabled(!isAlias);
+        setLoopComboMode(source.loopMode);
+        m_timelineLoopCombo->setEnabled(!isAlias);
 
         emit animPlaybackIntervalChanged(fpsToShow);
 
@@ -785,6 +799,8 @@ void TimelineEditorPanel::onTimelineSelectionChanged()
         m_timelineFpsSpin->setValue(8);
     }
     m_timelineFpsSpin->setEnabled(false);
+    setLoopComboMode(AnimationLoopMode::Loop);
+    m_timelineLoopCombo->setEnabled(false);
     if (m_timelineAliasLabel) m_timelineAliasLabel->setVisible(false);
     if (m_timelineFlipLabel)  m_timelineFlipLabel->setVisible(false);
     if (m_timelineFlipCombo)  m_timelineFlipCombo->setVisible(false);
@@ -905,6 +921,41 @@ void TimelineEditorPanel::onTimelineFlipChanged(int index)
     m_undoStack->push(new SetTimelineFlipCommand(
         &m_session->activeAtlas().timelines, idx, oldH, oldV, newH, newV,
         [this]() { emit animationDataChanged(); }
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// setLoopComboMode
+// ---------------------------------------------------------------------------
+void TimelineEditorPanel::setLoopComboMode(AnimationLoopMode mode)
+{
+    const QSignalBlocker blocker(m_timelineLoopCombo);
+    m_timelineLoopCombo->setCurrentIndex(m_timelineLoopCombo->findData(static_cast<int>(mode)));
+}
+
+// ---------------------------------------------------------------------------
+// onTimelineLoopChanged
+// ---------------------------------------------------------------------------
+void TimelineEditorPanel::onTimelineLoopChanged(int index)
+{
+    const int idx = m_session->selectedTimelineIndex;
+    if (idx < 0 || idx >= m_session->activeAtlas().timelines.size() || index < 0) return;
+    auto& tl = m_session->activeAtlas().timelines[idx];
+    const AnimationLoopMode oldMode = tl.loopMode;
+    const auto newMode = static_cast<AnimationLoopMode>(m_timelineLoopCombo->itemData(index).toInt());
+    if (oldMode == newMode) return;
+    tl.loopMode = newMode;
+    emit animationDataChanged();
+    m_undoStack->push(new SetTimelineLoopModeCommand(
+        &m_session->activeAtlas().timelines, idx, oldMode, newMode,
+        [this, idx]() {
+            // The selected timeline may be this one or an alias showing its mode.
+            const auto& timelines = m_session->activeAtlas().timelines;
+            const int selected = m_session->selectedTimelineIndex;
+            if (selected >= 0 && selected < timelines.size())
+                setLoopComboMode(aliasSourceTimeline(timelines, selected).loopMode);
+            emit animationDataChanged();
+        }
     ));
 }
 

@@ -383,4 +383,46 @@ void ExportPipelineTests::testProjectTextCantInjectCliRecords() {
     QVERIFY(animations.first().toObject()["name"].toString().startsWith(QStringLiteral("idle ")));
 }
 
+void ExportPipelineTests::testAnimationLoopModesAreExported() {
+    const QString spritesDir = m_root.filePath(QStringLiteral("loop sprites"));
+    QVERIFY(QDir().mkpath(spritesDir));
+    writeSprite(QDir(spritesDir).filePath(QStringLiteral("a.png")), {16, 16}, Qt::red);
+    writeSprite(QDir(spritesDir).filePath(QStringLiteral("b.png")), {16, 16}, Qt::blue);
+
+    const QJsonArray frames{"a.png", "b.png"};
+    const QJsonArray timelines{
+        QJsonObject{{"name", "walk"}, {"fps", 6}, {"frames", frames}},
+        QJsonObject{{"name", "jump"}, {"fps", 6}, {"frames", frames}, {"loop", "once"}},
+        QJsonObject{{"name", "swing"}, {"fps", 6}, {"frames", frames}, {"loop", "pingpong"}},
+        QJsonObject{{"name", "wave"}, {"fps", 6}, {"frames", frames}, {"loop", "once-pingpong"}},
+        // An alias plays the way its source does; its own mode is not written.
+        QJsonObject{{"name", "swing_left"}, {"fps", 6}, {"alias_of", "swing"}, {"loop", "once"},
+                    {"h_flip", true}},
+    };
+    const QJsonObject payload{{"animations", QJsonObject{{"timelines", timelines}}}};
+
+    const QString destination = m_root.filePath(QStringLiteral("loop export"));
+    const ExportRun run = exportSprites(spritesDir, destination, QStringLiteral("json"),
+                                        makeProfile(), payload);
+    QVERIFY2(run.ok, qPrintable(describe(run.error, run.log)));
+
+    const QDir profileDir(QDir(destination).filePath(PROFILE_NAME));
+    const QStringList metadataFiles = profileDir.entryList({QStringLiteral("*.json")}, QDir::Files);
+    QVERIFY2(!metadataFiles.isEmpty(), qPrintable(profileDir.entryList().join(", ")));
+    const QJsonObject document =
+        QJsonDocument::fromJson(readTextFile(profileDir.filePath(metadataFiles.first())).toUtf8())
+            .object();
+
+    QHash<QString, QJsonObject> animations;
+    for (const QJsonValue& value : document["animations"].toArray())
+        animations.insert(value.toObject()["name"].toString(), value.toObject());
+    QCOMPARE(animations.size(), 5);
+    QCOMPARE(animations["walk"]["loop"].toString(), QStringLiteral("loop"));
+    QCOMPARE(animations["jump"]["loop"].toString(), QStringLiteral("once"));
+    QCOMPARE(animations["swing"]["loop"].toString(), QStringLiteral("pingpong"));
+    QCOMPARE(animations["wave"]["loop"].toString(), QStringLiteral("once-pingpong"));
+    QCOMPARE(animations["swing_left"]["alias"].toString(), QStringLiteral("swing"));
+    QCOMPARE(animations["swing_left"]["flip"].toString(), QStringLiteral("h"));
+}
+
 QTEST_MAIN(ExportPipelineTests)

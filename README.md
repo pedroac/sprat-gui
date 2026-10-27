@@ -258,6 +258,7 @@ Focuses on timeline authoring and animation preview. It provides a dedicated ani
 - **Animation authoring**
   - Timelines panel lists all animations with detailed info: `<name> | <frames count> frames | <fps> fps`.
   - The **Selected Timeline** group provides controls to rename, adjust FPS, and manage the frame sequence ("tape").
+  - **Play** sets how the animation plays, in the preview and in exported metadata: **Loop** (repeat), **Once** (stop on the last frame), **Ping-pong** (forward then backward, repeated) or **Ping-pong once** (forward then backward, then stop on the first frame). An alias plays the way its source does. Engines with their own ping-pong (Phaser, Aseprite) get it as a setting; Godot and Unity get the way back as extra frames.
   - Drag frames from the layout into the timeline; reorder via drag-and-drop or context actions; duplicate/remove frames with toolbar buttons.
 
 - **Animation test area**
