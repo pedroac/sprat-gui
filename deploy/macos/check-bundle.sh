@@ -40,7 +40,9 @@ for tool in "${bundled_tools[@]}"; do
 done
 
 machO_count=0
-# One file(1) run for the whole bundle; it prints "<path>|<description>" per file.
+# One file(1) run for the whole bundle; it prints "<path>|<description>" per file. For a
+# universal binary it also prints a "<path> (for architecture x86_64):<tab>Mach-O ..." line
+# per slice, without the separator, so only lines whose description field is Mach-O count.
 while IFS= read -r file; do
     machO_count=$((machO_count + 1))
     relative="${file#"$bundle"/}"
@@ -70,7 +72,7 @@ while IFS= read -r file; do
             esac
         done < <(otool -arch "$arch" -L "$file" | tail -n +2 | awk '{ print $1 }')
     done
-done < <(find "$bundle" -type f -exec file -F '|' {} + | awk -F '|' '/Mach-O/ { print $1 }')
+done < <(find "$bundle" -type f -exec file -F '|' {} + | awk -F '|' 'NF > 1 && $2 ~ /Mach-O/ { print $1 }')
 
 if [ "$machO_count" -eq 0 ]; then
     fail "no Mach-O files found in $bundle"
