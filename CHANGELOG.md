@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nine-Slice workspace: insets can no longer add up to more than the sprite (left + right within its width, top + bottom within its height), and the preview no longer clamps them to half the sprite. Projects saved with insets that don't fit get the right and bottom insets reduced when the sprite is opened or exported, instead of failing to export
 - Export: nine-slice insets set in the Nine-Slice workspace are now written to the export
 - Nine-Slice workspace: opening it no longer resets the first sprite's insets, fill modes and size
-- Edits in the Nine-Slice and Normal Map workspaces now count as unsaved changes: the app asks to save them before closing, and saving clears the unsaved marker in the title bar
+- Edits in the Nine-Slice workspace now count as unsaved changes: the app asks to save them before closing, and saving clears the unsaved marker in the title bar
 - Export: projects with alias timelines no longer fail to export ("Invalid alias line"); aliases and their flip are now written the way sprat-cli reads them
 - Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 

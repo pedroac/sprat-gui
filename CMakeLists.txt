@@ -332,7 +332,7 @@ if(APPLE)
 endif()
 
 # === Find Dependencies ===
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg OpenGL)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 if(APPLE)
@@ -345,7 +345,6 @@ if(APPLE)
     foreach(_agl_tgt IN ITEMS
             Qt6::Gui Qt6::GuiPrivate
             Qt6::Widgets Qt6::WidgetsPrivate
-            Qt6::OpenGL Qt6::OpenGLWidgets Qt6::OpenGLPrivate
             Qt6::QCocoaIntegrationPlugin)
         if(NOT TARGET ${_agl_tgt})
             continue()
@@ -474,14 +473,6 @@ set(PROJECT_SOURCES
     src/App/Workspaces/AtlasesManagement/PackedAtlasView.cpp
     src/App/Workspaces/NineSlice/NineSliceWorkspace.h
     src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
-    src/MapPaint/MapPaintCanvas.h
-    src/MapPaint/MapPaintCanvas.cpp
-    src/NormalMap/NormalMapPaintCanvas.h
-    src/NormalMap/NormalMapPaintCanvas.cpp
-    src/App/Workspaces/NormalMap/NormalMapWorkspace.h
-    src/App/Workspaces/NormalMap/NormalMapWorkspace.cpp
-    src/App/Workspaces/NormalMap/NormalWheelWidget.h
-    src/App/Workspaces/NormalMap/NormalWheelWidget.cpp
     src/NineSlice/NineSliceEditorCanvas.h
     src/NineSlice/NineSliceInsets.h
     src/NineSlice/NineSliceEditorCanvas.cpp
@@ -609,9 +600,6 @@ target_include_directories(sprat-gui PRIVATE
     src/App/Workspaces/FrameAnimation
     src/App/Workspaces/NineSlice
     src/App/Workspaces/Shared
-    src/App/Workspaces/NormalMap
-    src/MapPaint
-    src/NormalMap
     src/NineSlice
     src/Animation
     src/Animation/Timelines
@@ -636,7 +624,6 @@ target_link_libraries(sprat-gui PRIVATE
     Qt6::Concurrent
     Qt6::Network
     Qt6::Svg
-    Qt6::OpenGL
     LibArchive::LibArchive
 )
 

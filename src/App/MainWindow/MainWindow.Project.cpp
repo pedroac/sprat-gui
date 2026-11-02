@@ -16,7 +16,6 @@
 #include "ExportWorkspace.h"
 #include "FrameAnimationWorkspace.h"
 #include "NineSliceWorkspace.h"
-#include "NormalMapWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -1816,11 +1815,6 @@ void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
         if (m_animationDock) m_animationDock->hide();
         m_mainStack->setCurrentIndex(3);
         m_mainStack->show();
-    } else if (ws == m_normalMapWorkspace) {
-        if (m_atlasDock)     m_atlasDock->hide();
-        if (m_animationDock) m_animationDock->hide();
-        m_mainStack->setCurrentIndex(4);
-        m_mainStack->show();
     }
 }
 
@@ -1853,8 +1847,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
             m_mainStack->setCurrentIndex(0);
         } else if (prev == m_nineSliceWorkspace) {
             m_mainStack->setCurrentIndex(0);
-        } else if (prev == m_normalMapWorkspace) {
-            m_mainStack->setCurrentIndex(0);
         } else if (prev == m_atlasesManagementWorkspace) {
             if (m_atlasesManagementWorkspace &&
                     m_atlasesManagementWorkspace->viewMode()
@@ -1886,7 +1878,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
                         : (next == m_exportWorkspace)    ? 2
                         : (next == m_atlasesManagementWorkspace) ? 3
                         : (next == m_nineSliceWorkspace)    ? 4
-                        : (next == m_normalMapWorkspace)    ? 5
                         : 0;
         m_layoutOrchestrator->setActiveWorkspace(wsIdx);
     }
@@ -1902,8 +1893,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
         m_atlasesManagementWorkspaceAction->setChecked(next == m_atlasesManagementWorkspace);
     if (m_nineSliceWorkspaceAction)
         m_nineSliceWorkspaceAction->setChecked(next == m_nineSliceWorkspace);
-    if (m_normalMapWorkspaceAction)
-        m_normalMapWorkspaceAction->setChecked(next == m_normalMapWorkspace);
 
     // Apply dock/stack layout for the incoming workspace
     applyWorkspaceLayout(next);
@@ -1924,9 +1913,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
             m_frameAnimWorkspace->clearFirstLoad();
             resizeDocks({m_atlasDock, m_animationDock}, {270, 730}, Qt::Horizontal);
         }
-    } else if (next == m_normalMapWorkspace) {
-        if (m_normalMapWorkspace && m_session)
-            m_normalMapWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
     } else if (next == m_exportWorkspace) {
         if (m_exportCoordinator)
             m_exportCoordinator->setExportWorkspaceActive(true);

@@ -266,8 +266,7 @@ void NavigatorPanel::updateAtlasCombo(const QVector<AtlasEntry>& atlases, int ac
         if (atlas.spritePaths.isEmpty()) continue; // Hide empty atlases
         if (i == activeSessionIndex)
             selectComboIdx = m_atlasCombo->count(); // count() accounts for "All" at index 0
-        QIcon icon = atlas.hasNormalMap ? QIcon(QStringLiteral(":/icons/normal-map.svg")) : QIcon();
-        m_atlasCombo->addItem(icon, atlas.name, i); // Store real atlas index as item data
+        m_atlasCombo->addItem(atlas.name, i); // Store real atlas index as item data
     }
     m_atlasCombo->setCurrentIndex(selectComboIdx);
     m_atlasCombo->blockSignals(false);
