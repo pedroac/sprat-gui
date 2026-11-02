@@ -239,19 +239,13 @@ void MainWindow::loadAutosavedProject() {
             MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore autosaved frame list; falling back to folder source."));
             m_session->layoutSourcePath = QDir(folder).absolutePath();
             m_session->layoutSourceIsList = false;
-            if (!m_session->frameListPath.isEmpty()) {
-                QFile::remove(m_session->frameListPath);
-                m_session->frameListPath.clear();
-            }
+            m_session->removeFrameListFile();
             updateFolderLabel(folder);
         }
     } else {
         m_session->layoutSourcePath = QDir(folder).absolutePath();
         m_session->layoutSourceIsList = false;
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
-        }
+        m_session->removeFrameListFile();
         updateFolderLabel(folder);
     }
     scheduleLayoutRebuild(true);
@@ -1134,19 +1128,13 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
                     MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
                     m_session->layoutSourcePath = QDir(folder).absolutePath();
                     m_session->layoutSourceIsList = false;
-                    if (!m_session->frameListPath.isEmpty()) {
-                        QFile::remove(m_session->frameListPath);
-                        m_session->frameListPath.clear();
-                    }
+                    m_session->removeFrameListFile();
                     updateFolderLabel(folder);
                 }
             } else {
                 m_session->layoutSourcePath = QDir(folder).absolutePath();
                 m_session->layoutSourceIsList = false;
-                if (!m_session->frameListPath.isEmpty()) {
-                    QFile::remove(m_session->frameListPath);
-                    m_session->frameListPath.clear();
-                }
+                m_session->removeFrameListFile();
                 updateFolderLabel(folder);
             }
             scheduleLayoutRebuild(true);
@@ -1379,10 +1367,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
             m_projectController->setProjectFilePath(QString());
         }
         if (m_projectController) m_projectController->setSourceFolderIsTemp(false);
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
-        }
+        m_session->removeFrameListFile();
         m_session->sourceFolder.clear();
         m_projectController->clearSourceFolderTempDir();
         ensureSourceFolder();

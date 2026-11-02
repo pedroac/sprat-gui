@@ -566,10 +566,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         m_projectController->registerLoadedSource(sourcePath, action, subfolderPath);
     }
 
-    if (!m_session->frameListPath.isEmpty()) {
-        QFile::remove(m_session->frameListPath);
-        m_session->frameListPath.clear();
-    }
+    m_session->removeFrameListFile();
 
     // Ensure we generate a list file so spratlayout respects our sort order
     if (!ensureFrameListInput()) {
@@ -651,10 +648,7 @@ void MainWindow::onTransparencyProcessingFinished() {
         m_projectController->registerLoadedSource(sourcePath, action, subfolderPath);
     }
 
-    if (!m_session->frameListPath.isEmpty()) {
-        QFile::remove(m_session->frameListPath);
-        m_session->frameListPath.clear();
-    }
+    m_session->removeFrameListFile();
 
     // Ensure we generate a list file so spratlayout respects our sort order
     if (!ensureFrameListInput()) {

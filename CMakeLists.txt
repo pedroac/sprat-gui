@@ -398,6 +398,10 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.LayoutFlow.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
     src/App/MainWindow/MainWindow.SmokeTest.cpp
+    src/App/MainWindow/MainWindow.Sources.cpp
+    src/App/MainWindow/MainWindow.Settings.cpp
+    src/App/MainWindow/MainWindow.Frames.cpp
+    src/App/MainWindow/MainWindow.FolderSync.cpp
     src/App/MainWindow/MainWindow.Navigator.cpp
     src/App/Workspaces/Shared/NavigatorTreeWidget.h
     src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
@@ -490,16 +494,8 @@ set(PROJECT_SOURCES
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
     src/Project/ProjectSession.h
-    src/Project/ProjectData.cpp
-    src/Project/ProjectData.h
-    src/Project/Repositories/SpriteRepository.cpp
-    src/Project/Repositories/SpriteRepository.h
-    src/Project/Repositories/SourceRepository.cpp
-    src/Project/Repositories/SourceRepository.h
     src/Project/Repositories/MarkerRepository.cpp
     src/Project/Repositories/MarkerRepository.h
-    src/Project/Repositories/ExportRepository.cpp
-    src/Project/Repositories/ExportRepository.h
 
     src/Animation/Timelines/AnimationTimelineOps.cpp
     src/Animation/Timelines/AnimationTimelineOps.h

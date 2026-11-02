@@ -93,6 +93,9 @@ public:
     QJsonObject pendingProjectPayload;
 
     void clear();
+
+    /// Deletes the temporary frame list file, if any, and forgets its path.
+    void removeFrameListFile();
     bool isEmpty() const;
     void rebuildSpriteIndex();
 

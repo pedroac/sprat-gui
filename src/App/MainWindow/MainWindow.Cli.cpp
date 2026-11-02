@@ -226,10 +226,7 @@ void MainWindow::loadFolder(const QString& path, DropAction action) {
     qInfo() << "[loadFolder] path=" << folderPath << "action=" << (int)action;
 
     // Clean up any previous frame list file
-    if (!m_session->frameListPath.isEmpty()) {
-        QFile::remove(m_session->frameListPath);
-        m_session->frameListPath.clear();
-    }
+    m_session->removeFrameListFile();
 
     if (action == DropAction::Merge) {
         // If this source is already loaded, sync it instead of re-importing.

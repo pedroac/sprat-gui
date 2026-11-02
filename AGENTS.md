@@ -391,6 +391,10 @@ The central orchestrator coordinating all application features. Implements most 
 - `MainWindow.Events.cpp` - Event handling (drag/drop, keyboard)
 - `MainWindow.ImageLoading.cpp` - Image and folder loading workflows
 - `MainWindow.TimelineEditor.cpp` - Timeline creation/editing UI
+- `MainWindow.Sources.cpp` - Removing, retrying and re-syncing sources; syncing the layout back to an image or GIF
+- `MainWindow.Settings.cpp` - Settings dialog sections, `applySettings()`, configured layout profiles
+- `MainWindow.Frames.cpp` - Adding, removing and splitting sprites, the excluded atlas, and the frame list file (`ProjectSession::removeFrameListFile()` deletes it)
+- `MainWindow.FolderSync.cpp` - Source folder watcher, manual/periodic sync, keeping the sprites folder in step with the active frames
 
 **Key Responsibilities**:
 - Maintain `ProjectSession` (application state)

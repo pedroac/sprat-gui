@@ -1,4 +1,5 @@
 #include "ProjectSession.h"
+#include <QFile>
 #include <QDir>
 #include <QUuid>
 #include <QFileInfo>
@@ -18,12 +19,19 @@ ProjectSession::ProjectSession(QObject* parent) : QObject(parent) {
     atlases.append(excl);
 }
 
+void ProjectSession::removeFrameListFile() {
+    if (frameListPath.isEmpty())
+        return;
+    QFile::remove(frameListPath);
+    frameListPath.clear();
+}
+
 void ProjectSession::clear() {
     currentFolder.clear();
     layoutSourcePath.clear();
     layoutSourceIsList = false;
     activeFramePaths.clear();
-    frameListPath.clear();
+    removeFrameListFile();
 
     // Reset to neutral atlas + excluded atlas
     atlases.clear();
