@@ -3,6 +3,7 @@
 #include "ZoomableGraphicsView.h"
 #include "CliToolsConfig.h"
 #include "MessageDialog.h"
+#include "PostExportCommandTrust.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -809,8 +810,12 @@ SaveConfig ExportWorkspace::getConfig() const {
         const QString name = m_profileCombo->currentData().toString();
         if (!name.isEmpty()) config.profiles.append(name);
     }
-    if (m_postExportCommandEdit)
+    if (m_postExportCommandEdit) {
         config.postExportCommand = m_postExportCommandEdit->text();
+        // Typed by the user here, not loaded from the project: no need to confirm it.
+        if (m_postExportCommandEdit->isModified())
+            PostExportCommandTrust::trust(config.postExportCommand);
+    }
     return config;
 }
 

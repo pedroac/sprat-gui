@@ -2,12 +2,14 @@
 #include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "NineSliceInsets.h"
+#include "PathSafety.h"
 #include "ResolutionUtils.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QStandardPaths>
 #include <QColor>
 #include <QUuid>
 
@@ -655,7 +657,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     QJsonArray profilesArr = saveOpts["profiles"].toArray();
     out.saveConfig.profiles.reserve(profilesArr.size());
     for (const auto& pVal : profilesArr) {
-        out.saveConfig.profiles.append(pVal.toString());
+        if (PathSafety::isPlainName(pVal.toString()))
+            out.saveConfig.profiles.append(pVal.toString());
     }
     out.saveConfig.profilesGlobal     = saveOpts["profiles_global"].toBool(true);
     out.saveConfig.syncSprites        = saveOpts["sync_sprites"].toBool(false);
@@ -669,8 +672,10 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         p.transform          = readTransform(po["transform"], schemaVersion);
         p.scaleFilter        = po["scale_filter"].toString();
         p.postExportCommand  = po["post_export_command"].toString();
-        for (const auto& prv : po["profiles"].toArray())
-            p.profiles.append(prv.toString());
+        for (const auto& prv : po["profiles"].toArray()) {
+            if (PathSafety::isPlainName(prv.toString()))
+                p.profiles.append(prv.toString());
+        }
         if (!p.name.isEmpty()) out.exportPresets.append(p);
     }
 
@@ -719,12 +724,19 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 if (!origPath.isEmpty() && QDir::isRelativePath(origPath) && !currentFolder.isEmpty()) {
                     origPath = QDir(currentFolder).absoluteFilePath(origPath);
                     // Reject traversal attempts that escape the project folder
-                    if (!QDir::cleanPath(origPath).startsWith(QDir::cleanPath(currentFolder))) {
+                    if (!PathSafety::isInsideFolder(origPath, currentFolder)) {
                         origPath.clear();
                     }
                 }
                 src.originalPath = origPath;
-                src.cachedFolderPath = sObj["cachedFolder"].toString();
+                // The cached folder is deleted when its source is removed, so only accept
+                // the places the app creates it: inside the project or the temp folder.
+                const QString cachedFolder = sObj["cachedFolder"].toString();
+                if (PathSafety::isInsideFolder(cachedFolder, currentFolder)
+                        || PathSafety::isInsideFolder(
+                               cachedFolder, QStandardPaths::writableLocation(QStandardPaths::TempLocation))) {
+                    src.cachedFolderPath = cachedFolder;
+                }
                 const QJsonArray excArr = sObj["excluded"].toArray();
                 src.excludedFiles.reserve(excArr.size());
                 for (const auto& e : excArr) src.excludedFiles.append(e.toString());
@@ -817,17 +829,21 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             atlas.isNeutral   = aObj["is_neutral"].toBool(false);
             atlas.isExcluded  = aObj["is_excluded"].toBool(false);
             atlas.outputSubdir = aObj["output_subdir"].toString();
+            if (!PathSafety::isContainedRelativePath(atlas.outputSubdir))
+                atlas.outputSubdir.clear();
 
             {
                 QJsonObject eo = aObj["export_override"].toObject();
                 // Deserialize profiles array; fall back to legacy single "profile" field
                 const QJsonArray profArr = eo["profiles"].toArray();
                 if (!profArr.isEmpty()) {
-                    for (const auto& pv : profArr)
-                        atlas.exportConfig.profiles.append(pv.toString());
+                    for (const auto& pv : profArr) {
+                        if (PathSafety::isPlainName(pv.toString()))
+                            atlas.exportConfig.profiles.append(pv.toString());
+                    }
                 } else {
                     const QString legacyProfile = eo["profile"].toString();
-                    if (!legacyProfile.isEmpty())
+                    if (PathSafety::isPlainName(legacyProfile))
                         atlas.exportConfig.profiles.append(legacyProfile);
                 }
                 atlas.exportConfig.transform   = readTransform(eo["transform"], schemaVersion);

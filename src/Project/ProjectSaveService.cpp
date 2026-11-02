@@ -1,4 +1,5 @@
 #include "ProjectSaveService.h"
+#include "PathSafety.h"
 #include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
@@ -171,6 +172,19 @@ bool ProjectSaveService::save(
         }
     };
 
+    // Profile names and the atlas subfolder come from the project file and become folders
+    // that are wiped below, so they must not point outside the destination.
+    for (const QString& profileName : config.profiles) {
+        if (!profileName.trimmed().isEmpty() && !PathSafety::isPlainName(profileName)) {
+            error = QString(trPS("Invalid profile name \"%1\": profile names can't contain slashes or be \".\" or \"..\".")).arg(profileName);
+            return false;
+        }
+    }
+    if (!config.atlasSubdir.isEmpty() && !PathSafety::isContainedRelativePath(config.atlasSubdir)) {
+        error = QString(trPS("Invalid atlas output folder \"%1\": it must be a folder inside the export destination.")).arg(config.atlasSubdir);
+        return false;
+    }
+
     // Use zip mode only when the destination path is explicitly a .zip file.
     // Never auto-convert a non-existent folder path to a zip.
     bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
@@ -197,14 +211,13 @@ bool ProjectSaveService::save(
         for (const QString& profileNameRaw : config.profiles) {
             const QString profileName = profileNameRaw.trimmed();
             if (profileName.isEmpty()) continue;
-            if (config.atlasSubdir.isEmpty()) {
-                // Single atlas: wipe the whole profile folder.
-                QDir(wd.filePath(profileName)).removeRecursively();
-            } else {
-                // Multi-atlas: only wipe this atlas's subfolder within the profile.
-                QDir(QDir(wd.filePath(profileName)).filePath(config.atlasSubdir))
-                    .removeRecursively();
-            }
+            // Single atlas: wipe the whole profile folder.
+            // Multi-atlas: only wipe this atlas's subfolder within the profile.
+            const QString staleDir = config.atlasSubdir.isEmpty()
+                ? wd.filePath(profileName)
+                : QDir(wd.filePath(profileName)).filePath(config.atlasSubdir);
+            if (PathSafety::isInsideFolder(staleDir, wd.absolutePath()))
+                QDir(staleDir).removeRecursively();
         }
     }
 

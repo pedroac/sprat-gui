@@ -446,12 +446,6 @@ private:
      */
     void copyActiveFramesToSourceFolder(bool overwriteDuplicates = true) override;
 
-    /**
-     * @brief Clears image files from the source folder.
-     *
-     * @param excludePath If provided, skips clearing if the folder path matches (prevents erasing folder we're about to load from)
-     */
-    void clearSourceFolderImages(const QString& excludePath = QString());
 
     /**
      * @brief Performs manual sync: compares layout sprites with folder images.

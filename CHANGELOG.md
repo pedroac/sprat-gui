@@ -17,7 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame Animation workspace: animations can now run at up to 100 FPS (was 60). Projects with faster animations load capped at 100 FPS, the fastest speed a GIF export can show
 - Export: the "Raw (sprat-cli format)" format is now called "Layout text (sprat-cli files)", so it can't be confused with sprat-cli's new `raw` format. Saved projects keep their choice
 
+### Security
+- Opening a sprite archive can no longer overwrite files outside the folder it is extracted to. Links inside archives (which a `.tar` could use to write to any of your files) are now skipped
+- Exporting can no longer delete folders outside the export folder. A project file could name a profile or atlas output folder with an absolute path or `..`, and the export cleared that folder before writing. Such names are now dropped when the project is opened, and the export refuses them
+- A post-export command stored in a project now asks before it runs for the first time, so a project from someone else can't run commands on your computer unnoticed. Commands you type in the Export workspace run without asking
+- In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
+
 ### Fixed
+- Removing a source no longer deletes its files permanently when the system temp folder is on another drive (common on Linux), so undoing the removal brings them back
+- In-app updates: on macOS the new app replaces the old one instead of being copied over it (leftover files could make macOS report the app as damaged); on Linux the bundled profiles config and transforms are updated too, and running from an AppImage updates the AppImage itself. The update now waits for the app to close instead of a fixed 2 seconds
+- Windows: installing sprat-cli from the app no longer fails because the downloaded ZIP was saved without a `.zip` extension
+- Writing files back to a source ZIP no longer leaves a broken ZIP when a file can't be read or written; the original ZIP is only replaced once the new one is complete
+- Opening a project ZIP whose project file can't be fully read now shows an error instead of loading a cut-off project, and archive warnings no longer stop extraction partway while reporting success
+- Atlas names with slashes or `..` no longer turn into export folders outside the export
 - macOS: the app no longer shows as "damaged" and refuses to open (seen on macOS 27 beta). The bundle is now re-signed after packaging, and the bundled sprat-cli tools, profiles config and transforms moved from `Contents/MacOS` to `Contents/Resources/cli`, since non-code files in `Contents/MacOS` made the bundle unsignable
 - macOS: installing sprat-cli from the app now puts it where the app looks for it, and copies the profiles config and transforms correctly
 - macOS: the app now runs on Intel Macs and on macOS 11 and later. It is a universal (Apple Silicon and Intel) build, and its bundled sprat-cli tools no longer need Rosetta or Homebrew libraries

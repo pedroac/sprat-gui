@@ -611,7 +611,8 @@ Central data structures:
 - `SyncMode` - Watch vs Manual folder sync
 
 #### Utilities
-- `ArchiveExtractor` - ZIP file handling
+- `ArchiveExtractor` - ZIP/tar handling. Extraction only writes plain files and folders (links are skipped) inside the destination; `createZip` writes through `QSaveFile`, so a failure never replaces the existing ZIP
+- `PathSafety` - Checks for names and paths read from project files before the app writes to or deletes them (`isPlainName` for profile names, `isContainedRelativePath` for atlas output folders, `isInsideFolder` before deleting, `folderNameFromLabel` for folder names made from atlas names). Use it for any new project value that becomes a path
 - `ZoomableGraphicsView` - Reusable zoomable canvas
 - `ViewUtils` - Graphics utilities (transformations, scaling)
 - `MarkerUtils` - Marker rendering and manipulation
@@ -621,6 +622,8 @@ Central data structures:
 ### 9. Settings (`src/Settings/`)
 
 Application preferences and configuration.
+
+`PostExportCommandTrust` remembers (as SHA-256 hashes in `sprat.conf`) the post-export commands the user typed or approved. The command is saved in the project file, so `ExportCoordinator::confirmPostExportCommand()` asks before running one that isn't trusted.
 
 **Key Features**:
 - CLI tool paths

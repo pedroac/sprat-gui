@@ -12,6 +12,7 @@
 #include "NineSliceWorkspace.h"
 #include "NineSliceEditorCanvas.h"
 #include "UndoCommands.h"
+#include "PathSafety.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
 #include "ResolutionUtils.h"
@@ -221,7 +222,7 @@ void MainWindow::setupUi() {
                 if (!m_session || index < 0 || index >= m_session->atlases.size()) return;
                 m_session->atlases[index].name = newName;
                 m_session->atlases[index].outputSubdir =
-                    newName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                    PathSafety::folderNameFromLabel(newName);
                 emit m_session->atlasesChanged();
                 m_atlasesManagementWorkspace->setAtlases(
                     m_session->atlases, m_session->activeAtlasIndex);
@@ -272,7 +273,7 @@ void MainWindow::setupUi() {
                 AtlasEntry newAtlas;
                 newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 newAtlas.name         = groupName;
-                newAtlas.outputSubdir = groupName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                newAtlas.outputSubdir = PathSafety::folderNameFromLabel(groupName);
                 m_session->atlases.append(newAtlas);
                 moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
                 emit m_session->atlasesChanged();
@@ -287,7 +288,7 @@ void MainWindow::setupUi() {
                     AtlasEntry newAtlas;
                     newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
                     newAtlas.name         = groupName;
-                    newAtlas.outputSubdir = groupName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                    newAtlas.outputSubdir = PathSafety::folderNameFromLabel(groupName);
                     m_session->atlases.append(newAtlas);
                     moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
                 }

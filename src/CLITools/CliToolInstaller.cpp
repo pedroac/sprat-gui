@@ -196,7 +196,10 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
         return;
     }
 
-    QTemporaryFile* tempFile = new QTemporaryFile(this);
+    // Keep the release asset's extension: Expand-Archive only accepts files ending in .zip.
+    const QString suffix = QFileInfo(reply->request().url().path()).suffix(); // before redirects
+    QTemporaryFile* tempFile = new QTemporaryFile(
+        QDir(QDir::tempPath()).filePath(QStringLiteral("sprat-cli-XXXXXX.") + suffix), this);
     if (!tempFile->open()) {
         emit errorOccurred("Install Failed", "Could not create a temporary file for downloaded installer.");
 #ifndef SPRAT_EMBEDDED_CLI
@@ -207,7 +210,17 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
         reply->deleteLater();
         return;
     }
-    tempFile->write(reply->readAll());
+    const QByteArray data = reply->readAll();
+    if (tempFile->write(data) != data.size()) {
+        emit errorOccurred("Install Failed", "Could not save the downloaded installer: " + tempFile->errorString());
+#ifndef SPRAT_EMBEDDED_CLI
+        emit installFinished(-1, QProcess::CrashExit);
+#else
+        emit installFinished(-1, -1);
+#endif
+        reply->deleteLater();
+        return;
+    }
     QString tempPath = tempFile->fileName();
     tempFile->close();
     emit installLog("Download finished. Extracting installer...");

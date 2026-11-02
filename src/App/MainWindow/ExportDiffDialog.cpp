@@ -1,4 +1,5 @@
 #include "ExportDiffDialog.h"
+#include "AtlasOutputFolder.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -70,19 +71,6 @@ QString effectiveTransform(const AtlasEntry& atlas, const SaveConfig& config) {
     return config.transform;
 }
 
-// Returns the output subdirectory for an atlas, automatically deriving one from the
-// atlas name when multiple atlases would otherwise all write to the same root directory.
-QString effectiveOutputSubdir(const AtlasEntry& atlas, int rootExporterCount) {
-    if (!atlas.outputSubdir.isEmpty())
-        return atlas.outputSubdir;
-    if (rootExporterCount <= 1)
-        return {};
-    if (atlas.isNeutral)
-        return QStringLiteral("sprites");
-    const QString slug = atlas.name.trimmed().toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
-    return slug.isEmpty() ? QStringLiteral("atlas") : slug;
-}
-
 }  // namespace
 
 QVector<ExportDiffDialog::DiffEntry> ExportDiffDialog::buildEntries(
@@ -105,7 +93,7 @@ QVector<ExportDiffDialog::DiffEntry> ExportDiffDialog::buildEntries(
         if (atlas.isExcluded) continue;
         if (atlas.spritePaths.isEmpty()) continue;
 
-        const QString subdir = effectiveOutputSubdir(atlas, rootExporterCount);
+        const QString subdir = effectiveAtlasOutputSubdir(atlas, rootExporterCount);
         const QStringList profs = effectiveProfiles(atlas, config);
         const QString transform = effectiveTransform(atlas, config);
 

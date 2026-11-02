@@ -230,8 +230,9 @@ void MainWindow::removeSource(int index) {
     if (!removed.cachedFolderPath.isEmpty()
             && removed.cachedFolderPath != srcFolder) {
         trashPath = TrashBin::sendFolder(removed.cachedFolderPath);
+        // If it can't be moved, leave the files: deleting them would make undo lose them.
         if (trashPath.isEmpty())
-            QDir(removed.cachedFolderPath).removeRecursively(); // fallback
+            qWarning() << "Could not move removed source folder to the trash:" << removed.cachedFolderPath;
     }
 
     // Callbacks for the undo command.
@@ -3225,19 +3226,6 @@ void MainWindow::copyActiveFramesToSourceFolder(bool overwriteDuplicates) {
     }
     m_session->activeFramePaths = newPaths;
     qInfo() << "[Performance] copyActiveFramesToSourceFolder took" << timer.elapsed() << "ms for" << newPaths.size() << "files";
-}
-
-void MainWindow::clearSourceFolderImages(const QString& excludePath) {
-    if (m_session->sourceFolder.isEmpty()) return;
-    const QString canonicalSource = QDir(m_session->sourceFolder).absolutePath();
-    if (!excludePath.isEmpty() &&
-        QDir(excludePath).absolutePath() == canonicalSource) {
-        return; // Don't erase the folder we're about to load from
-    }
-    // Remove all contents (including subdirectories) and recreate the empty folder
-    QDir dir(canonicalSource);
-    dir.removeRecursively();
-    QDir().mkpath(canonicalSource);
 }
 
 void MainWindow::showSyncNotification(const QString& message) {
