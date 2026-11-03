@@ -123,9 +123,12 @@ All Qt runtime DLLs and CLI tools are included in the ZIP — the application is
 
 1. Download `sprat-gui-macos.dmg`.
 2. Open the `.dmg` file and drag `sprat-gui.app` to your **Applications** folder.
-3. On first launch, macOS Gatekeeper will block the app because it is not notarized. To open it anyway:
-   - Right-click (or Control-click) `sprat-gui.app` in Finder and choose **Open**.
-   - Click **Open** in the dialog that appears.
+3. On first launch, macOS will say that Apple could not verify `sprat-gui` is free of malware, because the app is not notarized. To open it anyway:
+   - Click **Done** in that dialog.
+   - Open **System Settings → Privacy & Security**, scroll down to the message about `sprat-gui`, and click **Open Anyway**.
+   - Confirm with your password, then click **Open Anyway** once more.
+
+   macOS remembers this, so you only do it once per downloaded version. Alternatively, remove the download quarantine in Terminal: `xattr -dr com.apple.quarantine /Applications/sprat-gui.app`. On macOS 14 or older, you can also Control-click the app in Finder and choose **Open**.
 
 The CLI tools are bundled inside the `.app` bundle and require no separate installation.
 
