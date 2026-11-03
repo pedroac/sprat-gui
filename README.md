@@ -171,7 +171,7 @@ Manual build (does not modify `DEPENDENCIES`):
 
 ```bash
 cmake -S . -B build -DSPRAT_EMBEDDED_CLI=ON
-cmake --build build --parallel
+cmake --build build --parallel 4
 ctest --test-dir build --output-on-failure
 ```
 
