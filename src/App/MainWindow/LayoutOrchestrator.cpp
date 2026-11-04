@@ -371,8 +371,9 @@ void LayoutOrchestrator::handleProfileFailure(const QString& failedProfile) {
     }
 
     if (fallbackProfile.isEmpty()) {
-        MessageDialog::warning(nullptr, tr("Profile disabled"),
-            tr("The selected profile failed and was disabled. No fallback profile is available."));
+        MessageDialog::warning(dialogParent(), tr("Layout Failed"),
+            tr("The layout failed with the \"%1\" profile, and no other profile is enabled to try "
+               "instead. Enable or add a profile in Settings > Manage Profiles.").arg(failedProfile));
         return;
     }
     if (m_cfg.profileCombo->currentData().toString() == fallbackProfile) {
@@ -384,6 +385,10 @@ void LayoutOrchestrator::handleProfileFailure(const QString& failedProfile) {
 }
 
 // --- handleDimensionsError ---
+
+QWidget* LayoutOrchestrator::dialogParent() const {
+    return qobject_cast<QWidget*>(parent());
+}
 
 void LayoutOrchestrator::handleDimensionsError(const QString& failedProfile) {
     if (!m_cfg.profileCombo) return;
@@ -441,9 +446,19 @@ void LayoutOrchestrator::handleDimensionsError(const QString& failedProfile) {
 
     if (fallback.isEmpty()) {
         emit statusMessageChanged(tr("Error running layout"));
-        MessageDialog::critical(nullptr, tr("Error"),
-            tr("Sprite dimensions exceed atlas limits and no suitable fallback profile is available."));
+        emit loadingStateChanged(false);
+        const SpratProfile* failed = profileDef(failedProfile);
+        const QString limit = failed && failed->maxWidth > 0 && failed->maxHeight > 0
+            ? tr(" (the \"%1\" profile allows up to %2 x %3 px)")
+                  .arg(failedProfile).arg(failed->maxWidth).arg(failed->maxHeight)
+            : QString();
+        MessageDialog::critical(dialogParent(), tr("Sprites Too Large"),
+            tr("Some sprites don't fit in an atlas of the maximum size%1, and no other enabled "
+               "profile allows a larger atlas or multipack.\n\n"
+               "Raise the profile's maximum width and height, or turn on multipack, in "
+               "Settings > Manage Profiles.").arg(limit));
         m_layoutFailureDialogShown = true;
+        return;
     }
 
     emit statusMessageChanged(
@@ -536,7 +551,9 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
 
         if (!m_layoutFailureDialogShown && !result.error.contains("stopped", Qt::CaseInsensitive)) {
             if (!result.output.isEmpty() || !result.error.isEmpty()) {
-                MessageDialog::critical(nullptr, tr("Error"), tr("spratlayout failed:\n") + details);
+                MessageDialog::critical(dialogParent(), tr("Layout Failed"),
+                    tr("None of the enabled profiles could lay out these sprites.\n\n"
+                       "spratlayout reported:\n%1").arg(details));
                 m_layoutFailureDialogShown = true;
             }
         }
@@ -756,8 +773,9 @@ void LayoutOrchestrator::onRunnerError(const QString& details) {
     qCritical() << "spratlayout process error:" << details;
 
     if (!m_layoutFailureDialogShown) {
-        MessageDialog::critical(nullptr, tr("Error"),
-            tr("spratlayout process failed:\n") + details);
+        MessageDialog::critical(dialogParent(), tr("Layout Failed"),
+            tr("spratlayout could not be run:\n%1\n\n"
+               "Check the sprat-cli tools in Settings > CLI Tools.").arg(details));
         m_layoutFailureDialogShown = true;
     }
 

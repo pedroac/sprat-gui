@@ -755,7 +755,8 @@ void MainWindow::setupUi() {
 
     m_exportationWorkspaceAction = m_viewMenu->addAction(
         QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"));
-    m_exportationWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_E));
+    // Not Alt+E: that is the Edit menu's mnemonic, and the clash disables both.
+    m_exportationWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_X));
     m_exportationWorkspaceAction->setCheckable(true);
     workspaceGroup->addAction(m_exportationWorkspaceAction);
     connect(m_exportationWorkspaceAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
@@ -858,9 +859,10 @@ void MainWindow::setupToolbar() {
     fileMenu->addSeparator();
 
     m_loadProjectAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Load..."));
+        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Project..."));
+    m_loadProjectAction->setShortcut(QKeySequence::Open);  // Ctrl+O
     m_loadProjectAction->setToolTip(
-        tr("Load a project.spart.json file or a project folder containing that file"));
+        tr("Open a project: its project.spart.json file, or a ZIP project"));
     connect(m_loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
 
     m_loadAction = fileMenu->addAction(
@@ -898,6 +900,7 @@ void MainWindow::setupToolbar() {
 
     m_exportAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export"));
+    m_exportAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
     m_exportAction->setEnabled(false);
     m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
     connect(m_exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
@@ -1005,8 +1008,30 @@ void MainWindow::setupStatusBarUi() {
 }
 
 void MainWindow::setupZoomShortcuts() {
-    auto performZoom = [this](bool zoomIn) {
+    // The view to zoom: the focused canvas, or else the current workspace's main view,
+    // so the shortcuts still work after clicking a button or a side panel.
+    auto zoomFocus = [this]() -> QWidget* {
         QWidget* fw = QApplication::focusWidget();
+        auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        auto* previewView = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+        auto* animPanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = animPanel ? animPanel->animCanvas() : nullptr;
+        for (QWidget* view : {static_cast<QWidget*>(canvas), static_cast<QWidget*>(previewView),
+                              static_cast<QWidget*>(animCanvas)}) {
+            if (fw && view && (fw == view || view->isAncestorOf(fw)))
+                return fw;
+        }
+        if (m_exportWorkspace && m_currentWorkspace == m_exportWorkspace)
+            return (fw && m_exportWorkspace->isAncestorOf(fw)) ? fw : m_exportWorkspace;
+        if (m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace)
+            return (fw && m_nineSliceWorkspace->isAncestorOf(fw)) ? fw : m_nineSliceWorkspace;
+        if (m_currentWorkspace == m_frameAnimWorkspace)
+            return animCanvas;
+        return canvas;
+    };
+
+    auto performZoom = [this, zoomFocus](bool zoomIn) {
+        QWidget* fw = zoomFocus();
         if (!fw) {
             return;
         }
@@ -1051,8 +1076,8 @@ void MainWindow::setupZoomShortcuts() {
     connect(zoomOut, &QShortcut::activated, this, [performZoom]() { performZoom(false); });
 
     // Helper lambda to apply 100% or fit to the focused canvas
-    auto applyZoomPreset = [this](bool fitToContent) {
-        QWidget* fw = QApplication::focusWidget();
+    auto applyZoomPreset = [this, zoomFocus](bool fitToContent) {
+        QWidget* fw = zoomFocus();
         if (!fw) return;
         auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
         auto* previewView = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;

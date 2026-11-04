@@ -13,6 +13,8 @@
 #include <functional>
 #include <QElapsedTimer>
 #include <QUndoStack>
+#include <QPointer>
+#include <QMessageBox>
 
 #include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
@@ -139,8 +141,9 @@ private slots:
 #ifndef Q_OS_WASM
     /**
      * @brief Saves project state to a new folder chosen by the user.
+     * @return False if the user canceled or the save failed
      */
-    void onSaveAsClicked();
+    bool onSaveAsClicked();
 #endif
 
     // === Layout Canvas Events ===
@@ -220,8 +223,20 @@ private slots:
 
     /**
      * @brief Handles save action from the user (silent, uses last destination).
+     * @return False if the user canceled or the save failed
      */
-    void onSaveClicked();
+    bool onSaveClicked();
+
+    /**
+     * @brief Asks to save unsaved changes before they would be lost.
+     * @param question The question to show, naming what is about to happen
+     * @return True to continue (saved or discarded), false if the user canceled or
+     *         the save didn't complete
+     */
+    bool confirmDiscardUnsavedChanges(const QString& question);
+
+    /// Tells the user, without blocking, that the layout switched to another profile.
+    void showProfileFallbackNotice(const QString& previousProfile, const QString& newProfile);
 
     /**
      * @brief Re-runs export to the last-used destination; opens dialog on first use.
@@ -933,6 +948,7 @@ private:
     QAction* m_addSourceUrlAction = nullptr;
     QAction* m_saveAction = nullptr;
     QAction* m_saveAsAction = nullptr;
+    QPointer<QMessageBox> m_profileFallbackNotice;
     QAction* m_exportAction = nullptr;
     QLabel* m_statusLabel = nullptr;
     QProgressBar* m_statusProgressBar = nullptr;

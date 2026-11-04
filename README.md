@@ -271,7 +271,7 @@ Focuses on timeline authoring and animation preview. It provides a dedicated ani
 
 ![Frame Animation workspace](README_assets/frame_animation_workspace.png)
 
-### **Exportation Workspace** (`Alt+E`)
+### **Exportation Workspace** (`Alt+X`)
 A full-screen preview and configuration area for final output. Preview exactly how your atlases will be packed and choose your metadata format before exporting to disk.
 
 - Click **Exportation** (toolbar) to open the export workspace, or use **Export** for a quick re-export to the last used output folder.

@@ -1,4 +1,5 @@
 #include "FrameDetectionDialog.h"
+#include <QtConcurrent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -125,6 +126,12 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
 
     optionsLayout->addStretch();
 
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setWordWrap(true);
+    optionsLayout->addWidget(m_statusLabel);
+    connect(&m_redetectWatcher, &QFutureWatcher<RedetectResult>::finished,
+            this, &FrameDetectionDialog::onRedetectFinished);
+
     m_redetectTimer = new QTimer(this);
     m_redetectTimer->setSingleShot(true);
     m_redetectTimer->setInterval(400);
@@ -181,7 +188,25 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     });
 }
 
+// A detection still running when the dialog closes finishes on its own: it only uses
+// copies of its inputs, and its result is dropped with the watcher.
 FrameDetectionDialog::~FrameDetectionDialog() = default;
+
+void FrameDetectionDialog::setDetectionError(const QString& error) {
+    if (error.isEmpty()) return;
+    m_statusLabel->setStyleSheet(QStringLiteral("color: #d9534f;"));
+    m_statusLabel->setText(tr("Detection failed: %1").arg(error));
+}
+
+void FrameDetectionDialog::setDetecting(bool detecting) {
+    if (detecting) {
+        m_statusLabel->setStyleSheet(QString());
+        m_statusLabel->setText(tr("Detecting frames…"));
+        setCursor(Qt::BusyCursor);
+    } else {
+        unsetCursor();
+    }
+}
 
 void FrameDetectionDialog::hideSingleFrameButton() {
     m_rejectBtn->hide();
@@ -249,8 +274,47 @@ void FrameDetectionDialog::onRedetectClicked() {
     }
     m_userAddedFrames = stillAdded;
 
-    // Run new detection (m_lastDetectedFrames kept for the Reset button)
-    m_lastDetectedFrames = m_redetectFn(getUpdatedSettings());
+    // Run the new detection in the background; a change made meanwhile runs once it ends.
+    if (m_redetectWatcher.isRunning()) {
+        m_redetectQueued = true;
+        return;
+    }
+    setDetecting(true);
+#ifdef Q_OS_WASM
+    // QtConcurrent is unreliable without threads in the web build; run it here.
+    const RedetectResult result = m_redetectFn(getUpdatedSettings());
+    setDetecting(false);
+    showRedetectResult(result);
+#else
+    m_redetectWatcher.setFuture(QtConcurrent::run(m_redetectFn, getUpdatedSettings()));
+#endif
+}
+
+void FrameDetectionDialog::onRedetectFinished() {
+    setDetecting(false);
+    if (m_redetectQueued) {
+        m_redetectQueued = false;
+        onRedetectClicked();
+        return;
+    }
+    showRedetectResult(m_redetectWatcher.result());
+}
+
+void FrameDetectionDialog::showRedetectResult(const RedetectResult& result) {
+    if (!result.error.isEmpty()) {
+        setDetectionError(result.error); // keep the frames on the canvas
+        return;
+    }
+    m_statusLabel->setStyleSheet(QString());
+    m_statusLabel->setText(result.frames.isEmpty()
+        ? tr("No frames found with these settings.")
+        : tr("%n frame(s) found.", "", result.frames.size()));
+    applyDetectedFrames(result.frames);
+}
+
+void FrameDetectionDialog::applyDetectedFrames(const QVector<QRect>& detected) {
+    // m_lastDetectedFrames is kept for the Reset button.
+    m_lastDetectedFrames = detected;
 
     // For each detected frame, subtract every removed rect from it.
     // subtractRect returns the pieces of `r` that lie outside `removed`

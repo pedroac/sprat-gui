@@ -256,42 +256,11 @@ void MainWindow::onLoadProject() {
     wasmOpenFileDialog(false);
     return;
 #endif
-    QMessageBox picker(this);
-    picker.setWindowTitle(tr("Load"));
-    picker.setIcon(QMessageBox::Question);
-    picker.setText(tr("Load a project file or a project folder?"));
-
-    QPushButton* projectFileButton = picker.addButton(tr("Project File..."), QMessageBox::AcceptRole);
-    QPushButton* projectFolderButton = picker.addButton(tr("Project Folder..."), QMessageBox::AcceptRole);
-    picker.addButton(QMessageBox::Cancel);
-    picker.exec();
-
-    if (picker.clickedButton() == projectFileButton) {
-        const QString filter = tr("Project Files (project.spart.json *.json);;"
-                                  "ZIP Projects (*.zip);;"
-                                  "All Supported Files (*.json *.zip)");
-        const QString file = QFileDialog::getOpenFileName(this, tr("Load Project File"), "", filter);
-        if (!file.isEmpty()) {
-            loadProject(file);
-        }
-        return;
-    }
-
-    if (picker.clickedButton() == projectFolderButton) {
-        const QString folder = QFileDialog::getExistingDirectory(this, tr("Select Project Folder"));
-        if (folder.isEmpty()) {
-            return;
-        }
-        const QString projectFile = QDir(folder).filePath("project.spart.json");
-        if (!QFileInfo::exists(projectFile)) {
-            MessageDialog::warning(
-                this,
-                tr("Load Failed"),
-                tr("The selected folder does not contain a project.spart.json file."));
-            return;
-        }
-        loadProject(projectFile);
-    }
+    const QString filter = tr("Projects (project.spart.json *.json *.zip);;"
+                              "All Files (*)");
+    const QString file = QFileDialog::getOpenFileName(this, tr("Open Project"), QString(), filter);
+    if (!file.isEmpty())
+        loadProject(file);
 }
 
 void MainWindow::onLoadFromUrl() {
@@ -600,21 +569,20 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
     return true;
 }
 
-void MainWindow::onSaveClicked() {
+bool MainWindow::onSaveClicked() {
 #ifdef Q_OS_WASM
-    return;
+    return true; // the web build has no project folder to save to
 #else
     const QString projectFilePath = m_projectController ? m_projectController->projectFilePath() : QString();
     if (projectFilePath.isEmpty()) {
-        onSaveAsClicked();
-        return;
+        return onSaveAsClicked();
     }
     const QString projectDir = QFileInfo(projectFilePath).absolutePath();
     QString error;
     if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
         m_statusLabel->setText(tr("Save failed: ") + error);
         MessageDialog::critical(this, tr("Save Failed"), error);
-        return;
+        return false;
     }
     if (m_lastSaveConfig.syncSprites) {
         syncNewSpritesToProjectFolder(projectDir);
@@ -622,11 +590,12 @@ void MainWindow::onSaveClicked() {
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
     markProjectUnmodified(false);
     updateUiState();
+    return true;
 #endif
 }
 
 #ifndef Q_OS_WASM
-void MainWindow::onSaveAsClicked() {
+bool MainWindow::onSaveAsClicked() {
     // Start browser in the parent of the current project folder, or the last
     // used parent, so the user naturally creates sibling project folders.
     const QString projectFilePath2 = m_projectController ? m_projectController->projectFilePath() : QString();
@@ -644,7 +613,7 @@ void MainWindow::onSaveAsClicked() {
     const QString projectDir = QFileDialog::getSaveFileName(
         this, tr("Save Project As"), startDir,
         QString(), nullptr, QFileDialog::DontConfirmOverwrite);
-    if (projectDir.isEmpty()) return;
+    if (projectDir.isEmpty()) return false;
 
     // Remember the parent so next Save As opens there.
     m_settings.defaultProjectsFolder = QFileInfo(projectDir).absolutePath();
@@ -708,7 +677,7 @@ void MainWindow::onSaveAsClicked() {
         mainLayout->addLayout(contentLayout);
         mainLayout->addWidget(buttonBox);
 
-        if (dlg.exec() != QDialog::Accepted) return;
+        if (dlg.exec() != QDialog::Accepted) return false;
         m_lastSaveConfig.syncSprites = cb->isChecked();
     }
 
@@ -727,12 +696,13 @@ void MainWindow::onSaveAsClicked() {
     if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
         m_statusLabel->setText(tr("Save failed: ") + error);
         MessageDialog::critical(this, tr("Save Failed"), error);
-        return;
+        return false;
     }
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
     markProjectUnmodified(false);
     addToRecentProjects(newProjectFilePath);
     updateUiState();
+    return true;
 }
 #endif
 
@@ -995,6 +965,19 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
             setLoading(false);
             MessageDialog::warning(this, tr("Load Failed"), result.error);
             return;    }
+
+    // The project is about to replace the current one; checked here rather than before
+    // loading because a ZIP is only known to be a project once it has been read.
+    if (isWindowModified()) {
+        setLoading(false); // don't keep the loading overlay up behind the question
+        if (!confirmDiscardUnsavedChanges(
+                tr("You have unsaved changes. Save them before opening \"%1\"?")
+                    .arg(QFileInfo(path).fileName()))) {
+            m_statusLabel->setText(tr("Opening project canceled"));
+            return;
+        }
+        setLoading(true);
+    }
 
     // Add to recent projects
     addToRecentProjects(path);

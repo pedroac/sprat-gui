@@ -9,12 +9,20 @@
 #include <QSpinBox>
 #include <functional>
 #include <QTimer>
+#include <QLabel>
+#include <QFutureWatcher>
 #include "FrameDetectionCanvas.h"
 
 class FrameDetectionDialog : public QDialog {
     Q_OBJECT
 public:
-    using RedetectFn = std::function<QVector<QRect>(const AppSettings&)>;
+    struct RedetectResult {
+        QVector<QRect> frames;
+        QString error; ///< Non-empty when detection failed
+    };
+    /// Runs detection with the given settings. Called on a worker thread, so it must not
+    /// touch widgets or shared state.
+    using RedetectFn = std::function<RedetectResult(const AppSettings&)>;
 
     explicit FrameDetectionDialog(const QString& imagePath, const QVector<QRect>& initialFrames, const AppSettings& settings, RedetectFn redetectFn = {}, const QColor& backgroundColor = QColor(), QWidget* parent = nullptr);
     ~FrameDetectionDialog() override;
@@ -26,14 +34,22 @@ public:
     /** Hide the "Use as Single Frame" button (call before exec()). */
     void hideSingleFrameButton();
 
+    /** Shows why the initial detection failed (call before exec()). */
+    void setDetectionError(const QString& error);
+
 private slots:
     void onAcceptClicked();
     void onRejectClicked();
     void onCancelClicked();
     void onRedetectClicked();
     void onResetClicked();
+    void onRedetectFinished();
 
 private:
+    void showRedetectResult(const RedetectResult& result);
+    void applyDetectedFrames(const QVector<QRect>& detected);
+    void setDetecting(bool detecting);
+
     QPixmap m_image;
     AppSettings m_settings;
     RedetectFn m_redetectFn;
@@ -55,4 +71,7 @@ private:
     QColor m_rectangleColor;
     QSpinBox* m_toleranceSpin = nullptr;
     QSpinBox* m_minSizeSpin = nullptr;
+    QLabel* m_statusLabel = nullptr;
+    QFutureWatcher<RedetectResult> m_redetectWatcher;
+    bool m_redetectQueued = false; ///< Settings changed while a detection was running
 };

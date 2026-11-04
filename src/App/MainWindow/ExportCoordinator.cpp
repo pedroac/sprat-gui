@@ -124,11 +124,11 @@ bool ExportCoordinator::runExport(SaveConfig config) {
 
     if (m_layoutBinary.isEmpty() || m_packBinary.isEmpty()) {
         if (!m_cliReady) {
-            MessageDialog::critical(m_cfg.parentWidget, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
+            MessageDialog::critical(m_cfg.parentWidget, tr("sprat-cli Tools Missing"), tr("spratlayout or spratpack wasn't found, so nothing can be exported. Install or locate the sprat-cli tools in Settings > CLI Tools."));
             return false;
         }
         if (m_cfg.session->layoutSourcePath.isEmpty()) {
-            MessageDialog::critical(m_cfg.parentWidget, tr("Error"), tr("No layout source selected."));
+            MessageDialog::critical(m_cfg.parentWidget, tr("Nothing to Export"), tr("Add sprites to the project before exporting."));
             return false;
         }
     }

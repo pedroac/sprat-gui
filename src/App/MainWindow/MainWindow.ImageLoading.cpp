@@ -39,7 +39,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
 
     if (AnimatedImageImport::isAnimatedGif(imagePath)) {
         if (!m_cliReady || m_isLoading) {
-            MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+            MessageDialog::warning(this, tr("Can't Import Yet"), tr("The sprat-cli tools aren't ready yet, or another import is still running. Wait for it to finish, or check the tools in Settings > CLI Tools."));
             return;
         }
 
@@ -74,13 +74,13 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
 
 #ifdef Q_OS_WASM
     if (!m_cliReady || m_isLoading) {
-        MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        MessageDialog::warning(this, tr("Can't Import Yet"), tr("The sprat-cli tools aren't ready yet, or another import is still running. Wait for it to finish, or check the tools in Settings > CLI Tools."));
         return;
     }
 
 #ifndef SPRAT_EMBEDDED_CLI
     if (m_spratFramesBin.isEmpty()) {
-        MessageDialog::warning(this, tr("Error"), tr("spratframes binary not found."));
+        MessageDialog::warning(this, tr("sprat-cli Tool Missing"), tr("spratframes wasn't found. Install or locate the sprat-cli tools in Settings > CLI Tools."));
         return;
     }
 #endif
@@ -98,12 +98,12 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     });
 #else
     if (!m_cliReady || m_isLoading) {
-        MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        MessageDialog::warning(this, tr("Can't Import Yet"), tr("The sprat-cli tools aren't ready yet, or another import is still running. Wait for it to finish, or check the tools in Settings > CLI Tools."));
         return;
     }
 
     if (m_spratFramesBin.isEmpty()) {
-        MessageDialog::warning(this, tr("Error"), tr("spratframes binary not found."));
+        MessageDialog::warning(this, tr("sprat-cli Tool Missing"), tr("spratframes wasn't found. Install or locate the sprat-cli tools in Settings > CLI Tools."));
         return;
     }
 
@@ -133,18 +133,21 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
     }
 
     const QString imagePath = result.imagePath;
-    FrameDetectionDialog::RedetectFn redetectFn = [this, imagePath](const AppSettings& s) {
+    // Runs on a worker thread: copies everything it needs instead of using this.
+    const QString framesBinary = m_projectController->framesBinary();
+    FrameDetectionDialog::RedetectFn redetectFn = [imagePath, framesBinary](const AppSettings& s) {
         ProjectController::FramesAdvancedSettings fs;
         fs.framesHasRectangles = s.framesHasRectangles;
         fs.framesRectangleColor = s.framesRectangleColor;
         fs.framesTolerance = s.framesTolerance;
         fs.framesMinSize = s.framesMinSize;
         fs.framesMaxSprites = s.framesMaxSprites;
-        m_projectController->setFramesSettings(fs);
-        return m_projectController->detectFramesInImage(imagePath).frames;
+        const auto detection = ProjectController::detectFrames(imagePath, fs, framesBinary);
+        return FrameDetectionDialog::RedetectResult{detection.frames, detection.error};
     };
 
     FrameDetectionDialog dialog(result.imagePath, result.detection.frames, m_settings, redetectFn, result.detection.backgroundColor, this);
+    dialog.setDetectionError(result.detection.error);
     if (m_detectFramesHideSingleFrame)
         dialog.hideSingleFrameButton();
     m_detectFramesHideSingleFrame = false;
@@ -159,6 +162,14 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
         m_settings.framesRectangleColor = updated.framesRectangleColor;
         m_settings.framesTolerance = updated.framesTolerance;
         m_settings.framesMinSize = updated.framesMinSize;
+        // Only accepted settings reach the controller; canceling keeps the previous ones.
+        m_projectController->setFramesSettings({
+            m_settings.framesHasRectangles,
+            m_settings.framesRectangleColor,
+            m_settings.framesTolerance,
+            m_settings.framesMinSize,
+            m_settings.framesMaxSprites
+        });
     }
 
     if (dialog.userAccepted()) {
@@ -175,7 +186,7 @@ void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetec
 #ifndef Q_OS_WASM
         if (m_spratUnpackBin.isEmpty()) {
             qWarning() << "[FrameExtraction] spratunpack binary not set, cannot extract frames";
-            MessageDialog::warning(this, tr("Error"), tr("spratunpack binary not found."));
+            MessageDialog::warning(this, tr("sprat-cli Tool Missing"), tr("spratunpack wasn't found. Install or locate the sprat-cli tools in Settings > CLI Tools."));
             return;
         }
 #endif
@@ -249,12 +260,12 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     }
     
     if (!m_cliReady || m_isLoading) {
-        MessageDialog::warning(this, tr("Error"), tr("CLI tools not ready or already loading."));
+        MessageDialog::warning(this, tr("Can't Import Yet"), tr("The sprat-cli tools aren't ready yet, or another import is still running. Wait for it to finish, or check the tools in Settings > CLI Tools."));
         return;
     }
     
     if (m_spratUnpackBin.isEmpty()) {
-        MessageDialog::warning(this, tr("Error"), tr("spratunpack binary not found."));
+        MessageDialog::warning(this, tr("sprat-cli Tool Missing"), tr("spratunpack wasn't found. Install or locate the sprat-cli tools in Settings > CLI Tools."));
         return;
     }
 

@@ -135,7 +135,16 @@ echo "VERSION file content:"
 cat VERSION
 echo "---"
 cmake -DSPRAT_DOWNLOAD_STB=ON .
-make -j$(nproc 2>/dev/null || echo 1)
+# One compile job per core can run a low-memory machine out of RAM and get the build
+# OOM-killed; allow one job per 2 GiB of available memory, at most one per core.
+jobs=$(nproc 2>/dev/null || echo 1)
+memory_jobs=$(awk '/^MemAvailable:/ { print int($2 / 2097152) }' /proc/meminfo 2>/dev/null || true)
+if [ -n "$memory_jobs" ] && [ "$memory_jobs" -lt "$jobs" ]; then
+  jobs=$memory_jobs
+fi
+[ "$jobs" -ge 1 ] || jobs=1
+echo "Building with $jobs parallel job(s)"
+make -j"$jobs"
 
 # Check the built tools before installing, so a wrong version never replaces working ones.
 echo "Checking built CLI tool versions:"

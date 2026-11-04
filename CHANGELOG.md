@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame Animation workspace: each timeline has a loop mode (Loop, Once, Ping-pong or Ping-pong once). The preview, GIF/video export and exported metadata play it that way; an alias plays the way its source does. Projects saved before keep looping
 
 ### Changed
+- The Export workspace shortcut is now Alt+X. Alt+E is the Edit menu's key on Windows and Linux, and the clash made Alt+E do nothing
+- File > Load is now File > Open Project (Ctrl+O) and opens the file dialog directly. To open a project folder, pick its project.spart.json
+- File > Export has a shortcut: Ctrl+E
+- Help > Hotkeys now lists the shortcuts as they are bound, in the platform's notation (⌘ on macOS), including marker copy/paste and nudging with the arrow keys
+- When the layout switches to another profile because the selected one failed, a notice says which profile is now used (exports use it too)
+- Layout and sprat-cli errors say what went wrong and where to fix it, instead of "Error", and open over the app window
 - Frame Animation workspace: onion skin now defaults to off
 - Sprites workspace: trim rect now defaults to on
 - Atlas Sprites: deduplication mode now defaults to Exact instead of None
@@ -24,9 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
 
 ### Fixed
+- Opening another project (Open Project, Open Recent, or dropping a project) now asks to save unsaved changes first, instead of discarding them. Closing the app no longer closes it when saving was canceled or failed
+- Ctrl+V in the sprite preview pastes copied markers again, instead of importing from the clipboard
+- Frame detection no longer freezes its dialog while detecting; it shows progress, keeps the frames when detection fails and says why, and settings changed in a canceled dialog are no longer kept
+- Zoom shortcuts (Ctrl+plus/minus, Ctrl+0, Ctrl+1) work on the current workspace's view even when the focus is in a side panel or on a button
+- When no profile can fit the sprites, the layout stops with one message instead of also trying to switch to an empty profile
 - Removing a source no longer deletes its files permanently when the system temp folder is on another drive (common on Linux), so undoing the removal brings them back
 - In-app updates: on macOS the new app replaces the old one instead of being copied over it (leftover files could make macOS report the app as damaged); on Linux the bundled profiles config and transforms are updated too, and running from an AppImage updates the AppImage itself. The update now waits for the app to close instead of a fixed 2 seconds
 - Windows: installing sprat-cli from the app no longer fails because the downloaded ZIP was saved without a `.zip` extension
+- Linux: installing sprat-cli from the app no longer runs one compile job per CPU core, which could run out of memory on machines with little RAM. It now runs one job per 2 GiB of free memory
 - Writing files back to a source ZIP no longer leaves a broken ZIP when a file can't be read or written; the original ZIP is only replaced once the new one is complete
 - Opening a project ZIP whose project file can't be fully read now shows an error instead of loading a cut-off project, and archive warnings no longer stop extraction partway while reporting success
 - Atlas names with slashes or `..` no longer turn into export folders outside the export
@@ -50,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 
 ### Dependencies
+- Updated sprat-cli to v0.28.1, which labels layout values, reports mistakes in hand-written markers and animations files, and writes raw format version 4
 - Updated sprat-cli to v0.24.0, which adds animation loop modes and rejects animations faster than 100 FPS
 - macOS: the bundled sprat-cli tools are built from source with the app instead of being taken from sprat-cli's macOS release
 

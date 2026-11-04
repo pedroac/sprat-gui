@@ -384,10 +384,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 this, [this](const QString& profile) {
                     auto* profileCombo = m_atlasWorkspace ? m_atlasWorkspace->profileCombo() : nullptr;
                     if (!profileCombo) return;
+                    const QString previous = m_currentProfile;
                     const QSignalBlocker blocker(profileCombo);
                     profileCombo->setCurrentIndex(profileCombo->findData(profile));
                     m_currentProfile = profile;
                     if (m_layoutOrchestrator) m_layoutOrchestrator->setCurrentProfile(profile);
+                    if (!previous.isEmpty() && previous != profile)
+                        showProfileFallbackNotice(previous, profile);
                 });
         connect(m_layoutOrchestrator, &LayoutOrchestrator::cliReadyCheckNeeded,
                 this, &MainWindow::checkCliTools);
@@ -629,24 +632,47 @@ void MainWindow::markProjectUnmodified(bool clearHistory) {
     updateWindowModified();
 }
 
+void MainWindow::showProfileFallbackNotice(const QString& previousProfile, const QString& newProfile) {
+    // Non-modal, and reused when several profiles are tried in a row, so a layout that
+    // runs on its own doesn't stack up dialogs.
+    if (!m_profileFallbackNotice) {
+        m_profileFallbackNotice = new QMessageBox(QMessageBox::Information, tr("Layout Profile Changed"),
+                                                  QString(), QMessageBox::Ok, this);
+        m_profileFallbackNotice->setWindowModality(Qt::NonModal);
+        m_profileFallbackNotice->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    m_profileFallbackNotice->setText(
+        tr("The layout failed with the \"%1\" profile (for example, a sprite is larger than its "
+           "maximum atlas size), so it now uses \"%2\".\n\n"
+           "Exports use the selected profile, now \"%2\". Pick another profile in the profile list, "
+           "or change the profile's limits in Settings > Manage Profiles.")
+            .arg(previousProfile, newProfile));
+    m_profileFallbackNotice->show();
+    m_profileFallbackNotice->raise();
+}
+
+bool MainWindow::confirmDiscardUnsavedChanges(const QString& question) {
+    if (!isWindowModified())
+        return true;
+    const auto choice = MessageDialog::customQuestion(
+        this, tr("Unsaved Changes"), question,
+        {tr("Save"), tr("Don't Save"), tr("Cancel")},
+        0,
+        tr("Unsaved Changes"),
+        {QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton),
+         QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
+         QApplication::style()->standardIcon(QStyle::SP_DialogCancelButton)});
+    switch (choice) {
+    case 0:  return onSaveClicked(); // a canceled or failed save keeps the current project
+    case 1:  return true;
+    default: return false;
+    }
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
-    if (isWindowModified()) {
-        const auto choice = MessageDialog::customQuestion(
-            this, tr("Unsaved Changes"),
-            tr("You have unsaved changes. Save before closing?"),
-            {tr("Save"), tr("Don't Save"), tr("Cancel")},
-            0,
-            tr("Unsaved Changes"),
-            {QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton),
-             QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
-             QApplication::style()->standardIcon(QStyle::SP_DialogCancelButton)});
-        if (choice == 2) {          // Cancel
-            event->ignore();
-            return;
-        }
-        if (choice == 0) {          // Save
-            onSaveClicked();
-        }
+    if (!confirmDiscardUnsavedChanges(tr("You have unsaved changes. Save before closing?"))) {
+        event->ignore();
+        return;
     }
 
     // Clean up temporary folders before closing
@@ -997,88 +1023,102 @@ void MainWindow::onQuickStart() {
 }
 
 void MainWindow::onShowHotkeys() {
-    QString content = tr(
-        "<h2>Keyboard Shortcuts</h2>"
+    // Shortcuts are shown in the platform's notation (e.g. ⌘S on macOS) and, where an
+    // action exists, read from it, so this list can't drift from the real bindings.
+    auto keys = [](const QKeySequence& sequence) {
+        return sequence.toString(QKeySequence::NativeText).toHtmlEscaped();
+    };
+    auto standardKeys = [&keys](QKeySequence::StandardKey key) {
+        const QList<QKeySequence> bindings = QKeySequence::keyBindings(key);
+        return bindings.isEmpty() ? QString() : keys(bindings.first());
+    };
+    auto actionKeys = [&keys](const QAction* action) {
+        return action ? keys(action->shortcut()) : QString();
+    };
+    // "Ctrl+" on Windows/Linux, "⌘" on macOS, for combinations with the mouse.
+    QString ctrl = keys(QKeySequence(Qt::CTRL | Qt::Key_A));
+    ctrl.chop(1);
 
-        "<h3>General</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Save Project</td><td><b>Ctrl+S</b></td></tr>"
-        "<tr><td>Save Project As</td><td><b>Ctrl+Shift+S</b></td></tr>"
-        "<tr><td>Undo Pivot Change</td><td><b>Ctrl+Z</b></td></tr>"
-        "<tr><td>Redo Pivot Change</td><td><b>Ctrl+Y</b></td></tr>"
-        "<tr><td>Paste / Import from Clipboard</td><td><b>Ctrl+V</b></td></tr>"
-        "<tr><td>Quit</td><td><b>Ctrl+Q</b></td></tr>"
-        "</table>"
+    QString content = QStringLiteral("<h2>%1</h2>").arg(tr("Keyboard Shortcuts"));
+    auto beginSection = [&content, this](const QString& title) {
+        content += QStringLiteral("<h3>%1</h3><table border='1' cellpadding='4' cellspacing='0' width='100%'>"
+                                  "<tr><th width='60%'>%2</th><th>%3</th></tr>")
+                       .arg(title, tr("Action"), tr("Shortcut"));
+    };
+    auto row = [&content](const QString& action, const QString& shortcut) {
+        if (!shortcut.isEmpty())
+            content += QStringLiteral("<tr><td>%1</td><td><b>%2</b></td></tr>").arg(action, shortcut);
+    };
+    auto endSection = [&content]() { content += QStringLiteral("</table>"); };
+    const QString orText = tr(" or ");
 
-        "<h3>Workspaces</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Sprites workspace</td><td><b>Alt+S</b></td></tr>"
-        "<tr><td>Atlases workspace</td><td><b>Alt+A</b></td></tr>"
-        "<tr><td>Nine-Slice workspace</td><td><b>Alt+N</b></td></tr>"
-        "<tr><td>Frame Animation workspace</td><td><b>Alt+F</b></td></tr>"
-        "<tr><td>Exportation workspace</td><td><b>Alt+E</b></td></tr>"
-        "</table>"
+    beginSection(tr("General"));
+    row(tr("Open Project"), actionKeys(m_loadProjectAction));
+    row(tr("Save Project"), actionKeys(m_saveAction));
+    row(tr("Save Project As"), actionKeys(m_saveAsAction));
+    row(tr("Export Again"), actionKeys(m_exportAction));
+    row(tr("Undo"), standardKeys(QKeySequence::Undo));
+    row(tr("Redo"), standardKeys(QKeySequence::Redo));
+    row(tr("Import from Clipboard"), standardKeys(QKeySequence::Paste));
+    row(tr("Quit"), standardKeys(QKeySequence::Quit));
+    endSection();
 
-        "<h3>Canvas Views (Layout, Preview, Animation)</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Zoom In</td><td><b>Ctrl++</b> or <b>Ctrl+Scroll Up</b></td></tr>"
-        "<tr><td>Zoom Out</td><td><b>Ctrl+-</b> or <b>Ctrl+Scroll Down</b></td></tr>"
-        "<tr><td>100% Zoom</td><td><b>Ctrl+1</b></td></tr>"
-        "<tr><td>Fit to Window</td><td><b>Ctrl+0</b></td></tr>"
-        "<tr><td>Pan View</td><td><b>Space+Drag</b> or <b>Middle Mouse Drag</b></td></tr>"
-        "</table>"
+    beginSection(tr("Workspaces"));
+    row(tr("Sprites"), actionKeys(m_atlasWorkspaceAction));
+    row(tr("Atlases"), actionKeys(m_atlasesManagementWorkspaceAction));
+    row(tr("Nine-Slice"), actionKeys(m_nineSliceWorkspaceAction));
+    row(tr("Frame Animation"), actionKeys(m_frameAnimWorkspaceAction));
+    row(tr("Export"), actionKeys(m_exportationWorkspaceAction));
+    endSection();
 
-        "<h3>Layout Canvas</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Navigate Sprites</td><td><b>Arrow Keys</b></td></tr>"
-        "<tr><td>First / Last Sprite in Row</td><td><b>Home</b> / <b>End</b></td></tr>"
-        "<tr><td>Extend Selection</td><td><b>Shift+Arrow Keys</b></td></tr>"
-        "<tr><td>Select All Sprites</td><td><b>Ctrl+A</b></td></tr>"
-        "<tr><td>Delete Selected Sprites</td><td><b>Delete</b></td></tr>"
-        "<tr><td>Quick Split</td><td><b>Alt+Click</b> on a sprite</td></tr>"
-        "</table>"
-        "<p><i>Sprite search is done via the Search field in the Atlas Layout workspace right panel.</i></p>"
+    beginSection(tr("Canvas Views (Layout, Preview, Animation)"));
+    row(tr("Zoom In"), keys(QKeySequence(Qt::CTRL | Qt::Key_Plus)) + orText + ctrl + tr("Scroll Up"));
+    row(tr("Zoom Out"), keys(QKeySequence(Qt::CTRL | Qt::Key_Minus)) + orText + ctrl + tr("Scroll Down"));
+    row(tr("100% Zoom"), keys(QKeySequence(Qt::CTRL | Qt::Key_1)));
+    row(tr("Fit to Window"), keys(QKeySequence(Qt::CTRL | Qt::Key_0)));
+    row(tr("Pan View"), tr("Space+Drag") + orText + tr("Middle Mouse Drag"));
+    endSection();
 
-        "<h3>Navigation View</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Delete / Exclude Selected Sprites</td><td><b>Delete</b></td></tr>"
-        "<tr><td>Toggle Sprite Checkbox</td><td><b>Ctrl+Click</b></td></tr>"
-        "<tr><td>Check a Range of Sprites</td><td><b>Shift+Click</b></td></tr>"
-        "<tr><td>Context Menu (Atlases workspace)</td><td><b>Right-Click</b> folder/group or source</td></tr>"
-        "</table>"
+    beginSection(tr("Layout Canvas"));
+    row(tr("Navigate Sprites"), tr("Arrow Keys"));
+    row(tr("First / Last Sprite in Row"), tr("Home / End"));
+    row(tr("Extend Selection"), tr("Shift+Arrow Keys"));
+    row(tr("Select All Sprites"), standardKeys(QKeySequence::SelectAll));
+    row(tr("Remove Selected Sprites"), standardKeys(QKeySequence::Delete));
+    row(tr("Quick Split"), tr("Alt+Click on a sprite"));
+    endSection();
+    content += QStringLiteral("<p><i>%1</i></p>")
+                   .arg(tr("To find a sprite, use the Search field in the Sprites workspace."));
 
-        "<h3>Timeline</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Navigate Frames</td><td><b>Arrow Keys</b></td></tr>"
-        "<tr><td>Extend Frame Selection</td><td><b>Shift+Arrow Keys</b></td></tr>"
-        "<tr><td>Select All Frames</td><td><b>Ctrl+A</b></td></tr>"
-        "<tr><td>Delete Selected Frames</td><td><b>Delete</b></td></tr>"
-        "</table>"
+    beginSection(tr("Navigation View"));
+    row(tr("Remove / Exclude Selected Sprites"), standardKeys(QKeySequence::Delete));
+    row(tr("Toggle Sprite Checkbox"), ctrl + tr("Click"));
+    row(tr("Check a Range of Sprites"), tr("Shift+Click"));
+    row(tr("Context Menu (Atlases workspace)"), tr("Right-Click a folder, group or source"));
+    endSection();
 
-        "<h3>Sprite Preview</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Delete Selected Marker / Vertex</td><td><b>Delete</b></td></tr>"
-        "</table>"
+    beginSection(tr("Timeline"));
+    row(tr("Navigate Frames"), tr("Arrow Keys"));
+    row(tr("Extend Frame Selection"), tr("Shift+Arrow Keys"));
+    row(tr("Select All Frames"), standardKeys(QKeySequence::SelectAll));
+    row(tr("Delete Selected Frames"), standardKeys(QKeySequence::Delete));
+    endSection();
 
-        "<h3>Animation Playback</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Play / Pause Animation</td><td><b>Space</b></td></tr>"
-        "</table>"
+    beginSection(tr("Sprite Preview"));
+    row(tr("Move Selected Marker or Pivot 1 px"), tr("Arrow Keys"));
+    row(tr("Move Selected Marker or Pivot 10 px"), tr("Shift+Arrow Keys"));
+    row(tr("Copy Markers"), standardKeys(QKeySequence::Copy));
+    row(tr("Paste Markers"), standardKeys(QKeySequence::Paste));
+    row(tr("Delete Selected Marker / Vertex"), standardKeys(QKeySequence::Delete));
+    endSection();
 
-        "<h3>Debug</h3>"
-        "<table border='1' cellpadding='4' cellspacing='0' width='100%'>"
-        "<tr><th width='60%'>Action</th><th>Shortcut</th></tr>"
-        "<tr><td>Toggle Debug panel</td><td><b>F12</b></td></tr>"
-        "</table>"
-    );
+    beginSection(tr("Animation Playback"));
+    row(tr("Play / Pause Animation"), tr("Space"));
+    endSection();
+
+    beginSection(tr("Debug"));
+    row(tr("Toggle Debug Panel"), keys(QKeySequence(Qt::Key_F12)));
+    endSection();
 
     QDialog dlg(this);
     dlg.setWindowTitle(tr("Keyboard Hotkeys"));

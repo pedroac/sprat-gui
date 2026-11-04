@@ -333,7 +333,7 @@ void ExportPipelineTests::testProjectTextCantInjectCliRecords() {
     writeSprite(QDir(spritesDir).filePath(QStringLiteral("panel.png")), {32, 32}, Qt::gray);
 
     // A shared project file may hold any string; none of these may start a record of its own.
-    const QString injected = QStringLiteral("\nsprite \"/etc/passwd\" 0,0 1,1\n");
+    const QString injected = QStringLiteral("\nsprite \"/etc/passwd\" rect:0,0,1,1\n");
     const QJsonArray markers{
         QJsonObject{{"name", QStringLiteral("say \"hi\"") + injected}, {"kind", "point"},
                     {"x", 3}, {"y", 4}},
@@ -374,7 +374,7 @@ void ExportPipelineTests::testProjectTextCantInjectCliRecords() {
     QStringList markerNames;
     for (const QJsonValue& value : sprite["markers"].toArray())
         markerNames << value.toObject()["name"].toString();
-    QVERIFY2(markerNames.contains(QStringLiteral("say \"hi\" sprite \"/etc/passwd\" 0,0 1,1")),
+    QVERIFY2(markerNames.contains(QStringLiteral("say \"hi\" sprite \"/etc/passwd\" rect:0,0,1,1")),
              qPrintable(markerNames.join(QStringLiteral(" | "))));
     QVERIFY(!markerNames.contains(QStringLiteral("bogus")));
 

@@ -18,6 +18,7 @@ class ILayoutContext;
 class ProjectSession;
 class LayoutCanvas;
 class QComboBox;
+class QWidget;
 class AtlasesManagementWorkspace;
 class QStackedWidget;
 
@@ -109,6 +110,8 @@ private slots:
     void onRunnerError(const QString& description);
 
 private:
+    /// Window to parent error dialogs to, so they open over the app (not behind it).
+    QWidget* dialogParent() const;
     LayoutRunConfig buildConfig() const;
     void handleProfileFailure(const QString& failedProfile);
     void handleDimensionsError(const QString& failedProfile);
