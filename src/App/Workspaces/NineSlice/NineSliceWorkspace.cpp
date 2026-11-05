@@ -3,6 +3,7 @@
 #include "NavigatorTreeWidget.h"
 #include "NineSliceEditorCanvas.h"
 #include "ProjectSession.h"
+#include "SpritePickerDialog.h"
 #include "SpriteModels.h"
 
 #include <QApplication>
@@ -18,6 +19,8 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStackedWidget>
+#include <QStyle>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
@@ -26,28 +29,24 @@
 namespace {
 /// Largest inset the spin boxes accept before a sprite image sets the real limit.
 constexpr int MAX_INSET = 9999;
-}
 
-// ---------------------------------------------------------------------------
-// filterItemNineSliced — recursively hide tree items whose sprite is not nine-sliced
-// Returns true if the item (or any descendant) is visible after filtering.
-// ---------------------------------------------------------------------------
-static bool filterItemNineSliced(QTreeWidgetItem* item)
+/// Splits a sprite into thirds the first time it is nine-sliced, when it has no insets yet.
+void applyDefaultInsets(Sprite& sprite)
 {
-    auto sp = item->data(0, Qt::UserRole).value<SpritePtr>();
-    if (sp && !sp->path.isEmpty()) {
-        // Leaf (sprite) item
-        item->setHidden(!sp->isNineSliced);
-        return sp->isNineSliced;
-    }
-    // Folder item: show only if at least one child is visible
-    bool anyVisible = false;
-    for (int i = 0; i < item->childCount(); ++i) {
-        if (filterItemNineSliced(item->child(i)))
-            anyVisible = true;
-    }
-    item->setHidden(!anyVisible);
-    return anyVisible;
+    if (sprite.nsLeft != 0 || sprite.nsTop != 0 || sprite.nsRight != 0 || sprite.nsBottom != 0)
+        return;
+    const QPixmap pix(sprite.path);
+    if (pix.isNull()) return;
+    sprite.nsLeft   = pix.width()  / 3;
+    sprite.nsTop    = pix.height() / 3;
+    sprite.nsRight  = pix.width()  / 3;
+    sprite.nsBottom = pix.height() / 3;
+    // Clear any stale target size written by saveCurrentSprite() before the sprite was
+    // nine-sliced (e.g. the spinbox minimum of 1 px), so that setTargetSize is not called
+    // with a value unrelated to this sprite.
+    sprite.nsTargetWidth  = 0;
+    sprite.nsTargetHeight = 0;
+}
 }
 
 NineSliceWorkspace::NineSliceWorkspace(ProjectSession* session, QWidget* parent)
@@ -66,22 +65,11 @@ void NineSliceWorkspace::setupUi()
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     mainLayout->addWidget(splitter);
 
-    // === Left panel: filter toggle + NavigatorPanel ===
+    // === Left panel: the nine-sliced sprites, with Add/Remove under them as in the Atlases workspace ===
     auto* leftWidget = new QWidget;
     auto* leftLayout = new QVBoxLayout(leftWidget);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
-
-    m_filterNineSlicedBtn = new QPushButton(QIcon(QStringLiteral(":/icons/filter.svg")), tr("Nine-sliced only"), this);
-    m_filterNineSlicedBtn->setCheckable(true);
-    m_filterNineSlicedBtn->setToolTip(tr("Show only sprites marked as nine-sliced"));
-    {
-        auto* row = new QHBoxLayout;
-        row->setContentsMargins(4, 2, 4, 2);
-        row->addWidget(m_filterNineSlicedBtn);
-        row->addStretch();
-        leftLayout->addLayout(row);
-    }
 
     m_navigatorPanel = new NavigatorPanel(this);
     m_navigatorPanel->configure({
@@ -90,14 +78,45 @@ void NineSliceWorkspace::setupUi()
         /* checkboxes      */ false,
         /* filterBar       */ true,
         /* addSourceButton */ false,
-        /* selectionMode   */ QAbstractItemView::SingleSelection
+        /* selectionMode   */ QAbstractItemView::ExtendedSelection
     });
-    m_navigatorPanel->setSpriteBadgeCallback([](const SpritePtr& sp) -> QIcon {
-        if (sp && sp->isNineSliced)
-            return QIcon(QStringLiteral(":/icons/nine-slice.svg"));
-        return {};
-    });
-    leftLayout->addWidget(m_navigatorPanel, 1);
+    m_navigatorPanel->setSpriteFilter([](const SpritePtr& sp) { return sp->isNineSliced; });
+
+    m_emptyState = new QWidget(this);
+    {
+        auto* emptyLayout = new QVBoxLayout(m_emptyState);
+        auto* emptyLabel = new QLabel(tr("No nine-sliced sprites yet.\nClick Add to pick the sprites "
+                                         "that should stretch, such as panels and buttons."), m_emptyState);
+        emptyLabel->setAlignment(Qt::AlignCenter);
+        emptyLabel->setWordWrap(true);
+        emptyLayout->addWidget(emptyLabel);
+    }
+    m_emptyState->setObjectName(QStringLiteral("nineSliceEmptyState"));
+    m_navigatorStack = new QStackedWidget(this);
+    m_navigatorStack->setObjectName(QStringLiteral("nineSliceNavigatorStack"));
+    m_navigatorStack->addWidget(m_navigatorPanel);
+    m_navigatorStack->addWidget(m_emptyState);
+    leftLayout->addWidget(m_navigatorStack, 1);
+
+    m_addBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder),
+                               tr("Add"), leftWidget);
+    m_addBtn->setObjectName(QStringLiteral("nineSliceAddButton"));
+    m_addBtn->setToolTip(tr("Pick sprites to nine-slice"));
+    m_addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_removeBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
+                                  tr("Remove"), leftWidget);
+    m_removeBtn->setObjectName(QStringLiteral("nineSliceRemoveButton"));
+    m_removeBtn->setToolTip(tr("Stop nine-slicing the selected sprites (Delete). Their insets are kept "
+                               "if you add them again"));
+    m_removeBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_removeBtn->setEnabled(false);
+    {
+        auto* row = new QHBoxLayout;
+        row->setContentsMargins(4, 2, 4, 2);
+        row->addWidget(m_addBtn);
+        row->addWidget(m_removeBtn);
+        leftLayout->addLayout(row);
+    }
     splitter->addWidget(leftWidget);
 
     // === Right panel ===
@@ -105,22 +124,10 @@ void NineSliceWorkspace::setupUi()
     auto* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(4, 4, 4, 4);
 
-    // -- Top row: Nine-Sliced toggle | Zoom + W/H + Lines/Grid/Colorize
-    //    Lives outside m_configGroup so it is never disabled by it.
+    // -- Top row: Zoom + W/H + Lines/Grid/Colorize
     {
         auto* row = new QHBoxLayout;
         row->setContentsMargins(0, 0, 0, 2);
-
-        m_nineSlicedBtn = new QPushButton(QIcon(QStringLiteral(":/icons/nine-slice.svg")), tr("Nine-Sliced"), this);
-        m_nineSlicedBtn->setCheckable(true);
-        m_nineSlicedBtn->setEnabled(false);
-        m_nineSlicedBtn->setToolTip(tr("Mark or unmark the selected sprite as nine-sliced"));
-        row->addWidget(m_nineSlicedBtn);
-
-        auto* vSep = new QFrame;
-        vSep->setFrameShape(QFrame::VLine);
-        vSep->setFrameShadow(QFrame::Sunken);
-        row->addWidget(vSep);
 
         // Magnifying glass icon (matches SpriteEditorPanel style)
         {
@@ -240,10 +247,13 @@ void NineSliceWorkspace::setupUi()
     // === Connections ===
     connect(m_navigatorPanel->tree(), &QTreeWidget::currentItemChanged,
             this, &NineSliceWorkspace::onNavigatorSelectionChanged);
-    connect(m_filterNineSlicedBtn, &QPushButton::toggled,
-            this, &NineSliceWorkspace::applyNineSliceFilter);
-    connect(m_nineSlicedBtn, &QPushButton::toggled,
-            this, &NineSliceWorkspace::onNineSlicedToggled);
+    connect(m_navigatorPanel->tree(), &QTreeWidget::itemSelectionChanged, this, [this]() {
+        m_removeBtn->setEnabled(!m_navigatorPanel->selectedSpritePaths().isEmpty());
+    });
+    connect(m_navigatorPanel, &NavigatorPanel::excludeKeyPressed,
+            this, &NineSliceWorkspace::onRemoveSpritesClicked);
+    connect(m_addBtn, &QPushButton::clicked, this, &NineSliceWorkspace::onAddSpritesClicked);
+    connect(m_removeBtn, &QPushButton::clicked, this, &NineSliceWorkspace::onRemoveSpritesClicked);
 
     connect(m_leftSpin, qOverload<int>(&QSpinBox::valueChanged),
             this, &NineSliceWorkspace::onInsetSpinChanged);
@@ -286,40 +296,23 @@ void NineSliceWorkspace::setupUi()
 
 void NineSliceWorkspace::enter()
 {
-    // Save path before refresh(): if refresh emits currentItemChanged(null) it
-    // will clear m_currentSpritePath via onNavigatorSelectionChanged.  After
-    // refresh we use the post-refresh value as the source of truth and only
-    // fall back to the saved path when refresh left no selection.
+    // refresh() rebuilds the tree with its signals blocked, so the current path survives it.
     const QString savedPath = m_currentSpritePath;
-    if (m_session)
-        m_navigatorPanel->refresh(m_session, false);
-    if (m_currentSpritePath.isEmpty() && !savedPath.isEmpty())
-        m_currentSpritePath = savedPath;
+    refreshNavigator();
+    showSprite(savedPath);
+}
 
-    // If still no path, auto-select the first sprite in the tree.
-    // refresh() blocks signals so currentItemChanged never fires during rebuild.
-    if (m_currentSpritePath.isEmpty()) {
-        auto* tree = m_navigatorPanel->tree();
-        QTreeWidgetItemIterator it(tree);
-        while (*it) {
-            auto sp = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
-            if (sp && !sp->path.isEmpty()) {
-                // Select before setting the path: the selection handler saves the
-                // UI into the current sprite, which would wipe this one's insets.
-                tree->setCurrentItem(*it);
-                m_currentSpritePath = sp->path;
-                break;
-            }
-            ++it;
-        }
-    }
-
-    if (!m_currentSpritePath.isEmpty()) {
-        loadSprite(m_currentSpritePath);
+void NineSliceWorkspace::refreshSprites()
+{
+    const QString currentPath = m_currentSpritePath;
+    refreshNavigator();
+    if (auto* item = m_navigatorPanel->findSpriteItem(currentPath)) {
+        const QSignalBlocker blocker(m_navigatorPanel->tree());
+        m_navigatorPanel->tree()->setCurrentItem(item);
+        m_removeBtn->setEnabled(true);
     } else {
-        m_canvas->clearSprite();
+        showSprite(currentPath);
     }
-    applyNineSliceFilter();
 }
 
 void NineSliceWorkspace::leave()
@@ -347,30 +340,11 @@ void NineSliceWorkspace::loadSprite(const QString& path)
         m_canvas->clearSprite();
         return;
     }
-    // Apply thirds defaults the first time a sprite is marked as nine-sliced.
-    if (sp->isNineSliced
-            && sp->nsLeft == 0 && sp->nsTop == 0
-            && sp->nsRight == 0 && sp->nsBottom == 0) {
-        QPixmap pix(path);
-        if (!pix.isNull()) {
-            sp->nsLeft   = pix.width()  / 3;
-            sp->nsTop    = pix.height() / 3;
-            sp->nsRight  = pix.width()  / 3;
-            sp->nsBottom = pix.height() / 3;
-            // Clear any stale target size written by saveCurrentSprite() before
-            // the sprite was marked (e.g. the spinbox minimum of 1 px), so that
-            // setTargetSize is not called with a value unrelated to this sprite.
-            sp->nsTargetWidth  = 0;
-            sp->nsTargetHeight = 0;
-        }
-    }
+    if (sp->isNineSliced) applyDefaultInsets(*sp);
 
     const double prevZoom = m_zoomSpin->value() / 100.0;
     bool insetsFitted = false;
     m_updatingUi = true;
-
-    m_nineSlicedBtn->setEnabled(true);
-    m_nineSlicedBtn->setChecked(sp->isNineSliced);
 
     resetInsetLimits(); // the previous sprite's caps must not clip this one's insets
     m_leftSpin->setValue(sp->nsLeft);
@@ -441,16 +415,77 @@ void NineSliceWorkspace::saveCurrentSprite()
     sp->nsTargetHeight = m_heightSpin->value();
 }
 
-void NineSliceWorkspace::applyNineSliceFilter()
+void NineSliceWorkspace::refreshNavigator()
 {
-    if (!m_filterNineSlicedBtn->isChecked()) {
-        // Restore text filter (un-hides all items, then re-applies text match)
-        m_navigatorPanel->applyFilter(m_navigatorPanel->filterText());
+    if (m_session) m_navigatorPanel->refresh(m_session, false);
+    const bool hasSprites = m_navigatorPanel->firstSpriteItem() != nullptr;
+    m_navigatorStack->setCurrentWidget(hasSprites ? static_cast<QWidget*>(m_navigatorPanel) : m_emptyState);
+    m_removeBtn->setEnabled(!m_navigatorPanel->selectedSpritePaths().isEmpty());
+}
+
+void NineSliceWorkspace::showSprite(const QString& path)
+{
+    QTreeWidgetItem* item = m_navigatorPanel->findSpriteItem(path);
+    if (!item) item = m_navigatorPanel->firstSpriteItem();
+    const auto sprite = item ? item->data(0, Qt::UserRole).value<SpritePtr>() : nullptr;
+    if (!sprite) {
+        clearSpriteView();
         return;
     }
     auto* tree = m_navigatorPanel->tree();
-    for (int i = 0; i < tree->topLevelItemCount(); ++i)
-        filterItemNineSliced(tree->topLevelItem(i));
+    {
+        const QSignalBlocker blocker(tree);
+        tree->setCurrentItem(item);
+    }
+    m_removeBtn->setEnabled(true);
+    m_currentSpritePath = sprite->path;
+    loadSprite(sprite->path);
+}
+
+void NineSliceWorkspace::clearSpriteView()
+{
+    m_currentSpritePath.clear();
+    m_configGroup->setEnabled(false);
+    m_canvas->setReadOnly(false);
+    m_canvas->clearSprite();
+}
+
+void NineSliceWorkspace::setNineSliced(const QStringList& paths, bool nineSliced, const QString& nextPath)
+{
+    if (!m_session || paths.isEmpty()) return;
+    saveCurrentSprite();
+    for (const QString& path : paths) {
+        const auto sp = m_session->spriteIndex.value(QDir::cleanPath(path));
+        if (!sp) continue;
+        sp->isNineSliced = nineSliced;
+        // Every added sprite gets insets now, not only the one shown, so it exports sliced.
+        if (nineSliced) applyDefaultInsets(*sp);
+    }
+    refreshNavigator();
+    showSprite(nextPath);
+    emit definitionsChanged();
+}
+
+QString NineSliceWorkspace::spriteAfterRemoving(const QStringList& removedPaths) const
+{
+    if (!m_currentSpritePath.isEmpty() && !removedPaths.contains(m_currentSpritePath))
+        return m_currentSpritePath;
+    QStringList listed;
+    QTreeWidgetItemIterator it(m_navigatorPanel->tree());
+    while (*it) {
+        const auto sp = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sp && !sp->path.isEmpty()) listed.append(sp->path);
+        ++it;
+    }
+    // The next sprite below the removed ones, else the nearest one above them.
+    const int anchor = listed.indexOf(m_currentSpritePath);
+    for (int i = anchor + 1; anchor >= 0 && i < listed.size(); ++i) {
+        if (!removedPaths.contains(listed[i])) return listed[i];
+    }
+    for (int i = (anchor >= 0 ? anchor : listed.size()) - 1; i >= 0; --i) {
+        if (!removedPaths.contains(listed[i])) return listed[i];
+    }
+    return {};
 }
 
 // === Slots ===
@@ -463,42 +498,36 @@ void NineSliceWorkspace::onNavigatorSelectionChanged(QTreeWidgetItem* current, Q
         m_currentSpritePath = sprite->path;
         loadSprite(sprite->path);
     } else {
-        m_currentSpritePath.clear();
-        m_updatingUi = true;
-        m_nineSlicedBtn->setChecked(false);
-        m_nineSlicedBtn->setEnabled(false);
-        m_updatingUi = false;
-        m_configGroup->setEnabled(false);
-        m_canvas->setReadOnly(false);
-        m_canvas->clearSprite();
+        clearSpriteView();
     }
 }
 
-void NineSliceWorkspace::onNineSlicedToggled(bool checked)
+void NineSliceWorkspace::onAddSpritesClicked()
 {
-    if (m_updatingUi || m_currentSpritePath.isEmpty() || !m_session) return;
-    auto sp = m_session->spriteIndex.value(QDir::cleanPath(m_currentSpritePath));
-    if (!sp) return;
-    saveCurrentSprite();
-    sp->isNineSliced = checked;
-    loadSprite(m_currentSpritePath);
-    if (m_session) {
-        m_navigatorPanel->refresh(m_session, false);
-        auto* tree = m_navigatorPanel->tree();
-        QTreeWidgetItemIterator it(tree);
-        while (*it) {
-            auto sp2 = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
-            if (sp2 && sp2->path == m_currentSpritePath) {
-                tree->blockSignals(true);
-                tree->setCurrentItem(*it);
-                tree->blockSignals(false);
-                break;
-            }
-            ++it;
-        }
-    }
-    applyNineSliceFilter();
-    emit definitionsChanged();
+    if (!m_session) return;
+    SpritePickerDialog::Options options;
+    options.title = tr("Add Nine-Slice Sprites");
+    options.acceptText = tr("Add");
+    options.emptyText = tr("Every sprite is already nine-sliced.");
+    options.filter = [](const SpritePtr& sp) { return !sp->isNineSliced; };
+    addSprites(SpritePickerDialog::pick(this, m_session, options));
+}
+
+void NineSliceWorkspace::onRemoveSpritesClicked()
+{
+    removeSprites(m_navigatorPanel->selectedSpritePaths());
+}
+
+void NineSliceWorkspace::addSprites(const QStringList& paths)
+{
+    if (paths.isEmpty()) return;
+    setNineSliced(paths, true, paths.first());
+}
+
+void NineSliceWorkspace::removeSprites(const QStringList& paths)
+{
+    if (paths.isEmpty()) return;
+    setNineSliced(paths, false, spriteAfterRemoving(paths));
 }
 
 void NineSliceWorkspace::onInsetSpinChanged()
@@ -597,57 +626,18 @@ void NineSliceWorkspace::onCanvasTargetSizeChanged(int w, int h)
 void NineSliceWorkspace::onNavigatorContextMenuRequested(const QPoint& pos)
 {
     if (!m_session) return;
-    auto* item = m_navigatorPanel->tree()->itemAt(pos);
-    if (!item) return;
-    auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
-    if (!sprite || sprite->path.isEmpty()) return;
-
-    // Silently select a tree item by path without firing currentItemChanged.
-    // Used after refresh() so the badge updates without re-triggering onNavigatorSelectionChanged.
-    auto silentReselect = [this](const QString& path) {
-        auto* tree = m_navigatorPanel->tree();
-        QTreeWidgetItemIterator it(tree);
-        while (*it) {
-            auto sp2 = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
-            if (sp2 && sp2->path == path) {
-                tree->blockSignals(true);
-                tree->setCurrentItem(*it);
-                tree->blockSignals(false);
-                break;
-            }
-            ++it;
-        }
-    };
+    auto* tree = m_navigatorPanel->tree();
+    // Right-clicking outside the selection acts on the clicked item, as file managers do.
+    if (auto* item = tree->itemAt(pos); item && !item->isSelected()) {
+        tree->setCurrentItem(item);
+    }
 
     QMenu menu(this);
-    if (sprite->isNineSliced) {
-        auto* act = menu.addAction(QIcon(QStringLiteral(":/icons/disabled.svg")), tr("Remove Nine-Slice"));
-        connect(act, &QAction::triggered, this, [this, sprite, silentReselect]() {
-            saveCurrentSprite();
-            sprite->isNineSliced = false;
-            m_currentSpritePath = sprite->path;
-            loadSprite(sprite->path);
-            if (m_session) {
-                m_navigatorPanel->refresh(m_session, false);
-                silentReselect(sprite->path);
-            }
-            applyNineSliceFilter();
-            emit definitionsChanged();
-        });
-    } else {
-        auto* act = menu.addAction(QIcon(QStringLiteral(":/icons/nine-slice.svg")), tr("Mark as Nine-Sliced"));
-        connect(act, &QAction::triggered, this, [this, sprite, silentReselect]() {
-            saveCurrentSprite();
-            sprite->isNineSliced = true;
-            m_currentSpritePath = sprite->path;
-            loadSprite(sprite->path);  // quarters applied here if first mark
-            if (m_session) {
-                m_navigatorPanel->refresh(m_session, false);
-                silentReselect(sprite->path);
-            }
-            applyNineSliceFilter();
-            emit definitionsChanged();
-        });
+    menu.addAction(m_addBtn->icon(), tr("Add..."), this, &NineSliceWorkspace::onAddSpritesClicked);
+    const int selectedCount = m_navigatorPanel->selectedSpritePaths().size();
+    if (selectedCount > 0) {
+        menu.addAction(m_removeBtn->icon(), tr("Remove Nine-Slice (%n sprite(s))", nullptr, selectedCount),
+                       this, &NineSliceWorkspace::onRemoveSpritesClicked);
     }
-    menu.exec(m_navigatorPanel->tree()->mapToGlobal(pos));
+    menu.exec(tree->mapToGlobal(pos));
 }

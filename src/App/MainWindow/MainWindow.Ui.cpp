@@ -47,6 +47,8 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QTabBar>
+#include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QFileDialog>
@@ -69,17 +71,6 @@ void MainWindow::setupUi() {
     resize(1400, 860);
     setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
     setupToolbar();
-
-    // Add a 10px gap between the menu bar and the dock widgets
-    QToolBar* topSpacer = new QToolBar(this);
-    topSpacer->setObjectName("topSpacer");
-    topSpacer->setFixedHeight(10);
-    topSpacer->setMovable(false);
-    topSpacer->setFloatable(false);
-    topSpacer->setAllowedAreas(Qt::TopToolBarArea);
-    topSpacer->setStyleSheet("background: transparent; border: none;");
-    topSpacer->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    addToolBar(Qt::TopToolBarArea, topSpacer);
 
     // Prepare fonts for dock titles
     QFont boldFont = this->font();
@@ -747,52 +738,46 @@ void MainWindow::setupUi() {
     addDockWidget(Qt::BottomDockWidgetArea, m_debugDock);
     resizeDocks({m_atlasDock}, {500}, Qt::Vertical);
 
-    // View menu
-    m_viewMenu = menuBar()->addMenu(tr("&Workspace"));
-
+    // Workspace actions: the tabs trigger them, and they're added to the window so their
+    // shortcuts work without a menu.
     auto* workspaceGroup = new QActionGroup(this);
     workspaceGroup->setExclusive(true);
+    auto addWorkspaceAction = [this, workspaceGroup](const QIcon& icon, const QString& text,
+                                                     const QKeySequence& shortcut) {
+        auto* action = new QAction(icon, text, this);
+        action->setShortcut(shortcut);
+        action->setCheckable(true);
+        workspaceGroup->addAction(action);
+        addAction(action);
+        return action;
+    };
 
-    m_exportationWorkspaceAction = m_viewMenu->addAction(
-        QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"));
     // Not Alt+E: that is the Edit menu's mnemonic, and the clash disables both.
-    m_exportationWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_X));
-    m_exportationWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_exportationWorkspaceAction);
+    m_exportationWorkspaceAction = addWorkspaceAction(
+        QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"),
+        QKeySequence(Qt::ALT | Qt::Key_X));
     connect(m_exportationWorkspaceAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
-    m_viewMenu->addSeparator();
-
-    m_atlasesManagementWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/layout.svg"), tr("Atlases"));
-    m_atlasesManagementWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
-    m_atlasesManagementWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_atlasesManagementWorkspaceAction);
+    m_atlasesManagementWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/layout.svg"), tr("Atlases"), QKeySequence(Qt::ALT | Qt::Key_A));
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
-    m_atlasWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/scan.svg"), tr("Sprites"));
-    m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_S));
-    m_atlasWorkspaceAction->setCheckable(true);
+    m_atlasWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/scan.svg"), tr("Sprites"), QKeySequence(Qt::ALT | Qt::Key_S));
     m_atlasWorkspaceAction->setChecked(true);
-    workspaceGroup->addAction(m_atlasWorkspaceAction);
     connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
-    m_viewMenu->addSeparator();
-
-    m_nineSliceWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/nine-slice.svg"), tr("Nine-Slice"));
-    m_nineSliceWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_N));
-    m_nineSliceWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_nineSliceWorkspaceAction);
+    m_nineSliceWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/nine-slice.svg"), tr("Nine-Slice"), QKeySequence(Qt::ALT | Qt::Key_N));
     connect(m_nineSliceWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_nineSliceWorkspace); });
 
-    m_frameAnimWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/film.svg"), tr("Frame Animation"));
-    m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
-    m_frameAnimWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_frameAnimWorkspaceAction);
+    m_frameAnimWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/film.svg"), tr("Frame Animation"), QKeySequence(Qt::ALT | Qt::Key_F));
     connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_frameAnimWorkspace); });
 
-    m_viewMenu->addSeparator();
+    setupWorkspaceTabs();
 
     auto* debugShortcut = new QAction(this);
     debugShortcut->setShortcut(QKeySequence(Qt::Key_F12));
@@ -861,9 +846,14 @@ void MainWindow::setupToolbar() {
     m_loadProjectAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Project..."));
     m_loadProjectAction->setShortcut(QKeySequence::Open);  // Ctrl+O
-    m_loadProjectAction->setToolTip(
-        tr("Open a project: its project.spart.json file, or a ZIP project"));
+    m_loadProjectAction->setToolTip(tr("Open a project folder, the folder you saved the project to"));
     connect(m_loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
+
+#ifndef Q_OS_WASM
+    m_loadZipProjectAction = fileMenu->addAction(tr("Open ZIP Project..."));
+    m_loadZipProjectAction->setToolTip(tr("Open a project packed in a ZIP file"));
+    connect(m_loadZipProjectAction, &QAction::triggered, this, &MainWindow::onLoadZipProject);
+#endif
 
     m_loadAction = fileMenu->addAction(
         QIcon(":/icons/directory.svg"), tr("Add Source Folder..."));
@@ -1126,6 +1116,62 @@ void MainWindow::setupKeyboardShortcuts() {
     connect(pasteShortcut, &QShortcut::activated, this, &MainWindow::onPasteImport);
 }
 
+void MainWindow::setupWorkspaceTabs() {
+    // A toolbar, not the central widget: the atlas and animation docks sit in the top dock
+    // area, above the central widget, and the tabs must sit above them.
+    m_workspaceToolBar = new QToolBar(tr("Workspaces"), this);
+    m_workspaceToolBar->setObjectName("workspaceToolBar");
+    m_workspaceToolBar->setMovable(false);
+    m_workspaceToolBar->setFloatable(false);
+    m_workspaceToolBar->setAllowedAreas(Qt::TopToolBarArea);
+    m_workspaceToolBar->toggleViewAction()->setVisible(false);
+    addToolBar(Qt::TopToolBarArea, m_workspaceToolBar);
+
+    m_workspaceTabBar = new QTabBar(m_workspaceToolBar);
+    m_workspaceTabBar->setObjectName("workspaceTabBar");
+    m_workspaceTabBar->setDocumentMode(true);
+    m_workspaceTabBar->setDrawBase(false);
+    m_workspaceTabBar->setExpanding(false);
+    m_workspaceTabBar->setFocusPolicy(Qt::NoFocus);
+    m_workspaceToolBar->addWidget(m_workspaceTabBar);
+
+    // The order the work flows in: sort sources into atlases, edit sprites, use them, export.
+    m_workspaceTabs = {
+        {m_atlasesManagementWorkspace, m_atlasesManagementWorkspaceAction},
+        {m_atlasWorkspace, m_atlasWorkspaceAction},
+        {m_nineSliceWorkspace, m_nineSliceWorkspaceAction},
+        {m_frameAnimWorkspace, m_frameAnimWorkspaceAction},
+        {m_exportWorkspace, m_exportationWorkspaceAction},
+    };
+    for (const auto& [workspace, action] : m_workspaceTabs) {
+        const int index = m_workspaceTabBar->addTab(action->icon(), action->text());
+        const QString keys = action->shortcut().toString(QKeySequence::NativeText);
+        m_workspaceTabBar->setTabToolTip(index, keys.isEmpty() ? action->text()
+                                                               : tr("%1 (%2)").arg(action->text(), keys));
+    }
+
+    connect(m_workspaceTabBar, &QTabBar::currentChanged, this, [this](int index) {
+        if (index < 0 || index >= m_workspaceTabs.size()) return;
+        if (m_workspaceTabs[index].first != m_currentWorkspace)
+            m_workspaceTabs[index].second->trigger();
+        // Back to the current workspace's tab if the action didn't switch to this one.
+        updateWorkspaceTabs();
+    });
+}
+
+void MainWindow::updateWorkspaceTabs() {
+    if (!m_workspaceTabBar) return;
+    const QSignalBlocker blocker(m_workspaceTabBar);
+    for (int i = 0; i < m_workspaceTabs.size(); ++i) {
+        const auto& [workspace, action] = m_workspaceTabs[i];
+        m_workspaceTabBar->setTabEnabled(i, action->isEnabled());
+        if (workspace == m_currentWorkspace)
+            m_workspaceTabBar->setCurrentIndex(i);
+    }
+    // The welcome page has no workspace to switch between.
+    m_workspaceToolBar->setVisible(m_atlasWorkspaceAction->isEnabled() || m_currentWorkspace != m_atlasWorkspace);
+}
+
 void MainWindow::updateUiState() {
     const bool enabled = m_cliReady && !m_isLoading;
     const bool hasModels = m_session && !m_session->activeAtlas().layoutModels.isEmpty() && !m_session->activeAtlas().layoutModels.first().sprites.isEmpty();
@@ -1145,6 +1191,9 @@ void MainWindow::updateUiState() {
     if (m_loadProjectAction) {
         m_loadProjectAction->setEnabled(!m_isLoading);
     }
+    if (m_loadZipProjectAction) {
+        m_loadZipProjectAction->setEnabled(!m_isLoading);
+    }
     if (m_addSourceFileAction) {
         m_addSourceFileAction->setEnabled(sourceActionsEnabled);
     }
@@ -1163,13 +1212,14 @@ void MainWindow::updateUiState() {
         m_atlasWorkspace->sourceResolutionCombo()->setEnabled(enabled);
     }
 
-    // View menu items: enabled once a project is open or sprites are loaded
+    // Workspace actions: enabled once a project is open or sprites are loaded
     const bool hasProject = m_projectController && !m_projectController->projectFilePath().isEmpty();
     const bool viewEnabled = hasProject || hasModels;
     if (m_atlasWorkspaceAction)         m_atlasWorkspaceAction->setEnabled(viewEnabled);
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
     if (m_nineSliceWorkspaceAction)     m_nineSliceWorkspaceAction->setEnabled(viewEnabled);
+    updateWorkspaceTabs();
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
@@ -1215,11 +1265,13 @@ void MainWindow::updateMainContentView() {
         }
     }
     if (hasLayout) {
-        QString projectName = QFileInfo(projectFilePathUi).dir().dirName();
-        if (projectName.isEmpty() || projectName == ".") {
-            projectName = tr("Untitled Project");
+        if (hasProject) {
+            setWindowTitle(tr("%1 — %2[*]").arg(projectDisplayName(projectFilePathUi),
+                                                projectLocation(projectFilePathUi)));
+        } else {
+            setWindowTitle(tr("%1 — %2[*]").arg(tr("Untitled Project"),
+                                                QDir::toNativeSeparators(m_session->currentFolder)));
         }
-        setWindowTitle(tr("%1 — %2[*]").arg(projectName).arg(m_session->currentFolder));
     }
     // hasProject && !hasLayout: title was set when the project was created/opened; leave it.
 }
@@ -1232,10 +1284,24 @@ void MainWindow::updateRecentProjectsMenu() {
         return;
     }
     for (const QString& path : m_recentProjects) {
-        QAction* action = m_recentProjectsMenu->addAction(QFileInfo(path).fileName());
-        action->setToolTip(path);
+        QAction* action = m_recentProjectsMenu->addAction(projectDisplayName(path));
+        action->setToolTip(projectLocation(path));
         connect(action, &QAction::triggered, this, [this, path]() { loadProject(path); });
     }
+}
+
+QString MainWindow::projectDisplayName(const QString& projectFilePath) {
+    const QFileInfo info(projectFilePath);
+    if (info.suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) == 0)
+        return info.completeBaseName();
+    return info.dir().dirName();
+}
+
+QString MainWindow::projectLocation(const QString& projectFilePath) {
+    const QFileInfo info(projectFilePath);
+    if (info.suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) == 0)
+        return QDir::toNativeSeparators(info.absoluteFilePath());
+    return QDir::toNativeSeparators(info.absolutePath());
 }
 
 void MainWindow::addToRecentProjects(const QString& path) {
@@ -1289,11 +1355,8 @@ void MainWindow::refreshSpriteTree() {
         navigatorPanel->refresh(m_session, m_atlasWorkspace->showHiddenItems(), atlasFilter);
 
         // Also refresh the NineSlice workspace navigator so it stays in sync
-        if (m_nineSliceWorkspace) {
-            auto* nineSliceNav = m_nineSliceWorkspace->navigatorPanel();
-            if (nineSliceNav)
-                nineSliceNav->refresh(m_session, false);
-        }
+        if (m_nineSliceWorkspace)
+            m_nineSliceWorkspace->refreshSprites();
         return;
     }
 

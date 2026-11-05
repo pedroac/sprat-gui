@@ -96,6 +96,22 @@ public:
     /** Set a callback that returns a badge icon per sprite (or null icon for no badge). */
     void setSpriteBadgeCallback(SpriteBadgeCallback cb);
 
+    /// Returns true for the sprites the tree lists.
+    using SpriteFilter = std::function<bool(const SpritePtr&)>;
+
+    /// Lists only the sprites `filter` accepts, from the next refresh() on. An empty filter lists them all.
+    void setSpriteFilter(SpriteFilter filter);
+
+    /// Paths of the selected sprites, in tree order. A selected folder or group counts as all
+    /// the sprites under it that the text filter shows.
+    QStringList selectedSpritePaths() const;
+
+    /// The tree item of the sprite at `path`, or nullptr when the tree doesn't list it.
+    QTreeWidgetItem* findSpriteItem(const QString& path) const;
+
+    /// The first sprite item in tree order, or nullptr when the tree lists none.
+    QTreeWidgetItem* firstSpriteItem() const;
+
 signals:
     /** Emitted when the user selects a different atlas in the combo. */
     void atlasIndexChanged(int sessionAtlasIndex);
@@ -128,4 +144,5 @@ private:
     bool                 m_groupSimilar      = true;
     QHash<QString, QIcon> m_iconCache;
     SpriteBadgeCallback  m_badgeCallback;
+    SpriteFilter         m_spriteFilter;
 };

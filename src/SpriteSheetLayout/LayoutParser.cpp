@@ -48,6 +48,8 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
                 if (QDir::isRelativePath(rootPath)) {
                     rootPath = QDir(folderPath).absoluteFilePath(rootPath);
                 }
+                // A relative root leaves "a/../../b" segments, and paths are compared as strings.
+                rootPath = QDir::cleanPath(rootPath);
                 dir = QDir(rootPath);
             }
             continue;
@@ -97,7 +99,7 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             QString capturedPath = match.captured(1);
             capturedPath.replace("\\\"", "\"");
             capturedPath.replace("\\\\", "\\");
-            s->path = dir.absoluteFilePath(capturedPath);
+            s->path = QDir::cleanPath(dir.absoluteFilePath(capturedPath));
             // Derive name from relative path within sourceFolder when available
             if (!sourceFolder.isEmpty()) {
                 QString rel = QDir(sourceFolder).relativeFilePath(s->path);

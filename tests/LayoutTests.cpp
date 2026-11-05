@@ -5,6 +5,19 @@
 #include "models.h"
 #include <QDir>
 
+void LayoutTests::testLayoutParserCleansRelativeRoot() {
+    // spratlayout can print the root relative to its working folder. Sprite paths are compared
+    // as strings (frame lists, atlases, exclusions), so the ".." segments must be resolved.
+    const QString output = QString::fromLatin1(R"(root "../../../tmp/sprat-gui-x/hero"
+atlas 64,64
+sprite "run/run_1.png" rect:0,0,8,8
+)");
+    const QVector<LayoutModel> models = LayoutParser::parse(output, "/home/user/project");
+    QCOMPARE(models.size(), 1);
+    QCOMPARE(models.first().sprites.size(), 1);
+    QCOMPARE(models.first().sprites.first()->path, QString("/tmp/sprat-gui-x/hero/run/run_1.png"));
+}
+
 void LayoutTests::testLayoutParserHandlesEscapedQuotes() {
     const QString output = QString::fromLatin1(R"(atlas 100,100
 scale 1.0

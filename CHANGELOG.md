@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame Animation workspace: each timeline has a loop mode (Loop, Once, Ping-pong or Ping-pong once). The preview, GIF/video export and exported metadata play it that way; an alias plays the way its source does. Projects saved before keep looping
 
 ### Changed
+- Nine-Slice workspace: the sprite list shows only nine-sliced sprites. **Add** (under the list, as in the Atlases workspace) opens a sprite picker where you tick several sprites, or a whole folder, at once; **Remove** (or Delete) stops nine-slicing the selected ones and keeps their insets for later. This replaces the "Nine-sliced only" filter and the "Nine-Sliced" toggle
+- Workspaces now have tabs at the top of the window (Atlases, Sprites, Nine-Slice, Frame Animation, Exportation), so the current workspace is always shown and one click switches. They replace the Workspace menu; its shortcuts (Alt+A, Alt+S, Alt+N, Alt+F, Alt+X) still work
 - The Export workspace shortcut is now Alt+X. Alt+E is the Edit menu's key on Windows and Linux, and the clash made Alt+E do nothing
-- File > Load is now File > Open Project (Ctrl+O) and opens the file dialog directly. To open a project folder, pick its project.spart.json
+- File > Load is now File > Open Project (Ctrl+O). It asks for the project folder, the same folder Save As creates, instead of the project.spart.json inside it. ZIP projects open with File > Open ZIP Project
 - File > Export has a shortcut: Ctrl+E
 - Help > Hotkeys now lists the shortcuts as they are bound, in the platform's notation (⌘ on macOS), including marker copy/paste and nudging with the arrow keys
 - When the layout switches to another profile because the selected one failed, a notice says which profile is now used (exports use it too)
@@ -30,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
 
 ### Fixed
+- Save (Ctrl+S) on a project opened from a ZIP updates the ZIP, instead of writing a project file and `sprites/` folder next to it
+- Restoring an autosave of an open project finds its sprites and excluded sprites again
+- Undoing "Exclude from Layout" puts the sprites back in their atlas and takes them off the excluded list; redo excludes them again
+- After importing an archive and removing or excluding sprites, the window title no longer shows "/" as the folder
+- Excluded sprites are kept in the project: saving copies their images into the project folder, and they stay listed (and can be included again) after the project is moved, renamed or opened from a ZIP. Before, their images were left behind and they couldn't be brought back
+- Sync, and the periodic folder check, no longer add excluded sprites back into the layout
+- A project opened from a ZIP no longer loses its sprites after the first layout (they were deleted from the temporary folder it was extracted to)
+- Save (Ctrl+S) copies newly added images into the project before writing the project file, so the file never points at their temporary locations
+- Opening a ZIP project failed with "Invalid image path" (or laid out nothing): its sprites were looked for next to the ZIP instead of inside it
+- Opening a project while on the Nine-Slice, Atlases or Exportation tab put the Sprites panel over that workspace
+- The window title and File > Open Recent name a project after its folder (or ZIP) and show where it is, instead of the parent folder, `project.spart.json`, or a temporary folder
+- After opening a project, the status bar keeps "Loaded N sprites" instead of switching to "CLI ready"
 - Opening another project (Open Project, Open Recent, or dropping a project) now asks to save unsaved changes first, instead of discarding them. Closing the app no longer closes it when saving was canceled or failed
 - Ctrl+V in the sprite preview pastes copied markers again, instead of importing from the clipboard
 - Frame detection no longer freezes its dialog while detecting; it shows progress, keeps the frames when detection fails and says why, and settings changed in a canceled dialog are no longer kept

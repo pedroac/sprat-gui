@@ -7,6 +7,7 @@ class QDoubleSpinBox;
 class QPushButton;
 class QSpinBox;
 class QComboBox;
+class QStackedWidget;
 class QTreeWidgetItem;
 class NineSliceEditorCanvas;
 class NavigatorPanel;
@@ -16,12 +17,12 @@ class ProjectSession;
  * @brief Workspace for editing per-sprite nine-slice configurations.
  *
  * Two-panel layout:
- *  - Left:  NavigatorPanel (sprite tree + filter) with an optional
- *           "nine-sliced only" toggle above the tree.
- *  - Right: Nine-Sliced toggle + inset/mode fields + slice editor canvas.
+ *  - Left:  the nine-sliced sprites (NavigatorPanel), with Add… (a SpritePickerDialog
+ *           of the other sprites) and Remove above them.
+ *  - Right: inset/mode fields + slice editor canvas.
  *
  * Selecting a sprite in the navigator loads it into the canvas and config.
- * Checking "Nine-Sliced" enables the inset fields and shows slice lines.
+ * Removing a sprite keeps its insets, so adding it again restores them.
  */
 class NineSliceWorkspace : public QWidget, public IWorkspace {
     Q_OBJECT
@@ -34,6 +35,13 @@ public:
     QWidget* widget() override { return this; }
 
     void setSettings(const AppSettings& settings);
+    /// Rebuilds the sprite list after the project's sprites change, keeping the current sprite
+    /// selected, or showing another when it is gone.
+    void refreshSprites();
+    /// Nine-slices the sprites at `paths`, giving any without insets thirds, and shows the first.
+    void addSprites(const QStringList& paths);
+    /// Stops nine-slicing the sprites at `paths`, keeping their insets, and shows a neighbour.
+    void removeSprites(const QStringList& paths);
     NineSliceEditorCanvas* canvas() const { return m_canvas; }
     QDoubleSpinBox* zoomSpin() const { return m_zoomSpin; }
     NavigatorPanel* navigatorPanel() const { return m_navigatorPanel; }
@@ -43,7 +51,8 @@ signals:
 
 private slots:
     void onNavigatorSelectionChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
-    void onNineSlicedToggled(bool checked);
+    void onAddSpritesClicked();
+    void onRemoveSpritesClicked();
     void onInsetSpinChanged();
     void onCanvasInsetsChanged(int left, int top, int right, int bottom);
     void onFillModeChanged();
@@ -55,7 +64,15 @@ private:
     void setupUi();
     void loadSprite(const QString& path);
     void saveCurrentSprite();
-    void applyNineSliceFilter();
+    /// Rebuilds the list of nine-sliced sprites and shows the empty state when there are none.
+    void refreshNavigator();
+    /// Selects and loads the sprite at `path`, or the first listed sprite when `path` isn't
+    /// listed. Clears the editor when the list is empty. Doesn't save the current sprite.
+    void showSprite(const QString& path);
+    void clearSpriteView();
+    void setNineSliced(const QStringList& paths, bool nineSliced, const QString& nextPath);
+    /// The listed sprite to show after the sprites at `removedPaths` leave the list.
+    QString spriteAfterRemoving(const QStringList& removedPaths) const;
     void updateFixedDimensions();
     /// Caps each inset spin box at the source size minus the opposite inset, so
     /// left + right and top + bottom always fit the image, as sprat-cli requires.
@@ -68,9 +85,11 @@ private:
     AppSettings m_settings;
     QString m_currentSpritePath;
 
-    NavigatorPanel* m_navigatorPanel      = nullptr;
-    QPushButton*    m_filterNineSlicedBtn = nullptr;
-    QPushButton*    m_nineSlicedBtn       = nullptr;
+    NavigatorPanel* m_navigatorPanel = nullptr;
+    QStackedWidget* m_navigatorStack = nullptr;
+    QWidget*        m_emptyState     = nullptr;
+    QPushButton*    m_addBtn         = nullptr;
+    QPushButton*    m_removeBtn      = nullptr;
 
     QWidget* m_configGroup = nullptr;
 

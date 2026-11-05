@@ -459,6 +459,8 @@ set(PROJECT_SOURCES
     src/App/Workspaces/Shared/IAtlasViewport.h
     src/App/Workspaces/Shared/NavigatorPanel.h
     src/App/Workspaces/Shared/NavigatorPanel.cpp
+    src/App/Workspaces/Shared/SpritePickerDialog.h
+    src/App/Workspaces/Shared/SpritePickerDialog.cpp
     src/App/Workspaces/Atlas/AtlasWorkspace.h
     src/App/Workspaces/Atlas/AtlasWorkspace.cpp
     src/App/Workspaces/Atlas/SpriteEditorPanel.h
@@ -748,6 +750,7 @@ if(BUILD_TESTING)
         assets/icons.qrc
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
+        src/App/Workspaces/Shared/SpritePickerDialog.cpp
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
         src/App/MainWindow/SpritePreviewTooltip.cpp
         src/NineSlice/NineSliceEditorCanvas.cpp

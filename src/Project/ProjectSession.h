@@ -91,6 +91,7 @@ public:
 
     // --- Transient State ---
     QJsonObject pendingProjectPayload;
+    QString pendingProjectDir;  // Folder holding the pending project's project.spart.json
 
     void clear();
 

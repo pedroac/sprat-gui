@@ -379,6 +379,10 @@ void MainWindow::performManualSync() {
     for (const auto& sprite : layout.sprites) {
         if (sprite) existingPaths.insert(sprite->path);
     }
+    // Excluded sprites stay in the folder (so they can be included again) but not in the layout.
+    syncExcludedAtlas();
+    const QStringList excludedPaths = excludedSpritePaths();
+    const QSet<QString> excludedSet(excludedPaths.begin(), excludedPaths.end());
 
     for (const QString& imagePath : folderImages) {
         qInfo() << "[Sync]   Image:" << imagePath;
@@ -386,6 +390,10 @@ void MainWindow::performManualSync() {
         // Check if image is already in layout by absolute path
         if (existingPaths.contains(imagePath)) {
             qInfo() << "[Sync]     Found in layout";
+            continue;
+        }
+        if (excludedSet.contains(imagePath)) {
+            qInfo() << "[Sync]     Excluded";
             continue;
         }
 
@@ -491,6 +499,7 @@ void MainWindow::onWatchModePeriodicCheck() {
         for (const auto& sprite : layout.sprites) {
             if (sprite) existingPaths.insert(sprite->path);
         }
+        for (const QString& path : excludedSpritePaths()) existingPaths.insert(path);
         for (const QString& path : folderImages) {
             if (!existingPaths.contains(path)) {
                 qInfo() << "[Watch] Detected new file in folder:" << path;

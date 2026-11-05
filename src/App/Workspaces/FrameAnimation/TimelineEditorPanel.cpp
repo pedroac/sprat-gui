@@ -212,12 +212,40 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     auto* groupLayout = new QVBoxLayout(m_selectedTimelineGroup);
     editorContainerLayout->addWidget(m_selectedTimelineGroup);
 
-    // Name / FPS / Remove row
+    // Name / Play / Flip / FPS / Remove row
     auto* nameLayout = new QHBoxLayout();
     nameLayout->addWidget(new QLabel(tr("Name:"), m_selectedTimelineGroup));
     m_timelineNameEdit = new QLineEdit(m_selectedTimelineGroup);
     m_timelineNameEdit->setEnabled(false);
     nameLayout->addWidget(m_timelineNameEdit);
+    nameLayout->addWidget(new QLabel(tr("Play:"), m_selectedTimelineGroup));
+    m_timelineLoopCombo = new QComboBox(m_selectedTimelineGroup);
+    const struct { QString label; AnimationLoopMode mode; QString tooltip; } loopModes[] = {
+        {tr("Loop"),           AnimationLoopMode::Loop,         tr("Repeat from the first frame")},
+        {tr("Once"),           AnimationLoopMode::Once,         tr("Play once and stop on the last frame")},
+        {tr("Ping-pong"),      AnimationLoopMode::PingPong,     tr("Play forward then backward, and repeat")},
+        {tr("Ping-pong once"), AnimationLoopMode::OncePingPong,
+         tr("Play forward then backward once, and stop on the first frame")},
+    };
+    for (const auto& loopMode : loopModes) {
+        m_timelineLoopCombo->addItem(loopMode.label, static_cast<int>(loopMode.mode));
+        m_timelineLoopCombo->setItemData(m_timelineLoopCombo->count() - 1, loopMode.tooltip, Qt::ToolTipRole);
+    }
+    m_timelineLoopCombo->setToolTip(tr("How the animation plays, here and in exported metadata. "
+                                       "An alias plays the way its source does."));
+    m_timelineLoopCombo->setAccessibleName(tr("Timeline loop mode"));
+    m_timelineLoopCombo->setEnabled(false);
+    nameLayout->addWidget(m_timelineLoopCombo);
+    m_timelineFlipLabel = new QLabel(tr("Flip:"), m_selectedTimelineGroup);
+    m_timelineFlipLabel->setVisible(false);
+    nameLayout->addWidget(m_timelineFlipLabel);
+    m_timelineFlipCombo = new QComboBox(m_selectedTimelineGroup);
+    m_timelineFlipCombo->addItem(tr("None"),       0);
+    m_timelineFlipCombo->addItem(tr("Horizontal"), 1);
+    m_timelineFlipCombo->addItem(tr("Vertical"),   2);
+    m_timelineFlipCombo->addItem(tr("Both"),       3);
+    m_timelineFlipCombo->setVisible(false);
+    nameLayout->addWidget(m_timelineFlipCombo);
     nameLayout->addWidget(new QLabel(tr("FPS:"), m_selectedTimelineGroup));
     m_timelineFpsSpin = new QSpinBox(m_selectedTimelineGroup);
     m_timelineFpsSpin->setRange(1, MAX_ANIMATION_FPS);
@@ -239,39 +267,6 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     m_timelineAliasLabel->setToolTip(
         tr("An alias timeline references another timeline's frames but can have its own flip and transform settings."));
     groupLayout->addWidget(m_timelineAliasLabel);
-
-    // Loop mode / flip row
-    auto* flipRow = new QHBoxLayout();
-    flipRow->addWidget(new QLabel(tr("Play:"), m_selectedTimelineGroup));
-    m_timelineLoopCombo = new QComboBox(m_selectedTimelineGroup);
-    const struct { QString label; AnimationLoopMode mode; QString tooltip; } loopModes[] = {
-        {tr("Loop"),           AnimationLoopMode::Loop,         tr("Repeat from the first frame")},
-        {tr("Once"),           AnimationLoopMode::Once,         tr("Play once and stop on the last frame")},
-        {tr("Ping-pong"),      AnimationLoopMode::PingPong,     tr("Play forward then backward, and repeat")},
-        {tr("Ping-pong once"), AnimationLoopMode::OncePingPong,
-         tr("Play forward then backward once, and stop on the first frame")},
-    };
-    for (const auto& loopMode : loopModes) {
-        m_timelineLoopCombo->addItem(loopMode.label, static_cast<int>(loopMode.mode));
-        m_timelineLoopCombo->setItemData(m_timelineLoopCombo->count() - 1, loopMode.tooltip, Qt::ToolTipRole);
-    }
-    m_timelineLoopCombo->setToolTip(tr("How the animation plays, here and in exported metadata. "
-                                       "An alias plays the way its source does."));
-    m_timelineLoopCombo->setAccessibleName(tr("Timeline loop mode"));
-    m_timelineLoopCombo->setEnabled(false);
-    flipRow->addWidget(m_timelineLoopCombo);
-    m_timelineFlipLabel = new QLabel(tr("Flip:"), m_selectedTimelineGroup);
-    m_timelineFlipLabel->setVisible(false);
-    flipRow->addWidget(m_timelineFlipLabel);
-    m_timelineFlipCombo = new QComboBox(m_selectedTimelineGroup);
-    m_timelineFlipCombo->addItem(tr("None"),       0);
-    m_timelineFlipCombo->addItem(tr("Horizontal"), 1);
-    m_timelineFlipCombo->addItem(tr("Vertical"),   2);
-    m_timelineFlipCombo->addItem(tr("Both"),       3);
-    m_timelineFlipCombo->setVisible(false);
-    flipRow->addWidget(m_timelineFlipCombo);
-    flipRow->addStretch();
-    groupLayout->addLayout(flipRow);
 
     // Timeline drop area (frames list)
     m_timelineDropArea = new QWidget(m_timelineEditorContainer);

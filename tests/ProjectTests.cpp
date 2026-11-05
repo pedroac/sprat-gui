@@ -299,6 +299,45 @@ void ProjectTests::testAnimatedGifFrameExtraction() {
     QVERIFY(QFile::exists(framesDir.filePath("frame_0001.png")));
 }
 
+void ProjectTests::testProjectPayloadKeepsExcludedSpritesWhenProjectMoves() {
+    // Excluded files are relative to the source's cached folder, so that folder is saved
+    // relative to the project and resolved against wherever the project is opened from.
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString savedDir = root.filePath("Saved Project");
+    const QString movedDir = root.filePath("Moved Project ñ");
+    QVERIFY(QDir().mkpath(QDir(savedDir).filePath("sprites/hero")));
+    QVERIFY(QDir().mkpath(QDir(movedDir).filePath("sprites/hero")));
+
+    ProjectSource source;
+    source.name = "hero.zip";
+    source.type = SourceType::Archive;
+    source.originalPath = "/art/hero.zip";
+    source.cachedFolderPath = QDir(savedDir).filePath("sprites/hero");
+    source.excludedFiles = QStringList{"run/run_3.png"};
+
+    ProjectPayloadBuildInput input;
+    input.projectDir = savedDir;
+    input.currentFolder = QDir(savedDir).filePath("sprites/hero");
+    input.sources = {source};
+    input.portablePaths = true;
+    const QJsonObject payload = ProjectPayloadCodec::build(input);
+
+    const QJsonObject savedSource =
+        payload["layout"].toObject()["sources"].toArray().first().toObject();
+    QCOMPARE(savedSource["cachedFolder"].toString(), QString("sprites/hero"));
+
+    // The app opens a project with currentFolder set to the sprites folder, not the project's.
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult result = ProjectPayloadCodec::applyToLayout(
+        payload, QDir(movedDir).filePath("sprites/hero"), layoutModels, movedDir);
+
+    QCOMPARE(result.sources.size(), 1);
+    QCOMPARE(result.sources[0].cachedFolderPath, QDir(movedDir).filePath("sprites/hero"));
+    QCOMPARE(result.sources[0].excludedFiles, QStringList{"run/run_3.png"});
+    QCOMPARE(result.sources[0].originalPath, QString("/art/hero.zip"));
+}
+
 void ProjectTests::testProjectPayloadDropsPathsOutsideTheProject() {
     // Names and paths from a project file end up as folders the app writes or deletes,
     // so values pointing outside the project are dropped on load.

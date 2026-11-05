@@ -35,6 +35,8 @@ class QTreeWidgetItem;
 class QListWidget;
 class QLineEdit;
 class QActionGroup;
+class QTabBar;
+class QToolBar;
 class QGroupBox;
 class QGraphicsView;
 class QScrollArea;
@@ -199,9 +201,14 @@ private slots:
     void onAddSourceFile();
 
     /**
-     * @brief Handles loading of a saved project.
+     * @brief Asks for a project folder (one with project.spart.json) and opens it.
      */
     void onLoadProject();
+    /// Asks for a ZIP holding a project.spart.json and opens it.
+    void onLoadZipProject();
+    /// Folder holding the open project's project.spart.json: the project folder, or for a
+    /// ZIP project the folder it was extracted to. Empty when no project is open.
+    QString projectRootDir() const;
     void onLoadFromUrl();
 
     /**
@@ -254,6 +261,10 @@ private slots:
     void schedulePreviewPack(const QString& profileName, const QString& scaleFilter);
     void switchWorkspace(IWorkspace* next);
     void applyWorkspaceLayout(IWorkspace* ws);
+    /// Adds the tab bar that switches workspaces, one tab per workspace action, in pipeline order
+    void setupWorkspaceTabs();
+    /// Selects the current workspace's tab and matches the tabs' enabled state to their actions
+    void updateWorkspaceTabs();
 
     /**
      * @brief Handles when a generic process finishes execution.
@@ -549,6 +560,10 @@ private:
      * @param path Path to project file
      */
     void addToRecentProjects(const QString& path);
+    /// The name a project is known by: its folder's name, or the ZIP's name without ".zip".
+    static QString projectDisplayName(const QString& projectFilePath);
+    /// Where a project lives, for display: its folder, or the ZIP file.
+    static QString projectLocation(const QString& projectFilePath);
 
     /**
      * @brief Updates the recent projects menu.
@@ -703,6 +718,8 @@ private:
     void refreshSpriteTree();
     void updateNavigatorAtlasCombo();
     void syncExcludedAtlas();
+    /// Absolute paths of the excluded sprites whose images exist.
+    QStringList excludedSpritePaths() const;
     void addToExcludedFiles(const QString& absPath);
     void removeFromExcludedFiles(const QString& absPath);
 
@@ -920,7 +937,6 @@ private:
 
     struct LogEntry { LogLevel level; QString text; };
     QVector<LogEntry> m_logEntries;
-    QMenu* m_viewMenu = nullptr;
 
     FrameAnimationWorkspace* m_frameAnimWorkspace = nullptr;
 
@@ -930,6 +946,10 @@ private:
     QAction*        m_atlasesManagementWorkspaceAction = nullptr;
     NineSliceWorkspace* m_nineSliceWorkspace = nullptr;
     QAction*        m_nineSliceWorkspaceAction = nullptr;
+    QToolBar*       m_workspaceToolBar = nullptr;
+    QTabBar*        m_workspaceTabBar = nullptr;
+    /// The workspace each tab shows, and the action that switches to it, by tab index
+    QVector<QPair<IWorkspace*, QAction*>> m_workspaceTabs;
 
     // Layout Canvas Area
     QStackedWidget* m_profileSelectorStack = nullptr;
@@ -944,6 +964,7 @@ private:
 
     QAction* m_loadAction = nullptr;
     QAction* m_loadProjectAction = nullptr;
+    QAction* m_loadZipProjectAction = nullptr;
     QAction* m_addSourceFileAction = nullptr;
     QAction* m_addSourceUrlAction = nullptr;
     QAction* m_saveAction = nullptr;
@@ -1028,6 +1049,7 @@ private:
 
     // Project controller — owns async watcher state, project-file path, and source-management helpers
     ProjectController* m_projectController = nullptr;
+    QString m_zipProjectRoot;  // Where the open ZIP project was extracted; saving packs it back
     QTimer* m_autosaveTimer = nullptr;
     QTimer* m_resizeDebounceTimer = nullptr;
     QSize m_pendingResizeSize;

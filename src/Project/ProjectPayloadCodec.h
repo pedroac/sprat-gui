@@ -78,5 +78,9 @@ struct ProjectPayloadApplyResult {
 class ProjectPayloadCodec {
 public:
     static QJsonObject build(const ProjectPayloadBuildInput& input);
-    static ProjectPayloadApplyResult applyToLayout(const QJsonObject& root, const QString& currentFolder, QVector<LayoutModel>& layoutModels);
+    /// @param projectDir Folder holding project.spart.json (the extraction folder for a ZIP).
+    ///        Source paths are saved relative to it. Empty: resolve them against currentFolder.
+    static ProjectPayloadApplyResult applyToLayout(const QJsonObject& root, const QString& currentFolder,
+                                                   QVector<LayoutModel>& layoutModels,
+                                                   const QString& projectDir = QString());
 };

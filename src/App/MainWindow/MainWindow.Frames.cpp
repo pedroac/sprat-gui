@@ -320,6 +320,16 @@ void MainWindow::syncExcludedAtlas() {
     }
 }
 
+QStringList MainWindow::excludedSpritePaths() const {
+    QStringList paths;
+    if (!m_session) return paths;
+    const int excIdx = m_session->excludedAtlasIndex();
+    if (excIdx < 0 || excIdx >= m_session->atlases.size()) return paths;
+    for (const QString& p : m_session->atlases[excIdx].spritePaths)
+        if (QFileInfo::exists(p)) paths.append(p);
+    return paths;
+}
+
 void MainWindow::addToExcludedFiles(const QString& absPath) {
     const QString cleaned = QDir::cleanPath(absPath);
     for (auto& src : m_session->sources) {
@@ -431,6 +441,11 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         return;
     }
 
+    // Atlas membership before the exclusion, so undo puts each sprite back in its atlas.
+    QVector<QStringList> savedAtlasSpritePaths;
+    for (const AtlasEntry& atlas : m_session->atlases)
+        savedAtlasSpritePaths.append(atlas.spritePaths);
+
     // Persist exclusion so sprites appear in the "Excluded" section.
     for (const QString& p : targets)
         addToExcludedFiles(p);
@@ -472,6 +487,10 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
     const QVector<LayoutModel> savedLayoutModels = m_session->activeAtlas().layoutModels;
 
     auto postExecuteRedo = [this, targets]() {
+        // Again on redo: undo took them off the excluded list.
+        for (const QString& p : targets)
+            addToExcludedFiles(p);
+        syncExcludedAtlas();
         if (m_session->activeFramePaths.isEmpty()) {
             m_session->layoutSourcePath.clear();
             m_session->layoutSourceIsList = false;
@@ -505,7 +524,17 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
         }
     };
 
-    auto postExecuteUndo = [this]() {
+    auto postExecuteUndo = [this, targets, savedAtlasSpritePaths]() {
+        for (const QString& p : targets)
+            removeFromExcludedFiles(p);
+        if (savedAtlasSpritePaths.size() == m_session->atlases.size()) {
+            for (int i = 0; i < m_session->atlases.size(); ++i)
+                if (!m_session->atlases[i].isExcluded)
+                    m_session->atlases[i].spritePaths = savedAtlasSpritePaths[i];
+        }
+        syncExcludedAtlas();
+        if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
+            m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
         refreshSpriteTree();
         refreshTimelineFrames();
         refreshTimelineList();
