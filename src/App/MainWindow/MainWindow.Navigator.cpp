@@ -282,8 +282,11 @@ void MainWindow::onNavigatorExcludeKey(QTreeWidgetItem* item)
 void MainWindow::onNavigatorDeleteFrames(const QStringList& paths)
 {
     if (m_session) {
+        // Sprites in the layout are excluded by onRemoveFramesRequested(), as an undoable step
+        // that remembers their atlas; only the others are excluded here.
         for (const QString& p : paths)
-            addToExcludedFiles(p);
+            if (!m_session->activeFramePaths.contains(p))
+                addToExcludedFiles(p);
         syncExcludedAtlas();
         if (m_atlasesManagementWorkspace && m_currentWorkspace == m_atlasesManagementWorkspace)
             m_atlasesManagementWorkspace->refreshSpriteList(m_session->atlases);
@@ -474,7 +477,7 @@ void MainWindow::onSpritesDroppedToTimeline(const QStringList& paths,
 
     // Sort paths within each group.
     for (auto& group : grouped) {
-        std::sort(group.begin(), group.end());
+        group = AnimationTimelineOps::naturallySorted(group);
     }
 
     const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;

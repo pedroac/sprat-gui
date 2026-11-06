@@ -9,4 +9,6 @@ public:
     static bool moveFrame(QVector<AnimationTimeline>& timelines, int timelineIndex, int from, int to);
     static bool duplicateFrame(QVector<AnimationTimeline>& timelines, int timelineIndex, int index);
     static bool removeFrames(QVector<AnimationTimeline>& timelines, int timelineIndex, const QVector<int>& rowsDescending);
+    /// Sorts frame paths the way animation frames are numbered: "walk2" before "walk10".
+    static QStringList naturallySorted(QStringList framePaths);
 };

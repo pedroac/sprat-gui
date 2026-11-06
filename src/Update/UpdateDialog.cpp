@@ -14,7 +14,8 @@
 UpdateDialog::UpdateDialog(const UpdateChecker::ReleaseInfo& info, QWidget* parent)
     : QDialog(parent),
       m_installer(new UpdateInstaller(this)),
-      m_downloadUrl(info.downloadUrl) {
+      m_downloadUrl(info.downloadUrl),
+      m_sha256(info.sha256) {
     setupUi(info);
 
     connect(m_installer, &UpdateInstaller::downloadProgress,
@@ -107,7 +108,7 @@ void UpdateDialog::setupUi(const UpdateChecker::ReleaseInfo& info) {
 
 void UpdateDialog::onDownloadClicked() {
     m_stack->setCurrentWidget(m_downloadPage);
-    m_installer->download(m_downloadUrl);
+    m_installer->download(m_downloadUrl, m_sha256);
 }
 
 void UpdateDialog::onDownloadProgress(qint64 received, qint64 total) {

@@ -9,6 +9,7 @@
 #include "TimelineGenerationService.h"
 #include "TimelineUi.h"
 #include "SpriteSelectionPresenter.h"
+#include "SpritePickerDialog.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -29,6 +30,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QStyledItemDelegate>
 #include <QSpinBox>
@@ -165,6 +167,18 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     auto* listLayout = new QVBoxLayout(m_listArea);
     listLayout->setContentsMargins(groupMargin, groupTopPadding, groupMargin, groupBottomMargin);
 
+    // Timelines belong to an atlas; this picks whose timelines are listed.
+    m_atlasRow = new QWidget(m_listArea);
+    auto* atlasLayout = new QHBoxLayout(m_atlasRow);
+    atlasLayout->setContentsMargins(0, 0, 0, 0);
+    atlasLayout->addWidget(new QLabel(tr("Atlas:"), m_atlasRow));
+    m_atlasCombo = new QComboBox(m_atlasRow);
+    m_atlasCombo->setToolTip(tr("The atlas whose timelines are shown. Timelines use that atlas's sprites."));
+    m_atlasCombo->setAccessibleName(tr("Atlas"));
+    atlasLayout->addWidget(m_atlasCombo, 1);
+    m_atlasRow->setVisible(false);
+    listLayout->addWidget(m_atlasRow);
+
     auto* addLayout = new QHBoxLayout();
     addLayout->addWidget(new QLabel(tr("Name:"), m_listArea));
     m_timelineCreateEdit = new QLineEdit(m_listArea);
@@ -173,7 +187,7 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
 
     m_addBtn = new QPushButton(
         QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), "", m_listArea);
-    m_addBtn->setToolTip(tr("Add timeline"));
+    m_addBtn->setToolTip(tr("Add a timeline and pick its sprites"));
     addLayout->addWidget(m_addBtn);
     listLayout->addLayout(addLayout);
 
@@ -212,12 +226,40 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     auto* groupLayout = new QVBoxLayout(m_selectedTimelineGroup);
     editorContainerLayout->addWidget(m_selectedTimelineGroup);
 
-    // Name / FPS / Remove row
+    // Name / Play / Flip / FPS / Remove row
     auto* nameLayout = new QHBoxLayout();
     nameLayout->addWidget(new QLabel(tr("Name:"), m_selectedTimelineGroup));
     m_timelineNameEdit = new QLineEdit(m_selectedTimelineGroup);
     m_timelineNameEdit->setEnabled(false);
     nameLayout->addWidget(m_timelineNameEdit);
+    nameLayout->addWidget(new QLabel(tr("Play:"), m_selectedTimelineGroup));
+    m_timelineLoopCombo = new QComboBox(m_selectedTimelineGroup);
+    const struct { QString label; AnimationLoopMode mode; QString tooltip; } loopModes[] = {
+        {tr("Loop"),           AnimationLoopMode::Loop,         tr("Repeat from the first frame")},
+        {tr("Once"),           AnimationLoopMode::Once,         tr("Play once and stop on the last frame")},
+        {tr("Ping-pong"),      AnimationLoopMode::PingPong,     tr("Play forward then backward, and repeat")},
+        {tr("Ping-pong once"), AnimationLoopMode::OncePingPong,
+         tr("Play forward then backward once, and stop on the first frame")},
+    };
+    for (const auto& loopMode : loopModes) {
+        m_timelineLoopCombo->addItem(loopMode.label, static_cast<int>(loopMode.mode));
+        m_timelineLoopCombo->setItemData(m_timelineLoopCombo->count() - 1, loopMode.tooltip, Qt::ToolTipRole);
+    }
+    m_timelineLoopCombo->setToolTip(tr("How the animation plays, here and in exported metadata. "
+                                       "An alias plays the way its source does."));
+    m_timelineLoopCombo->setAccessibleName(tr("Timeline loop mode"));
+    m_timelineLoopCombo->setEnabled(false);
+    nameLayout->addWidget(m_timelineLoopCombo);
+    m_timelineFlipLabel = new QLabel(tr("Flip:"), m_selectedTimelineGroup);
+    m_timelineFlipLabel->setVisible(false);
+    nameLayout->addWidget(m_timelineFlipLabel);
+    m_timelineFlipCombo = new QComboBox(m_selectedTimelineGroup);
+    m_timelineFlipCombo->addItem(tr("None"),       0);
+    m_timelineFlipCombo->addItem(tr("Horizontal"), 1);
+    m_timelineFlipCombo->addItem(tr("Vertical"),   2);
+    m_timelineFlipCombo->addItem(tr("Both"),       3);
+    m_timelineFlipCombo->setVisible(false);
+    nameLayout->addWidget(m_timelineFlipCombo);
     nameLayout->addWidget(new QLabel(tr("FPS:"), m_selectedTimelineGroup));
     m_timelineFpsSpin = new QSpinBox(m_selectedTimelineGroup);
     m_timelineFpsSpin->setRange(1, MAX_ANIMATION_FPS);
@@ -240,44 +282,11 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
         tr("An alias timeline references another timeline's frames but can have its own flip and transform settings."));
     groupLayout->addWidget(m_timelineAliasLabel);
 
-    // Loop mode / flip row
-    auto* flipRow = new QHBoxLayout();
-    flipRow->addWidget(new QLabel(tr("Play:"), m_selectedTimelineGroup));
-    m_timelineLoopCombo = new QComboBox(m_selectedTimelineGroup);
-    const struct { QString label; AnimationLoopMode mode; QString tooltip; } loopModes[] = {
-        {tr("Loop"),           AnimationLoopMode::Loop,         tr("Repeat from the first frame")},
-        {tr("Once"),           AnimationLoopMode::Once,         tr("Play once and stop on the last frame")},
-        {tr("Ping-pong"),      AnimationLoopMode::PingPong,     tr("Play forward then backward, and repeat")},
-        {tr("Ping-pong once"), AnimationLoopMode::OncePingPong,
-         tr("Play forward then backward once, and stop on the first frame")},
-    };
-    for (const auto& loopMode : loopModes) {
-        m_timelineLoopCombo->addItem(loopMode.label, static_cast<int>(loopMode.mode));
-        m_timelineLoopCombo->setItemData(m_timelineLoopCombo->count() - 1, loopMode.tooltip, Qt::ToolTipRole);
-    }
-    m_timelineLoopCombo->setToolTip(tr("How the animation plays, here and in exported metadata. "
-                                       "An alias plays the way its source does."));
-    m_timelineLoopCombo->setAccessibleName(tr("Timeline loop mode"));
-    m_timelineLoopCombo->setEnabled(false);
-    flipRow->addWidget(m_timelineLoopCombo);
-    m_timelineFlipLabel = new QLabel(tr("Flip:"), m_selectedTimelineGroup);
-    m_timelineFlipLabel->setVisible(false);
-    flipRow->addWidget(m_timelineFlipLabel);
-    m_timelineFlipCombo = new QComboBox(m_selectedTimelineGroup);
-    m_timelineFlipCombo->addItem(tr("None"),       0);
-    m_timelineFlipCombo->addItem(tr("Horizontal"), 1);
-    m_timelineFlipCombo->addItem(tr("Vertical"),   2);
-    m_timelineFlipCombo->addItem(tr("Both"),       3);
-    m_timelineFlipCombo->setVisible(false);
-    flipRow->addWidget(m_timelineFlipCombo);
-    flipRow->addStretch();
-    groupLayout->addLayout(flipRow);
-
     // Timeline drop area (frames list)
     m_timelineDropArea = new QWidget(m_timelineEditorContainer);
     auto* dropLayout   = new QVBoxLayout(m_timelineDropArea);
     dropLayout->setContentsMargins(0, 4, 0, 0);
-    m_timelineDragHintLabel = new QLabel(tr("Drag frames from layout canvas here"),
+    m_timelineDragHintLabel = new QLabel(tr("Right-click the frames to add more"),
                                          m_timelineDropArea);
     dropLayout->addWidget(m_timelineDragHintLabel);
     m_timelineFramesList = new TimelineListWidget(m_timelineDropArea);
@@ -316,6 +325,10 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     connect(m_timelineFramesList, &TimelineListWidget::frameMoved, this, &TimelineEditorPanel::onFrameMoved);
     connect(m_timelineFramesList, &TimelineListWidget::removeSelectedRequested, this, &TimelineEditorPanel::onFrameRemoveRequested);
     connect(m_timelineFramesList, &TimelineListWidget::duplicateFrameRequested, this, &TimelineEditorPanel::onFrameDuplicateRequested);
+    connect(m_timelineFramesList, &TimelineListWidget::addFramesRequested, this, &TimelineEditorPanel::addFramesToSelectedTimeline);
+    connect(m_atlasCombo, &QComboBox::currentIndexChanged, this, [this](int comboIndex) {
+        if (comboIndex >= 0) emit atlasSelected(m_atlasCombo->itemData(comboIndex).toInt());
+    });
     connect(m_timelineFramesList, &QListWidget::itemSelectionChanged, this, &TimelineEditorPanel::onTimelineFrameSelectionChanged);
 }
 
@@ -686,11 +699,48 @@ void TimelineEditorPanel::onTimelineAddClicked()
 {
     QString name = m_timelineCreateEdit->text().trimmed();
     if (name.isEmpty()) {
-        name = QString("Timeline %1").arg(m_session->activeAtlas().timelines.size() + 1);
+        name = getUniqueTimelineName(tr("Timeline %1").arg(m_session->activeAtlas().timelines.size() + 1));
     }
+    addTimelineWithPickedSprites(name);
+}
+
+/// Picker options that list only the active atlas's sprites: a timeline's frames come from its atlas.
+static SpritePickerDialog::Options activeAtlasPickerOptions(ProjectSession* session, const QString& title,
+                                                            const QString& acceptText)
+{
+    SpritePickerDialog::Options options;
+    options.title = title;
+    options.acceptText = acceptText;
+    options.emptyText = TimelineEditorPanel::tr("This atlas has no sprites.");
+    QSet<QString> inAtlas;
+    for (const QString& path : session->activeAtlas().spritePaths) inAtlas.insert(QDir::cleanPath(path));
+    options.filter = [inAtlas](const SpritePtr& sprite) {
+        return inAtlas.contains(QDir::cleanPath(sprite->path));
+    };
+    return options;
+}
+
+QStringList TimelineEditorPanel::pickActiveAtlasSprites(const QString& title, const QString& acceptText,
+                                                        bool allowEmpty, bool* accepted)
+{
+    SpritePickerDialog::Options options = activeAtlasPickerOptions(m_session, title, acceptText);
+    options.allowEmpty = allowEmpty;
+    SpritePickerDialog dialog(m_session, options, this);
+    *accepted = dialog.exec() == QDialog::Accepted;
+    // Ticking has no order, and the tree lists "walk10" before "walk2".
+    return *accepted ? AnimationTimelineOps::naturallySorted(dialog.selectedSpritePaths()) : QStringList();
+}
+
+void TimelineEditorPanel::addTimelineWithPickedSprites(const QString& name)
+{
+    bool accepted = false;
+    const QStringList frames = pickActiveAtlasSprites(
+        tr("New Timeline \"%1\"").arg(name), tr("Create"), /*allowEmpty=*/true, &accepted);
+    if (!accepted) return;
 
     AnimationTimeline timeline;
     timeline.name = name;
+    timeline.frames = frames;
     m_session->activeAtlas().timelines.append(timeline);
     m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
 
@@ -704,6 +754,94 @@ void TimelineEditorPanel::onTimelineAddClicked()
         &m_session->selectedTimelineIndex,
         [this]() { refreshAndSelect(); }
     ));
+}
+
+// ---------------------------------------------------------------------------
+// autoCreateTimelinesFromGroups
+// ---------------------------------------------------------------------------
+void TimelineEditorPanel::autoCreateTimelinesFromGroups()
+{
+    const SpritePickerDialog::Options options =
+        activeAtlasPickerOptions(m_session, tr("Auto-create Timelines"), tr("Create"));
+    const QVector<SpritePickerDialog::Group> groups =
+        SpritePickerDialog::pickGroups(this, m_session, options);
+    if (groups.isEmpty()) return;
+
+    // One timeline per group, named by its path in the tree: the source, then the groups,
+    // so "Mascot.zip/run" lands in a "Mascot.zip" folder of the timeline list.
+    QVector<TimelineSeed> seeds;
+    for (const SpritePickerDialog::Group& group : groups)
+        seeds.append({group.path, AnimationTimelineOps::naturallySorted(group.spritePaths)});
+
+    const QVector<AnimationTimeline> oldState = m_session->activeAtlas().timelines;
+    const int oldSelection = m_session->selectedTimelineIndex;
+    int focusIndex = -1;
+    QString status;
+    const bool changed = TimelineGenerationService::addTimelines(
+        seeds, m_session->activeAtlas().timelines, focusIndex,
+        [this](const QString& timelineName) {
+            return TimelineUi::askTimelineConflictResolution(this, timelineName);
+        },
+        status);
+    commitGeneratedTimelines(changed, oldState, oldSelection, focusIndex, status);
+}
+
+// ---------------------------------------------------------------------------
+// addFramesToSelectedTimeline
+// ---------------------------------------------------------------------------
+void TimelineEditorPanel::addFramesToSelectedTimeline(int index)
+{
+    auto& timelines = m_session->activeAtlas().timelines;
+    const int selected = m_session->selectedTimelineIndex;
+    if (selected < 0 || selected >= timelines.size()) {
+        onTimelineAddClicked();
+        return;
+    }
+    if (!timelines[selected].aliasOf.isEmpty()) return;  // an alias shows its source's frames
+
+    bool accepted = false;
+    const QStringList paths = pickActiveAtlasSprites(
+        tr("Add Frames to \"%1\"").arg(timelines[selected].name), tr("Add"),
+        /*allowEmpty=*/false, &accepted);
+    if (paths.isEmpty()) return;
+
+    const QVector<AnimationTimeline> oldTimelines = timelines;
+    QStringList& frames = timelines[selected].frames;
+    const int insertAt = qBound(0, index, int(frames.size()));
+    for (int i = 0; i < paths.size(); ++i)
+        frames.insert(insertAt + i, paths[i]);
+
+    m_undoStack->push(new TimelinesUpdateCommand(
+        &timelines, oldTimelines, timelines, selected, selected,
+        &m_session->selectedTimelineIndex,
+        [this]() { refreshAndSelect(); }, tr("Add Frames")));
+    refreshTimelineFrames();
+    refreshTimelineList();
+    emit animZoomResetAndFitRequested();
+    // Select the added frames, so the user sees where they went.
+    m_timelineFramesList->clearSelection();
+    for (int i = insertAt; i < insertAt + paths.size() && i < m_timelineFramesList->count(); ++i)
+        m_timelineFramesList->item(i)->setSelected(true);
+    if (insertAt < m_timelineFramesList->count())
+        m_timelineFramesList->scrollToItem(m_timelineFramesList->item(insertAt));
+}
+
+// ---------------------------------------------------------------------------
+// updateAtlasCombo
+// ---------------------------------------------------------------------------
+void TimelineEditorPanel::updateAtlasCombo(const QVector<AtlasEntry>& atlases, int activeIndex)
+{
+    const QSignalBlocker blocker(m_atlasCombo);
+    m_atlasCombo->clear();
+    for (int i = 0; i < atlases.size(); ++i) {
+        const AtlasEntry& atlas = atlases[i];
+        if (atlas.isExcluded) continue;
+        // An empty atlas has no sprites for timelines, unless it is the active one.
+        if (atlas.spritePaths.isEmpty() && i != activeIndex) continue;
+        m_atlasCombo->addItem(atlas.name, i);
+        if (i == activeIndex) m_atlasCombo->setCurrentIndex(m_atlasCombo->count() - 1);
+    }
+    m_atlasRow->setVisible(m_atlasCombo->count() > 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +923,9 @@ void TimelineEditorPanel::onTimelineSelectionChanged()
         emit animPlaybackIntervalChanged(fpsToShow);
 
         m_timelineFramesList->setReadOnly(isAlias);
-        m_timelineDragHintLabel->setText(tr("Drag frames from layout canvas here"));
+        m_timelineDragHintLabel->setText(isAlias
+            ? tr("An alias shows its source timeline's frames")
+            : tr("Right-click the frames to add more"));
         m_removeBtn->setEnabled(true);
         refreshTimelineFrames();
         emit animFrameReset();
@@ -805,7 +945,7 @@ void TimelineEditorPanel::onTimelineSelectionChanged()
     if (m_timelineFlipLabel)  m_timelineFlipLabel->setVisible(false);
     if (m_timelineFlipCombo)  m_timelineFlipCombo->setVisible(false);
     m_removeBtn->setEnabled(false);
-    m_timelineDragHintLabel->setText(tr("Drop sprites or a group here to create a new timeline"));
+    m_timelineDragHintLabel->setText(tr("Add a timeline, or right-click the timeline list to auto-create them"));
     m_timelineDragHintLabel->setVisible(true);
     m_timelineFramesList->clear();
     m_timelineFramesList->setReadOnly(false);
@@ -1129,17 +1269,10 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
                 return;
             }
 
-            AnimationTimeline tl;
-            tl.name = trimmed;
-            m_session->activeAtlas().timelines.append(tl);
-            m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
-
-            m_undoStack->push(new TimelineAddCommand(
-                &m_session->activeAtlas().timelines, tl,
-                &m_session->selectedTimelineIndex,
-                refreshAndSelectLambda));
-            refreshAndSelectLambda();
+            addTimelineWithPickedSprites(trimmed);
         });
+        menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create Timelines..."), this,
+                       &TimelineEditorPanel::autoCreateTimelinesFromGroups);
 
         hasItems = true;
     } else if (item && item->data(0, Qt::UserRole).isValid()) {
@@ -1170,6 +1303,10 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
         });
 
         menu.addAction(QIcon(":/icons/link.svg"), tr("Create Alias"), this, &TimelineEditorPanel::onTimelineCreateAlias);
+        menu.addSeparator();
+        menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline..."), this, &TimelineEditorPanel::onTimelineAddClicked);
+        menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create Timelines..."), this,
+                       &TimelineEditorPanel::autoCreateTimelinesFromGroups);
         hasItems = true;
     }
 
@@ -1207,7 +1344,9 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
     if (!item && !hasChecked) {
         QMenu emptyMenu(this);
-        emptyMenu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline"), this, &TimelineEditorPanel::onTimelineAddClicked);
+        emptyMenu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline..."), this, &TimelineEditorPanel::onTimelineAddClicked);
+        emptyMenu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create Timelines..."), this,
+                            &TimelineEditorPanel::autoCreateTimelinesFromGroups);
         emptyMenu.exec(m_timelineList->mapToGlobal(pos));
         return;
     }
@@ -1537,6 +1676,11 @@ void TimelineEditorPanel::onTimelineFrameSelectionChanged()
 // ---------------------------------------------------------------------------
 void TimelineEditorPanel::onGenerateTimelinesFromFrames()
 {
+    generateTimelines();
+}
+
+void TimelineEditorPanel::generateTimelines(const QStringList& onlyPaths)
+{
     if (m_session->activeAtlas().layoutModels.isEmpty()
             || m_session->activeAtlas().layoutModels.first().sprites.isEmpty()) {
         MessageDialog::information(this, tr("Generate Timelines"),
@@ -1547,12 +1691,16 @@ void TimelineEditorPanel::onGenerateTimelinesFromFrames()
     const QVector<AnimationTimeline> oldState = m_session->activeAtlas().timelines;
     const int oldSelection = m_session->selectedTimelineIndex;
 
+    QSet<QString> only;
+    for (const QString& path : onlyPaths) only.insert(QDir::cleanPath(path));
+
     QVector<SpritePtr> renamedSprites;
     const bool multiSource = m_session->sources.size() > 1;
     for (const auto& model : m_session->activeAtlas().layoutModels) {
         for (const auto& sprite : model.sprites) {
             if (!sprite) continue;
             const QString cp = QDir::cleanPath(sprite->path);
+            if (!only.isEmpty() && !only.contains(cp)) continue;
 
             int bestMatchLen = -1;
             QString localName;
@@ -1587,7 +1735,7 @@ void TimelineEditorPanel::onGenerateTimelinesFromFrames()
 
     int focusIndex = -1;
     QString status;
-    bool changed = TimelineGenerationService::generateFromSprites(
+    const bool changed = TimelineGenerationService::generateFromSprites(
         renamedSprites,
         m_session->activeAtlas().timelines,
         focusIndex,
@@ -1595,7 +1743,12 @@ void TimelineEditorPanel::onGenerateTimelinesFromFrames()
             return TimelineUi::askTimelineConflictResolution(this, timelineName);
         },
         status);
+    commitGeneratedTimelines(changed, oldState, oldSelection, focusIndex, status);
+}
 
+void TimelineEditorPanel::commitGeneratedTimelines(bool changed, const QVector<AnimationTimeline>& oldState,
+                                                   int oldSelection, int focusIndex, const QString& status)
+{
     if (changed) {
         if (focusIndex >= 0)
             m_session->selectedTimelineIndex = focusIndex;

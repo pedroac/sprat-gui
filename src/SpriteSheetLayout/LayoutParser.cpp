@@ -7,6 +7,20 @@
 #include <QRegularExpression>
 #include <QHash>
 
+namespace {
+// Reads "KEY:A,B,C,D" (the token after "KEY:") into four integers.
+bool parseFourInts(const QString& value, int out[4]) {
+    const QStringList parts = value.split(',');
+    if (parts.size() != 4) return false;
+    for (int i = 0; i < 4; ++i) {
+        bool ok = false;
+        out[i] = parts[i].toInt(&ok);
+        if (!ok) return false;
+    }
+    return true;
+}
+} // namespace
+
 QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& folderPath,
                                           const QString& sourceFolder) {
     QVector<LayoutModel> models;
@@ -17,7 +31,8 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
     if (sourceSizeCache.size() > 16384) {
         sourceSizeCache.clear();
     }
-    QRegularExpression spriteRe(R"raw(sprite\s+"((?:[^"\\]|\\.)*)"\s+(\d+),(\d+)\s+(\d+),(\d+)(?:\s+(\d+),(\d+)\s+(\d+),(\d+))?(?:\s+(rotated))?)raw");
+    // sprite "PATH" rect:X,Y,W,H [trim:L,T,R,B] [rotated] ... (options in any order)
+    QRegularExpression spriteRe(R"raw(^sprite\s+"((?:[^"\\]|\\.)*)"(.*)$)raw");
     QRegularExpression rootRe(R"raw(root\s+"((?:[^"\\]|\\.)*)")raw");
 
     QStringList lines = output.split('\n');
@@ -33,6 +48,8 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
                 if (QDir::isRelativePath(rootPath)) {
                     rootPath = QDir(folderPath).absoluteFilePath(rootPath);
                 }
+                // A relative root leaves "a/../../b" segments, and paths are compared as strings.
+                rootPath = QDir::cleanPath(rootPath);
                 dir = QDir(rootPath);
             }
             continue;
@@ -61,11 +78,28 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             if (!match.hasMatch()) {
                 continue;
             }
+            int rect[4] = {0, 0, 0, 0};
+            int trim[4] = {0, 0, 0, 0};
+            bool hasRect = false;
+            bool hasTrim = false;
+            bool rotated = false;
+            for (const QString& token : match.captured(2).split(' ', Qt::SkipEmptyParts)) {
+                if (token.startsWith(QLatin1String("rect:"))) {
+                    hasRect = parseFourInts(token.mid(5), rect);
+                } else if (token.startsWith(QLatin1String("trim:"))) {
+                    hasTrim = parseFourInts(token.mid(5), trim);
+                } else if (token == QLatin1String("rotated")) {
+                    rotated = true;
+                }
+            }
+            if (!hasRect) {
+                continue;
+            }
             auto s = std::make_shared<Sprite>();
             QString capturedPath = match.captured(1);
             capturedPath.replace("\\\"", "\"");
             capturedPath.replace("\\\\", "\\");
-            s->path = dir.absoluteFilePath(capturedPath);
+            s->path = QDir::cleanPath(dir.absoluteFilePath(capturedPath));
             // Derive name from relative path within sourceFolder when available
             if (!sourceFolder.isEmpty()) {
                 QString rel = QDir(sourceFolder).relativeFilePath(s->path);
@@ -80,14 +114,13 @@ QVector<LayoutModel> LayoutParser::parse(const QString& output, const QString& f
             } else {
                 s->name = QFileInfo(s->path).baseName();
             }
-            s->rect = QRect(match.captured(2).toInt(), match.captured(3).toInt(), match.captured(4).toInt(), match.captured(5).toInt());
-            if (!match.captured(6).isEmpty()) {
+            s->rect = QRect(rect[0], rect[1], rect[2], rect[3]);
+            if (hasTrim) {
+                // trimRect holds the left, top, right and bottom margins.
                 s->trimmed = true;
-                s->trimRect = QRect(match.captured(6).toInt(), match.captured(7).toInt(), match.captured(8).toInt(), match.captured(9).toInt());
+                s->trimRect = QRect(trim[0], trim[1], trim[2], trim[3]);
             }
-            if (!match.captured(10).isEmpty()) {
-                s->rotated = true;
-            }
+            s->rotated = rotated;
             // Use the original image dimensions so the pivot aligns with the visual frame center.
             // For rotated sprites the atlas rect has width and height swapped relative to the
             // source image, so derive content dimensions in source-image space before centering.

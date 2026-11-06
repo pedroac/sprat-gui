@@ -282,7 +282,7 @@ public:
         if (!m_removedSource.cachedFolderPath.isEmpty()
                 && QDir(m_removedSource.cachedFolderPath).exists()) {
             if (!m_trashPath.isEmpty() && !QDir(m_trashPath).exists()) {
-                QFile::rename(m_removedSource.cachedFolderPath, m_trashPath);
+                TrashBin::moveFolder(m_removedSource.cachedFolderPath, m_trashPath);
             } else {
                 m_trashPath = TrashBin::sendFolder(m_removedSource.cachedFolderPath);
             }

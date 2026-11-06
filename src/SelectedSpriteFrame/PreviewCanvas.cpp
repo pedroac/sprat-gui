@@ -327,6 +327,17 @@ QPointF PreviewCanvas::viewportCenterInScene() const {
     return mapToScene(viewport()->rect().center());
 }
 
+bool PreviewCanvas::event(QEvent* event) {
+    if (event->type() == QEvent::ShortcutOverride && !m_sprites.isEmpty() && m_overlay) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->matches(QKeySequence::Copy) || keyEvent->matches(QKeySequence::Paste)) {
+            event->accept();
+            return true;
+        }
+    }
+    return ZoomableGraphicsView::event(event);
+}
+
 void PreviewCanvas::keyPressEvent(QKeyEvent* event) {
     if (!m_sprites.isEmpty() && m_overlay) {
         if (event->matches(QKeySequence::Copy))  { emit copyMarkersRequested();  event->accept(); return; }

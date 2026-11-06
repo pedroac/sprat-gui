@@ -2,12 +2,14 @@
 #include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "NineSliceInsets.h"
+#include "PathSafety.h"
 #include "ResolutionUtils.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QStandardPaths>
 #include <QColor>
 #include <QUuid>
 
@@ -167,7 +169,14 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             }
             sObj["originalPath"] = origPath;
             if (!src.cachedFolderPath.isEmpty()) {
-                sObj["cachedFolder"] = src.cachedFolderPath;
+                // Relative when inside the project, so excluded files (stored relative to
+                // it) still resolve after the project is moved or opened from a ZIP.
+                QString cached = src.cachedFolderPath;
+                if (input.portablePaths && !input.projectDir.isEmpty()) {
+                    const QString rel = QDir(input.projectDir).relativeFilePath(cached);
+                    if (!rel.startsWith(QLatin1String(".."))) cached = rel;
+                }
+                sObj["cachedFolder"] = cached;
             }
             if (!src.excludedFiles.isEmpty()) {
                 QJsonArray excArr;
@@ -227,7 +236,6 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
             aObj["name"]       = atlas.name;
             aObj["is_neutral"] = atlas.isNeutral;
             aObj["is_excluded"] = atlas.isExcluded;
-            if (atlas.hasNormalMap) aObj["has_normal_map"] = true;
             aObj["output_subdir"] = atlas.outputSubdir;
 
             QJsonObject eoObj;
@@ -442,7 +450,7 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     return root;
 }
 
-ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& root, const QString& currentFolder, QVector<LayoutModel>& layoutModels) {
+ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& root, const QString& currentFolder, QVector<LayoutModel>& layoutModels, const QString& projectDir) {
     ProjectPayloadApplyResult out;
     if (!root.value(QStringLiteral("complete")).toBool()) {
         qWarning() << "ProjectPayloadCodec: project file may be incomplete or corrupted (missing 'complete' sentinel)";
@@ -656,7 +664,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
     QJsonArray profilesArr = saveOpts["profiles"].toArray();
     out.saveConfig.profiles.reserve(profilesArr.size());
     for (const auto& pVal : profilesArr) {
-        out.saveConfig.profiles.append(pVal.toString());
+        if (PathSafety::isPlainName(pVal.toString()))
+            out.saveConfig.profiles.append(pVal.toString());
     }
     out.saveConfig.profilesGlobal     = saveOpts["profiles_global"].toBool(true);
     out.saveConfig.syncSprites        = saveOpts["sync_sprites"].toBool(false);
@@ -670,8 +679,10 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         p.transform          = readTransform(po["transform"], schemaVersion);
         p.scaleFilter        = po["scale_filter"].toString();
         p.postExportCommand  = po["post_export_command"].toString();
-        for (const auto& prv : po["profiles"].toArray())
-            p.profiles.append(prv.toString());
+        for (const auto& prv : po["profiles"].toArray()) {
+            if (PathSafety::isPlainName(prv.toString()))
+                p.profiles.append(prv.toString());
+        }
         if (!p.name.isEmpty()) out.exportPresets.append(p);
     }
 
@@ -709,6 +720,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
         const QJsonObject layoutInfo = root["layout"].toObject();
 
         // Read sources array (new model) — highest priority
+        // Source paths are saved relative to the project folder.
+        const QString sourceBase = projectDir.isEmpty() ? currentFolder : projectDir;
         const QJsonArray sourcesArr = layoutInfo["sources"].toArray();
         if (!sourcesArr.isEmpty()) {
             for (const auto& sVal : sourcesArr) {
@@ -717,15 +730,24 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 src.name = sObj["name"].toString();
                 src.type = sourceTypeFromString(sObj["type"].toString());
                 QString origPath = sObj["originalPath"].toString();
-                if (!origPath.isEmpty() && QDir::isRelativePath(origPath) && !currentFolder.isEmpty()) {
-                    origPath = QDir(currentFolder).absoluteFilePath(origPath);
+                if (!origPath.isEmpty() && QDir::isRelativePath(origPath) && !sourceBase.isEmpty()) {
+                    origPath = QDir(sourceBase).absoluteFilePath(origPath);
                     // Reject traversal attempts that escape the project folder
-                    if (!QDir::cleanPath(origPath).startsWith(QDir::cleanPath(currentFolder))) {
+                    if (!PathSafety::isInsideFolder(origPath, sourceBase)) {
                         origPath.clear();
                     }
                 }
                 src.originalPath = origPath;
-                src.cachedFolderPath = sObj["cachedFolder"].toString();
+                // The cached folder is deleted when its source is removed, so only accept
+                // the places the app creates it: inside the project or the temp folder.
+                QString cachedFolder = sObj["cachedFolder"].toString();
+                if (!cachedFolder.isEmpty() && QDir::isRelativePath(cachedFolder) && !sourceBase.isEmpty())
+                    cachedFolder = QDir::cleanPath(QDir(sourceBase).absoluteFilePath(cachedFolder));
+                if (PathSafety::isInsideFolder(cachedFolder, sourceBase)
+                        || PathSafety::isInsideFolder(
+                               cachedFolder, QStandardPaths::writableLocation(QStandardPaths::TempLocation))) {
+                    src.cachedFolderPath = cachedFolder;
+                }
                 const QJsonArray excArr = sObj["excluded"].toArray();
                 src.excludedFiles.reserve(excArr.size());
                 for (const auto& e : excArr) src.excludedFiles.append(e.toString());
@@ -817,19 +839,22 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             atlas.name       = aObj["name"].toString();
             atlas.isNeutral   = aObj["is_neutral"].toBool(false);
             atlas.isExcluded  = aObj["is_excluded"].toBool(false);
-            atlas.hasNormalMap = aObj["has_normal_map"].toBool(false);
             atlas.outputSubdir = aObj["output_subdir"].toString();
+            if (!PathSafety::isContainedRelativePath(atlas.outputSubdir))
+                atlas.outputSubdir.clear();
 
             {
                 QJsonObject eo = aObj["export_override"].toObject();
                 // Deserialize profiles array; fall back to legacy single "profile" field
                 const QJsonArray profArr = eo["profiles"].toArray();
                 if (!profArr.isEmpty()) {
-                    for (const auto& pv : profArr)
-                        atlas.exportConfig.profiles.append(pv.toString());
+                    for (const auto& pv : profArr) {
+                        if (PathSafety::isPlainName(pv.toString()))
+                            atlas.exportConfig.profiles.append(pv.toString());
+                    }
                 } else {
                     const QString legacyProfile = eo["profile"].toString();
-                    if (!legacyProfile.isEmpty())
+                    if (PathSafety::isPlainName(legacyProfile))
                         atlas.exportConfig.profiles.append(legacyProfile);
                 }
                 atlas.exportConfig.transform   = readTransform(eo["transform"], schemaVersion);

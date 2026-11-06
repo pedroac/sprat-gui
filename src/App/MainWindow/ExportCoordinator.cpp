@@ -1,4 +1,5 @@
 #include "ExportCoordinator.h"
+#include "AtlasOutputFolder.h"
 #include "ILayoutContext.h"
 #include "LayoutOrchestrator.h"
 #include "LayoutCanvas.h"
@@ -8,6 +9,7 @@
 #include "ProjectSession.h"
 #include "ProjectSaveService.h"
 #include "MessageDialog.h"
+#include "PostExportCommandTrust.h"
 #include "models.h"
 
 #include <QDir>
@@ -26,19 +28,6 @@
 #ifdef Q_OS_WASM
 #include <emscripten.h>
 #endif
-
-// Returns the output subdirectory for an atlas, automatically deriving one from the
-// atlas name when multiple atlases would otherwise all write to the same root directory.
-static QString effectiveOutputSubdir(const AtlasEntry& atlas, int rootExporterCount) {
-    if (!atlas.outputSubdir.isEmpty())
-        return atlas.outputSubdir;
-    if (rootExporterCount <= 1)
-        return {};
-    if (atlas.isNeutral)
-        return QStringLiteral("sprites");
-    const QString slug = atlas.name.trimmed().toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
-    return slug.isEmpty() ? QStringLiteral("atlas") : slug;
-}
 
 ExportCoordinator::ExportCoordinator(const Config& cfg, QObject* parent)
     : QObject(parent), m_cfg(cfg)
@@ -135,15 +124,18 @@ bool ExportCoordinator::runExport(SaveConfig config) {
 
     if (m_layoutBinary.isEmpty() || m_packBinary.isEmpty()) {
         if (!m_cliReady) {
-            MessageDialog::critical(m_cfg.parentWidget, tr("Error"), tr("Missing spratlayout or spratpack binaries."));
+            MessageDialog::critical(m_cfg.parentWidget, tr("sprat-cli Tools Missing"), tr("spratlayout or spratpack wasn't found, so nothing can be exported. Install or locate the sprat-cli tools in Settings > CLI Tools."));
             return false;
         }
         if (m_cfg.session->layoutSourcePath.isEmpty()) {
-            MessageDialog::critical(m_cfg.parentWidget, tr("Error"), tr("No layout source selected."));
+            MessageDialog::critical(m_cfg.parentWidget, tr("Nothing to Export"), tr("Add sprites to the project before exporting."));
             return false;
         }
     }
     if (m_exportWatcher.isRunning()) {
+        return false;
+    }
+    if (!confirmPostExportCommand(config)) {
         return false;
     }
 
@@ -263,7 +255,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                     atlasConfig.scaleFilter = atlas.exportConfig.scaleFilter;
                 // Nest this atlas inside each profile folder rather than at the top level.
                 // ProjectSaveService writes to <outputPath>/<profile>/<atlasSubdir>/.
-                atlasConfig.atlasSubdir = effectiveOutputSubdir(atlas, rootExporterCount);
+                atlasConfig.atlasSubdir = effectiveAtlasOutputSubdir(atlas, rootExporterCount);
 
                 // Write project JSON only on first atlas call
                 const QJsonObject payload = first ? projectPayload : QJsonObject();
@@ -350,6 +342,36 @@ bool ExportCoordinator::runExport(SaveConfig config) {
     m_exportWatcher.setFuture(QtConcurrent::run(saveTask));
 #endif
     return true;
+}
+
+bool ExportCoordinator::confirmPostExportCommand(SaveConfig& config) {
+#ifdef Q_OS_WASM
+    Q_UNUSED(config)
+    return true;
+#else
+    const QString command = config.postExportCommand.trimmed();
+    if (command.isEmpty() || PostExportCommandTrust::isTrusted(command))
+        return true;
+
+    enum { RunCommand, ExportWithoutCommand, CancelExport };
+    const int choice = MessageDialog::customQuestion(
+        m_cfg.parentWidget, tr("Run Post-Export Command?"),
+        tr("This project runs a shell command after exporting:\n\n%1\n\n"
+           "Only run it if you trust where the project came from. "
+           "If you run it, it won't be asked about again.").arg(command),
+        {tr("Run Command"), tr("Export Without It"), tr("Cancel")},
+        ExportWithoutCommand);
+    switch (choice) {
+    case RunCommand:
+        PostExportCommandTrust::trust(command);
+        return true;
+    case ExportWithoutCommand:
+        config.postExportCommand.clear();
+        return true;
+    default:
+        return false;
+    }
+#endif
 }
 
 void ExportCoordinator::handleExportResult(const ExportResult& result) {

@@ -346,7 +346,7 @@ jobs:
         if: steps.check_qt_wasm.outputs.wasm_available == 'true'
         run: |
           export EMFLAGS="-sASSERTIONS=0"
-          cmake --build build_wasm --parallel
+          cmake --build build_wasm --parallel 4
 
       - name: Package WASM
         if: steps.check_qt_wasm.outputs.wasm_available == 'true'

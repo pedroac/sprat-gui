@@ -2,6 +2,7 @@
 
 #include <functional>
 #include "models.h"
+#include "TimelineBuilder.h"
 
 class TimelineGenerationService {
 public:
@@ -11,6 +12,15 @@ public:
     /** Generate timelines from an explicit set of sprites (e.g. a single source). */
     static bool generateFromSprites(
         const QVector<SpritePtr>& sprites,
+        QVector<AnimationTimeline>& timelines,
+        int& focusIndex,
+        const ConflictResolver& resolveConflict,
+        QString& statusMessage);
+
+    /** Adds the given timelines. One whose name is taken is replaced, merged or skipped, as
+     *  @p resolveConflict says. @p focusIndex is the first timeline added or changed. */
+    static bool addTimelines(
+        const QVector<TimelineSeed>& seeds,
         QVector<AnimationTimeline>& timelines,
         int& focusIndex,
         const ConflictResolver& resolveConflict,

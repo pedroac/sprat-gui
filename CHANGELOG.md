@@ -8,16 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `deploy/build-from-source.sh` builds sprat-cli and sprat-gui from source on Linux and macOS: it checks Git and the build dependencies (printing the install command for what's missing), clones or updates both repositories in a `sprat` folder, builds the sprat-cli version sprat-gui needs, and sets sprat-gui up to use the tools. Run it again to update
 - Frame Animation workspace: each timeline has a loop mode (Loop, Once, Ping-pong or Ping-pong once). The preview, GIF/video export and exported metadata play it that way; an alias plays the way its source does. Projects saved before keep looping
 
 ### Changed
+- Frame Animation workspace: the sprite column is gone; the timeline list sits on the left and the selected timeline with its preview on the right. With several atlases, an **Atlas** selector above the timelines picks whose timelines are shown
+- Frame Animation workspace: **Add timeline** opens a sprite picker (as in the Nine-Slice workspace); tick sprites or whole groups, or create it empty. Right-click the timeline list for **Auto-create Timelines...**: pick one or more groups (or a source), and each group holding sprites becomes a timeline named after it, inside a folder named after its source and parent groups. Right-click a frame for **Add Frames Before...** / **Add Frames After...**, or empty space in the frames for **Add Frames...**
+- Sprites picked or dropped into a timeline are ordered by their numbers (`walk2` before `walk10`), not alphabetically
+- Nine-Slice workspace: the sprite list shows only nine-sliced sprites. **Add** (under the list, as in the Atlases workspace) opens a sprite picker where you tick several sprites, or a whole folder, at once; **Remove** (or Delete) stops nine-slicing the selected ones and keeps their insets for later. This replaces the "Nine-sliced only" filter and the "Nine-Sliced" toggle
+- Workspaces now have tabs at the top of the window (Atlases, Sprites, Nine-Slice, Frame Animation, Exportation), so the current workspace is always shown and one click switches. They replace the Workspace menu; its shortcuts (Alt+A, Alt+S, Alt+N, Alt+F, Alt+X) still work
+- The Export workspace shortcut is now Alt+X. Alt+E is the Edit menu's key on Windows and Linux, and the clash made Alt+E do nothing
+- File > Load is now File > Open Project (Ctrl+O). It asks for the project folder, the same folder Save As creates, instead of the project.spart.json inside it. ZIP projects open with File > Open ZIP Project
+- File > Export has a shortcut: Ctrl+E
+- Help > Hotkeys now lists the shortcuts as they are bound, in the platform's notation (⌘ on macOS), including marker copy/paste and nudging with the arrow keys
+- When the layout switches to another profile because the selected one failed, a notice says which profile is now used (exports use it too)
+- Layout and sprat-cli errors say what went wrong and where to fix it, instead of "Error", and open over the app window
 - Frame Animation workspace: onion skin now defaults to off
 - Sprites workspace: trim rect now defaults to on
 - Atlas Sprites: deduplication mode now defaults to Exact instead of None
 - Frame Animation workspace: animations can now run at up to 100 FPS (was 60). Projects with faster animations load capped at 100 FPS, the fastest speed a GIF export can show
 - Export: the "Raw (sprat-cli format)" format is now called "Layout text (sprat-cli files)", so it can't be confused with sprat-cli's new `raw` format. Saved projects keep their choice
 
+### Security
+- Opening a sprite archive can no longer overwrite files outside the folder it is extracted to. Links inside archives (which a `.tar` could use to write to any of your files) are now skipped
+- Exporting can no longer delete folders outside the export folder. A project file could name a profile or atlas output folder with an absolute path or `..`, and the export cleared that folder before writing. Such names are now dropped when the project is opened, and the export refuses them
+- A post-export command stored in a project now asks before it runs for the first time, so a project from someone else can't run commands on your computer unnoticed. Commands you type in the Export workspace run without asking
+- In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
+
 ### Fixed
+- Save (Ctrl+S) on a project opened from a ZIP updates the ZIP, instead of writing a project file and `sprites/` folder next to it
+- Restoring an autosave of an open project finds its sprites and excluded sprites again
+- Undoing "Exclude from Layout" puts the sprites back in their atlas and takes them off the excluded list; redo excludes them again
+- After importing an archive and removing or excluding sprites, the window title no longer shows "/" as the folder
+- Excluded sprites are kept in the project: saving copies their images into the project folder, and they stay listed (and can be included again) after the project is moved, renamed or opened from a ZIP. Before, their images were left behind and they couldn't be brought back
+- Sync, and the periodic folder check, no longer add excluded sprites back into the layout
+- A project opened from a ZIP no longer loses its sprites after the first layout (they were deleted from the temporary folder it was extracted to)
+- Save (Ctrl+S) copies newly added images into the project before writing the project file, so the file never points at their temporary locations
+- Opening a ZIP project failed with "Invalid image path" (or laid out nothing): its sprites were looked for next to the ZIP instead of inside it
+- Opening a project while on the Nine-Slice, Atlases or Exportation tab put the Sprites panel over that workspace
+- The window title and File > Open Recent name a project after its folder (or ZIP) and show where it is, instead of the parent folder, `project.spart.json`, or a temporary folder
+- After opening a project, the status bar keeps "Loaded N sprites" instead of switching to "CLI ready"
+- Opening another project (Open Project, Open Recent, or dropping a project) now asks to save unsaved changes first, instead of discarding them. Closing the app no longer closes it when saving was canceled or failed
+- Ctrl+V in the sprite preview pastes copied markers again, instead of importing from the clipboard
+- Frame detection no longer freezes its dialog while detecting; it shows progress, keeps the frames when detection fails and says why, and settings changed in a canceled dialog are no longer kept
+- Zoom shortcuts (Ctrl+plus/minus, Ctrl+0, Ctrl+1) work on the current workspace's view even when the focus is in a side panel or on a button
+- When no profile can fit the sprites, the layout stops with one message instead of also trying to switch to an empty profile
+- Removing a source no longer deletes its files permanently when the system temp folder is on another drive (common on Linux), so undoing the removal brings them back
+- In-app updates: on macOS the new app replaces the old one instead of being copied over it (leftover files could make macOS report the app as damaged); on Linux the bundled profiles config and transforms are updated too, and running from an AppImage updates the AppImage itself. The update now waits for the app to close instead of a fixed 2 seconds
+- Windows: installing sprat-cli from the app no longer fails because the downloaded ZIP was saved without a `.zip` extension
+- Linux: installing sprat-cli from the app no longer runs one compile job per CPU core, which could run out of memory on machines with little RAM. It now runs one job per 2 GiB of free memory
+- Writing files back to a source ZIP no longer leaves a broken ZIP when a file can't be read or written; the original ZIP is only replaced once the new one is complete
+- Opening a project ZIP whose project file can't be fully read now shows an error instead of loading a cut-off project, and archive warnings no longer stop extraction partway while reporting success
+- Atlas names with slashes or `..` no longer turn into export folders outside the export
 - macOS: the app no longer shows as "damaged" and refuses to open (seen on macOS 27 beta). The bundle is now re-signed after packaging, and the bundled sprat-cli tools, profiles config and transforms moved from `Contents/MacOS` to `Contents/Resources/cli`, since non-code files in `Contents/MacOS` made the bundle unsignable
 - macOS: installing sprat-cli from the app now puts it where the app looks for it, and copies the profiles config and transforms correctly
 - macOS: the app now runs on Intel Macs and on macOS 11 and later. It is a universal (Apple Silicon and Intel) build, and its bundled sprat-cli tools no longer need Rosetta or Homebrew libraries
@@ -33,11 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nine-Slice workspace: insets can no longer add up to more than the sprite (left + right within its width, top + bottom within its height), and the preview no longer clamps them to half the sprite. Projects saved with insets that don't fit get the right and bottom insets reduced when the sprite is opened or exported, instead of failing to export
 - Export: nine-slice insets set in the Nine-Slice workspace are now written to the export
 - Nine-Slice workspace: opening it no longer resets the first sprite's insets, fill modes and size
-- Edits in the Nine-Slice and Normal Map workspaces now count as unsaved changes: the app asks to save them before closing, and saving clears the unsaved marker in the title bar
+- Edits in the Nine-Slice workspace now count as unsaved changes: the app asks to save them before closing, and saving clears the unsaved marker in the title bar
 - Export: projects with alias timelines no longer fail to export ("Invalid alias line"); aliases and their flip are now written the way sprat-cli reads them
 - Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 
 ### Dependencies
+- Updated sprat-cli to v0.32.4, which describes puppets (rigs, poses and pose sequences) and writes raw format version 8
+- Updated sprat-cli to v0.28.1, which labels layout values, reports mistakes in hand-written markers and animations files, and writes raw format version 4
 - Updated sprat-cli to v0.24.0, which adds animation loop modes and rejects animations faster than 100 FPS
 - macOS: the bundled sprat-cli tools are built from source with the app instead of being taken from sprat-cli's macOS release
 

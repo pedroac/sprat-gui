@@ -58,7 +58,6 @@ struct AtlasEntry {
     QString name;
     bool isNeutral   = false;
     bool isExcluded  = false;
-    bool hasNormalMap = false;
     QStringList spritePaths;
     QVector<AnimationTimeline> timelines;
     QVector<LayoutModel> layoutModels;

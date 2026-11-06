@@ -5,17 +5,23 @@ set -euo pipefail
 # Ensure we're in the script directory
 cd "$(dirname "$0")"
 
-# Update DEPENDENCIES from the local sprat-cli checkout if available,
-# otherwise fall back to the latest GitHub release.
+# Update DEPENDENCIES from the local sprat-cli checkout when its version is a
+# published tag, otherwise from the latest GitHub release. CI clones the tag in
+# DEPENDENCIES, so an untagged local version must never be pinned.
+CLI_REPO="https://github.com/pedroac/sprat-cli.git"
 LOCAL_CLI_VERSION=""
 if [ -f "../sprat-cli/VERSION" ]; then
     LOCAL_CLI_VERSION=$(tr -d '[:space:]' < "../sprat-cli/VERSION")
 fi
 
-if [ -n "$LOCAL_CLI_VERSION" ]; then
+if [ -n "$LOCAL_CLI_VERSION" ] \
+    && git ls-remote --exit-code --tags "$CLI_REPO" "refs/tags/$LOCAL_CLI_VERSION" >/dev/null 2>&1; then
     echo "$LOCAL_CLI_VERSION" > DEPENDENCIES
     echo "Dependencies set to local sprat-cli version: $LOCAL_CLI_VERSION"
 else
+    if [ -n "$LOCAL_CLI_VERSION" ]; then
+        echo "Local sprat-cli version $LOCAL_CLI_VERSION has no published tag (or the network is down); not pinning it."
+    fi
     echo "Updating DEPENDENCIES from latest GitHub release..."
     TAG=$(curl -fsSL https://api.github.com/repos/pedroac/sprat-cli/releases/latest 2>/dev/null \
         | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \

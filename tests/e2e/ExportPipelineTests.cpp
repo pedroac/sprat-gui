@@ -333,7 +333,7 @@ void ExportPipelineTests::testProjectTextCantInjectCliRecords() {
     writeSprite(QDir(spritesDir).filePath(QStringLiteral("panel.png")), {32, 32}, Qt::gray);
 
     // A shared project file may hold any string; none of these may start a record of its own.
-    const QString injected = QStringLiteral("\nsprite \"/etc/passwd\" 0,0 1,1\n");
+    const QString injected = QStringLiteral("\nsprite \"/etc/passwd\" rect:0,0,1,1\n");
     const QJsonArray markers{
         QJsonObject{{"name", QStringLiteral("say \"hi\"") + injected}, {"kind", "point"},
                     {"x", 3}, {"y", 4}},
@@ -374,7 +374,7 @@ void ExportPipelineTests::testProjectTextCantInjectCliRecords() {
     QStringList markerNames;
     for (const QJsonValue& value : sprite["markers"].toArray())
         markerNames << value.toObject()["name"].toString();
-    QVERIFY2(markerNames.contains(QStringLiteral("say \"hi\" sprite \"/etc/passwd\" 0,0 1,1")),
+    QVERIFY2(markerNames.contains(QStringLiteral("say \"hi\" sprite \"/etc/passwd\" rect:0,0,1,1")),
              qPrintable(markerNames.join(QStringLiteral(" | "))));
     QVERIFY(!markerNames.contains(QStringLiteral("bogus")));
 
@@ -426,3 +426,43 @@ void ExportPipelineTests::testAnimationLoopModesAreExported() {
 }
 
 QTEST_MAIN(ExportPipelineTests)
+
+void ExportPipelineTests::testExportNeverDeletesOutsideDestination() {
+    // Profile names and atlas folders come from the project file; before writing, the
+    // export wipes <destination>/<profile>/<atlas>. Names that point elsewhere must fail
+    // the export without touching anything outside the destination.
+    const QString victimDir = m_root.filePath(QStringLiteral("victim"));
+    QVERIFY(QDir().mkpath(victimDir));
+    const QString victimFile = QDir(victimDir).filePath(QStringLiteral("keep.txt"));
+    {
+        QFile f(victimFile);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("keep");
+    }
+    const QString destination = m_root.filePath(QStringLiteral("safe export"));
+
+    SpratProfile absoluteProfile = makeProfile();
+    absoluteProfile.name = victimDir;
+    ExportRun run = exportSprites(m_spritesDir, destination, QStringLiteral("json"), absoluteProfile);
+    QVERIFY(!run.ok);
+    QVERIFY2(run.error.contains(QStringLiteral("profile")), qPrintable(run.error));
+    QVERIFY(QFileInfo::exists(victimFile));
+
+    for (const QString& atlasSubdir : {QStringLiteral("../../victim"), victimDir}) {
+        SaveConfig config;
+        config.destination = destination;
+        config.transform = QStringLiteral("json");
+        config.profiles = {PROFILE_NAME};
+        config.atlasSubdir = atlasSubdir;
+        QString savedDestination;
+        QString error;
+        const bool ok = ProjectSaveService::save(
+            config, m_spritesDir, {}, m_spritesDir, {makeProfile()}, PROFILE_NAME,
+            toolPath(QStringLiteral("spratlayout")), toolPath(QStringLiteral("spratpack")),
+            toolPath(QStringLiteral("spratconvert")), QJsonObject(), savedDestination, error,
+            QStringLiteral("none"), 5, ProjectSaveService::SaveCallbacks{});
+        QVERIFY2(!ok, qPrintable(atlasSubdir));
+        QVERIFY2(error.contains(QStringLiteral("folder")), qPrintable(error));
+        QVERIFY(QFileInfo::exists(victimFile));
+    }
+}

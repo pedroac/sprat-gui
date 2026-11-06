@@ -9,5 +9,6 @@ private slots:
     void testAnimationLoopModeNames();
     void testAnimationPlayOrder();
     void testPlaybackFollowsLoopMode();
+    void testFramePathsSortNaturally();
     void testPlaybackRestartsFinishedOnceAnimation();
 };

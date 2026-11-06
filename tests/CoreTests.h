@@ -8,4 +8,9 @@ private slots:
     void testMarkerNameNormalization();
     void testResolutionUtils();
     void testUpdateOffersOnlyNewerVersions();
+    void testUpdateAssetNeedsSha256Digest();
+    void testPathSafetyRejectsEscapingPaths();
+    void testArchiveExtractionSkipsLinks();
+    void testCreateZipRoundTripsAndKeepsOriginalOnFailure();
+    void testTrashBinMoveFolderKeepsExistingTarget();
 };

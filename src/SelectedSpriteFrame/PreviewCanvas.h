@@ -89,6 +89,9 @@ signals:
     void pasteMarkersRequested();
 
 protected:
+    /// Claims Ctrl+C / Ctrl+V for marker copy/paste, which the main window's
+    /// clipboard-import shortcut would otherwise take.
+    bool event(QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 

@@ -16,7 +16,6 @@
 #include "ExportWorkspace.h"
 #include "FrameAnimationWorkspace.h"
 #include "NineSliceWorkspace.h"
-#include "NormalMapWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -53,6 +52,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QSet>
 #include <QDoubleSpinBox>
 #include <QImage>
 #include <QInputDialog>
@@ -223,6 +223,7 @@ void MainWindow::loadAutosavedProject() {
     // Update UI to clear sprite selection display
     onSpriteSelected(SpritePtr());
     m_session->pendingProjectPayload = root;
+    m_session->pendingProjectDir = root[QStringLiteral("autosave_project_dir")].toString();
     m_session->currentFolder = folder;
     const QString sourceMode = layoutInfo["source_mode"].toString();
     QStringList framePaths;
@@ -240,19 +241,13 @@ void MainWindow::loadAutosavedProject() {
             MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore autosaved frame list; falling back to folder source."));
             m_session->layoutSourcePath = QDir(folder).absolutePath();
             m_session->layoutSourceIsList = false;
-            if (!m_session->frameListPath.isEmpty()) {
-                QFile::remove(m_session->frameListPath);
-                m_session->frameListPath.clear();
-            }
+            m_session->removeFrameListFile();
             updateFolderLabel(folder);
         }
     } else {
         m_session->layoutSourcePath = QDir(folder).absolutePath();
         m_session->layoutSourceIsList = false;
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
-        }
+        m_session->removeFrameListFile();
         updateFolderLabel(folder);
     }
     scheduleLayoutRebuild(true);
@@ -263,42 +258,35 @@ void MainWindow::onLoadProject() {
     wasmOpenFileDialog(false);
     return;
 #endif
-    QMessageBox picker(this);
-    picker.setWindowTitle(tr("Load"));
-    picker.setIcon(QMessageBox::Question);
-    picker.setText(tr("Load a project file or a project folder?"));
-
-    QPushButton* projectFileButton = picker.addButton(tr("Project File..."), QMessageBox::AcceptRole);
-    QPushButton* projectFolderButton = picker.addButton(tr("Project Folder..."), QMessageBox::AcceptRole);
-    picker.addButton(QMessageBox::Cancel);
-    picker.exec();
-
-    if (picker.clickedButton() == projectFileButton) {
-        const QString filter = tr("Project Files (project.spart.json *.json);;"
-                                  "ZIP Projects (*.zip);;"
-                                  "All Supported Files (*.json *.zip)");
-        const QString file = QFileDialog::getOpenFileName(this, tr("Load Project File"), "", filter);
-        if (!file.isEmpty()) {
-            loadProject(file);
-        }
+    // Save As writes a project folder, so that is what the user opens.
+    const QString folder = QFileDialog::getExistingDirectory(
+        this, tr("Open Project Folder"), m_settings.defaultProjectsFolder);
+    if (folder.isEmpty()) return;
+    const QString projectFile = QDir(folder).filePath(QStringLiteral("project.spart.json"));
+    if (!QFileInfo::exists(projectFile)) {
+        MessageDialog::warning(this, tr("Not a Project Folder"),
+            tr("\"%1\" is not a sprat-gui project folder: it has no project.spart.json.\n\n"
+               "Pick the folder you saved the project to. To use the images in this folder, "
+               "choose File > Add Source Folder instead.").arg(QDir::toNativeSeparators(folder)));
         return;
     }
+    loadProject(projectFile);
+}
 
-    if (picker.clickedButton() == projectFolderButton) {
-        const QString folder = QFileDialog::getExistingDirectory(this, tr("Select Project Folder"));
-        if (folder.isEmpty()) {
-            return;
-        }
-        const QString projectFile = QDir(folder).filePath("project.spart.json");
-        if (!QFileInfo::exists(projectFile)) {
-            MessageDialog::warning(
-                this,
-                tr("Load Failed"),
-                tr("The selected folder does not contain a project.spart.json file."));
-            return;
-        }
-        loadProject(projectFile);
-    }
+QString MainWindow::projectRootDir() const {
+    const QString projectFilePath = m_projectController ? m_projectController->projectFilePath() : QString();
+    if (projectFilePath.isEmpty()) return QString();
+    if (projectFilePath.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive) && !m_zipProjectRoot.isEmpty())
+        return m_zipProjectRoot;
+    return QFileInfo(projectFilePath).absolutePath();
+}
+
+void MainWindow::onLoadZipProject() {
+    const QString file = QFileDialog::getOpenFileName(
+        this, tr("Open ZIP Project"), m_settings.defaultProjectsFolder,
+        tr("ZIP projects (*.zip);;All Files (*)"));
+    if (!file.isEmpty())
+        loadProject(file);
 }
 
 void MainWindow::onLoadFromUrl() {
@@ -607,33 +595,45 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
     return true;
 }
 
-void MainWindow::onSaveClicked() {
+bool MainWindow::onSaveClicked() {
 #ifdef Q_OS_WASM
-    return;
+    return true; // the web build has no project folder to save to
 #else
     const QString projectFilePath = m_projectController ? m_projectController->projectFilePath() : QString();
     if (projectFilePath.isEmpty()) {
-        onSaveAsClicked();
-        return;
+        return onSaveAsClicked();
     }
-    const QString projectDir = QFileInfo(projectFilePath).absolutePath();
-    QString error;
-    if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
-        m_statusLabel->setText(tr("Save failed: ") + error);
-        MessageDialog::critical(this, tr("Save Failed"), error);
-        return;
+    const bool isZipProject = projectFilePath.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive);
+    if (isZipProject && m_zipProjectRoot.isEmpty()) {
+        // An old ZIP project that wasn't extracted: there's no folder to save into.
+        return onSaveAsClicked();
     }
+    // A ZIP project is saved into the folder it was extracted to, then packed again.
+    const QString projectDir = projectRootDir();
+    // Copy new images first, so the project file refers to their copies in the project.
     if (m_lastSaveConfig.syncSprites) {
         syncNewSpritesToProjectFolder(projectDir);
     }
-    m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
+    QString error;
+    bool saved = ProjectSaveService::writeProjectJson(
+        projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error);
+    if (saved && isZipProject)
+        saved = ArchiveExtractor::createZip(projectDir, projectFilePath, error);
+    if (!saved) {
+        m_statusLabel->setText(tr("Save failed: ") + error);
+        MessageDialog::critical(this, tr("Save Failed"), error);
+        return false;
+    }
+    m_statusLabel->setText(tr("Saved to: %1").arg(QDir::toNativeSeparators(
+        isZipProject ? projectFilePath : projectDir)));
     markProjectUnmodified(false);
     updateUiState();
+    return true;
 #endif
 }
 
 #ifndef Q_OS_WASM
-void MainWindow::onSaveAsClicked() {
+bool MainWindow::onSaveAsClicked() {
     // Start browser in the parent of the current project folder, or the last
     // used parent, so the user naturally creates sibling project folders.
     const QString projectFilePath2 = m_projectController ? m_projectController->projectFilePath() : QString();
@@ -651,7 +651,7 @@ void MainWindow::onSaveAsClicked() {
     const QString projectDir = QFileDialog::getSaveFileName(
         this, tr("Save Project As"), startDir,
         QString(), nullptr, QFileDialog::DontConfirmOverwrite);
-    if (projectDir.isEmpty()) return;
+    if (projectDir.isEmpty()) return false;
 
     // Remember the parent so next Save As opens there.
     m_settings.defaultProjectsFolder = QFileInfo(projectDir).absolutePath();
@@ -715,7 +715,7 @@ void MainWindow::onSaveAsClicked() {
         mainLayout->addLayout(contentLayout);
         mainLayout->addWidget(buttonBox);
 
-        if (dlg.exec() != QDialog::Accepted) return;
+        if (dlg.exec() != QDialog::Accepted) return false;
         m_lastSaveConfig.syncSprites = cb->isChecked();
     }
 
@@ -727,19 +727,20 @@ void MainWindow::onSaveAsClicked() {
         copySpriteToProjectFolder(projectDir);
     }
 
-    const QString folderName = QFileInfo(projectDir).fileName();
-    setWindowTitle(tr("%1 — %2[*]").arg(folderName, projectDir));
+    setWindowTitle(tr("%1 — %2[*]").arg(projectDisplayName(newProjectFilePath),
+                                        projectLocation(newProjectFilePath)));
 
     QString error;
     if (!ProjectSaveService::writeProjectJson(projectDir, buildProjectPayload(m_lastSaveConfig, m_session, true), error)) {
         m_statusLabel->setText(tr("Save failed: ") + error);
         MessageDialog::critical(this, tr("Save Failed"), error);
-        return;
+        return false;
     }
     m_statusLabel->setText(tr("Saved to: %1").arg(projectDir));
     markProjectUnmodified(false);
     addToRecentProjects(newProjectFilePath);
     updateUiState();
+    return true;
 }
 #endif
 
@@ -845,10 +846,7 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     input.sourceFolder = session->sourceFolder;
     input.sources = session->sources;
     input.orphanedSpritePaths = session->orphanedSpritePaths;
-    const QString pFilePath = m_projectController ? m_projectController->projectFilePath() : QString();
-    input.projectDir = pFilePath.isEmpty()
-        ? QString()
-        : QFileInfo(pFilePath).absolutePath();
+    input.projectDir = projectRootDir();
     input.activeFramePaths = session->activeFramePaths;
     input.layoutSourceIsList = session->layoutSourceIsList;
     input.atlases = session->atlases;
@@ -921,8 +919,14 @@ void MainWindow::autosaveProject() {
         return;
     }
 
+    // Absolute paths: the restore has no project folder to resolve relative ones against.
+    QJsonObject payload = buildProjectPayload(m_lastSaveConfig, m_session, /*portable=*/false);
+    // Source folders are only accepted inside the project folder (or the temp folder).
+    const QString projectDir = projectRootDir();
+    if (!projectDir.isEmpty())
+        payload[QStringLiteral("autosave_project_dir")] = projectDir;
     QString error;
-    if (AutosaveProjectStore::save(getAutosaveFilePath(), buildProjectPayload(m_lastSaveConfig, m_session, /*portable=*/true), error)) {
+    if (AutosaveProjectStore::save(getAutosaveFilePath(), payload, error)) {
         m_statusLabel->setText(tr("Autosaved project"));
     } else {
         m_statusLabel->setText(error);
@@ -1003,6 +1007,19 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
             MessageDialog::warning(this, tr("Load Failed"), result.error);
             return;    }
 
+    // The project is about to replace the current one; checked here rather than before
+    // loading because a ZIP is only known to be a project once it has been read.
+    if (isWindowModified()) {
+        setLoading(false); // don't keep the loading overlay up behind the question
+        if (!confirmDiscardUnsavedChanges(
+                tr("You have unsaved changes. Save them before opening \"%1\"?")
+                    .arg(QFileInfo(path).fileName()))) {
+            m_statusLabel->setText(tr("Opening project canceled"));
+            return;
+        }
+        setLoading(true);
+    }
+
     // Add to recent projects
     addToRecentProjects(path);
 
@@ -1011,12 +1028,16 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
     if (m_projectController) m_projectController->setSourceFolderIsTemp(false);
 
     QJsonObject root = result.root;
-    const int projectVersion = root["version"].toInt(1);
+    // Projects since schema 3 store "schema_version"; older ones stored "version" (2 = portable paths).
+    const int projectVersion = root.contains(QStringLiteral("schema_version"))
+        ? root["schema_version"].toInt(1)
+        : root["version"].toInt(1);
     const bool isZipProject = path.endsWith(".zip", Qt::CaseInsensitive);
 
     // For ZIP projects with embedded sprites (v2+), extract the entire archive
     // to a temp dir so sprites become accessible on disk.
     QString projectDir = QFileInfo(path).absolutePath();
+    m_zipProjectRoot.clear();
     if (isZipProject && projectVersion >= 2) {
         auto tempDir = std::make_unique<QTemporaryDir>();
         if (!tempDir->isValid()) {
@@ -1032,12 +1053,15 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
             return;
         }
         projectDir = tempPath;
+        m_zipProjectRoot = tempPath;
         const QString spritesDir = QDir(tempPath).filePath("sprites");
         if (QDir(spritesDir).exists()) {
             m_session->sourceFolder = spritesDir;
         }
         if (m_projectController) m_projectController->setSourceFolderIsTemp(true);
-        m_projectController->addTempDir(std::move(tempDir));
+        // The project's sprites live here while it is open. addTempDir() folders are deleted
+        // after each layout, which would take the sprites (and the excluded ones) with them.
+        m_projectController->setSourceFolderTempDir(std::move(tempDir));
     } else {
         // Prefer a pre-existing sprites subfolder next to the project file
         const QString spritesDir = QDir(projectDir).filePath("sprites");
@@ -1092,6 +1116,7 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
     onSpriteSelected(SpritePtr());
 
     m_session->pendingProjectPayload = root;
+    m_session->pendingProjectDir = projectDir;
     cacheLayoutOutputFromPayload(root);
 
     QJsonObject layoutOpts = root["layout_options"].toObject();
@@ -1135,19 +1160,13 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
                     MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
                     m_session->layoutSourcePath = QDir(folder).absolutePath();
                     m_session->layoutSourceIsList = false;
-                    if (!m_session->frameListPath.isEmpty()) {
-                        QFile::remove(m_session->frameListPath);
-                        m_session->frameListPath.clear();
-                    }
+                    m_session->removeFrameListFile();
                     updateFolderLabel(folder);
                 }
             } else {
                 m_session->layoutSourcePath = QDir(folder).absolutePath();
                 m_session->layoutSourceIsList = false;
-                if (!m_session->frameListPath.isEmpty()) {
-                    QFile::remove(m_session->frameListPath);
-                    m_session->frameListPath.clear();
-                }
+                m_session->removeFrameListFile();
                 updateFolderLabel(folder);
             }
             scheduleLayoutRebuild(true);
@@ -1380,10 +1399,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
             m_projectController->setProjectFilePath(QString());
         }
         if (m_projectController) m_projectController->setSourceFolderIsTemp(false);
-        if (!m_session->frameListPath.isEmpty()) {
-            QFile::remove(m_session->frameListPath);
-            m_session->frameListPath.clear();
-        }
+        m_session->removeFrameListFile();
         m_session->sourceFolder.clear();
         m_projectController->clearSourceFolderTempDir();
         ensureSourceFolder();
@@ -1483,7 +1499,10 @@ void MainWindow::applyProjectPayload() {
 
     QJsonObject root = m_session->pendingProjectPayload;
     m_session->pendingProjectPayload = QJsonObject();
-    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(root, m_session->currentFolder, m_session->activeAtlas().layoutModels);
+    const QString projectDir = m_session->pendingProjectDir;
+    m_session->pendingProjectDir.clear();
+    ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(
+        root, m_session->currentFolder, m_session->activeAtlas().layoutModels, projectDir);
 
     m_layoutZoom = applied.layoutZoom * 100.0;
     onLayoutZoomChanged(m_layoutZoom);
@@ -1553,6 +1572,7 @@ void MainWindow::applyProjectPayload() {
         }
     }
 
+    const bool cliWasReady = m_cliReady;
     if (m_cliSetup) {
         bool allFound = m_cliSetup->resolveQuietly();
         // Update local mirror from controller
@@ -1568,7 +1588,10 @@ void MainWindow::applyProjectPayload() {
                      && !storedVersion.isEmpty()
                      && storedVersion == QString(SPRAT_CLI_VERSION);
     }
-    m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI tools not ready"));
+    // Only when the CLI state changed or is broken: otherwise this would replace the
+    // layout's "Loaded N sprites" message, which can arrive before the payload is applied.
+    if (m_cliReady != cliWasReady || !m_cliReady)
+        m_statusLabel->setText(m_cliReady ? tr("CLI ready") : tr("CLI tools not ready"));
     updateUiState();
 
     // Restore atlas structure
@@ -1643,6 +1666,10 @@ void MainWindow::applyProjectPayload() {
         }
     }
     refreshAnimationTest();
+    // restoreState() above shows the docks as they were when the project was saved,
+    // which can cover the workspace the user is on now (e.g. the Sprites dock over Nine-Slice).
+    if (!applied.dockState.isEmpty() && m_currentWorkspace)
+        applyWorkspaceLayout(m_currentWorkspace);
     m_isRestoringProject = false;
 }
 
@@ -1657,6 +1684,9 @@ void MainWindow::copySpriteToProjectFolder(const QString& projectDir) {
     QStringList frames;
     if (m_session->layoutSourceIsList) {
         frames = m_session->activeFramePaths;
+        // Excluded sprites aren't in the layout, but the project keeps them so they can be
+        // included again.
+        frames += excludedSpritePaths();
     } else if (!m_session->sourceFolder.isEmpty()) {
         frames = ImageDiscoveryService::collectImagesRecursive({m_session->sourceFolder});
     }
@@ -1690,6 +1720,8 @@ void MainWindow::copySpriteToProjectFolder(const QString& projectDir) {
         }
     }
 
+    syncExcludedAtlas();
+
     // promoteSourceFolderAfterSave uses sourceFolder as base to remap activeFramePaths —
     // the same base we used above — then updates sourceFolder/currentFolder/layoutSourcePath.
     promoteSourceFolderAfterSave(projectDir);
@@ -1704,8 +1736,9 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
 
     if (m_session->layoutSourceIsList) {
         // Collect frames that live outside the project sprites folder
+        // (excluded sprites too: the project keeps them so they can be included again).
         QStringList outside;
-        for (const QString& p : m_session->activeFramePaths) {
+        for (const QString& p : m_session->activeFramePaths + excludedSpritePaths()) {
             const QString abs = QFileInfo(p).absoluteFilePath();
             if (canonicalSprites.isEmpty() || !abs.startsWith(canonicalSprites + QLatin1Char('/')))
                 outside.append(p);
@@ -1716,15 +1749,19 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
         // preserving the structure within that source's cache directory.
         const QDir dstRoot(spritesPath);
         QHash<QString, QString> remapped;
+        QSet<int> copiedSources;
         for (const QString& p : outside) {
             const QString abs = QFileInfo(p).absoluteFilePath();
             QString rel;
-            for (const ProjectSource& src : m_session->sources) {
+            int sourceIndex = -1;
+            for (int i = 0; i < m_session->sources.size(); ++i) {
+                const ProjectSource& src = m_session->sources[i];
                 if (src.cachedFolderPath.isEmpty()) continue;
                 const QString canon = QDir(src.cachedFolderPath).canonicalPath();
                 if (!canon.isEmpty() && abs.startsWith(canon + QLatin1Char('/'))) {
                     rel = src.name + QLatin1Char('/') +
                           QDir(src.cachedFolderPath).relativeFilePath(abs);
+                    sourceIndex = i;
                     break;
                 }
             }
@@ -1736,7 +1773,12 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
                 if (!QFile::copy(abs, dst)) continue;
             }
             remapped[p] = dst;
+            if (sourceIndex >= 0) copiedSources.insert(sourceIndex);
         }
+        // The copied sources now live in sprites/<name>/; excluded files are relative to it.
+        for (int i : copiedSources)
+            m_session->sources[i].cachedFolderPath = dstRoot.filePath(m_session->sources[i].name);
+        if (!copiedSources.isEmpty()) syncExcludedAtlas();
         if (remapped.isEmpty()) return;
         for (QString& p : m_session->activeFramePaths)
             if (remapped.contains(p)) p = remapped[p];
@@ -1757,32 +1799,17 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
 
 void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
 {
-    // Capture Frame Animation dock widths before potentially hiding the animation dock.
-    // m_animationDock is only visible when Frame Animation is active, so this is
-    // a reliable guard against saving state from other workspaces.
-    if (m_atlasDock && m_animationDock && m_animationDock->isVisible()) {
-        m_savedAtlasDockW = m_atlasDock->width();
-        m_savedAnimDockW  = m_animationDock->width();
-    }
-
     auto* atlasSplitter = m_atlasWorkspace ? m_atlasWorkspace->atlasSplitter() : nullptr;
-    auto* editorContent = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel() : nullptr;
     if (ws == m_atlasWorkspace) {
         // AtlasWorkspace::leave() already saved splitter H sizes; restore to Horizontal here
         if (atlasSplitter) atlasSplitter->setOrientation(Qt::Horizontal);
         if (m_atlasDock)     m_atlasDock->show();
         if (m_animationDock) m_animationDock->hide();
     } else if (ws == m_frameAnimWorkspace) {
-        // AtlasWorkspace::leave() already saved splitter H sizes; flip to Vertical now
-        if (atlasSplitter)  atlasSplitter->setOrientation(Qt::Vertical);
-        if (editorContent)  editorContent->hide();
-        if (m_atlasDock)      m_atlasDock->show();
+        // Sprites are picked in dialogs (Add Timeline, Add Frames), so the animation dock
+        // takes the whole width.
+        if (m_atlasDock)      m_atlasDock->hide();
         if (m_animationDock)  m_animationDock->show();
-        // Restore dock widths saved when leaving Frame Animation; prevents the atlas
-        // dock from staying expanded after the animation dock was hidden in Sprites.
-        if (m_savedAtlasDockW > 0 && m_savedAnimDockW > 0)
-            resizeDocks({m_atlasDock, m_animationDock},
-                        {m_savedAtlasDockW, m_savedAnimDockW}, Qt::Horizontal);
     } else if (ws == m_exportWorkspace) {
         if (m_atlasDock)     m_atlasDock->hide();
         if (m_animationDock) m_animationDock->hide();
@@ -1816,11 +1843,6 @@ void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
         if (m_animationDock) m_animationDock->hide();
         m_mainStack->setCurrentIndex(3);
         m_mainStack->show();
-    } else if (ws == m_normalMapWorkspace) {
-        if (m_atlasDock)     m_atlasDock->hide();
-        if (m_animationDock) m_animationDock->hide();
-        m_mainStack->setCurrentIndex(4);
-        m_mainStack->show();
     }
 }
 
@@ -1853,8 +1875,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
             m_mainStack->setCurrentIndex(0);
         } else if (prev == m_nineSliceWorkspace) {
             m_mainStack->setCurrentIndex(0);
-        } else if (prev == m_normalMapWorkspace) {
-            m_mainStack->setCurrentIndex(0);
         } else if (prev == m_atlasesManagementWorkspace) {
             if (m_atlasesManagementWorkspace &&
                     m_atlasesManagementWorkspace->viewMode()
@@ -1886,7 +1906,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
                         : (next == m_exportWorkspace)    ? 2
                         : (next == m_atlasesManagementWorkspace) ? 3
                         : (next == m_nineSliceWorkspace)    ? 4
-                        : (next == m_normalMapWorkspace)    ? 5
                         : 0;
         m_layoutOrchestrator->setActiveWorkspace(wsIdx);
     }
@@ -1902,8 +1921,7 @@ void MainWindow::switchWorkspace(IWorkspace* next)
         m_atlasesManagementWorkspaceAction->setChecked(next == m_atlasesManagementWorkspace);
     if (m_nineSliceWorkspaceAction)
         m_nineSliceWorkspaceAction->setChecked(next == m_nineSliceWorkspace);
-    if (m_normalMapWorkspaceAction)
-        m_normalMapWorkspaceAction->setChecked(next == m_normalMapWorkspace);
+    updateWorkspaceTabs();
 
     // Apply dock/stack layout for the incoming workspace
     applyWorkspaceLayout(next);
@@ -1924,9 +1942,6 @@ void MainWindow::switchWorkspace(IWorkspace* next)
             m_frameAnimWorkspace->clearFirstLoad();
             resizeDocks({m_atlasDock, m_animationDock}, {270, 730}, Qt::Horizontal);
         }
-    } else if (next == m_normalMapWorkspace) {
-        if (m_normalMapWorkspace && m_session)
-            m_normalMapWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
     } else if (next == m_exportWorkspace) {
         if (m_exportCoordinator)
             m_exportCoordinator->setExportWorkspaceActive(true);

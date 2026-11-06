@@ -6,6 +6,7 @@
 #include <QSize>
 #include <QStringList>
 #include "AnimationModels.h"
+#include "ProjectModels.h"
 
 class QLineEdit;
 class QLabel;
@@ -57,6 +58,7 @@ public:
     /** The widget that carries the top timeline-list area (for splitter assembly). */
     QWidget*            listAreaWidget()           const { return m_listArea; }
 
+    QComboBox*          atlasCombo()               const { return m_atlasCombo; }
     QPushButton*        addTimelineButton()        const { return m_addBtn; }
     QPushButton*        removeTimelineButton()     const { return m_removeBtn; }
 
@@ -67,10 +69,21 @@ public:
      *  selection if index < 0), then lets onTimelineSelectionChanged() fire. */
     void selectTimeline(int index);
 
+    /** Asks for sprites and adds a timeline with them, named from the name field. */
     void onTimelineAddClicked();
+    /** Asks for groups and creates a timeline for each group, in or under them, that holds
+     *  sprites, named by its path ("Mascot.zip/run"). Asks about names already taken. */
+    void autoCreateTimelinesFromGroups();
+    /** Asks for sprites and inserts them into the selected timeline at @p index. */
+    void addFramesToSelectedTimeline(int index);
+    /** Lists the atlases whose timelines can be edited; the row hides when there is only one. */
+    void updateAtlasCombo(const QVector<AtlasEntry>& atlases, int activeIndex);
     void onTimelineRemoveClicked();
     void onTimelineSelectionChanged();
     void onGenerateTimelinesFromFrames();
+    /** Creates timelines from sprite names (TimelineGenerationService), for the active atlas's
+     *  sprites in @p onlyPaths, or all of them when it is empty. Asks about name conflicts. */
+    void generateTimelines(const QStringList& onlyPaths = QStringList());
 
     bool    hasDuplicateTimelineName(const QString& name) const;
     QString getUniqueTimelineName(const QString& baseName, const QString& folderPath = QString()) const;
@@ -93,6 +106,8 @@ signals:
     void statusMessage(const QString& text);
     /** MainWindow: onSpritesDroppedToTimeline(paths, targetFolder). */
     void spritesToTimelineRequested(const QStringList& paths, const QString& targetFolder);
+    /** MainWindow: make this atlas the active one (its timelines are shown). */
+    void atlasSelected(int atlasIndex);
 
 private slots:
     void onTimelineNameChanged();
@@ -116,9 +131,20 @@ private:
     void refreshAndSelect();
     /** Shows @p mode in the loop combo without emitting a change. */
     void setLoopComboMode(AnimationLoopMode mode);
+    /** Adds a timeline named @p name with sprites picked in a dialog (it may be left empty). */
+    void addTimelineWithPickedSprites(const QString& name);
+    /** Selects the first new timeline and pushes one undo step, or shows @p status when
+     *  nothing changed. */
+    void commitGeneratedTimelines(bool changed, const QVector<AnimationTimeline>& oldState,
+                                  int oldSelection, int focusIndex, const QString& status);
+    /** Shows the sprite picker limited to the active atlas, whose sprites timelines can use. */
+    QStringList pickActiveAtlasSprites(const QString& title, const QString& acceptText,
+                                       bool allowEmpty, bool* accepted);
 
     // Timeline list section
     QWidget*            m_listArea            = nullptr;
+    QWidget*            m_atlasRow            = nullptr;
+    QComboBox*          m_atlasCombo          = nullptr;
     QLineEdit*          m_timelineCreateEdit  = nullptr;
     TimelineTreeWidget* m_timelineList        = nullptr;
     QPushButton*        m_addBtn              = nullptr;

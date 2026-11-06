@@ -11,8 +11,8 @@
 #include "AtlasesManagementWorkspace.h"
 #include "NineSliceWorkspace.h"
 #include "NineSliceEditorCanvas.h"
-#include "NormalMapWorkspace.h"
 #include "UndoCommands.h"
+#include "PathSafety.h"
 #include "MainWindowUiState.h"
 #include "ResolutionsConfig.h"
 #include "ResolutionUtils.h"
@@ -47,6 +47,8 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QTabBar>
+#include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QFileDialog>
@@ -69,17 +71,6 @@ void MainWindow::setupUi() {
     resize(1400, 860);
     setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
     setupToolbar();
-
-    // Add a 10px gap between the menu bar and the dock widgets
-    QToolBar* topSpacer = new QToolBar(this);
-    topSpacer->setObjectName("topSpacer");
-    topSpacer->setFixedHeight(10);
-    topSpacer->setMovable(false);
-    topSpacer->setFloatable(false);
-    topSpacer->setAllowedAreas(Qt::TopToolBarArea);
-    topSpacer->setStyleSheet("background: transparent; border: none;");
-    topSpacer->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    addToolBar(Qt::TopToolBarArea, topSpacer);
 
     // Prepare fonts for dock titles
     QFont boldFont = this->font();
@@ -222,7 +213,7 @@ void MainWindow::setupUi() {
                 if (!m_session || index < 0 || index >= m_session->atlases.size()) return;
                 m_session->atlases[index].name = newName;
                 m_session->atlases[index].outputSubdir =
-                    newName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                    PathSafety::folderNameFromLabel(newName);
                 emit m_session->atlasesChanged();
                 m_atlasesManagementWorkspace->setAtlases(
                     m_session->atlases, m_session->activeAtlasIndex);
@@ -273,7 +264,7 @@ void MainWindow::setupUi() {
                 AtlasEntry newAtlas;
                 newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 newAtlas.name         = groupName;
-                newAtlas.outputSubdir = groupName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                newAtlas.outputSubdir = PathSafety::folderNameFromLabel(groupName);
                 m_session->atlases.append(newAtlas);
                 moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
                 emit m_session->atlasesChanged();
@@ -288,7 +279,7 @@ void MainWindow::setupUi() {
                     AtlasEntry newAtlas;
                     newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
                     newAtlas.name         = groupName;
-                    newAtlas.outputSubdir = groupName.toLower().replace(QLatin1Char(' '), QLatin1Char('_'));
+                    newAtlas.outputSubdir = PathSafety::folderNameFromLabel(groupName);
                     m_session->atlases.append(newAtlas);
                     moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
                 }
@@ -433,18 +424,6 @@ void MainWindow::setupUi() {
     connect(m_nineSliceWorkspace, &NineSliceWorkspace::definitionsChanged,
             this, &MainWindow::markWorkspaceEdited);
 
-    // Page 5: Normal Map Workspace
-    m_normalMapWorkspace = new NormalMapWorkspace(m_session, this);
-    m_mainStack->addWidget(m_normalMapWorkspace);  // page 4
-    connect(m_normalMapWorkspace, &NormalMapWorkspace::atlasIndexChanged,
-            this, [this](int atlasIdx) {
-                if (!m_session) return;
-                if (atlasIdx >= 0 && atlasIdx < m_session->atlases.size())
-                    m_session->activeAtlasIndex = atlasIdx;
-            });
-    connect(m_normalMapWorkspace, &NormalMapWorkspace::definitionsChanged,
-            this, &MainWindow::markWorkspaceEdited);
-
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
 
@@ -484,18 +463,7 @@ void MainWindow::setupUi() {
     connect(m_atlasWorkspace->addProfilesBtn(), &QPushButton::clicked,
             this, &MainWindow::onManageProfiles);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::atlasIndexChanged,
-            this, [this](int atlasIndex) {
-        if (!m_session) return;
-        if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
-            m_session->activeAtlasIndex = atlasIndex;
-            refreshSpriteTree();
-            refreshTimelineList();
-            refreshAnimationTest();
-            scheduleLayoutRebuild(true);
-        } else {
-            refreshSpriteTree();
-        }
-    });
+            this, &MainWindow::selectActiveAtlas);
     connect(m_atlasWorkspace, &AtlasWorkspace::showHiddenToggled,
             this, [this](bool) { refreshSpriteTree(); });
     connect(m_atlasWorkspace, &AtlasWorkspace::deleteFramesRequested,
@@ -559,6 +527,10 @@ void MainWindow::setupUi() {
         [this](const QString& text) { if (m_statusLabel) m_statusLabel->setText(text); });
     connect(timelineEditorPanel, &TimelineEditorPanel::spritesToTimelineRequested,
         this, &MainWindow::onSpritesDroppedToTimeline);
+    connect(timelineEditorPanel, &TimelineEditorPanel::atlasSelected, this, [this](int atlasIndex) {
+        selectActiveAtlas(atlasIndex);
+        updateNavigatorAtlasCombo();  // the Sprites workspace shows the same atlas
+    });
 
     // The panel widget itself is never placed in any layout — its sub-widgets are
     // distributed directly into the animation dock. Hide it so it doesn't sit as
@@ -719,9 +691,9 @@ void MainWindow::setupUi() {
     m_atlasDock->setTitleBarWidget(new QWidget(this));
     m_atlasDock->setWidget(m_atlasWorkspace);
 
-    // Animation dock (right column in Frame Animation workspace):
-    //   Top  = timeline list
-    //   Bottom = selected-timeline editor  +  animation preview
+    // Animation dock (the Frame Animation workspace):
+    //   Left  = timeline list
+    //   Right = selected-timeline editor  +  animation preview
     m_animationDock = new QDockWidget(tr("Animation"), this);
     m_animationDock->setObjectName("animationDock");
     m_animationDock->setFont(boldFont);
@@ -735,11 +707,13 @@ void MainWindow::setupUi() {
         animBottomLayout->addWidget(m_frameAnimWorkspace->timelinePanel()->timelineEditorContainer());
         animBottomLayout->addWidget(m_frameAnimWorkspace->animPanel(), 1);
 
-        auto* animSplitter = new QSplitter(Qt::Vertical, m_animationDock);
+        // Timelines on the left, the selected timeline and its preview on the right.
+        auto* animSplitter = new QSplitter(Qt::Horizontal, m_animationDock);
         animSplitter->addWidget(m_frameAnimWorkspace->timelinePanel()->listAreaWidget());
         animSplitter->addWidget(animBottomPanel);
-        animSplitter->setStretchFactor(0, 2);
-        animSplitter->setStretchFactor(1, 3);
+        animSplitter->setStretchFactor(0, 1);
+        animSplitter->setStretchFactor(1, 2);
+        animSplitter->setSizes({360, 720});
         m_animationDock->setWidget(animSplitter);
     }
 
@@ -759,58 +733,46 @@ void MainWindow::setupUi() {
     addDockWidget(Qt::BottomDockWidgetArea, m_debugDock);
     resizeDocks({m_atlasDock}, {500}, Qt::Vertical);
 
-    // View menu
-    m_viewMenu = menuBar()->addMenu(tr("&Workspace"));
-
+    // Workspace actions: the tabs trigger them, and they're added to the window so their
+    // shortcuts work without a menu.
     auto* workspaceGroup = new QActionGroup(this);
     workspaceGroup->setExclusive(true);
+    auto addWorkspaceAction = [this, workspaceGroup](const QIcon& icon, const QString& text,
+                                                     const QKeySequence& shortcut) {
+        auto* action = new QAction(icon, text, this);
+        action->setShortcut(shortcut);
+        action->setCheckable(true);
+        workspaceGroup->addAction(action);
+        addAction(action);
+        return action;
+    };
 
-    m_exportationWorkspaceAction = m_viewMenu->addAction(
-        QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"));
-    m_exportationWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_E));
-    m_exportationWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_exportationWorkspaceAction);
+    // Not Alt+E: that is the Edit menu's mnemonic, and the clash disables both.
+    m_exportationWorkspaceAction = addWorkspaceAction(
+        QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"),
+        QKeySequence(Qt::ALT | Qt::Key_X));
     connect(m_exportationWorkspaceAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
-    m_viewMenu->addSeparator();
-
-    m_atlasesManagementWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/layout.svg"), tr("Atlases"));
-    m_atlasesManagementWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_A));
-    m_atlasesManagementWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_atlasesManagementWorkspaceAction);
+    m_atlasesManagementWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/layout.svg"), tr("Atlases"), QKeySequence(Qt::ALT | Qt::Key_A));
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
-    m_atlasWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/scan.svg"), tr("Sprites"));
-    m_atlasWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_S));
-    m_atlasWorkspaceAction->setCheckable(true);
+    m_atlasWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/scan.svg"), tr("Sprites"), QKeySequence(Qt::ALT | Qt::Key_S));
     m_atlasWorkspaceAction->setChecked(true);
-    workspaceGroup->addAction(m_atlasWorkspaceAction);
     connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
-    m_viewMenu->addSeparator();
-
-    m_nineSliceWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/nine-slice.svg"), tr("Nine-Slice"));
-    m_nineSliceWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_N));
-    m_nineSliceWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_nineSliceWorkspaceAction);
+    m_nineSliceWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/nine-slice.svg"), tr("Nine-Slice"), QKeySequence(Qt::ALT | Qt::Key_N));
     connect(m_nineSliceWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_nineSliceWorkspace); });
 
-    m_normalMapWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/normal-map.svg"), tr("Normal Map"));
-    m_normalMapWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_M));
-    m_normalMapWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_normalMapWorkspaceAction);
-    connect(m_normalMapWorkspaceAction, &QAction::triggered,
-            this, [this]() { switchWorkspace(m_normalMapWorkspace); });
-
-    m_frameAnimWorkspaceAction = m_viewMenu->addAction(QIcon(":/icons/film.svg"), tr("Frame Animation"));
-    m_frameAnimWorkspaceAction->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F));
-    m_frameAnimWorkspaceAction->setCheckable(true);
-    workspaceGroup->addAction(m_frameAnimWorkspaceAction);
+    m_frameAnimWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/film.svg"), tr("Frame Animation"), QKeySequence(Qt::ALT | Qt::Key_F));
     connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_frameAnimWorkspace); });
 
-    m_viewMenu->addSeparator();
+    setupWorkspaceTabs();
 
     auto* debugShortcut = new QAction(this);
     debugShortcut->setShortcut(QKeySequence(Qt::Key_F12));
@@ -877,10 +839,16 @@ void MainWindow::setupToolbar() {
     fileMenu->addSeparator();
 
     m_loadProjectAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Load..."));
-    m_loadProjectAction->setToolTip(
-        tr("Load a project.spart.json file or a project folder containing that file"));
+        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Project..."));
+    m_loadProjectAction->setShortcut(QKeySequence::Open);  // Ctrl+O
+    m_loadProjectAction->setToolTip(tr("Open a project folder, the folder you saved the project to"));
     connect(m_loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
+
+#ifndef Q_OS_WASM
+    m_loadZipProjectAction = fileMenu->addAction(tr("Open ZIP Project..."));
+    m_loadZipProjectAction->setToolTip(tr("Open a project packed in a ZIP file"));
+    connect(m_loadZipProjectAction, &QAction::triggered, this, &MainWindow::onLoadZipProject);
+#endif
 
     m_loadAction = fileMenu->addAction(
         QIcon(":/icons/directory.svg"), tr("Add Source Folder..."));
@@ -917,6 +885,7 @@ void MainWindow::setupToolbar() {
 
     m_exportAction = fileMenu->addAction(
         style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export"));
+    m_exportAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
     m_exportAction->setEnabled(false);
     m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
     connect(m_exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
@@ -1024,8 +993,30 @@ void MainWindow::setupStatusBarUi() {
 }
 
 void MainWindow::setupZoomShortcuts() {
-    auto performZoom = [this](bool zoomIn) {
+    // The view to zoom: the focused canvas, or else the current workspace's main view,
+    // so the shortcuts still work after clicking a button or a side panel.
+    auto zoomFocus = [this]() -> QWidget* {
         QWidget* fw = QApplication::focusWidget();
+        auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
+        auto* previewView = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
+        auto* animPanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->animPanel() : nullptr;
+        auto* animCanvas = animPanel ? animPanel->animCanvas() : nullptr;
+        for (QWidget* view : {static_cast<QWidget*>(canvas), static_cast<QWidget*>(previewView),
+                              static_cast<QWidget*>(animCanvas)}) {
+            if (fw && view && (fw == view || view->isAncestorOf(fw)))
+                return fw;
+        }
+        if (m_exportWorkspace && m_currentWorkspace == m_exportWorkspace)
+            return (fw && m_exportWorkspace->isAncestorOf(fw)) ? fw : m_exportWorkspace;
+        if (m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace)
+            return (fw && m_nineSliceWorkspace->isAncestorOf(fw)) ? fw : m_nineSliceWorkspace;
+        if (m_currentWorkspace == m_frameAnimWorkspace)
+            return animCanvas;
+        return canvas;
+    };
+
+    auto performZoom = [this, zoomFocus](bool zoomIn) {
+        QWidget* fw = zoomFocus();
         if (!fw) {
             return;
         }
@@ -1070,8 +1061,8 @@ void MainWindow::setupZoomShortcuts() {
     connect(zoomOut, &QShortcut::activated, this, [performZoom]() { performZoom(false); });
 
     // Helper lambda to apply 100% or fit to the focused canvas
-    auto applyZoomPreset = [this](bool fitToContent) {
-        QWidget* fw = QApplication::focusWidget();
+    auto applyZoomPreset = [this, zoomFocus](bool fitToContent) {
+        QWidget* fw = zoomFocus();
         if (!fw) return;
         auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
         auto* previewView = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr;
@@ -1120,6 +1111,62 @@ void MainWindow::setupKeyboardShortcuts() {
     connect(pasteShortcut, &QShortcut::activated, this, &MainWindow::onPasteImport);
 }
 
+void MainWindow::setupWorkspaceTabs() {
+    // A toolbar, not the central widget: the atlas and animation docks sit in the top dock
+    // area, above the central widget, and the tabs must sit above them.
+    m_workspaceToolBar = new QToolBar(tr("Workspaces"), this);
+    m_workspaceToolBar->setObjectName("workspaceToolBar");
+    m_workspaceToolBar->setMovable(false);
+    m_workspaceToolBar->setFloatable(false);
+    m_workspaceToolBar->setAllowedAreas(Qt::TopToolBarArea);
+    m_workspaceToolBar->toggleViewAction()->setVisible(false);
+    addToolBar(Qt::TopToolBarArea, m_workspaceToolBar);
+
+    m_workspaceTabBar = new QTabBar(m_workspaceToolBar);
+    m_workspaceTabBar->setObjectName("workspaceTabBar");
+    m_workspaceTabBar->setDocumentMode(true);
+    m_workspaceTabBar->setDrawBase(false);
+    m_workspaceTabBar->setExpanding(false);
+    m_workspaceTabBar->setFocusPolicy(Qt::NoFocus);
+    m_workspaceToolBar->addWidget(m_workspaceTabBar);
+
+    // The order the work flows in: sort sources into atlases, edit sprites, use them, export.
+    m_workspaceTabs = {
+        {m_atlasesManagementWorkspace, m_atlasesManagementWorkspaceAction},
+        {m_atlasWorkspace, m_atlasWorkspaceAction},
+        {m_nineSliceWorkspace, m_nineSliceWorkspaceAction},
+        {m_frameAnimWorkspace, m_frameAnimWorkspaceAction},
+        {m_exportWorkspace, m_exportationWorkspaceAction},
+    };
+    for (const auto& [workspace, action] : m_workspaceTabs) {
+        const int index = m_workspaceTabBar->addTab(action->icon(), action->text());
+        const QString keys = action->shortcut().toString(QKeySequence::NativeText);
+        m_workspaceTabBar->setTabToolTip(index, keys.isEmpty() ? action->text()
+                                                               : tr("%1 (%2)").arg(action->text(), keys));
+    }
+
+    connect(m_workspaceTabBar, &QTabBar::currentChanged, this, [this](int index) {
+        if (index < 0 || index >= m_workspaceTabs.size()) return;
+        if (m_workspaceTabs[index].first != m_currentWorkspace)
+            m_workspaceTabs[index].second->trigger();
+        // Back to the current workspace's tab if the action didn't switch to this one.
+        updateWorkspaceTabs();
+    });
+}
+
+void MainWindow::updateWorkspaceTabs() {
+    if (!m_workspaceTabBar) return;
+    const QSignalBlocker blocker(m_workspaceTabBar);
+    for (int i = 0; i < m_workspaceTabs.size(); ++i) {
+        const auto& [workspace, action] = m_workspaceTabs[i];
+        m_workspaceTabBar->setTabEnabled(i, action->isEnabled());
+        if (workspace == m_currentWorkspace)
+            m_workspaceTabBar->setCurrentIndex(i);
+    }
+    // The welcome page has no workspace to switch between.
+    m_workspaceToolBar->setVisible(m_atlasWorkspaceAction->isEnabled() || m_currentWorkspace != m_atlasWorkspace);
+}
+
 void MainWindow::updateUiState() {
     const bool enabled = m_cliReady && !m_isLoading;
     const bool hasModels = m_session && !m_session->activeAtlas().layoutModels.isEmpty() && !m_session->activeAtlas().layoutModels.first().sprites.isEmpty();
@@ -1139,6 +1186,9 @@ void MainWindow::updateUiState() {
     if (m_loadProjectAction) {
         m_loadProjectAction->setEnabled(!m_isLoading);
     }
+    if (m_loadZipProjectAction) {
+        m_loadZipProjectAction->setEnabled(!m_isLoading);
+    }
     if (m_addSourceFileAction) {
         m_addSourceFileAction->setEnabled(sourceActionsEnabled);
     }
@@ -1157,32 +1207,30 @@ void MainWindow::updateUiState() {
         m_atlasWorkspace->sourceResolutionCombo()->setEnabled(enabled);
     }
 
-    // View menu items: enabled once a project is open or sprites are loaded
+    // Workspace actions: enabled once a project is open or sprites are loaded
     const bool hasProject = m_projectController && !m_projectController->projectFilePath().isEmpty();
     const bool viewEnabled = hasProject || hasModels;
     if (m_atlasWorkspaceAction)         m_atlasWorkspaceAction->setEnabled(viewEnabled);
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
     if (m_nineSliceWorkspaceAction)     m_nineSliceWorkspaceAction->setEnabled(viewEnabled);
-    if (m_normalMapWorkspaceAction)     m_normalMapWorkspaceAction->setEnabled(viewEnabled);
+    updateWorkspaceTabs();
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
     if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace
-            || m_currentWorkspace == m_nineSliceWorkspace
-            || m_currentWorkspace == m_normalMapWorkspace) return;
+            || m_currentWorkspace == m_nineSliceWorkspace) return;
 
+    const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
     if (hasModels) {
         m_mainStack->hide();
-        if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
+        if (m_atlasDock) m_atlasDock->setVisible(!wantsAnim);
         if (m_animationDock) m_animationDock->setVisible(wantsAnim);
         if (m_atlasWorkspace && m_atlasWorkspace->atlasViewStack() && m_atlasWorkspace->atlasViewStack()->currentIndex() == 2)
             m_atlasWorkspace->atlasViewStack()->setCurrentIndex(1); // Navigation
     } else if (hasProject) {
         m_mainStack->hide();
-        if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
+        if (m_atlasDock) m_atlasDock->setVisible(!wantsAnim);
         if (m_animationDock) m_animationDock->setVisible(wantsAnim);
         if (m_atlasWorkspace && m_atlasWorkspace->atlasViewStack()) m_atlasWorkspace->atlasViewStack()->setCurrentIndex(2); // Empty-state placeholder
     } else {
@@ -1202,8 +1250,7 @@ void MainWindow::updateMainContentView() {
     const bool hasProject = !projectFilePathUi.isEmpty();
 
     if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace
-            && m_currentWorkspace != m_nineSliceWorkspace
-            && m_currentWorkspace != m_normalMapWorkspace) {
+            && m_currentWorkspace != m_nineSliceWorkspace) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1212,11 +1259,13 @@ void MainWindow::updateMainContentView() {
         }
     }
     if (hasLayout) {
-        QString projectName = QFileInfo(projectFilePathUi).dir().dirName();
-        if (projectName.isEmpty() || projectName == ".") {
-            projectName = tr("Untitled Project");
+        if (hasProject) {
+            setWindowTitle(tr("%1 — %2[*]").arg(projectDisplayName(projectFilePathUi),
+                                                projectLocation(projectFilePathUi)));
+        } else {
+            setWindowTitle(tr("%1 — %2[*]").arg(tr("Untitled Project"),
+                                                QDir::toNativeSeparators(m_session->currentFolder)));
         }
-        setWindowTitle(tr("%1 — %2[*]").arg(projectName).arg(m_session->currentFolder));
     }
     // hasProject && !hasLayout: title was set when the project was created/opened; leave it.
 }
@@ -1229,10 +1278,24 @@ void MainWindow::updateRecentProjectsMenu() {
         return;
     }
     for (const QString& path : m_recentProjects) {
-        QAction* action = m_recentProjectsMenu->addAction(QFileInfo(path).fileName());
-        action->setToolTip(path);
+        QAction* action = m_recentProjectsMenu->addAction(projectDisplayName(path));
+        action->setToolTip(projectLocation(path));
         connect(action, &QAction::triggered, this, [this, path]() { loadProject(path); });
     }
+}
+
+QString MainWindow::projectDisplayName(const QString& projectFilePath) {
+    const QFileInfo info(projectFilePath);
+    if (info.suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) == 0)
+        return info.completeBaseName();
+    return info.dir().dirName();
+}
+
+QString MainWindow::projectLocation(const QString& projectFilePath) {
+    const QFileInfo info(projectFilePath);
+    if (info.suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) == 0)
+        return QDir::toNativeSeparators(info.absoluteFilePath());
+    return QDir::toNativeSeparators(info.absolutePath());
 }
 
 void MainWindow::addToRecentProjects(const QString& path) {
@@ -1286,21 +1349,8 @@ void MainWindow::refreshSpriteTree() {
         navigatorPanel->refresh(m_session, m_atlasWorkspace->showHiddenItems(), atlasFilter);
 
         // Also refresh the NineSlice workspace navigator so it stays in sync
-        if (m_nineSliceWorkspace) {
-            auto* nineSliceNav = m_nineSliceWorkspace->navigatorPanel();
-            if (nineSliceNav)
-                nineSliceNav->refresh(m_session, false);
-        }
-        // Refresh companion-map workspace navigators
-        if (m_normalMapWorkspace) {
-            auto* nav = m_normalMapWorkspace->navigatorPanel();
-            if (nav) {
-                int nmAtlasFilter = -1;
-                if (auto* nmCombo = nav->atlasCombo())
-                    nmAtlasFilter = nmCombo->currentData().toInt();
-                nav->refresh(m_session, false, nmAtlasFilter);
-            }
-        }
+        if (m_nineSliceWorkspace)
+            m_nineSliceWorkspace->refreshSprites();
         return;
     }
 
@@ -1737,26 +1787,22 @@ void MainWindow::updateNavigatorAtlasCombo() {
     auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
     if (navigatorPanel)
         navigatorPanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
-    if (m_normalMapWorkspace)
-        m_normalMapWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
-    if (navigatorPanel)
-        return;
-    // Fallback: direct combo manipulation (kept for safety)
-    auto* navigatorAtlasCombo = navigatorPanel ? navigatorPanel->atlasCombo() : nullptr;
-    if (!navigatorAtlasCombo) return;
-    navigatorAtlasCombo->blockSignals(true);
-    navigatorAtlasCombo->clear();
-    int selectComboIdx = 0;
-    for (int i = 0; i < m_session->atlases.size(); ++i) {
-        const auto& atlas = m_session->atlases[i];
-        if (atlas.isExcluded) continue;
-        if (atlas.spritePaths.isEmpty()) continue;  // Hide empty atlases
-        if (i == m_session->activeAtlasIndex)
-            selectComboIdx = navigatorAtlasCombo->count();
-        navigatorAtlasCombo->addItem(atlas.name, i);  // Store real atlas index as item data
+    auto* timelinePanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+    if (timelinePanel)
+        timelinePanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+}
+
+void MainWindow::selectActiveAtlas(int atlasIndex) {
+    if (!m_session) return;
+    if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
+        m_session->activeAtlasIndex = atlasIndex;
+        refreshSpriteTree();
+        refreshTimelineList();
+        refreshAnimationTest();
+        scheduleLayoutRebuild(true);
+    } else {
+        refreshSpriteTree();
     }
-    navigatorAtlasCombo->setCurrentIndex(selectComboIdx);
-    navigatorAtlasCombo->blockSignals(false);
 }
 
 // ---------------------------------------------------------------------------

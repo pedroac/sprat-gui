@@ -12,7 +12,7 @@ Use this app if you need to:
 4. Create animation timelines quickly from frame naming patterns.
 5. Preview and export animations (GIF/video) without manual scripting.
 6. Define nine-slice regions for scalable UI elements (buttons, panels).
-7. Save/load complete project state (`.json` or `.zip`).
+7. Save complete project state to a project folder, and open it again (also from a `.zip`).
 
 If your workflow is already fully automated by scripts and CI, this may be unnecessary. If you need fast visual iteration for game/UI assets, this is likely useful.
 
@@ -123,9 +123,12 @@ All Qt runtime DLLs and CLI tools are included in the ZIP — the application is
 
 1. Download `sprat-gui-macos.dmg`.
 2. Open the `.dmg` file and drag `sprat-gui.app` to your **Applications** folder.
-3. On first launch, macOS Gatekeeper will block the app because it is not notarized. To open it anyway:
-   - Right-click (or Control-click) `sprat-gui.app` in Finder and choose **Open**.
-   - Click **Open** in the dialog that appears.
+3. On first launch, macOS will say that Apple could not verify `sprat-gui` is free of malware, because the app is not notarized. To open it anyway:
+   - Click **Done** in that dialog.
+   - Open **System Settings → Privacy & Security**, scroll down to the message about `sprat-gui`, and click **Open Anyway**.
+   - Confirm with your password, then click **Open Anyway** once more.
+
+   macOS remembers this, so you only do it once per downloaded version. Alternatively, remove the download quarantine in Terminal: `xattr -dr com.apple.quarantine /Applications/sprat-gui.app`. On macOS 14 or older, you can also Control-click the app in Finder and choose **Open**.
 
 The CLI tools are bundled inside the `.app` bundle and require no separate installation.
 
@@ -140,7 +143,7 @@ sh build.sh
 ```
 
 `build.sh` behavior:
-- Updates `DEPENDENCIES` to the newest published `sprat-cli` release tag if network access is available.
+- Updates `DEPENDENCIES` to the `../sprat-cli` checkout's version if that version is a published tag, otherwise to the newest published `sprat-cli` release tag, if network access is available. An untagged local version is never pinned, since CI clones the pinned tag.
 - Configures with `cmake -B build -S .`.
 - Builds with `cmake --build build`.
 - Runs tests with `ctest --test-dir build --output-on-failure`.
@@ -168,7 +171,7 @@ Manual build (does not modify `DEPENDENCIES`):
 
 ```bash
 cmake -S . -B build -DSPRAT_EMBEDDED_CLI=ON
-cmake --build build --parallel
+cmake --build build --parallel 4
 ctest --test-dir build --output-on-failure
 ```
 
@@ -187,13 +190,13 @@ Run:
 5. Select sprites to edit pivots/markers.
 6. Create timelines manually or generate from frame names.
 7. Test animation in the Animation panel.
-8. Save project (`.json` or `.zip`) or export animation; output format (PNG vs. DDS) depends on active profile compression settings.
+8. Save the project folder or export animation; output format (PNG vs. DDS) depends on active profile compression settings.
 
 For a guided introduction, open **Help → Quick Start** inside the app. For a full list of keyboard shortcuts, open **Help → Hotkeys**.
 
 ## Workspaces
 
-The application is organized into dedicated workspaces, each focusing on a specific part of the asset creation pipeline. You can switch between them using the **Workspace** menu or keyboard shortcuts.
+The application is organized into dedicated workspaces, each focusing on a specific part of the asset creation pipeline. You can switch between them using the tabs at the top of the window or keyboard shortcuts.
 
 ### **Sprites Workspace** (`Alt+S`)
 The default workspace for importing assets, managing the sprite tree, and editing individual frame metadata (pivots and markers). Use this for the initial setup and fine-tuning of your sprites.
@@ -237,10 +240,11 @@ Advanced management for projects with multiple texture atlases. Drag and drop sp
 ### **Nine-Slice Workspace** (`Alt+N`)
 An interactive editor for defining nine-slice (nine-patch) configurations on individual sprites. Useful for scalable UI elements such as buttons and panels that must stretch without distorting corners.
 
-- **Left panel**: sprite navigator with a **Nine-sliced only** filter button to show only marked sprites. Nine-sliced sprites display a badge icon in the tree. Right-click a sprite for quick **Mark as Nine-Sliced** / **Remove Nine-Slice** actions.
+- **Left panel**: the nine-sliced sprites, with a text filter, and **Add** / **Remove** buttons under them.
+  - **Add** opens a sprite picker listing the other sprites, with a preview. Tick one or more sprites, or a whole folder (Shift+click ticks a range), and click **Add**. New sprites start with slice lines at image thirds.
+  - **Remove** (or `Delete`) stops nine-slicing the selected sprites. Their insets are kept, so adding a sprite again restores them.
 - **Right panel**:
-  - **Nine-Sliced toggle** — enable or disable nine-slicing for the selected sprite.
-  - **Insets** — L / T / R / B spinboxes (px) to set left, top, right, and bottom slice lines. When a sprite is first marked, the lines are initialised to image thirds automatically.
+  - **Insets** — L / T / R / B spinboxes (px) to set left, top, right, and bottom slice lines.
   - **Fill modes** — separate horizontal (H) and vertical (V) combos: *stretch*, *repeat*, or *mirror*.
   - **Zoom** — 10–1600 % zoom for the editor canvas.
   - **Target size** — W / H spinboxes (1–4096 px) to preview the nine-slice result at a given render size. Drag the right/bottom/corner handles on the canvas to resize interactively.
@@ -253,13 +257,16 @@ Nine-slice definitions are saved in the project file and included in atlas metad
 ![Nine-Slice workspace](README_assets/9-slices.png)
 
 ### **Frame Animation Workspace** (`Alt+F`)
-Focuses on timeline authoring and animation preview. It provides a dedicated animation panel and test area while keeping the sprite tree accessible for building sequences.
+Focuses on timeline authoring and animation preview: the timeline list on the left, the selected timeline and its preview on the right. Sprites are picked in dialogs, so the workspace doesn't need the sprite tree.
 
 - **Animation authoring**
-  - Timelines panel lists all animations with detailed info: `<name> | <frames count> frames | <fps> fps`.
+  - Timelines panel lists all animations with detailed info: `<name> | <frames count> frames | <fps> fps`. With several atlases, **Atlas** picks whose timelines are listed; a timeline's frames come from its atlas.
+  - **Add timeline** (the button next to the name field) opens a sprite picker: tick the sprites, or a whole group, and press **Create**. Create with nothing ticked makes an empty timeline.
+  - Right-click the timeline list and choose **Auto-create Timelines...** to pick one or more groups (Ctrl/Shift+click; a source counts as a group). Each group that holds sprites, the picked ones or any inside them, becomes a timeline named after it, in folders named after the source and the groups above it. Picking `Mascot.zip`, which holds groups `run` and `idle`, gives timelines `run` and `idle` in a `Mascot.zip` folder.
+  - Right-click a frame and choose **Add Frames Before...** or **Add Frames After...** to insert sprites there; right-click empty space in the frames for **Add Frames...** at the end. Picked sprites are added in number order (`walk2` before `walk10`).
   - The **Selected Timeline** group provides controls to rename, adjust FPS, and manage the frame sequence ("tape").
   - **Play** sets how the animation plays, in the preview and in exported metadata: **Loop** (repeat), **Once** (stop on the last frame), **Ping-pong** (forward then backward, repeated) or **Ping-pong once** (forward then backward, then stop on the first frame). An alias plays the way its source does. Engines with their own ping-pong (Phaser, Aseprite) get it as a setting; Godot and Unity get the way back as extra frames.
-  - Drag frames from the layout into the timeline; reorder via drag-and-drop or context actions; duplicate/remove frames with toolbar buttons.
+  - Reorder frames by dragging them or with the context menu; duplicate or remove them from the context menu.
 
 - **Animation test area**
   - Play/pause/step controls plus timeline FPS and zoom controls.
@@ -268,7 +275,7 @@ Focuses on timeline authoring and animation preview. It provides a dedicated ani
 
 ![Frame Animation workspace](README_assets/frame_animation_workspace.png)
 
-### **Exportation Workspace** (`Alt+E`)
+### **Exportation Workspace** (`Alt+X`)
 A full-screen preview and configuration area for final output. Preview exactly how your atlases will be packed and choose your metadata format before exporting to disk.
 
 - Click **Exportation** (toolbar) to open the export workspace, or use **Export** for a quick re-export to the last used output folder.
@@ -328,8 +335,8 @@ A full-screen preview and configuration area for final output. Preview exactly h
   - If individual files are missing inside an existing source, the app offers to restore them from the project cache or locate a replacement folder.
 
 - **Project save/load**
-  - Save projects as `.json` or `.zip` and pick exactly which data blocks to persist.
-  - Use load actions to resume layout, timelines, and editor context from a saved project.
+  - **Save As** creates a project folder holding `project.spart.json` and, if you choose, a copy of the source images in `sprites/`.
+  - **File > Open Project** (Ctrl+O) opens that folder and resumes layout, timelines, and editor context. **File > Open ZIP Project** opens a project packed in a ZIP. You can also drop a project folder or ZIP on the window.
   - **Autosave**: The application automatically saves a recovery snapshot of your project every 5 minutes. If the app is closed unexpectedly, it will offer to restore the autosaved state upon the next launch.
 ## Keyboard and pointer controls
 

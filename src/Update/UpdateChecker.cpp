@@ -3,6 +3,7 @@
 #include "UpdateChecker.h"
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QJsonObject>
 #include <QVersionNumber>
 
@@ -71,33 +72,16 @@ void UpdateChecker::onReplyFinished(QNetworkReply* reply) {
         return;
     }
 
-    // Pick the asset matching the current platform
-    QString platformSuffix;
-#if defined(Q_OS_LINUX)
-    platformSuffix = QLatin1String("sprat-gui-linux.tar.gz");
-#elif defined(Q_OS_WIN)
-    platformSuffix = QLatin1String("sprat-gui-windows.zip");
-#elif defined(Q_OS_MACOS)
-    platformSuffix = QLatin1String("sprat-gui-macos.zip");
-#endif
-
-    if (platformSuffix.isEmpty()) {
+    const QString assetName = platformAssetName();
+    if (assetName.isEmpty()) {
         emit noUpdateAvailable();
         return;
     }
 
     QString downloadUrl;
-    const QJsonArray assets = obj[QLatin1String("assets")].toArray();
-    for (const QJsonValue& val : assets) {
-        const QJsonObject asset = val.toObject();
-        if (asset[QLatin1String("name")].toString() == platformSuffix) {
-            downloadUrl = asset[QLatin1String("browser_download_url")].toString();
-            break;
-        }
-    }
-
-    if (downloadUrl.isEmpty()) {
-        emit noUpdateAvailable();
+    QString sha256;
+    if (!findAsset(obj[QLatin1String("assets")].toArray(), assetName, downloadUrl, sha256)) {
+        emit checkFailed(QStringLiteral("Release %1 has no %2 with a SHA-256 digest").arg(tagName, assetName));
         return;
     }
 
@@ -105,7 +89,40 @@ void UpdateChecker::onReplyFinished(QNetworkReply* reply) {
     info.version = tagName;
     info.releaseNotes = obj[QLatin1String("body")].toString();
     info.downloadUrl = downloadUrl;
+    info.sha256 = sha256;
     emit updateAvailable(info);
+}
+
+QString UpdateChecker::platformAssetName() {
+#if defined(Q_OS_LINUX)
+    if (qEnvironmentVariableIsSet("APPIMAGE"))
+        return QStringLiteral("sprat-gui-linux.AppImage");
+    return QStringLiteral("sprat-gui-linux.tar.gz");
+#elif defined(Q_OS_WIN)
+    return QStringLiteral("sprat-gui-windows.zip");
+#elif defined(Q_OS_MACOS)
+    return QStringLiteral("sprat-gui-macos.zip");
+#else
+    return {};
+#endif
+}
+
+bool UpdateChecker::findAsset(const QJsonArray& assets, const QString& assetName,
+                              QString& downloadUrl, QString& sha256) {
+    static const QRegularExpression digestPattern(QStringLiteral("^sha256:([0-9a-fA-F]{64})$"));
+    for (const QJsonValue& val : assets) {
+        const QJsonObject asset = val.toObject();
+        if (asset[QLatin1String("name")].toString() != assetName)
+            continue;
+        const QRegularExpressionMatch match =
+            digestPattern.match(asset[QLatin1String("digest")].toString());
+        downloadUrl = asset[QLatin1String("browser_download_url")].toString();
+        if (downloadUrl.isEmpty() || !match.hasMatch())
+            return false;
+        sha256 = match.captured(1).toLower();
+        return true;
+    }
+    return false;
 }
 
 #endif // Q_OS_WASM

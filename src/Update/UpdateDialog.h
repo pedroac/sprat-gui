@@ -29,6 +29,7 @@ private:
 
     UpdateInstaller* m_installer = nullptr;
     QString m_downloadUrl;
+    QString m_sha256;
 
     // Pages inside m_stack
     QWidget* m_infoPage = nullptr;

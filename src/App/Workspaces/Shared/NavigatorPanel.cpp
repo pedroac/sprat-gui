@@ -22,6 +22,8 @@
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 // ---------------------------------------------------------------------------
 // Helper: recursively propagate tristate check state bottom-up for folder nodes.
 // ---------------------------------------------------------------------------
@@ -245,6 +247,60 @@ void NavigatorPanel::setSpriteBadgeCallback(SpriteBadgeCallback cb)
     }
 }
 
+void NavigatorPanel::setSpriteFilter(SpriteFilter filter)
+{
+    m_spriteFilter = std::move(filter);
+}
+
+QStringList NavigatorPanel::selectedSpritePaths() const
+{
+    QStringList paths;
+    if (!m_spriteTree) return paths;
+    const QList<QTreeWidgetItem*> selected = m_spriteTree->selectedItems();
+    const QSet<QTreeWidgetItem*> selectedSet(selected.begin(), selected.end());
+    auto isUnderSelection = [&](QTreeWidgetItem* item) {
+        for (QTreeWidgetItem* node = item; node; node = node->parent()) {
+            if (selectedSet.contains(node)) return true;
+        }
+        return false;
+    };
+    QTreeWidgetItemIterator it(m_spriteTree);
+    while (*it) {
+        QTreeWidgetItem* item = *it;
+        ++it;
+        if (item->isHidden() || !isUnderSelection(item)) continue;
+        const auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && !sprite->path.isEmpty() && !paths.contains(sprite->path))
+            paths.append(sprite->path);
+    }
+    return paths;
+}
+
+QTreeWidgetItem* NavigatorPanel::findSpriteItem(const QString& path) const
+{
+    if (!m_spriteTree || path.isEmpty()) return nullptr;
+    const QString cleanPath = QDir::cleanPath(path);
+    QTreeWidgetItemIterator it(m_spriteTree);
+    while (*it) {
+        const auto sprite = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && QDir::cleanPath(sprite->path) == cleanPath) return *it;
+        ++it;
+    }
+    return nullptr;
+}
+
+QTreeWidgetItem* NavigatorPanel::firstSpriteItem() const
+{
+    if (!m_spriteTree) return nullptr;
+    QTreeWidgetItemIterator it(m_spriteTree);
+    while (*it) {
+        const auto sprite = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && !sprite->path.isEmpty()) return *it;
+        ++it;
+    }
+    return nullptr;
+}
+
 void NavigatorPanel::refresh(const ProjectSession* session, bool showHidden, int atlasFilter)
 {
     buildTree(session, showHidden, atlasFilter);
@@ -266,8 +322,7 @@ void NavigatorPanel::updateAtlasCombo(const QVector<AtlasEntry>& atlases, int ac
         if (atlas.spritePaths.isEmpty()) continue; // Hide empty atlases
         if (i == activeSessionIndex)
             selectComboIdx = m_atlasCombo->count(); // count() accounts for "All" at index 0
-        QIcon icon = atlas.hasNormalMap ? QIcon(QStringLiteral(":/icons/normal-map.svg")) : QIcon();
-        m_atlasCombo->addItem(icon, atlas.name, i); // Store real atlas index as item data
+        m_atlasCombo->addItem(atlas.name, i); // Store real atlas index as item data
     }
     m_atlasCombo->setCurrentIndex(selectComboIdx);
     m_atlasCombo->blockSignals(false);
@@ -495,6 +550,12 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
                     allSprites.append(it.value());
             }
         }
+    }
+
+    if (m_spriteFilter) {
+        allSprites.erase(std::remove_if(allSprites.begin(), allSprites.end(),
+                                        [this](const SpritePtr& sp) { return !sp || !m_spriteFilter(sp); }),
+                         allSprites.end());
     }
 
     if (allSprites.isEmpty()) {

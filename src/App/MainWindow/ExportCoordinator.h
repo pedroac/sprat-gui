@@ -98,6 +98,10 @@ private slots:
     void doRunPreviewPack();
 
 private:
+    /// Asks before running a post-export command the user hasn't typed or approved, since
+    /// it comes from the project file. Clears the command if the user declines it.
+    /// @return False when the user cancels the export
+    bool confirmPostExportCommand(SaveConfig& config);
     void handleExportResult(const ExportResult& result);
     void handlePackPreviewResult(const PackPreviewResult& result);
     void emitStatus(const QString& msg);

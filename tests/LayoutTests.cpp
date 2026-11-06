@@ -5,19 +5,39 @@
 #include "models.h"
 #include <QDir>
 
+void LayoutTests::testLayoutParserCleansRelativeRoot() {
+    // spratlayout can print the root relative to its working folder. Sprite paths are compared
+    // as strings (frame lists, atlases, exclusions), so the ".." segments must be resolved.
+    const QString output = QString::fromLatin1(R"(root "../../../tmp/sprat-gui-x/hero"
+atlas 64,64
+sprite "run/run_1.png" rect:0,0,8,8
+)");
+    const QVector<LayoutModel> models = LayoutParser::parse(output, "/home/user/project");
+    QCOMPARE(models.size(), 1);
+    QCOMPARE(models.first().sprites.size(), 1);
+    QCOMPARE(models.first().sprites.first()->path, QString("/tmp/sprat-gui-x/hero/run/run_1.png"));
+}
+
 void LayoutTests::testLayoutParserHandlesEscapedQuotes() {
     const QString output = QString::fromLatin1(R"(atlas 100,100
 scale 1.0
-sprite "path/with/\"quotes\".png" 0,0 10,10
+sprite "path/with/\"quotes\".png" rect:0,0,10,10
+sprite "b.png" rotated rect:10,0,4,6 trim:1,2,3,4 slice:1,1,1,1
 )");
     
     QVector<LayoutModel> models = LayoutParser::parse(output, "/tmp");
     QCOMPARE(models.size(), 1);
     LayoutModel model = models.first();
-    QCOMPARE(model.sprites.size(), 1);
+    QCOMPARE(model.sprites.size(), 2);
     
     QString expectedPath = QDir("/tmp").absoluteFilePath("path/with/\"quotes\".png");
     QCOMPARE(model.sprites[0]->path, expectedPath);
+    QCOMPARE(model.sprites[0]->rect, QRect(0, 0, 10, 10));
+    QVERIFY(!model.sprites[0]->trimmed && !model.sprites[0]->rotated);
+    // Options come in any order; trimRect holds the left, top, right and bottom margins.
+    QCOMPARE(model.sprites[1]->rect, QRect(10, 0, 4, 6));
+    QVERIFY(model.sprites[1]->trimmed && model.sprites[1]->rotated);
+    QCOMPARE(model.sprites[1]->trimRect, QRect(1, 2, 3, 4));
 }
 
 void LayoutTests::testTimelineBuilderParsesSupportedPatterns() {

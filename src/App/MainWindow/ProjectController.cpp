@@ -269,20 +269,27 @@ void ProjectController::onFrameExtractionWatcherFinished(){ emit frameExtraction
 ProjectController::FrameDetectionResult
 ProjectController::detectFramesInImage(const QString& imagePath) const
 {
+    return detectFrames(imagePath, m_framesSettings, m_framesBinary);
+}
+
+ProjectController::FrameDetectionResult
+ProjectController::detectFrames(const QString& imagePath, const FramesAdvancedSettings& settings,
+                                const QString& framesBinary)
+{
     FrameDetectionResult result;
 
     QStringList args;
-    if (m_framesSettings.framesHasRectangles) {
+    if (settings.framesHasRectangles) {
         args << "--has-rectangles";
-        if (!m_framesSettings.framesRectangleColor.isEmpty())
-            args << "--rectangle-color" << m_framesSettings.framesRectangleColor;
+        if (!settings.framesRectangleColor.isEmpty())
+            args << "--rectangle-color" << settings.framesRectangleColor;
     }
-    if (m_framesSettings.framesTolerance != 1)
-        args << "--tolerance" << QString::number(m_framesSettings.framesTolerance);
-    if (m_framesSettings.framesMinSize != 4)
-        args << "--min-size" << QString::number(m_framesSettings.framesMinSize);
-    if (m_framesSettings.framesMaxSprites != 10000)
-        args << "--max-sprites" << QString::number(m_framesSettings.framesMaxSprites);
+    if (settings.framesTolerance != 1)
+        args << "--tolerance" << QString::number(settings.framesTolerance);
+    if (settings.framesMinSize != 4)
+        args << "--min-size" << QString::number(settings.framesMinSize);
+    if (settings.framesMaxSprites != 10000)
+        args << "--max-sprites" << QString::number(settings.framesMaxSprites);
     args << imagePath;
 
     QByteArray output;
@@ -290,20 +297,33 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
     CliResult embeddedResult = EmbeddedCli::run("spratframes", args);
     if (embeddedResult.exitCode != 0) {
         qWarning() << "spratframes error (embedded):" << embeddedResult.stdErr;
+        result.error = QString::fromUtf8(embeddedResult.stdErr).trimmed();
+        if (result.error.isEmpty())
+            result.error = tr("spratframes failed with exit code %1.").arg(embeddedResult.exitCode);
         return result;
     }
     output = embeddedResult.stdOut;
 #else
-    if (m_framesBinary.isEmpty()) return result;
+    if (framesBinary.isEmpty()) {
+        result.error = tr("spratframes was not found. Check the sprat-cli tools in Settings > CLI Tools.");
+        return result;
+    }
     QProcess proc;
-    proc.start(m_framesBinary, args);
+    proc.start(framesBinary, args);
     proc.closeWriteChannel();
     if (!proc.waitForFinished(30000)) {
         qWarning() << "spratframes timed out";
+        proc.kill();
+        result.error = proc.error() == QProcess::FailedToStart
+            ? tr("spratframes could not be started: %1").arg(proc.errorString())
+            : tr("spratframes took longer than 30 seconds. Try a higher minimum size or fewer sprites.");
         return result;
     }
-    if (proc.exitCode() != 0) {
-        qWarning() << "spratframes error";
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+        result.error = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        qWarning() << "spratframes error:" << result.error;
+        if (result.error.isEmpty())
+            result.error = tr("spratframes failed with exit code %1.").arg(proc.exitCode());
         return result;
     }
     output = proc.readAllStandardOutput();
@@ -335,19 +355,19 @@ ProjectController::detectFramesInImage(const QString& imagePath) const
         }
 
         if (line.startsWith("sprite ")) {
-            QString spriteData = line.mid(7).trimmed();
-            QStringList parts = spriteData.split(' ', Qt::SkipEmptyParts);
-            if (parts.size() >= 2) {
-                QStringList posParts  = parts[0].split(',');
-                QStringList sizeParts = parts[1].split(',');
-                if (posParts.size() == 2 && sizeParts.size() == 2) {
-                    bool ok = true;
-                    int x = posParts[0].toInt(&ok); if (!ok) continue;
-                    int y = posParts[1].toInt(&ok); if (!ok) continue;
-                    int w = sizeParts[0].toInt(&ok); if (!ok) continue;
-                    int h = sizeParts[1].toInt(&ok); if (!ok) continue;
-                    result.frames.append(QRect(x, y, w, h));
-                }
+            // sprite rect:X,Y,W,H [rotated]
+            const QStringList parts = line.mid(7).trimmed().split(' ', Qt::SkipEmptyParts);
+            for (const QString& part : parts) {
+                if (!part.startsWith(QLatin1String("rect:"))) continue;
+                const QStringList values = part.mid(5).split(',');
+                if (values.size() != 4) break;
+                bool ok = true;
+                int x = values[0].toInt(&ok); if (!ok) break;
+                int y = values[1].toInt(&ok); if (!ok) break;
+                int w = values[2].toInt(&ok); if (!ok) break;
+                int h = values[3].toInt(&ok); if (!ok) break;
+                result.frames.append(QRect(x, y, w, h));
+                break;
             }
         }
     }
@@ -364,7 +384,7 @@ QString ProjectController::generateSpratFramesFormat(const QVector<QRect>& frame
     QTextStream stream(&format);
     stream << "path \"" << imagePath << "\"\n";
     for (const QRect& f : frames)
-        stream << "sprite " << f.x() << "," << f.y() << " "
+        stream << "sprite rect:" << f.x() << "," << f.y() << ","
                << f.width() << "," << f.height() << "\n";
     return format;
 }

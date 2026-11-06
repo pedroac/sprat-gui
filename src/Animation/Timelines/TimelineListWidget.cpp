@@ -6,6 +6,7 @@
 #include <QPainter>
 #include <QMenu>
 #include <QAction>
+#include <QIcon>
 #include <QItemSelectionModel>
 #include <QKeySequence>
 #include <QtGlobal>
@@ -209,12 +210,22 @@ void TimelineListWidget::onCustomContextMenuRequested(const QPoint& pos) {
 
     QListWidgetItem* item = itemAt(pos);
     if (!item) {
+        QMenu menu(this);
+        menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames..."), this,
+                       [this]() { emit addFramesRequested(count()); });
+        menu.exec(mapToGlobal(pos));
         return;
     }
 
     int idx = row(item);
     QMenu menu(this);
-    
+
+    menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames Before..."), this,
+                   [this, idx]() { emit addFramesRequested(idx); });
+    menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames After..."), this,
+                   [this, idx]() { emit addFramesRequested(idx + 1); });
+    menu.addSeparator();
+
     QAction* moveLeft = menu.addAction("Move to the left");
     moveLeft->setEnabled(idx > 0);
     connect(moveLeft, &QAction::triggered, [this, idx]() {

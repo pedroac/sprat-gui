@@ -382,7 +382,7 @@ The central orchestrator coordinating all application features. Implements most 
 
 **Files**:
 - `MainWindow.h/cpp` - Main window class, lifecycle management
-- `MainWindow.Ui.cpp` - UI layout and widget composition
+- `MainWindow.Ui.cpp` - UI layout and widget composition. `setupWorkspaceTabs()` adds the workspace tab bar in a toolbar (above the top dock area); each tab triggers its workspace action (added to the window, not to a menu, so its shortcut works), and `switchWorkspace()` calls `updateWorkspaceTabs()` to select it. A new workspace needs an action and an entry in `m_workspaceTabs`
 - `MainWindow.LayoutFlow.cpp` - Sprite layout canvas management
 - `MainWindow.Animation.cpp` - Animation panel, timeline controls
 - `MainWindow.Project.cpp` - Project loading/saving/state
@@ -391,6 +391,10 @@ The central orchestrator coordinating all application features. Implements most 
 - `MainWindow.Events.cpp` - Event handling (drag/drop, keyboard)
 - `MainWindow.ImageLoading.cpp` - Image and folder loading workflows
 - `MainWindow.TimelineEditor.cpp` - Timeline creation/editing UI
+- `MainWindow.Sources.cpp` - Removing, retrying and re-syncing sources; syncing the layout back to an image or GIF
+- `MainWindow.Settings.cpp` - Settings dialog sections, `applySettings()`, configured layout profiles
+- `MainWindow.Frames.cpp` - Adding, removing and splitting sprites, the excluded atlas, and the frame list file (`ProjectSession::removeFrameListFile()` deletes it)
+- `MainWindow.FolderSync.cpp` - Source folder watcher, manual/periodic sync, keeping the sprites folder in step with the active frames
 
 **Key Responsibilities**:
 - Maintain `ProjectSession` (application state)
@@ -481,6 +485,13 @@ Complete animation workflow from creation to export.
 - `Timeline.h` - Core timeline data structure
 - `TimelineGenerator.h/cpp` - Generate timelines from sprite naming patterns
 - `TimelineOperations.h/cpp` - Merge, copy, transform timelines
+- `AnimationTimelineOps.h/cpp` - Frame edits on a timeline (drop, move, duplicate, remove) and `naturallySorted()`, which orders picked sprites as frames (`walk2` before `walk10`)
+- `TimelineListWidget.h/cpp` - The selected timeline's frame strip; its context menu emits `addFramesRequested(index)` for Add Frames Before/After
+
+#### Frame Animation workspace (`src/App/Workspaces/FrameAnimation/`)
+- The workspace is the animation dock alone (the Sprites dock is hidden): `TimelineEditorPanel`'s list area on the left, its timeline editor plus `AnimationPreviewPanel` on the right (assembled in `MainWindow.Ui.cpp`)
+- Sprites are picked with `SpritePickerDialog`, limited to the active atlas: Add Timeline (`onTimelineAddClicked`), Auto-create Timelines (`autoCreateTimelinesFromGroups`: one timeline per group that directly holds sprites, named by the group's tree path, e.g. `Mascot.zip/run`; name conflicts go through `TimelineGenerationService::addTimelines()`) and Add Frames (`addFramesToSelectedTimeline`). Each pushes one undo command
+- The panel's Atlas combo (shown when there are several atlases) emits `atlasSelected`; `MainWindow::selectActiveAtlas()` handles it and the Sprites navigator's atlas combo
 
 **Timeline Naming Patterns**:
 ```
@@ -524,6 +535,11 @@ Integration with sprat-cli toolchain (see [Integration with sprat-cli](#integrat
 - Preserve existing sprite metadata
 - Handle sprite deletion scenarios
 
+### Shared workspace widgets (`src/App/Workspaces/Shared/`)
+
+- `NavigatorPanel` - The sprite tree with its text filter, used by every workspace. `setSpriteFilter()` limits which sprites it lists (the Nine-Slice workspace lists only nine-sliced ones); `selectedSpritePaths()` expands selected folders into their sprites
+- `SpritePickerDialog` - Modal "pick sprites" dialog: a `NavigatorPanel` plus a preview of the highlighted sprite. `SpritePickerDialog::pick(parent, session, options)` returns the picked paths; `Options` sets the title, accept button text, empty-state text, a sprite filter and multi-select (sprites are ticked, as in the Sprites workspace; the accept button shows the count). With `pickGroups`, it picks groups (the tree's folders, Ctrl/Shift+click for several; sprites can't be selected) and `selectedGroups()` / `SpritePickerDialog::pickGroups()` return every group in or under the selected ones that directly holds sprites, with its name, tree path and own sprites; `allowEmpty` lets the accept button work with nothing ticked. Use it for any "Add sprites..." action instead of building another picker
+
 ### 6. Project (`src/Project/`)
 
 Save/load project data with multiple formats.
@@ -541,7 +557,7 @@ Save/load project data with multiple formats.
 - Version compatibility
 
 #### ProjectFileLoader
-- Load from `.json` or `.zip` files
+- Load a project folder's `project.spart.json`, or a `.zip` holding one
 - Archive extraction
 - Validation and error handling
 
@@ -611,7 +627,8 @@ Central data structures:
 - `SyncMode` - Watch vs Manual folder sync
 
 #### Utilities
-- `ArchiveExtractor` - ZIP file handling
+- `ArchiveExtractor` - ZIP/tar handling. Extraction only writes plain files and folders (links are skipped) inside the destination; `createZip` writes through `QSaveFile`, so a failure never replaces the existing ZIP
+- `PathSafety` - Checks for names and paths read from project files before the app writes to or deletes them (`isPlainName` for profile names, `isContainedRelativePath` for atlas output folders, `isInsideFolder` before deleting, `folderNameFromLabel` for folder names made from atlas names). Use it for any new project value that becomes a path
 - `ZoomableGraphicsView` - Reusable zoomable canvas
 - `ViewUtils` - Graphics utilities (transformations, scaling)
 - `MarkerUtils` - Marker rendering and manipulation
@@ -621,6 +638,8 @@ Central data structures:
 ### 9. Settings (`src/Settings/`)
 
 Application preferences and configuration.
+
+`PostExportCommandTrust` remembers (as SHA-256 hashes in `sprat.conf`) the post-export commands the user typed or approved. The command is saved in the project file, so `ExportCoordinator::confirmPostExportCommand()` asks before running one that isn't trusted.
 
 **Key Features**:
 - CLI tool paths
@@ -748,7 +767,8 @@ QVector<LayoutModel> models = LayoutParser::parse(layoutText, folder, currentFol
 
 **Open Project**:
 ```
-File → Open → QFileDialog (*.json, *.zip)
+File → Open Project → folder picker (needs project.spart.json)
+     or Open ZIP Project → QFileDialog (*.zip)
          │
          ▼
 ProjectFileLoader::load()
@@ -1014,7 +1034,7 @@ ctest --output-on-failure
 - `TestCoreModels.cpp` - Data structure operations
 - `TestImageDiscovery.cpp` - Image discovery service
 - `TestProjectSession.cpp` - Session state management
-- `NineSliceWorkspaceTests.cpp` - Nine-Slice workspace widgets on a session (offscreen): loading a sprite fits its insets and keeps the spin boxes, canvas and sprite in sync
+- `NineSliceWorkspaceTests.cpp` - Nine-Slice workspace widgets on a session (offscreen): loading a sprite fits its insets and keeps the spin boxes, canvas and sprite in sync; the list holds only nine-sliced sprites; adding gives every added sprite thirds; removing keeps insets; `SpritePickerDialog` lists only the sprites its filter accepts and picks groups in group mode
 - `e2e/ExportPipelineTests.cpp` - End-to-end exports through the real sprat-cli tools (`sprat-gui-e2e` target). Generates sprites, runs `ProjectSaveService`, and checks the written atlases and metadata. Paths include spaces and non-ASCII characters. Embedded builds run the CLI in-process; other builds also build sprat-cli's executables and pass their folder in `SPRAT_CLI_DIR`. Turn off with `-DSPRAT_E2E_TESTS=OFF`. CI runs it on Linux, Windows and macOS.
 - `deploy/smoke-test.sh <executable> [options]` - Starts the app with `--smoke-test` on the real platform plugin (under `xvfb-run` on headless Linux) and fails if the main window does not appear (exit 2) or, with `--require-cli`, if sprat-cli's transforms or profiles config can't be found (exit 3). With `--smoke-test-zip <zip>` it then opens the ZIP through the GUI, ticks folders in the folder picker (`--smoke-test-folder`, default the top-level ones), lays it out with `--smoke-test-profile` (default `fast`) and checks the sprite count (`--smoke-test-expect-sprites`); a failed layout, profile fallback or any other dialog exits 4, a hang exits 5. The flow lives in `MainWindow::runSmokeTestImport()` (`MainWindow.SmokeTest.cpp`) and waits for `LayoutOrchestrator::layoutAppliedToCanvas`. CI uses `tests/assets/streets_of_fight_files.zip` (67 PNGs, 63 sprites after the default exact deduplication; art by Luis Zuno, redistributable per its `public-license.txt`). `--smoke-test` runs with `QStandardPaths` test mode and an emptied `sprat/` config folder, so results don't depend on the machine's saved settings. This is the only check that the app actually opens: ctest runs offscreen and never creates `MainWindow`. CI runs it on the build output on every push, and on the AppImage, Windows `dist/` folder and the macOS app unpacked from the ZIP whenever packaging runs (the DMG is then checked to hold the same app, with a valid signature). On an Apple Silicon Mac, the script runs a universal app twice, natively and its x86_64 slice under Rosetta, so both slices and the bundled sprat-cli are tested; the log's `architecture:` line shows which one ran.
 - `deploy/macos/check-bundle.sh <app> [max minimum macOS]` - Fails unless every Mach-O file in the bundle has arm64 and x86_64 slices, needs macOS 11.0 or older (or the given version), and links only system libraries or ones inside the bundle (no Homebrew). It also checks that the sprat-cli tools are in `Contents/Resources/cli`. CI runs it on the packaged app. The macOS build makes it pass by configuring with `CMAKE_OSX_ARCHITECTURES=arm64;x86_64` and `CMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local`, plus the `CMAKE_OSX_DEPLOYMENT_TARGET` default of 11.0 in `CMakeLists.txt`. `SPRAT_BUNDLE_CLI` (default ON on macOS, non-embedded builds) builds sprat-cli's tools from source and copies them into the bundle.

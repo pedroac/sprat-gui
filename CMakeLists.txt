@@ -332,7 +332,7 @@ if(APPLE)
 endif()
 
 # === Find Dependencies ===
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg OpenGL)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Svg)
 find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 if(APPLE)
@@ -345,7 +345,6 @@ if(APPLE)
     foreach(_agl_tgt IN ITEMS
             Qt6::Gui Qt6::GuiPrivate
             Qt6::Widgets Qt6::WidgetsPrivate
-            Qt6::OpenGL Qt6::OpenGLWidgets Qt6::OpenGLPrivate
             Qt6::QCocoaIntegrationPlugin)
         if(NOT TARGET ${_agl_tgt})
             continue()
@@ -399,6 +398,10 @@ set(PROJECT_SOURCES
     src/App/MainWindow/MainWindow.LayoutFlow.cpp
     src/App/MainWindow/MainWindow.ImageLoading.cpp
     src/App/MainWindow/MainWindow.SmokeTest.cpp
+    src/App/MainWindow/MainWindow.Sources.cpp
+    src/App/MainWindow/MainWindow.Settings.cpp
+    src/App/MainWindow/MainWindow.Frames.cpp
+    src/App/MainWindow/MainWindow.FolderSync.cpp
     src/App/MainWindow/MainWindow.Navigator.cpp
     src/App/Workspaces/Shared/NavigatorTreeWidget.h
     src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
@@ -456,6 +459,8 @@ set(PROJECT_SOURCES
     src/App/Workspaces/Shared/IAtlasViewport.h
     src/App/Workspaces/Shared/NavigatorPanel.h
     src/App/Workspaces/Shared/NavigatorPanel.cpp
+    src/App/Workspaces/Shared/SpritePickerDialog.h
+    src/App/Workspaces/Shared/SpritePickerDialog.cpp
     src/App/Workspaces/Atlas/AtlasWorkspace.h
     src/App/Workspaces/Atlas/AtlasWorkspace.cpp
     src/App/Workspaces/Atlas/SpriteEditorPanel.h
@@ -474,14 +479,6 @@ set(PROJECT_SOURCES
     src/App/Workspaces/AtlasesManagement/PackedAtlasView.cpp
     src/App/Workspaces/NineSlice/NineSliceWorkspace.h
     src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
-    src/MapPaint/MapPaintCanvas.h
-    src/MapPaint/MapPaintCanvas.cpp
-    src/NormalMap/NormalMapPaintCanvas.h
-    src/NormalMap/NormalMapPaintCanvas.cpp
-    src/App/Workspaces/NormalMap/NormalMapWorkspace.h
-    src/App/Workspaces/NormalMap/NormalMapWorkspace.cpp
-    src/App/Workspaces/NormalMap/NormalWheelWidget.h
-    src/App/Workspaces/NormalMap/NormalWheelWidget.cpp
     src/NineSlice/NineSliceEditorCanvas.h
     src/NineSlice/NineSliceInsets.h
     src/NineSlice/NineSliceEditorCanvas.cpp
@@ -499,16 +496,8 @@ set(PROJECT_SOURCES
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
     src/Project/ProjectSession.h
-    src/Project/ProjectData.cpp
-    src/Project/ProjectData.h
-    src/Project/Repositories/SpriteRepository.cpp
-    src/Project/Repositories/SpriteRepository.h
-    src/Project/Repositories/SourceRepository.cpp
-    src/Project/Repositories/SourceRepository.h
     src/Project/Repositories/MarkerRepository.cpp
     src/Project/Repositories/MarkerRepository.h
-    src/Project/Repositories/ExportRepository.cpp
-    src/Project/Repositories/ExportRepository.h
 
     src/Animation/Timelines/AnimationTimelineOps.cpp
     src/Animation/Timelines/AnimationTimelineOps.h
@@ -609,9 +598,6 @@ target_include_directories(sprat-gui PRIVATE
     src/App/Workspaces/FrameAnimation
     src/App/Workspaces/NineSlice
     src/App/Workspaces/Shared
-    src/App/Workspaces/NormalMap
-    src/MapPaint
-    src/NormalMap
     src/NineSlice
     src/Animation
     src/Animation/Timelines
@@ -636,7 +622,6 @@ target_link_libraries(sprat-gui PRIVATE
     Qt6::Concurrent
     Qt6::Network
     Qt6::Svg
-    Qt6::OpenGL
     LibArchive::LibArchive
 )
 
@@ -765,6 +750,7 @@ if(BUILD_TESTING)
         assets/icons.qrc
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
+        src/App/Workspaces/Shared/SpritePickerDialog.cpp
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
         src/App/MainWindow/SpritePreviewTooltip.cpp
         src/NineSlice/NineSliceEditorCanvas.cpp
@@ -774,6 +760,7 @@ if(BUILD_TESTING)
         src/Animation/AnimationPreviewService.cpp
         src/Animation/AnimationPlaybackService.cpp
         src/Animation/Test/AnimationTestOps.cpp
+        src/Animation/Timelines/AnimationTimelineOps.cpp
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp

@@ -91,8 +91,12 @@ public:
 
     // --- Transient State ---
     QJsonObject pendingProjectPayload;
+    QString pendingProjectDir;  // Folder holding the pending project's project.spart.json
 
     void clear();
+
+    /// Deletes the temporary frame list file, if any, and forgets its path.
+    void removeFrameListFile();
     bool isEmpty() const;
     void rebuildSpriteIndex();
 

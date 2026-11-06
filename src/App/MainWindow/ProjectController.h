@@ -42,6 +42,7 @@ public:
     struct FrameDetectionResult {
         QVector<QRect> frames;
         QColor         backgroundColor;
+        QString        error; ///< Why detection failed; empty when spratframes ran
     };
 
     // FrameDetectionTaskResult is forwarded to MainWindow for dialog display
@@ -178,6 +179,12 @@ public:
 
     // ---- Pure logic helpers that MainWindow currently owns ----
     FrameDetectionResult detectFramesInImage(const QString& imagePath) const;
+
+    /// Runs spratframes on imagePath with the given settings. Touches no controller
+    /// state, so it can run on any thread.
+    static FrameDetectionResult detectFrames(const QString& imagePath,
+                                             const FramesAdvancedSettings& settings,
+                                             const QString& framesBinary);
     QString generateSpratFramesFormat(const QVector<QRect>& frames,
                                       const QString& imagePath) const;
     void applyTransparencyToImage(QImage& img, const QColor& bgColor) const;

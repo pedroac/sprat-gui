@@ -135,7 +135,16 @@ echo "VERSION file content:"
 cat VERSION
 echo "---"
 cmake -DSPRAT_DOWNLOAD_STB=ON .
-make -j$(nproc 2>/dev/null || echo 1)
+# One compile job per core can run a low-memory machine out of RAM and get the build
+# OOM-killed; allow one job per 2 GiB of available memory, at most one per core.
+jobs=$(nproc 2>/dev/null || echo 1)
+memory_jobs=$(awk '/^MemAvailable:/ { print int($2 / 2097152) }' /proc/meminfo 2>/dev/null || true)
+if [ -n "$memory_jobs" ] && [ "$memory_jobs" -lt "$jobs" ]; then
+  jobs=$memory_jobs
+fi
+[ "$jobs" -ge 1 ] || jobs=1
+echo "Building with $jobs parallel job(s)"
+make -j"$jobs"
 
 # Check the built tools before installing, so a wrong version never replaces working ones.
 echo "Checking built CLI tool versions:"
@@ -196,7 +205,10 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
         return;
     }
 
-    QTemporaryFile* tempFile = new QTemporaryFile(this);
+    // Keep the release asset's extension: Expand-Archive only accepts files ending in .zip.
+    const QString suffix = QFileInfo(reply->request().url().path()).suffix(); // before redirects
+    QTemporaryFile* tempFile = new QTemporaryFile(
+        QDir(QDir::tempPath()).filePath(QStringLiteral("sprat-cli-XXXXXX.") + suffix), this);
     if (!tempFile->open()) {
         emit errorOccurred("Install Failed", "Could not create a temporary file for downloaded installer.");
 #ifndef SPRAT_EMBEDDED_CLI
@@ -207,7 +219,17 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
         reply->deleteLater();
         return;
     }
-    tempFile->write(reply->readAll());
+    const QByteArray data = reply->readAll();
+    if (tempFile->write(data) != data.size()) {
+        emit errorOccurred("Install Failed", "Could not save the downloaded installer: " + tempFile->errorString());
+#ifndef SPRAT_EMBEDDED_CLI
+        emit installFinished(-1, QProcess::CrashExit);
+#else
+        emit installFinished(-1, -1);
+#endif
+        reply->deleteLater();
+        return;
+    }
     QString tempPath = tempFile->fileName();
     tempFile->close();
     emit installLog("Download finished. Extracting installer...");

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QDirIterator>
 #include <QStandardPaths>
 #include <QDateTime>
 
@@ -73,9 +74,7 @@ public:
         const QString trashPath = QDir(tmpBase).filePath(
             folderName + QLatin1Char('_') +
             QString::number(QDateTime::currentMSecsSinceEpoch()));
-        if (QFile::rename(folderPath, trashPath))
-            return trashPath;
-        return {};
+        return moveFolder(folderPath, trashPath) ? trashPath : QString();
     }
 
     // Move a folder from its trash path back to its original location.
@@ -84,6 +83,38 @@ public:
             return false;
         QFileInfo origInfo(originalPath);
         QDir().mkpath(origInfo.absolutePath());
-        return QFile::rename(trashPath, originalPath);
+        return moveFolder(trashPath, originalPath);
+    }
+
+    // Moves a folder, copying it when rename can't (the temp folder is often on another
+    // filesystem, e.g. tmpfs). The source is only deleted once everything was copied.
+    static bool moveFolder(const QString& from, const QString& to) {
+        if (QFile::rename(from, to))
+            return true;
+        if (!QDir(from).exists() || QFileInfo::exists(to))
+            return false;
+        if (!copyFolder(from, to)) {
+            QDir(to).removeRecursively(); // only the partial copy: `to` didn't exist before
+            return false;
+        }
+        QDir(from).removeRecursively();
+        return true;
+    }
+
+private:
+    static bool copyFolder(const QString& from, const QString& to) {
+        const QDir source(from);
+        if (!QDir().mkpath(to))
+            return false;
+        QDirIterator it(from, QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot | QDir::NoSymLinks,
+                        QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString path = it.next();
+            const QString target = QDir(to).filePath(source.relativeFilePath(path));
+            const bool ok = it.fileInfo().isDir() ? QDir().mkpath(target) : QFile::copy(path, target);
+            if (!ok)
+                return false;
+        }
+        return true;
     }
 };

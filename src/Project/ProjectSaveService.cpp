@@ -1,4 +1,5 @@
 #include "ProjectSaveService.h"
+#include "PathSafety.h"
 #include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
@@ -22,6 +23,7 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <algorithm>
 #include <QTemporaryFile>
 #include <QTextStream>
 #include <QtGlobal>
@@ -70,7 +72,7 @@ namespace {
 
     /// Size of a sprite's original image in original-image pixels, the size
     /// sprat-cli checks slice insets against, read from its layout line
-    /// (`sprite "path" x,y w,h [left,top right,bottom] [rotated] ...`).
+    /// (`sprite "path" rect:x,y,w,h [trim:left,top,right,bottom] [rotated] ...`).
     /// Mirrors sprat-cli: the packed size may come from rounding, so the
     /// original can be up to half an atlas pixel larger than w / scale, and a
     /// nine-patch's 1px marker border, kept in the trim, is not part of it.
@@ -80,21 +82,29 @@ namespace {
         if (closingQuote < 0) return {};
         const QList<QByteArray> tokens =
             spriteLine.mid(closingQuote + 1).simplified().split(' ');
-        auto pair = [&](int index, int& a, int& b) {
-            if (index >= tokens.size()) return false;
-            const QList<QByteArray> parts = tokens[index].split(',');
-            bool okA = false;
-            bool okB = false;
-            if (parts.size() == 2) {
-                a = parts[0].toInt(&okA);
-                b = parts[1].toInt(&okB);
+        // The four values of the line's "key:a,b,c,d" token; false when it is missing or bad.
+        auto four = [&](const QByteArray& key, int out[4]) {
+            const auto it = std::find_if(tokens.begin(), tokens.end(),
+                [&](const QByteArray& t) { return t.startsWith(key); });
+            if (it == tokens.end()) return false;
+            const QList<QByteArray> parts = it->mid(key.size()).split(',');
+            if (parts.size() != 4) return false;
+            for (int i = 0; i < 4; ++i) {
+                bool ok = false;
+                out[i] = parts[i].toInt(&ok);
+                if (!ok) return false;
             }
-            return okA && okB;
+            return true;
         };
-        int x = 0, y = 0, w = 0, h = 0;
-        if (!pair(0, x, y) || !pair(1, w, h)) return {};
-        int trimLeft = 0, trimTop = 0, trimRight = 0, trimBottom = 0;
-        if (pair(2, trimLeft, trimTop) && !pair(3, trimRight, trimBottom)) return {};
+        int rect[4] = {0, 0, 0, 0};
+        if (!four("rect:", rect)) return {};
+        const int w = rect[2];
+        const int h = rect[3];
+        int trim[4] = {0, 0, 0, 0};
+        const bool hasTrim = std::any_of(tokens.begin(), tokens.end(),
+            [](const QByteArray& t) { return t.startsWith("trim:"); });
+        if (hasTrim && !four("trim:", trim)) return {};
+        int trimLeft = trim[0], trimTop = trim[1], trimRight = trim[2], trimBottom = trim[3];
         if (path.endsWith(QLatin1String(".9.png")) && trimLeft >= 1 && trimTop >= 1
                 && trimRight >= 1 && trimBottom >= 1) {
             --trimLeft;
@@ -171,6 +181,19 @@ bool ProjectSaveService::save(
         }
     };
 
+    // Profile names and the atlas subfolder come from the project file and become folders
+    // that are wiped below, so they must not point outside the destination.
+    for (const QString& profileName : config.profiles) {
+        if (!profileName.trimmed().isEmpty() && !PathSafety::isPlainName(profileName)) {
+            error = QString(trPS("Invalid profile name \"%1\": profile names can't contain slashes or be \".\" or \"..\".")).arg(profileName);
+            return false;
+        }
+    }
+    if (!config.atlasSubdir.isEmpty() && !PathSafety::isContainedRelativePath(config.atlasSubdir)) {
+        error = QString(trPS("Invalid atlas output folder \"%1\": it must be a folder inside the export destination.")).arg(config.atlasSubdir);
+        return false;
+    }
+
     // Use zip mode only when the destination path is explicitly a .zip file.
     // Never auto-convert a non-existent folder path to a zip.
     bool isZip = config.destination.endsWith(".zip", Qt::CaseInsensitive);
@@ -197,14 +220,13 @@ bool ProjectSaveService::save(
         for (const QString& profileNameRaw : config.profiles) {
             const QString profileName = profileNameRaw.trimmed();
             if (profileName.isEmpty()) continue;
-            if (config.atlasSubdir.isEmpty()) {
-                // Single atlas: wipe the whole profile folder.
-                QDir(wd.filePath(profileName)).removeRecursively();
-            } else {
-                // Multi-atlas: only wipe this atlas's subfolder within the profile.
-                QDir(QDir(wd.filePath(profileName)).filePath(config.atlasSubdir))
-                    .removeRecursively();
-            }
+            // Single atlas: wipe the whole profile folder.
+            // Multi-atlas: only wipe this atlas's subfolder within the profile.
+            const QString staleDir = config.atlasSubdir.isEmpty()
+                ? wd.filePath(profileName)
+                : QDir(wd.filePath(profileName)).filePath(config.atlasSubdir);
+            if (PathSafety::isInsideFolder(staleDir, wd.absolutePath()))
+                QDir(staleDir).removeRecursively();
         }
     }
 
@@ -315,18 +337,6 @@ bool ProjectSaveService::save(
                           << spriteState["pivot_x"].toInt() << "," << spriteState["pivot_y"].toInt() << "\n";
         }
         markersStream << "\n";
-    }
-
-    // Emit top-level alias directives for each sprite that has aliases.
-    for (auto it = spritesState.begin(); it != spritesState.end(); ++it) {
-        const QJsonObject spriteState = it.value().toObject();
-        const QString canonicalName = spriteState["name"].toString();
-        if (canonicalName.isEmpty()) continue;
-        for (const auto& a : spriteState["aliases"].toArray()) {
-            const QString alias = a.toString().trimmed();
-            if (!alias.isEmpty())
-                markersStream << "alias " << cliQuoted(alias) << " " << cliQuoted(canonicalName) << "\n";
-        }
     }
 
     QJsonObject animInfo = projectPayload["animations"].toObject();
@@ -698,10 +708,18 @@ bool ProjectSaveService::save(
                                 if (source.isValid()) {
                                     insets = fitNineSliceInsets(insets, source.width(), source.height());
                                 }
-                                const QString token = QStringLiteral("slice=%1,%2,%3,%4,%5,%6")
+                                const QString token = QStringLiteral("slice:%1,%2,%3,%4,%5,%6")
                                     .arg(insets.left).arg(insets.top).arg(insets.right)
                                     .arg(insets.bottom).arg(spec->hMode, spec->vMode);
-                                patched.append(line);
+                                // Replaces the slice spratlayout found in a nine-patch:
+                                // sprat-cli rejects an option given twice.
+                                QByteArray kept = line;
+                                const int sliceAt = kept.indexOf(" slice:", line.indexOf('"', line.indexOf('"') + 1));
+                                if (sliceAt >= 0) {
+                                    const int end = kept.indexOf(' ', sliceAt + 1);
+                                    kept.remove(sliceAt, (end < 0 ? kept.size() : end) - sliceAt);
+                                }
+                                patched.append(kept);
                                 patched.append(' ');
                                 patched.append(token.toUtf8());
                                 patched.append('\n');
@@ -721,7 +739,7 @@ bool ProjectSaveService::save(
         // Inject atlas-level colors/dither tokens into every sprite line
         if (config.colors > 0 || config.dither) {
             QByteArray extra;
-            if (config.colors > 0) extra += " colors=" + QByteArray::number(config.colors);
+            if (config.colors > 0) extra += " colors:" + QByteArray::number(config.colors);
             if (config.dither)     extra += " dither";
 
             QByteArray patched;
@@ -733,6 +751,26 @@ bool ProjectSaveService::save(
             }
             if (patched.endsWith("\n\n")) patched.chop(1);
             layoutData = patched;
+        }
+
+        // Sprite aliases are layout records, `alias "ORIGINAL" -> "DUPLICATE"`, where ORIGINAL
+        // is the sprite's path as the layout writes it. sprat-cli rejects an alias of a sprite
+        // the layout lacks, so only the sprites in this atlas get theirs.
+        {
+            QByteArray aliasLines;
+            for (auto it = spritesState.begin(); it != spritesState.end(); ++it) {
+                const QByteArray original = cliQuoted(it.key()).toUtf8();
+                if (!layoutData.contains("sprite " + original + ' ')) continue;
+                for (const auto& a : it.value().toObject()["aliases"].toArray()) {
+                    const QString alias = a.toString().trimmed();
+                    if (!alias.isEmpty())
+                        aliasLines += "alias " + original + " -> " + cliQuoted(alias).toUtf8() + '\n';
+                }
+            }
+            if (!aliasLines.isEmpty()) {
+                if (!layoutData.endsWith('\n')) layoutData.append('\n');
+                layoutData.append(aliasLines);
+            }
         }
 
         // Save combined layout, markers and animations (absolute paths — for spratconvert)

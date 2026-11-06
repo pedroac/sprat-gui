@@ -298,3 +298,90 @@ void ProjectTests::testAnimatedGifFrameExtraction() {
     QVERIFY(QFile::exists(framesDir.filePath("frame_0000.png")));
     QVERIFY(QFile::exists(framesDir.filePath("frame_0001.png")));
 }
+
+void ProjectTests::testProjectPayloadKeepsExcludedSpritesWhenProjectMoves() {
+    // Excluded files are relative to the source's cached folder, so that folder is saved
+    // relative to the project and resolved against wherever the project is opened from.
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString savedDir = root.filePath("Saved Project");
+    const QString movedDir = root.filePath("Moved Project ñ");
+    QVERIFY(QDir().mkpath(QDir(savedDir).filePath("sprites/hero")));
+    QVERIFY(QDir().mkpath(QDir(movedDir).filePath("sprites/hero")));
+
+    ProjectSource source;
+    source.name = "hero.zip";
+    source.type = SourceType::Archive;
+    source.originalPath = "/art/hero.zip";
+    source.cachedFolderPath = QDir(savedDir).filePath("sprites/hero");
+    source.excludedFiles = QStringList{"run/run_3.png"};
+
+    ProjectPayloadBuildInput input;
+    input.projectDir = savedDir;
+    input.currentFolder = QDir(savedDir).filePath("sprites/hero");
+    input.sources = {source};
+    input.portablePaths = true;
+    const QJsonObject payload = ProjectPayloadCodec::build(input);
+
+    const QJsonObject savedSource =
+        payload["layout"].toObject()["sources"].toArray().first().toObject();
+    QCOMPARE(savedSource["cachedFolder"].toString(), QString("sprites/hero"));
+
+    // The app opens a project with currentFolder set to the sprites folder, not the project's.
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult result = ProjectPayloadCodec::applyToLayout(
+        payload, QDir(movedDir).filePath("sprites/hero"), layoutModels, movedDir);
+
+    QCOMPARE(result.sources.size(), 1);
+    QCOMPARE(result.sources[0].cachedFolderPath, QDir(movedDir).filePath("sprites/hero"));
+    QCOMPARE(result.sources[0].excludedFiles, QStringList{"run/run_3.png"});
+    QCOMPARE(result.sources[0].originalPath, QString("/art/hero.zip"));
+}
+
+void ProjectTests::testProjectPayloadDropsPathsOutsideTheProject() {
+    // Names and paths from a project file end up as folders the app writes or deletes,
+    // so values pointing outside the project are dropped on load.
+    QTemporaryDir projectDir;
+    QVERIFY(projectDir.isValid());
+    const QString inside = projectDir.filePath("sprites/cache");
+    QVERIFY(QDir().mkpath(inside));
+
+    QJsonObject root;
+    root["schema_version"] = 5;
+    root["save_options"] = QJsonObject{{"profiles", QJsonArray{"desktop", "/home/user", ".."}}};
+    root["export_presets"] = QJsonArray{QJsonObject{
+        {"name", "preset"}, {"profiles", QJsonArray{"mobile", "../x"}}}};
+    root["atlases"] = QJsonArray{
+        QJsonObject{{"id", "safe"}, {"name", "safe"}, {"output_subdir", "ui/menus"},
+                    {"export_override", QJsonObject{{"profiles", QJsonArray{"desktop", "a/b"}}}}},
+        QJsonObject{{"id", "absolute"}, {"name", "absolute"}, {"output_subdir", "/home/user"}},
+        QJsonObject{{"id", "dotdot"}, {"name", "dotdot"}, {"output_subdir", "../.."}},
+    };
+    root["layout"] = QJsonObject{{"sources", QJsonArray{
+        QJsonObject{{"name", "kept"}, {"type", "archive"}, {"cachedFolder", inside},
+                    {"originalPath", "sprites.zip"}},
+        QJsonObject{{"name", "outside"}, {"type", "archive"}, {"cachedFolder", "/home/user/Documents"},
+                    {"originalPath", "../../escape.zip"}},
+    }}};
+
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult result =
+        ProjectPayloadCodec::applyToLayout(root, projectDir.path(), layoutModels);
+
+    QCOMPARE(result.saveConfig.profiles, QStringList{"desktop"});
+    QCOMPARE(result.exportPresets.size(), 1);
+    QCOMPARE(result.exportPresets.first().profiles, QStringList{"mobile"});
+
+    QHash<QString, AtlasEntry> atlases;
+    for (const AtlasEntry& atlas : result.atlases) atlases.insert(atlas.id, atlas);
+    QCOMPARE(atlases.value("safe").outputSubdir, QString("ui/menus"));
+    QCOMPARE(atlases.value("safe").exportConfig.profiles, QStringList{"desktop"});
+    QVERIFY(atlases.value("absolute").outputSubdir.isEmpty());
+    QVERIFY(atlases.value("dotdot").outputSubdir.isEmpty());
+
+    QCOMPARE(result.sources.size(), 2);
+    QCOMPARE(result.sources[0].cachedFolderPath, inside);
+    QVERIFY(result.sources[0].originalPath.endsWith("sprites.zip"));
+    QVERIFY(result.sources[1].cachedFolderPath.isEmpty());
+    QVERIFY(result.sources[1].originalPath.isEmpty());
+}
