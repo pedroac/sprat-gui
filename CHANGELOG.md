@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `deploy/build-from-source.sh` builds sprat-cli and sprat-gui from source on Linux and macOS: it checks Git and the build dependencies (printing the install command for what's missing), clones or updates both repositories in a `sprat` folder, builds the sprat-cli version sprat-gui needs, and sets sprat-gui up to use the tools. Run it again to update
 - Frame Animation workspace: each timeline has a loop mode (Loop, Once, Ping-pong or Ping-pong once). The preview, GIF/video export and exported metadata play it that way; an alias plays the way its source does. Projects saved before keep looping
 
 ### Changed
