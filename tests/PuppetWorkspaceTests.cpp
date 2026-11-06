@@ -1,5 +1,7 @@
 #include "PuppetWorkspaceTests.h"
 #include "ProjectSession.h"
+#include "NavigatorPanel.h"
+#include "NewPuppetDialog.h"
 #include "PuppetCanvas.h"
 #include "PuppetTreeWidget.h"
 #include "PuppetWorkspace.h"
@@ -12,6 +14,8 @@
 #include <QLabel>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialogButtonBox>
+#include <QMimeData>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QRadioButton>
@@ -52,6 +56,7 @@ struct PuppetProject {
         session.activeAtlas().layoutModels.first().sprites.append(sprite);
         session.activeAtlas().spritePaths.append(path);
         session.activeFramePaths.append(path);
+        session.spriteIndex.insert(path, sprite);
         return sprite;
     }
 };
@@ -132,7 +137,9 @@ void PuppetWorkspaceTests::testBuildingAPuppetIsUndoable() {
     workspace.refreshSprites();
     QVERIFY(showsEmptyState(workspace));
 
-    workspace.addPuppet();
+    Puppet blank;
+    blank.name = QStringLiteral("puppet");
+    workspace.addPuppet(blank);
     workspace.addPart();
     workspace.addSpriteVariants({face->path});
     QVERIFY(!showsEmptyState(workspace));
@@ -155,6 +162,89 @@ void PuppetWorkspaceTests::testBuildingAPuppetIsUndoable() {
     QVERIFY(showsEmptyState(workspace));
     while (project.undoStack.canRedo()) project.undoStack.redo();
     QCOMPARE(treeRows(workspace.tree()), built);
+}
+
+namespace {
+/// Drops @p spritePaths, as the Sprites tree drags them, on @p tree's viewport at @p pos.
+void dropSprites(QTreeWidget* tree, const QPoint& pos, const QStringList& spritePaths) {
+    QMimeData mime;
+    mime.setData(QStringLiteral("application/x-sprat-sprite"), spritePaths.join(QLatin1Char('\n')).toUtf8());
+    QDragEnterEvent enter(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(tree->viewport(), &enter);
+    QDragMoveEvent move(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(tree->viewport(), &move);
+    QDropEvent drop(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(tree->viewport(), &drop);
+}
+
+/// The dialog's parts list as rows, sprites indented by two spaces.
+QStringList partRows(QTreeWidget* tree) {
+    QStringList rows;
+    for (QTreeWidgetItemIterator it(tree); *it; ++it)
+        rows.append(((*it)->parent() ? QStringLiteral("  ") : QString()) + (*it)->text(0));
+    return rows;
+}
+}  // namespace
+
+void PuppetWorkspaceTests::testNewPuppetDialogBuildsAPuppetFromDroppedSprites() {
+    Doll doll;
+    NewPuppetDialog dialog(&doll.project.session, doll.project.session.activeAtlas().puppets,
+                           [](const SpritePtr&) { return true; });
+    dialog.resize(820, 560);
+    dialog.show();
+    QPushButton* create = dialog.findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+
+    // The name: a free one to start with; a taken one can't be used.
+    QCOMPARE(dialog.nameEdit()->text(), QStringLiteral("puppet"));
+    dialog.nameEdit()->setText(QStringLiteral("doll"));
+    QVERIFY(!create->isEnabled());
+    dialog.nameEdit()->setText(QStringLiteral("robot"));
+    QVERIFY(create->isEnabled());
+
+    // Sprites dropped on empty space make a part each, named after the sprite.
+    QTreeWidget* parts = dialog.partsTree();
+    dropSprites(parts, parts->viewport()->rect().bottomLeft() - QPoint(-10, 10), {doll.body->path, doll.head->path});
+    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head"}));
+    // Dropped on a part (or one of its sprites), they become its variants.
+    dropSprites(parts, parts->visualItemRect(parts->topLevelItem(1)->child(0)).center(), {doll.headSmiling->path});
+    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head", "  head-smiling"}));
+
+    // An empty part waits for sprites; a taken part name is refused.
+    dialog.addPart();
+    QCOMPARE(partRows(parts).mid(5), (QStringList{"part", "  (drop sprites here)"}));
+    parts->topLevelItem(2)->setText(0, QStringLiteral("head"));
+    QCoreApplication::processEvents();
+    QCOMPARE(parts->topLevelItem(2)->text(0), QStringLiteral("part"));
+    QVERIFY(dialog.findChild<QLabel*>(QStringLiteral("newPuppetPartProblem"))->isVisibleTo(&dialog));
+    parts->topLevelItem(2)->setText(0, QStringLiteral("tail"));
+    QCoreApplication::processEvents();
+    QCOMPARE(parts->topLevelItem(2)->text(0), QStringLiteral("tail"));
+    parts->setCurrentItem(parts->topLevelItem(2));
+    dialog.findChild<QPushButton*>(QStringLiteral("newPuppetRemove"))->click();
+    QCOMPARE(parts->topLevelItemCount(), 2);
+
+    // The sprite list's own button adds its selection to the selected part.
+    parts->setCurrentItem(parts->topLevelItem(0));
+    auto* addToPart = dialog.findChild<QPushButton*>(QStringLiteral("newPuppetAddToPart"));
+    QCOMPARE(addToPart->text(), QStringLiteral("Add to \"body\""));
+    dialog.sprites()->findSpriteItem(doll.headSmiling->path)->setSelected(true);
+    addToPart->click();
+    QCOMPARE(partRows(parts).mid(0, 3), (QStringList{"body", "  body", "  head-smiling"}));
+
+    const Puppet built = dialog.puppet();
+    QCOMPARE(built.name, QStringLiteral("robot"));
+    QCOMPARE(built.parts.size(), 2);
+    QCOMPARE(built.parts[1].variants.size(), 2);
+    QCOMPARE(built.parts[1].position, std::optional<QPoint>(QPoint(0, 0)));
+
+    // Created as one undo step, and selected.
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.refreshSprites();
+    workspace.addPuppet(built);
+    QCOMPARE(doll.project.session.activeAtlas().puppets.size(), 2);
+    QCOMPARE(doll.project.undoStack.count(), 1);
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("New Puppet"));
+    QCOMPARE(workspace.selection(), (PuppetSelection{1, -1, -1}));
 }
 
 void PuppetWorkspaceTests::testCanvasPlacesPartsByTheirPivot() {
@@ -275,6 +365,51 @@ void showAtFullSize(PuppetWorkspace& workspace) {
     workspace.zoomSpin()->setValue(100.0);
 }
 }  // namespace
+
+void PuppetWorkspaceTests::testEditingKeepsTheViewStill() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.resize(1000, 600);
+    workspace.show();
+    workspace.refreshSprites();
+    workspace.select({0, -1, -1});
+    PuppetCanvas* canvas = workspace.canvas();
+    QVERIFY(QTest::qWaitForWindowExposed(&workspace));
+    const auto originOnScreen = [canvas]() { return canvas->mapFromScene(QPointF(0, 0)); };
+    const QPoint origin = originOnScreen();
+    const double zoom = canvas->zoom();
+
+    // Dragging the body far past the puppet's bounds, as fitted, moves the body, not the view.
+    const QPoint start = canvas->mapFromScene(QPointF(0, -20));
+    const QPoint end = start + QPoint(300, 120);
+    QTest::mousePress(canvas->viewport(), Qt::LeftButton, {}, start);
+    QTest::mouseMove(canvas->viewport(), start + QPoint(150, 60));
+    QTest::mouseMove(canvas->viewport(), end);
+    QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, {}, end);
+    QVERIFY(doll.puppet().parts[0].position->x() > 0);
+    QCOMPARE(originOnScreen(), origin);
+    QCOMPARE(canvas->zoom(), zoom);
+
+    // Nor does undoing it, selecting another part or turning one.
+    doll.project.undoStack.undo();
+    QCOMPARE(originOnScreen(), origin);
+    workspace.select({0, 1, -1});
+    QCOMPARE(originOnScreen(), origin);
+    dragOnCanvas(canvas, QPointF(4, -50), QPointF(60, -40));
+    QCOMPARE(originOnScreen(), origin);
+    QCOMPARE(canvas->zoom(), zoom);
+
+    // Resizing the window after editing keeps the zoom and what is in the middle of the view.
+    const QPointF middle = canvas->mapToScene(canvas->viewport()->rect().center());
+    workspace.resize(1200, 700);
+    QCoreApplication::processEvents();
+    QCOMPARE(canvas->zoom(), zoom);
+    QVERIFY(QLineF(canvas->mapToScene(canvas->viewport()->rect().center()), middle).length() < 2 / zoom);
+
+    // Fit still fits the puppet as it is now.
+    workspace.findChild<QPushButton*>(QStringLiteral("puppetFit"))->click();
+    QVERIFY(canvas->zoom() != zoom);
+}
 
 void PuppetWorkspaceTests::testDraggingThePivotOntoAMarkerAttaches() {
     Doll doll;
@@ -445,6 +580,67 @@ void PuppetWorkspaceTests::testDriftingStaysWithinTheLeeway() {
     // 10 px asked, 2 px allowed from the neck, a point marker.
     QCOMPARE(drawnParts(canvas)[1], turnedHead(0, QPointF(2, -38)));
     QCOMPARE(doll.project.undoStack.count(), 0);
+}
+
+void PuppetWorkspaceTests::testTurningAPositionedPartByItsHandle() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 0, -1});
+    const Puppet before = doll.puppet();
+    auto* angle = workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"));
+    QVERIFY(angle);
+
+    // The body points up from its pivot at the origin; its handle is 36 view pixels along.
+    dragOnCanvas(workspace.canvas(), QPointF(0, -36), QPointF(36, 0));
+    QTransform quarterTurn;
+    quarterTurn.rotate(90);
+    QCOMPARE(drawnParts(workspace.canvas())[0], quarterTurn.mapRect(QRectF(-10, -40, 20, 40)));
+    // The head hangs from the neck, so it turned with the body.
+    QCOMPARE(drawnParts(workspace.canvas())[1], quarterTurn.mapRect(turnedHead(0)));
+    QCOMPARE(angle->value(), 90);
+    QVERIFY(doll.puppet() == before);
+    QCOMPARE(doll.project.undoStack.count(), 0);
+
+    // Dragging the body itself still moves it.
+    dragOnCanvas(workspace.canvas(), QPointF(20, 0), QPointF(20, 15));
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(0, 15)));
+    QCOMPARE(angle->value(), 90);
+}
+
+void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+    auto* angle = workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"));
+    QVERIFY(angle);
+    QCOMPARE(angle->value(), 0);
+
+    angle->setValue(45);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(45));
+    QCOMPARE(doll.project.undoStack.count(), 0);
+
+    // Turning on the canvas shows in the field, and the field keeps it when coming back.
+    dragOnCanvas(workspace.canvas(), turnedHead(45).center(), QPointF(-20, -38));
+    QCOMPARE(angle->value(), -90);
+    workspace.select({0, 0, -1});
+    QCOMPARE(angle->value(), 0);
+    workspace.select({0, 1, -1});
+    QCOMPARE(angle->value(), -90);
+
+    // Limits bound the field; a free turn wraps round.
+    QCOMPARE(angle->minimum(), -179);
+    QVERIFY(angle->wrapping());
+    workspace.findChild<QCheckBox*>(QStringLiteral("partLimitAngle"))->setChecked(true);
+    QCOMPARE(angle->minimum(), -45);
+    QCOMPARE(angle->maximum(), 45);
+    QCOMPARE(angle->value(), -45);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(-45));
+
+    workspace.findChild<QPushButton*>(QStringLiteral("puppetResetPose"))->click();
+    QCOMPARE(angle->value(), 0);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
 }
 
 void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {

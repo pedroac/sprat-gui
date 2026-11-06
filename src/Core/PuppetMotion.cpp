@@ -84,6 +84,10 @@ QPainterPath markerShape(const NamedPoint& marker) {
 int clampAngle(const PuppetAttachment& joint, double angle) {
     if (joint.angleMin && joint.angleMax)
         return qBound(*joint.angleMin, int(std::lround(angle)), *joint.angleMax);
+    return freeAngle(angle);
+}
+
+int freeAngle(double angle) {
     int free = int(std::lround(std::fmod(angle, 360.0)));
     if (free > 180) free -= 360;
     if (free <= -180) free += 360;

@@ -229,6 +229,7 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     const QSignalBlocker blockLimit(m_limitAngle);
     const QSignalBlocker blockMin(m_angleMin);
     const QSignalBlocker blockMax(m_angleMax);
+    const QSignalBlocker blockAngle(m_angle);
 
     const bool attached = !placement.position && !placement.parent.isEmpty();
     m_byPosition->setChecked(!attached);
@@ -259,6 +260,7 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     m_angleMin->setValue(limited ? *placement.angleMin : -45);
     m_angleMax->setValue(limited ? *placement.angleMax : 45);
     updatePlacementRows();
+    m_angle->setValue(placement.angle);
 
     m_partProblem->setText(problem);
     m_partProblem->setVisible(!problem.isEmpty());
@@ -329,6 +331,15 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     angleLayout->addStretch();
     form->addRow(tr("Turns:"), m_angleRow);
 
+    m_angle = new QSpinBox(page);
+    m_angle->setObjectName(QStringLiteral("partAngle"));
+    m_angle->setSuffix(QStringLiteral("°"));
+    m_angle->setKeyboardTracking(false);
+    m_angle->setToolTip(tr("Turns the part to try it, clockwise: from its parent when attached, around its "
+                           "pivot when placed by position. Not saved: Reset puts the puppet back at rest"));
+    form->addRow(tr("Angle:"), m_angle);
+    connect(m_angle, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::angleChanged);
+
     connect(m_byPosition, &QRadioButton::toggled, this, [this](bool checked) {
         updatePlacementRows();
         if (checked) emit detachRequested();
@@ -398,6 +409,27 @@ void PuppetPropertiesPanel::updatePlacementRows() {
     m_partForm->setRowVisible(m_angleRow, attached);
     m_angleMin->setEnabled(m_limitAngle->isChecked());
     m_angleMax->setEnabled(m_limitAngle->isChecked());
+    updateAngleRange();
+}
+
+void PuppetPropertiesPanel::updateAngleRange() {
+    const QSignalBlocker blocker(m_angle);
+    const int angle = m_angle->value();
+    const bool limited = m_attached->isChecked() && m_limitAngle->isChecked();
+    if (limited) {
+        m_angle->setRange(qMin(m_angleMin->value(), m_angleMax->value()),
+                          qMax(m_angleMin->value(), m_angleMax->value()));
+    } else {
+        m_angle->setRange(-179, 180);
+    }
+    // A free turn goes round past 180° to -179°.
+    m_angle->setWrapping(!limited);
+    m_angle->setValue(angle);
+}
+
+void PuppetPropertiesPanel::setAngle(int angle) {
+    const QSignalBlocker blocker(m_angle);
+    m_angle->setValue(angle);
 }
 
 void PuppetPropertiesPanel::showVariant(const QString& explicitName, const QString& defaultName, const QString& source,

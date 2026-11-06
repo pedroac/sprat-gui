@@ -55,7 +55,10 @@ public:
     PuppetSelection selection() const { return m_selection; }
 
     // Edits, each one undo step. They act on the current selection.
-    void addPuppet();
+    /// Opens the New Puppet window, then adds the puppet built there.
+    void newPuppet();
+    /// Adds @p puppet to the atlas as one undo step (a taken name gets a number) and selects it.
+    void addPuppet(const Puppet& puppet);
     void addPart();
     /// Adds the sprites as variants of the selected part.
     void addSpriteVariants(const QStringList& spritePaths);
@@ -76,7 +79,8 @@ public:
     void setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax);
 
     // Trying the joints: turns and drifts shown on the canvas, never saved (a rig is its rest pose).
-    /// Turns attached part @p partIndex to @p angle from its parent, within its limits.
+    /// Turns part @p partIndex to @p angle: an attached part from its parent, within its
+    /// limits; a positioned part around its pivot.
     void tryTurning(int partIndex, double angle);
     /// Moves attached part @p partIndex's joint @p sceneOffset from where the drag started,
     /// within its parent marker and leeway.
@@ -109,11 +113,15 @@ private:
     QPixmap imageOf(const SpritePtr& sprite) const;
     PuppetSpriteLookup spriteLookup() const;
     QString describeSource(const PuppetVariant& variant) const;
+    /// Accepts the active atlas's sprites.
+    std::function<bool(const SpritePtr&)> atlasSpriteFilter() const;
     /// The markers a joint of @p part can use (as the child: point markers only), each with
     /// the variants that lack it.
     QVector<PuppetPropertiesPanel::MarkerChoice> jointMarkers(const PuppetPart& part, bool asChild) const;
     /// The marker of its parent that part @p partIndex hangs from, in the parent's rest sprite.
     std::optional<NamedPoint> parentMarkerOf(const Puppet& puppet, int partIndex) const;
+    /// @p angle within part @p partIndex's joint limits, or brought into a free turn.
+    int triedAngle(const Puppet& puppet, int partIndex, double angle) const;
     /// The tried turns and drifts as evaluator states, within the joints' limits.
     QVector<PuppetPartState> triedStates(const Puppet& puppet) const;
     std::optional<PuppetCanvas::JointRange> jointRange(const Puppet& puppet,
@@ -129,7 +137,7 @@ private:
     QPoint m_dragStartPosition;  ///< The dragged part's position when the drag started
     int m_dragCount = 0;         ///< Numbers drags, so each drag is its own undo step
 
-    /// A tried turn and drift of an attached part.
+    /// A tried turn of a part, and drift of an attached one.
     struct TriedJoint {
         double angle = 0;
         QPointF offset;

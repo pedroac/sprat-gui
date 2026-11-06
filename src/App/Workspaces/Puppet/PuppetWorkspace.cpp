@@ -2,6 +2,7 @@
 #include "MessageDialog.h"
 #include "ProjectSession.h"
 #include "PuppetCanvas.h"
+#include "NewPuppetDialog.h"
 #include "PuppetEditing.h"
 #include "PuppetMotion.h"
 #include "PuppetPropertiesPanel.h"
@@ -119,7 +120,7 @@ void PuppetWorkspace::setupUi() {
 
     m_addPuppetAction = new QAction(tr("New Puppet"), this);
     m_addPuppetAction->setToolTip(tr("Add a puppet to this atlas"));
-    connect(m_addPuppetAction, &QAction::triggered, this, &PuppetWorkspace::addPuppet);
+    connect(m_addPuppetAction, &QAction::triggered, this, &PuppetWorkspace::newPuppet);
     m_addPartAction = new QAction(tr("New Part"), this);
     m_addPartAction->setToolTip(tr("Add a part to the selected puppet, in front of the others"));
     connect(m_addPartAction, &QAction::triggered, this, &PuppetWorkspace::addPart);
@@ -180,6 +181,7 @@ void PuppetWorkspace::setupUi() {
         m_zoomSpin->setSingleStep(10.0);
         row->addWidget(m_zoomSpin);
         auto* fitButton = new QPushButton(tr("Fit"), middle);
+        fitButton->setObjectName(QStringLiteral("puppetFit"));
         fitButton->setToolTip(tr("Zoom to show the whole puppet"));
         row->addWidget(fitButton);
         row->addStretch();
@@ -264,6 +266,9 @@ void PuppetWorkspace::setupUi() {
         attachSelectedPart(PuppetEditing::partNames(*puppet).indexOf(parent), parentMarker, childMarker);
     });
     connect(m_properties, &PuppetPropertiesPanel::detachRequested, this, &PuppetWorkspace::detachSelectedPart);
+    connect(m_properties, &PuppetPropertiesPanel::angleChanged, this, [this](int angle) {
+        tryTurning(m_selection.part, angle);
+    });
     connect(m_properties, &PuppetPropertiesPanel::limitsChanged, this,
             [this](int leeway, bool limited, int angleMin, int angleMax) {
         setSelectedPartLimits(leeway, limited ? std::optional<int>(angleMin) : std::nullopt,
@@ -583,6 +588,7 @@ void PuppetWorkspace::updateProperties() {
             placement.parentMarkers.insert(puppet->parts[j].name, jointMarkers(puppet->parts[j], false));
         }
         placement.childMarkers = jointMarkers(part, true);
+        placement.angle = int(std::lround(triedStates(*puppet)[i].angle));
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
         m_properties->showPart(part.name, placement, placements[i].problem,
                                [this, p, i](const QString& name) {
@@ -672,14 +678,27 @@ void PuppetWorkspace::applyPuppets(const QString& atlasId, const QVector<Puppet>
     refresh();
 }
 
-void PuppetWorkspace::addPuppet() {
+void PuppetWorkspace::newPuppet() {
+    if (!m_session) return;
+    NewPuppetDialog dialog(m_session, puppets(), atlasSpriteFilter(), this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    addPuppet(dialog.puppet());
+}
+
+void PuppetWorkspace::addPuppet(const Puppet& puppet) {
     QVector<Puppet> after = puppets();
-    Puppet puppet;
-    puppet.name = PuppetEditing::uniqueName(tr("puppet"), PuppetEditing::puppetNames(after));
     after.append(puppet);
-    const PuppetSelection added{int(after.size()) - 1, -1, -1};
-    pushEdit(tr("New Puppet"), after, added);
-    if (QTreeWidgetItem* item = itemFor(added)) m_tree->editItem(item, NAME_COLUMN);
+    if (!PuppetEditing::puppetNameProblem(puppets(), -1, puppet.name).isEmpty()) {
+        const QString base = puppet.name.trimmed().isEmpty() ? tr("puppet") : puppet.name.trimmed();
+        after.last().name = PuppetEditing::uniqueName(base, PuppetEditing::puppetNames(puppets()));
+    }
+    pushEdit(tr("New Puppet"), after, {int(after.size()) - 1, -1, -1});
+}
+
+std::function<bool(const SpritePtr&)> PuppetWorkspace::atlasSpriteFilter() const {
+    QSet<QString> inAtlas;
+    for (const QString& path : m_session->activeAtlas().spritePaths) inAtlas.insert(QDir::cleanPath(path));
+    return [inAtlas](const SpritePtr& sprite) { return inAtlas.contains(QDir::cleanPath(sprite->path)); };
 }
 
 void PuppetWorkspace::addPart() {
@@ -703,9 +722,7 @@ void PuppetWorkspace::pickSpriteVariants() {
     options.title = tr("Add Sprites to Part \"%1\"").arg(puppet->parts[m_selection.part].name);
     options.acceptText = tr("Add");
     options.emptyText = tr("This atlas has no sprites.");
-    QSet<QString> inAtlas;
-    for (const QString& path : m_session->activeAtlas().spritePaths) inAtlas.insert(QDir::cleanPath(path));
-    options.filter = [inAtlas](const SpritePtr& sprite) { return inAtlas.contains(QDir::cleanPath(sprite->path)); };
+    options.filter = atlasSpriteFilter();
     addSpriteVariants(SpritePickerDialog::pick(this, m_session, options));
 }
 
@@ -893,10 +910,12 @@ QVector<PuppetPartState> PuppetWorkspace::triedStates(const Puppet& puppet) cons
     QVector<PuppetPartState> states(puppet.parts.size());
     for (int i = 0; i < puppet.parts.size(); ++i) {
         const auto it = m_tried.constFind(puppet.parts[i].name);
-        const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
-        if (it == m_tried.constEnd() || !joint) continue;
+        if (it == m_tried.constEnd()) continue;
         // The rig may have changed since: keep within its limits as they are now.
-        states[i].angle = PuppetMotion::clampAngle(*joint, it->angle);
+        states[i].angle = triedAngle(puppet, i, it->angle);
+        const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
+        // A positioned part turns around its pivot; only an attached one drifts.
+        if (!joint) continue;
         const std::optional<NamedPoint> marker = parentMarkerOf(puppet, i);
         states[i].offset = marker ? QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, it->offset))
                                   : QPointF();
@@ -911,13 +930,17 @@ std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet
     const PuppetPart& part = puppet.parts[i];
     const PuppetAttachment* joint = puppetParentAttachment(puppet, part.name);
     const int parent = joint ? PuppetEditing::partNames(puppet).indexOf(joint->parent) : -1;
-    if (parent < 0 || !placements[parent].placed) return std::nullopt;
+    // A part hanging from one that can't be drawn can't be tried either.
+    if (joint && (parent < 0 || !placements[parent].placed)) return std::nullopt;
 
     PuppetCanvas::JointRange range;
+    range.attached = joint != nullptr;
     range.point = placements[i].pivot;
     range.angle = triedStates(puppet)[i].angle;
-    range.angleMin = joint->angleMin;
-    range.angleMax = joint->angleMax;
+    if (joint) {
+        range.angleMin = joint->angleMin;
+        range.angleMax = joint->angleMax;
+    }
     // The direction the part points in at angle 0: from its joint to its middle.
     const QPixmap image = part.variants.isEmpty() ? QPixmap() : imageOf(spriteFor(part.variants.first()));
     const QPointF middle = placements[i].transform.map(QRectF(image.rect()).center());
@@ -925,7 +948,7 @@ std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet
     const double now = towards.isNull() ? placements[i].totalAngle
                                         : qRadiansToDegrees(std::atan2(towards.y(), towards.x()));
     range.restDirection = now - range.angle;
-    if (const std::optional<NamedPoint> marker = parentMarkerOf(puppet, i))
+    if (const std::optional<NamedPoint> marker = joint ? parentMarkerOf(puppet, i) : std::nullopt)
         range.area = placements[parent].transform.map(PuppetMotion::jointArea(*marker, joint->leeway));
     return range;
 }
@@ -933,10 +956,15 @@ std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet
 void PuppetWorkspace::tryTurning(int partIndex, double angle) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
-    const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[partIndex].name);
-    if (!joint) return;
-    m_tried[puppet->parts[partIndex].name].angle = PuppetMotion::clampAngle(*joint, angle);
+    const int tried = triedAngle(*puppet, partIndex, angle);
+    m_tried[puppet->parts[partIndex].name].angle = tried;
     updateCanvas();
+    if (partIndex == m_selection.part) m_properties->setAngle(tried);
+}
+
+int PuppetWorkspace::triedAngle(const Puppet& puppet, int partIndex, double angle) const {
+    const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[partIndex].name);
+    return joint ? PuppetMotion::clampAngle(*joint, angle) : PuppetMotion::freeAngle(angle);
 }
 
 void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
@@ -959,4 +987,5 @@ void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
 void PuppetWorkspace::resetTriedPose() {
     m_tried.clear();
     updateCanvas();
+    m_properties->setAngle(0);
 }

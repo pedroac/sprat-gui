@@ -9,6 +9,8 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QResizeEvent>
+#include <QScrollBar>
 #include <QStyleOptionGraphicsItem>
 
 namespace {
@@ -31,6 +33,8 @@ constexpr int MARKER_SNAP_DISTANCE = 12;
 constexpr qreal MARKER_DOT_RADIUS = 3.5;
 /// Screen radius of the selected part's turn range arc.
 constexpr qreal TURN_ARC_RADIUS = 36;
+/// Screen radius of the selected part's turn handle, at the end of its angle line.
+constexpr qreal TURN_HANDLE_RADIUS = 5;
 /// Degrees between the points of a drawn arc.
 constexpr double ARC_STEP = 4;
 
@@ -78,6 +82,9 @@ PuppetCanvas::PuppetCanvas(QWidget* parent)
     setScene(m_scene);
     setZoomRange(0.1, 16.0);
     setAlignment(Qt::AlignCenter);
+    setResizeAnchor(QGraphicsView::AnchorViewCenter);
+    // A view zoomed out shows more than the scene rect held.
+    connect(this, &ZoomableGraphicsView::zoomChanged, this, [this]() { updateSceneRect(); });
     clearPuppet();
 }
 
@@ -115,8 +122,16 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& b
     addCross(QPointF(0, 0), ORIGIN_CROSS_HALF_SIZE, QColor(255, 255, 255), parts.size() + 1);
     if (selectedPivot)
         addCross(*selectedPivot, PIVOT_CROSS_HALF_SIZE, palette().color(QPalette::Highlight), parts.size() + 2);
-    // A new scene rect while dragging would shift the view under the pointer.
-    if (!m_dragging) updateSceneRect();
+    // The origin is always in view, even when every part is off to one side.
+    QRectF bounds(0, 0, 0, 0);
+    for (QGraphicsItem* item : m_scene->items()) {
+        if (item->data(PART_INDEX_KEY).isValid()) bounds |= item->sceneBoundingRect();
+    }
+    bounds.adjust(-SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN);
+    // Once the puppet changes, resizing the view no longer refits it: the view stays put.
+    if (bounds != m_puppetBounds && !m_puppetBounds.isNull()) setZoomManual(true);
+    m_puppetBounds = bounds;
+    updateSceneRect();
     viewport()->update();
 }
 
@@ -128,12 +143,23 @@ void PuppetCanvas::addCross(const QPointF& at, int halfSize, const QColor& color
 }
 
 void PuppetCanvas::updateSceneRect() {
-    // The origin is always in view, even when every part is off to one side.
-    QRectF bounds(0, 0, 0, 0);
-    for (QGraphicsItem* item : m_scene->items()) {
-        if (item->data(PART_INDEX_KEY).isValid()) bounds |= item->sceneBoundingRect();
+    // The scene rect holds what is in view, and some room around it to scroll to, so a
+    // new one never moves the view: the puppet changes, the view stays where it is.
+    QRectF rect = m_puppetBounds;
+    const QRectF visible = mapToScene(viewport()->rect()).boundingRect();
+    if (isVisible() && !visible.isEmpty()) {
+        const qreal roomX = visible.width() / 2;
+        const qreal roomY = visible.height() / 2;
+        rect |= visible.adjusted(-roomX, -roomY, roomX, roomY);
     }
-    m_scene->setSceneRect(bounds.adjusted(-SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN));
+    if (rect == m_scene->sceneRect()) return;
+    const QPointF originBefore = viewportTransform().map(QPointF(0, 0));
+    m_scene->setSceneRect(rect);
+    if (!isVisible() || visible.isEmpty()) return;
+    // Scrolled back by whole pixels: centerOn() rounds, and the view would creep.
+    const QPointF moved = viewportTransform().map(QPointF(0, 0)) - originBefore;
+    horizontalScrollBar()->setValue(horizontalScrollBar()->value() + qRound(moved.x()));
+    verticalScrollBar()->setValue(verticalScrollBar()->value() + qRound(moved.y()));
 }
 
 void PuppetCanvas::fitPuppet() {
@@ -142,13 +168,21 @@ void PuppetCanvas::fitPuppet() {
 }
 
 void PuppetCanvas::initialFit() {
-    const QRectF rect = m_scene->sceneRect();
+    const QRectF rect = m_puppetBounds;
     const QRect view = viewport()->rect().adjusted(1, 1, -1, -1);
     if (rect.isEmpty() || view.isEmpty()) return;
     const double zoom = qMin(MAX_FIT_ZOOM,
                              FIT_FILL * qMin(view.width() / rect.width(), view.height() / rect.height()));
+    m_scene->setSceneRect(rect);
     setZoom(zoom);
     centerOn(rect.center());
+    updateSceneRect();
+}
+
+void PuppetCanvas::resizeEvent(QResizeEvent* event) {
+    ZoomableGraphicsView::resizeEvent(event);
+    // A bigger view may show past the scene rect, which the alignment would re-center.
+    if (isZoomManual()) updateSceneRect();
 }
 
 int PuppetCanvas::partAt(const QPoint& viewPos) const {
@@ -177,6 +211,18 @@ bool PuppetCanvas::onPivotHandle(const QPoint& viewPos) const {
     const QPoint handle = mapFromScene(*m_selectedPivot);
     return (viewPos - handle).manhattanLength() <= 2 * PIVOT_HANDLE_RADIUS
         && QLineF(viewPos, handle).length() <= PIVOT_HANDLE_RADIUS;
+}
+
+std::optional<QPointF> PuppetCanvas::turnHandle() const {
+    if (!m_selectedJoint || m_selectedPart < 0 || m_selectedPart >= m_parts.size()) return std::nullopt;
+    const JointRange& range = *m_selectedJoint;
+    return pointAt(range.point, range.restDirection + range.angle, TURN_ARC_RADIUS / qMax(0.01, zoom()));
+}
+
+bool PuppetCanvas::onTurnHandle(const QPoint& viewPos) const {
+    const std::optional<QPointF> handle = turnHandle();
+    // A little more than the drawn dot, so it's easy to grab.
+    return handle && QLineF(QPointF(viewPos), QPointF(mapFromScene(*handle))).length() <= TURN_HANDLE_RADIUS + 3;
 }
 
 PuppetCanvas::Target PuppetCanvas::targetAt(const QPoint& viewPos) const {
@@ -218,10 +264,11 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     }
     ZoomableGraphicsView::mousePressEvent(event);
     if (event->button() != Qt::LeftButton || m_isPanning) return;
-    const int part = partAt(event->pos());
-    m_pressedPart = isMovable(part) ? part : -1;
-    m_turnPart = isTurnable(part) ? part : -1;
-    m_drift = event->modifiers() & Qt::ShiftModifier;
+    const bool onHandle = onTurnHandle(event->pos());
+    const int part = onHandle ? m_selectedPart : partAt(event->pos());
+    m_pressedPart = !onHandle && isMovable(part) ? part : -1;
+    m_turnPart = onHandle || isTurnable(part) ? part : -1;
+    m_drift = !onHandle && (event->modifiers() & Qt::ShiftModifier);
     m_turning = false;
     m_pressPos = event->pos();
     m_pressScenePos = mapToScene(event->pos());
@@ -244,7 +291,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
         if (!m_turning) {
             if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
             m_turning = true;
-            m_dragging = true;  // keeps the scene rect, so the view doesn't shift under the pointer
+            m_dragging = true;
             m_turnTotal = 0;
             m_turnLastAngle = angleAround(m_pressScenePos);
             emit partTurnStarted(m_turnPart, m_drift);
@@ -277,6 +324,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (event->buttons() == Qt::NoButton) {
         const int hovered = partAt(event->pos());
         const Qt::CursorShape cursor = onPivotHandle(event->pos()) ? Qt::CrossCursor
+            : onTurnHandle(event->pos())                            ? Qt::OpenHandCursor
             : isMovable(hovered)                                    ? Qt::SizeAllCursor
             : isTurnable(hovered)                                   ? Qt::OpenHandCursor
                                                                     : Qt::ArrowCursor;
@@ -306,7 +354,7 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
         m_turning = false;
         m_dragging = false;
     }
-    if (dragged) updateSceneRect();
+    if (dragged) setZoomManual(true);
     ZoomableGraphicsView::mouseReleaseEvent(event);
 }
 
@@ -373,17 +421,6 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
         painter->drawEllipse(*m_selectedPivot, radius, radius);
     }
 
-    // How to try the selected attached part, in the view's corner.
-    if (m_selectedJoint && !m_attaching && !m_turning) {
-        painter->save();
-        painter->resetTransform();
-        const QString hint = tr("Drag to turn it, Shift+drag to move its joint (not saved)");
-        const QRect area = viewport()->rect().adjusted(8, 0, -8, -6);
-        painter->setPen(palette().color(QPalette::PlaceholderText));
-        painter->drawText(area, Qt::AlignLeft | Qt::AlignBottom | Qt::TextWordWrap, hint);
-        painter->restore();
-    }
-
     // The selected part's range: where its joint may drift, and how far it may turn.
     if (m_selectedJoint && !m_attaching) {
         const JointRange& range = *m_selectedJoint;
@@ -409,9 +446,15 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
         nowPen.setCosmetic(true);
         painter->setPen(nowPen);
         painter->drawLine(range.point, pointAt(range.point, range.restDirection + range.angle, radius));
+        const QPointF handle = pointAt(range.point, range.restDirection + range.angle, radius);
+        const qreal handleRadius = TURN_HANDLE_RADIUS / qMax(0.01, zoom());
+        QPen handlePen(QColor(0, 0, 0, 160), 1);
+        handlePen.setCosmetic(true);
+        painter->setPen(handlePen);
+        painter->setBrush(highlight);
+        painter->drawEllipse(handle, handleRadius, handleRadius);
         if (std::lround(range.angle) != 0)
-            drawLabel(painter, pointAt(range.point, range.restDirection + range.angle, radius),
-                      QStringLiteral("%1°").arg(std::lround(range.angle)), highlight);
+            drawLabel(painter, handle, QStringLiteral("%1°").arg(std::lround(range.angle)), highlight);
     }
 
     if (!m_attaching) return;

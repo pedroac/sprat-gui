@@ -485,6 +485,8 @@ set(PROJECT_SOURCES
     src/App/Workspaces/Puppet/PuppetCanvas.cpp
     src/App/Workspaces/Puppet/PuppetPropertiesPanel.h
     src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
+    src/App/Workspaces/Puppet/NewPuppetDialog.h
+    src/App/Workspaces/Puppet/NewPuppetDialog.cpp
     src/App/Workspaces/Puppet/PuppetTreeWidget.h
     src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
     src/App/MainWindow/Undo/PuppetCommands.h
@@ -775,6 +777,7 @@ if(BUILD_TESTING)
         src/App/Workspaces/Puppet/PuppetWorkspace.cpp
         src/App/Workspaces/Puppet/PuppetCanvas.cpp
         src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
+        src/App/Workspaces/Puppet/NewPuppetDialog.cpp
         src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
         src/Core/MessageDialog.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp

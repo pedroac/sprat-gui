@@ -53,6 +53,8 @@ public:
         QHash<QString, QVector<MarkerChoice>> parentMarkers;
         /// This part's point markers, which it can hang by.
         QVector<MarkerChoice> childMarkers;
+        /// The angle it is tried at: from its parent, or around its pivot. Not saved.
+        int angle = 0;
     };
 
     explicit PuppetPropertiesPanel(QWidget* parent = nullptr);
@@ -66,6 +68,8 @@ public:
     /// @param source What it shows, e.g. "Sprite sprites/face.png"
     void showVariant(const QString& explicitName, const QString& defaultName, const QString& source,
                      const QPixmap& thumbnail, bool isRest, NameValidator validator);
+    /// Shows the shown part's tried angle, as it turns on the canvas.
+    void setAngle(int angle);
 
 signals:
     void renameRequested(const QString& name);
@@ -76,6 +80,8 @@ signals:
     void detachRequested();
     /// The attachment's leeway and, when @p limited, its angle limits.
     void limitsChanged(int leeway, bool limited, int angleMin, int angleMax);
+    /// Try the part at @p angle (not saved).
+    void angleChanged(int angle);
     void makeRestVariantRequested();
 
 private:
@@ -88,6 +94,8 @@ private:
     void emitAttach();
     void emitLimits();
     void updatePlacementRows();
+    /// The Angle field's range: the joint's limits, or a free turn.
+    void updateAngleRange();
 
     QStackedWidget* m_pages = nullptr;
     NameValidator m_validator;
@@ -113,6 +121,7 @@ private:
     QCheckBox* m_limitAngle = nullptr;
     QSpinBox* m_angleMin = nullptr;
     QSpinBox* m_angleMax = nullptr;
+    QSpinBox* m_angle = nullptr;
     Placement m_placement;  ///< As shown
     QLabel* m_partProblem = nullptr;
 

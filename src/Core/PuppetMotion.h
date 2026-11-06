@@ -19,6 +19,9 @@ QPainterPath markerShape(const NamedPoint& marker);
 /// @p angle (degrees clockwise from the parent) within the joint's limits, in whole degrees.
 /// Without limits the part turns freely: the angle is brought into -179..180.
 int clampAngle(const PuppetAttachment& joint, double angle);
+/// @p angle of a free turn (no limits, or a positioned part around its pivot), in whole
+/// degrees brought into -179..180.
+int freeAngle(double angle);
 
 /// @p offset (from the marker's point) moved to the nearest place the joint may go: inside
 /// the marker's shape, or up to @p leeway pixels from it. Whole pixels.

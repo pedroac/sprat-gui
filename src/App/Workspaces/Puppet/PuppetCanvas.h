@@ -16,7 +16,8 @@ class QGraphicsScene;
  *
  * Clicking a part selects it; dragging a movable part, or the arrow keys on the selected
  * one, asks to move it. Dragging a turnable (attached) part asks to turn it around its joint;
- * Shift+dragging it asks to move its joint. Dragging the selected part's pivot handle shows the markers it can
+ * Shift+dragging it asks to move its joint. Dragging the selected part's turn handle asks to
+ * turn it, whether attached or placed by position. Dragging the selected part's pivot handle shows the markers it can
  * hang from: dropping on one asks to attach the part there, dropping elsewhere asks to place
  * it there by position.
  *
@@ -52,8 +53,10 @@ public:
         bool selected = false;  ///< Its part is selected
     };
 
-    /// How far the selected part may turn and drift, drawn around its joint.
+    /// How far the selected part may turn and drift, drawn around its joint (its pivot, for a
+    /// positioned part), with a handle at the end of its angle line that turns it.
     struct JointRange {
+        bool attached = false;     ///< Turns from its parent; otherwise around its own pivot
         QPointF point;
         double restDirection = 0;  ///< Degrees, from the joint to the part's center at angle 0
         double angle = 0;          ///< Its angle now, from the parent
@@ -70,7 +73,8 @@ public:
                     std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint = std::nullopt);
     /// Shows only the origin cross.
     void clearPuppet();
-    /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms.
+    /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms
+    /// or the puppet changes. Nothing else moves the view: edits leave it where it is.
     void fitPuppet();
     /// Fits the whole puppet (the base class fits one side and scrolls the other).
     void initialFit() override;
@@ -101,6 +105,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void drawForeground(QPainter* painter, const QRectF& rect) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     /// A marker the pivot handle is over: part index and marker index.
@@ -117,6 +122,9 @@ private:
     double angleAround(const QPointF& scenePos) const;
     /// Whether @p viewPos is on the selected part's pivot handle.
     bool onPivotHandle(const QPoint& viewPos) const;
+    /// Where the selected part's turn handle is, in scene coordinates, if it has one.
+    std::optional<QPointF> turnHandle() const;
+    bool onTurnHandle(const QPoint& viewPos) const;
     /// The marker of an attach target nearest to @p viewPos, if it is close enough.
     Target targetAt(const QPoint& viewPos) const;
     void cancelAttach();
@@ -126,6 +134,7 @@ private:
     void updateSceneRect();
 
     QGraphicsScene* m_scene = nullptr;
+    QRectF m_puppetBounds;  ///< The parts and the origin, with a margin: what a fit shows
     QVector<Part> m_parts;  ///< As last shown
     QVector<Bone> m_bones;
     int m_selectedPart = -1;

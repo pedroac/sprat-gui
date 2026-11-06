@@ -549,6 +549,9 @@ void PuppetTests::testJointsTurnWithinTheirLimits() {
     QCOMPARE(PuppetMotion::clampAngle(free, 30.4), 30);
     QCOMPARE(PuppetMotion::clampAngle(free, 270), -90);  // a free part takes the short way
     QCOMPARE(PuppetMotion::clampAngle(free, -540), 180);
+    QCOMPARE(PuppetMotion::freeAngle(-180), 180);
+    QCOMPARE(PuppetMotion::freeAngle(181), -179);
+    QCOMPARE(PuppetMotion::freeAngle(720.4), 0);
 
     PuppetAttachment limited = free;
     limited.angleMin = -15;

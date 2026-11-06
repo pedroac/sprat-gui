@@ -7,10 +7,12 @@ class PuppetWorkspaceTests : public QObject {
 
 private slots:
     void testBuildingAPuppetIsUndoable();
+    void testNewPuppetDialogBuildsAPuppetFromDroppedSprites();
     void testCanvasPlacesPartsByTheirPivot();
     void testClickingAPartSelectsIt();
     void testDraggingAPartMovesIt();
     void testArrowKeysNudgeTheSelectedPart();
+    void testEditingKeepsTheViewStill();
     void testDraggingThePivotOntoAMarkerAttaches();
     void testDraggingThePivotAwayDetaches();
     void testPanelAttachesAndDetaches();
@@ -18,6 +20,8 @@ private slots:
     void testTurningAnAttachedPartIsNotSaved();
     void testTurningStopsAtTheAngleLimits();
     void testDriftingStaysWithinTheLeeway();
+    void testTurningAPositionedPartByItsHandle();
+    void testAngleFieldTurnsThePart();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();
