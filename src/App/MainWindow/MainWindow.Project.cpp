@@ -875,7 +875,11 @@ QJsonObject MainWindow::buildProjectPayload(SaveConfig config, ProjectSession* s
     }
     input.primarySelectedSpritePath = session->selectedSprite ? session->selectedSprite->path : QString();
     input.selectedPointName = session->selectedPointName;
-    input.layoutModels = session->activeAtlas().layoutModels;
+    for (int i = 0; i < session->atlases.size(); ++i) {
+        if (i != session->activeAtlasIndex) input.layoutModels += session->atlases[i].layoutModels;
+    }
+    input.layoutModels += session->activeAtlas().layoutModels;
+    input.storedSpriteStates = session->storedSpriteStates;
     input.layoutOutput = session->cachedLayoutOutput;
     input.layoutScale = session->cachedLayoutScale;
     input.profile = m_atlasWorkspace->profileCombo() ? m_atlasWorkspace->profileCombo()->currentData().toString() : QString();
@@ -1501,6 +1505,7 @@ void MainWindow::applyProjectPayload() {
     m_session->pendingProjectPayload = QJsonObject();
     const QString projectDir = m_session->pendingProjectDir;
     m_session->pendingProjectDir.clear();
+    m_session->storedSpriteStates = root["spritemarkers"].toObject()["sprites"].toObject();
     ProjectPayloadApplyResult applied = ProjectPayloadCodec::applyToLayout(
         root, m_session->currentFolder, m_session->activeAtlas().layoutModels, projectDir);
 

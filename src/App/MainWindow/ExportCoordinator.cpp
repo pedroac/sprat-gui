@@ -1,4 +1,5 @@
 #include "ExportCoordinator.h"
+#include "ProjectPayloadCodec.h"
 #include "AtlasOutputFolder.h"
 #include "ILayoutContext.h"
 #include "LayoutOrchestrator.h"
@@ -181,6 +182,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
     QStringList allFramePaths = m_cfg.session->activeFramePaths;
     const QString layoutSourcePath = m_cfg.session->layoutSourcePath;
     const QString sourceFolder = m_cfg.session->sourceFolder;
+    const QString currentFolder = m_cfg.session->currentFolder;
     QVector<SpratProfile> profiles = m_cfg.layoutContext->configuredProfiles();
     const QString deduplicateMode = m_settings.deduplicateMode;
     const int dedupThreshold = m_settings.dedupThreshold;
@@ -193,7 +195,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                      atlasSnapshot   = std::move(atlasSnapshot),
                      allFramePaths   = std::move(allFramePaths),
                      layoutSourcePath,
-                     sourceFolder,
+                     sourceFolder, currentFolder,
                      profiles        = std::move(profiles),
                      deduplicateMode, dedupThreshold,
                      spratLayoutBin, spratPackBin, spratConvertBin,
@@ -216,6 +218,10 @@ bool ExportCoordinator::runExport(SaveConfig config) {
         const bool multiAtlas = atlasesToExport.size() > 1
             || (!atlasesToExport.isEmpty() && !atlasesToExport.first().isNeutral);
         if (!multiAtlas) {
+            const QJsonObject payload = atlasesToExport.isEmpty()
+                ? projectPayload
+                : ProjectPayloadCodec::atlasExportPayload(projectPayload, allFramePaths,
+                                                          atlasesToExport.first().timelines, currentFolder);
             result.success = ProjectSaveService::save(
                 config,
                 layoutSourcePath,
@@ -226,7 +232,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 spratLayoutBin,
                 spratPackBin,
                 spratConvertBin,
-                projectPayload,
+                payload,
                 result.savedDestination,
                 result.error,
                 deduplicateMode,
@@ -241,7 +247,6 @@ bool ExportCoordinator::runExport(SaveConfig config) {
             for (const auto& a : atlasesToExport)
                 if (a.outputSubdir.isEmpty()) ++rootExporterCount;
 
-            bool first = true;
             for (const auto& atlas : atlasesToExport) {
                 if (shouldCancel()) { result.canceled = true; break; }
 
@@ -257,9 +262,9 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 // ProjectSaveService writes to <outputPath>/<profile>/<atlasSubdir>/.
                 atlasConfig.atlasSubdir = effectiveAtlasOutputSubdir(atlas, rootExporterCount);
 
-                // Write project JSON only on first atlas call
-                const QJsonObject payload = first ? projectPayload : QJsonObject();
-                first = false;
+                // Each atlas exports its own sprites' markers and its own animations.
+                const QJsonObject payload = ProjectPayloadCodec::atlasExportPayload(
+                    projectPayload, atlas.spritePaths, atlas.timelines, currentFolder);
 
                 setStatus(tr("Exporting '%1'...").arg(atlas.name));
 

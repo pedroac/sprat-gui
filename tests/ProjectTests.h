@@ -11,6 +11,8 @@ private slots:
     void testProjectPayloadKeepsAnimationLoopMode();
     void testProjectPayloadDropsPathsOutsideTheProject();
     void testProjectPayloadKeepsExcludedSpritesWhenProjectMoves();
+    void testProjectPayloadKeepsSpritesOfOtherAtlases();
+    void testAtlasExportPayloadHoldsOnlyThatAtlas();
     void testProjectFileLoaderLoad();
     void testProjectFileLoaderLoadZip();
     void testAutosaveProjectStoreCreatesMissingParentDir();

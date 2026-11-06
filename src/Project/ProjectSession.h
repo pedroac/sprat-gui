@@ -91,6 +91,10 @@ public:
 
     // --- Transient State ---
     QJsonObject pendingProjectPayload;
+    /// Sprite states ("spritemarkers"/"sprites" of ProjectPayloadCodec) of sprites that
+    /// aren't in the active atlas's layout: the loaded project's, and those of sprites
+    /// laid out before. Applied when their atlas is laid out, and saved with the project.
+    QJsonObject storedSpriteStates;
     QString pendingProjectDir;  // Folder holding the pending project's project.spart.json
 
     void clear();
