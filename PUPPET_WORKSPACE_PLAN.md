@@ -125,7 +125,7 @@ listing the atlas's timelines, as the source for variants.
   highlight while dragging, the joint snaps on drop), or use the right panel. The child's marker
   must be a point; the parent's may be any shape. A new part with no attachment is positioned
   at the puppet origin.
-- **Positioned parts** get a draggable `at:` handle on the canvas.
+- **Positioned parts** are dragged on the canvas, or nudged with the arrow keys (done in phase 2).
 - **Missing joint markers** are listed in Problems with a jump to that sprite in the Sprites
   workspace (which has the marker editor). Later: "copy this marker to all variants".
 

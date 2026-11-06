@@ -186,6 +186,70 @@ void PuppetWorkspaceTests::testClickingAPartSelectsIt() {
     QCOMPARE(workspace.selection(), (PuppetSelection{0, -1, -1}));
 }
 
+void PuppetWorkspaceTests::testDraggingAPartMovesIt() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.resize(1000, 600);
+    workspace.show();
+    workspace.refreshSprites();
+    workspace.select({0, -1, -1});
+    PuppetCanvas* canvas = workspace.canvas();
+    workspace.zoomSpin()->setValue(100.0);  // one view pixel per sprite pixel
+    QWidget* viewport = canvas->viewport();
+
+    // Drag the body 12 px right and 5 px down, in two moves.
+    const QPoint start = canvas->mapFromScene(QPointF(0, -20));
+    QTest::mousePress(viewport, Qt::LeftButton, {}, start);
+    QTest::mouseMove(viewport, start + QPoint(6, 2));
+    QTest::mouseMove(viewport, start + QPoint(12, 5));
+    QTest::mouseRelease(viewport, Qt::LeftButton, {}, start + QPoint(12, 5));
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(12, 5)));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 0, -1}));
+    // The head hangs from the body, so it moved with it.
+    QCOMPARE(drawnParts(canvas), (QVector<QRectF>{QRectF(2, -35, 20, 40), QRectF(4, -49, 16, 16)}));
+
+    // A second drag is its own undo step.
+    const QPoint again = canvas->mapFromScene(QPointF(12, -15));
+    QTest::mousePress(viewport, Qt::LeftButton, {}, again);
+    QTest::mouseMove(viewport, again + QPoint(0, 10));
+    QTest::mouseRelease(viewport, Qt::LeftButton, {}, again + QPoint(0, 10));
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(12, 15)));
+    QCOMPARE(doll.project.undoStack.count(), 2);
+    doll.project.undoStack.undo();
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(12, 5)));
+
+    // The head is placed by its attachment: dragging it selects it but doesn't move it.
+    const Puppet beforeHeadDrag = doll.puppet();
+    const QPoint head = canvas->mapFromScene(QPointF(12, -41));
+    QTest::mousePress(viewport, Qt::LeftButton, {}, head);
+    QTest::mouseMove(viewport, head + QPoint(20, 0));
+    QTest::mouseRelease(viewport, Qt::LeftButton, {}, head + QPoint(20, 0));
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
+    QVERIFY(doll.puppet() == beforeHeadDrag);
+    QCOMPARE(doll.project.undoStack.index(), 1);
+}
+
+void PuppetWorkspaceTests::testArrowKeysNudgeTheSelectedPart() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.refreshSprites();
+    workspace.select({0, 0, -1});
+    PuppetCanvas* canvas = workspace.canvas();
+
+    QTest::keyClick(canvas, Qt::Key_Right);
+    QTest::keyClick(canvas, Qt::Key_Right);
+    QTest::keyClick(canvas, Qt::Key_Up, Qt::ShiftModifier);
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(2, -10)));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+
+    // The head hangs from the body: the arrows leave it alone.
+    workspace.select({0, 1, -1});
+    QTest::keyClick(canvas, Qt::Key_Left);
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(2, -10)));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+}
+
 void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {
     Doll doll;
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);

@@ -63,7 +63,9 @@ public:
     void renameSelected(const QString& name);
     /// Moves the selected part or variant to @p to among its siblings.
     void moveSelected(int to);
-    void setSelectedPartPosition(const QPoint& position);
+    /// Sets the selected part's position. Edits with the same @p mergeKey in a row are one
+    /// undo step; an empty key merges the panel's edits of this part.
+    void setSelectedPartPosition(const QPoint& position, const QString& mergeKey = QString());
     void select(const PuppetSelection& selection);
 
 signals:
@@ -99,6 +101,8 @@ private:
     /// The puppet the canvas last fitted, so it fits again only for another puppet.
     QString m_fittedPuppet;
     bool m_rebuilding = false;
+    QPoint m_dragStartPosition;  ///< The dragged part's position when the drag started
+    int m_dragCount = 0;         ///< Numbers drags, so each drag is its own undo step
     mutable QHash<QString, QPixmap> m_images;  ///< By sprite path
     QHash<QString, SpritePtr> m_spritesByPath;  ///< The active atlas's laid-out sprites
     QHash<QString, SpritePtr> m_spritesByName;

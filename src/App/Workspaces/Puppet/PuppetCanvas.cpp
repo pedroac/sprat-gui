@@ -1,9 +1,11 @@
 #include "PuppetCanvas.h"
 
+#include <QApplication>
 #include <QGraphicsItem>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsPolygonItem>
 #include <QGraphicsScene>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
@@ -18,6 +20,8 @@ constexpr double MAX_FIT_ZOOM = 4.0;
 constexpr double FIT_FILL = 0.95;
 constexpr int ORIGIN_CROSS_HALF_SIZE = 24;
 constexpr int PIVOT_CROSS_HALF_SIZE = 8;
+/// Pixels Shift+arrow moves a part; an arrow alone moves it one.
+constexpr int NUDGE_STEP_LARGE = 10;
 
 /// The key of a pixmap item's part index (QGraphicsItem::data).
 constexpr int PART_INDEX_KEY = 0;
@@ -66,6 +70,9 @@ void PuppetCanvas::clearPuppet() {
 
 void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart, std::optional<QPointF> selectedPivot) {
     m_scene->clear();
+    m_movable.clear();
+    for (const Part& part : parts) m_movable.append(part.placed && part.movable);
+    m_selectedPart = selectedPart;
     for (int i = 0; i < parts.size(); ++i) {
         const Part& part = parts[i];
         if (!part.placed || part.image.isNull()) continue;
@@ -88,7 +95,8 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart, std:
     addCross(QPointF(0, 0), ORIGIN_CROSS_HALF_SIZE, QColor(255, 255, 255), parts.size() + 1);
     if (selectedPivot)
         addCross(*selectedPivot, PIVOT_CROSS_HALF_SIZE, palette().color(QPalette::Highlight), parts.size() + 2);
-    updateSceneRect();
+    // A new scene rect while dragging would shift the view under the pointer.
+    if (!m_dragging) updateSceneRect();
 }
 
 void PuppetCanvas::addCross(const QPointF& at, int halfSize, const QColor& color, qreal z) {
@@ -122,15 +130,69 @@ void PuppetCanvas::initialFit() {
     centerOn(rect.center());
 }
 
+int PuppetCanvas::partAt(const QPoint& viewPos) const {
+    for (QGraphicsItem* item : items(viewPos)) {
+        const QVariant index = item->data(PART_INDEX_KEY);
+        if (index.isValid()) return index.toInt();
+    }
+    return -1;
+}
+
 void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     ZoomableGraphicsView::mousePressEvent(event);
     if (event->button() != Qt::LeftButton || m_isPanning) return;
-    for (QGraphicsItem* item : items(event->pos())) {
-        const QVariant index = item->data(PART_INDEX_KEY);
-        if (index.isValid()) {
-            emit partClicked(index.toInt());
-            return;
+    const int part = partAt(event->pos());
+    m_pressedPart = (part >= 0 && part < m_movable.size() && m_movable[part]) ? part : -1;
+    m_pressPos = event->pos();
+    m_pressScenePos = mapToScene(event->pos());
+    m_dragging = false;
+    emit partClicked(part);
+}
+
+void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (m_pressedPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
+        if (!m_dragging) {
+            if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
+            m_dragging = true;
+            emit partDragStarted(m_pressedPart);
         }
+        const QPointF offset = mapToScene(event->pos()) - m_pressScenePos;
+        emit partDragged(m_pressedPart, QPoint(qRound(offset.x()), qRound(offset.y())));
+        return;
     }
-    emit partClicked(-1);
+    ZoomableGraphicsView::mouseMoveEvent(event);
+    if (event->buttons() == Qt::NoButton) {
+        const int part = partAt(event->pos());
+        const bool movable = part >= 0 && part < m_movable.size() && m_movable[part];
+        viewport()->setCursor(movable ? Qt::SizeAllCursor : Qt::ArrowCursor);
+    }
+}
+
+void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    const bool dragged = m_dragging;
+    if (event->button() == Qt::LeftButton) {
+        m_pressedPart = -1;
+        m_dragging = false;
+    }
+    if (dragged) updateSceneRect();
+    ZoomableGraphicsView::mouseReleaseEvent(event);
+}
+
+void PuppetCanvas::keyPressEvent(QKeyEvent* event) {
+    const bool movable = m_selectedPart >= 0 && m_selectedPart < m_movable.size() && m_movable[m_selectedPart];
+    const int step = (event->modifiers() & Qt::ShiftModifier) ? NUDGE_STEP_LARGE : 1;
+    QPoint offset;
+    switch (event->key()) {
+    case Qt::Key_Left:  offset = QPoint(-step, 0); break;
+    case Qt::Key_Right: offset = QPoint(step, 0); break;
+    case Qt::Key_Up:    offset = QPoint(0, -step); break;
+    case Qt::Key_Down:  offset = QPoint(0, step); break;
+    default: break;
+    }
+    if (movable && !offset.isNull()) {
+        emit partNudged(m_selectedPart, offset);
+        event->accept();
+        return;
+    }
+    ZoomableGraphicsView::keyPressEvent(event);
 }

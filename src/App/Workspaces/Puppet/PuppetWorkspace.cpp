@@ -191,7 +191,25 @@ void PuppetWorkspace::setupUi() {
         m_zoomSpin->setValue(zoom * 100.0);
     });
     connect(m_canvas, &PuppetCanvas::partClicked, this, [this](int part) {
-        if (m_selection.puppet >= 0) select({m_selection.puppet, part, -1});
+        // A click on the selected part keeps its variant selected.
+        if (m_selection.puppet >= 0 && (part < 0 || part != m_selection.part))
+            select({m_selection.puppet, part, -1});
+    });
+    connect(m_canvas, &PuppetCanvas::partDragStarted, this, [this](int part) {
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet || part < 0 || part >= puppet->parts.size()) return;
+        m_dragStartPosition = puppet->parts[part].position.value_or(QPoint());
+        ++m_dragCount;
+    });
+    connect(m_canvas, &PuppetCanvas::partDragged, this, [this](int part, const QPoint& offset) {
+        if (part != m_selection.part) return;
+        setSelectedPartPosition(m_dragStartPosition + offset, QStringLiteral("drag %1").arg(m_dragCount));
+    });
+    connect(m_canvas, &PuppetCanvas::partNudged, this, [this](int part, const QPoint& offset) {
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet || part != m_selection.part || !puppet->parts[part].position) return;
+        setSelectedPartPosition(*puppet->parts[part].position + offset,
+                                QStringLiteral("nudge %1 %2").arg(m_selection.puppet).arg(part));
     });
 
     // === Right: properties ===
@@ -199,7 +217,8 @@ void PuppetWorkspace::setupUi() {
     m_properties->setMinimumWidth(220);
     splitter->addWidget(m_properties);
     connect(m_properties, &PuppetPropertiesPanel::renameRequested, this, &PuppetWorkspace::renameSelected);
-    connect(m_properties, &PuppetPropertiesPanel::positionChanged, this, &PuppetWorkspace::setSelectedPartPosition);
+    connect(m_properties, &PuppetPropertiesPanel::positionChanged, this,
+            [this](const QPoint& position) { setSelectedPartPosition(position); });
     connect(m_properties, &PuppetPropertiesPanel::makeRestVariantRequested, this, [this]() { moveSelected(0); });
 
     splitter->setStretchFactor(0, 0);
@@ -434,6 +453,8 @@ void PuppetWorkspace::updateCanvas() {
         PuppetCanvas::Part drawn;
         drawn.placed = placements[i].placed;
         drawn.transform = placements[i].transform;
+        // A part placed by its attachment moves with its parent, not on its own.
+        drawn.movable = part.position.has_value() && !puppetParentAttachment(*puppet, part.name);
         if (!part.variants.isEmpty()) drawn.image = imageOf(spriteFor(part.variants.first()));
         parts.append(drawn);
     }
@@ -668,12 +689,13 @@ void PuppetWorkspace::moveSelected(int to) {
     }
 }
 
-void PuppetWorkspace::setSelectedPartPosition(const QPoint& position) {
+void PuppetWorkspace::setSelectedPartPosition(const QPoint& position, const QString& mergeKey) {
     if (!selectedPuppet() || m_selection.part < 0) return;
     QVector<Puppet> after = puppets();
     PuppetPart& part = after[m_selection.puppet].parts[m_selection.part];
     if (part.position == position) return;
     part.position = position;
     pushEdit(tr("Move Part"), after, m_selection,
-             QStringLiteral("position %1 %2").arg(m_selection.puppet).arg(m_selection.part));
+             mergeKey.isEmpty() ? QStringLiteral("position %1 %2").arg(m_selection.puppet).arg(m_selection.part)
+                                : mergeKey);
 }

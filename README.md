@@ -287,7 +287,7 @@ Builds sprat-cli puppets: cutout rigs whose parts each show one of their sprites
   - Drag a part to change the draw order, or a variant to reorder the variants (drop it on its part to make it the rest variant). Right-click for **Bring Forward**, **Send Backward** and **Make Rest Variant**.
   - **Add** › **New Puppet**, **New Part** (placed at the puppet's origin) or **Add Sprites...** (pick sprites from the atlas for the selected part). **Remove** (or `Delete`) removes the selected puppet, part or variant; removing a part also removes the attachments to and from it.
   - Rename with `F2` or in the right panel. Names must be unique, as sprat-cli requires: puppets in the atlas, parts in their puppet, variants in their part.
-- **Canvas**: the selected puppet at rest. The large cross is the puppet's origin; the small one is the selected part's pivot. Click a part to select it.
+- **Canvas**: the selected puppet at rest. The large cross is the puppet's origin; the small one is the selected part's pivot. Click a part to select it, and drag it to move it; parts hanging from it move along. The arrow keys move the selected part by one pixel (ten with `Shift`). A part hanging from another moves with that part, not on its own.
 - **Right panel**: the selected item's name; a part's position, or what it hangs from; a variant's sprite and preview. A ⚠ in the tree marks a part that can't be drawn (the panel says why) or a sprite that isn't in the atlas.
 
 Every change can be undone.
@@ -403,6 +403,8 @@ A full-screen preview and configuration area for final output. Preview exactly h
 ### **Puppet Workspace**
 - `F2`: Rename the selected puppet, part or variant.
 - `Delete`: Remove the selected puppet, part or variant.
+- Drag a part on the canvas: move it (one undo step per drag).
+- `Arrow Keys` on the canvas: move the selected part 1 px (`Shift`: 10 px).
 - `Ctrl + Wheel`: Zoom canvas.
 - `Space + Drag` or `Middle Mouse Drag`: Pan canvas.
 

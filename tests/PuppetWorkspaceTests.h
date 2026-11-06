@@ -9,6 +9,8 @@ private slots:
     void testBuildingAPuppetIsUndoable();
     void testCanvasPlacesPartsByTheirPivot();
     void testClickingAPartSelectsIt();
+    void testDraggingAPartMovesIt();
+    void testArrowKeysNudgeTheSelectedPart();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();
