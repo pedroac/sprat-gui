@@ -22,6 +22,9 @@ private slots:
     void testDriftingStaysWithinTheLeeway();
     void testTurningAPositionedPartByItsHandle();
     void testPullingAHandTurnsTheArm();
+    void testPullingSlidesWithinTheLeeway();
+    void testHiddenMarkersAreNotOffered();
+    void testMarkerListDoesNotSpreadThePanelRows();
     void testAngleFieldTurnsThePart();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();

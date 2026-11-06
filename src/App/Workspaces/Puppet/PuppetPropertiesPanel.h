@@ -11,8 +11,10 @@
 class QCheckBox;
 class QComboBox;
 class QFormLayout;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
+class QListWidget;
 class QPushButton;
 class QRadioButton;
 class QSpinBox;
@@ -55,6 +57,9 @@ public:
         QVector<MarkerChoice> childMarkers;
         /// The angle it is tried at: from its parent, or around its pivot. Not saved.
         int angle = 0;
+        /// Its sprites' markers (not "pivot"), and those it neither shows nor offers for joints.
+        QStringList markers;
+        QStringList hiddenMarkers;
     };
 
     explicit PuppetPropertiesPanel(QWidget* parent = nullptr);
@@ -82,10 +87,13 @@ signals:
     void limitsChanged(int leeway, bool limited, int angleMin, int angleMax);
     /// Try the part at @p angle (not saved).
     void angleChanged(int angle);
+    /// The markers the part should neither show nor offer for joints.
+    void hiddenMarkersChanged(const QStringList& hiddenMarkers);
     void makeRestVariantRequested();
 
 private:
-    QWidget* buildNameRow(QLineEdit*& edit, QLabel*& problem);
+    /// Adds a "Name:" row, and under it a row for the name's problem (hidden when there is none).
+    void addNameRows(QFormLayout* form, QWidget* page, QLineEdit*& edit, QLabel*& problem);
     void commitName(QLineEdit* edit, QLabel* problem);
     void checkName(QLineEdit* edit, QLabel* problem);
     void buildPlacement(QWidget* page, QFormLayout* form);
@@ -110,18 +118,19 @@ private:
     QFormLayout* m_partForm = nullptr;
     QRadioButton* m_byPosition = nullptr;
     QRadioButton* m_attached = nullptr;
-    QWidget* m_positionRow = nullptr;
+    QHBoxLayout* m_positionRow = nullptr;
     QSpinBox* m_positionX = nullptr;
     QSpinBox* m_positionY = nullptr;
     QComboBox* m_parentCombo = nullptr;
     QComboBox* m_parentMarkerCombo = nullptr;
     QComboBox* m_childMarkerCombo = nullptr;
     QSpinBox* m_leeway = nullptr;
-    QWidget* m_angleRow = nullptr;
+    QHBoxLayout* m_angleRow = nullptr;
     QCheckBox* m_limitAngle = nullptr;
     QSpinBox* m_angleMin = nullptr;
     QSpinBox* m_angleMax = nullptr;
     QSpinBox* m_angle = nullptr;
+    QListWidget* m_markers = nullptr;
     Placement m_placement;  ///< As shown
     QLabel* m_partProblem = nullptr;
 

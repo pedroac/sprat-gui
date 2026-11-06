@@ -43,7 +43,7 @@ public:
         bool attached = false;      ///< Hangs from another part: dragging it pulls it
         QPointF joint;              ///< Where it turns: its pivot or its joint
         bool attachTarget = false;  ///< The selected part may hang from it
-        QVector<Marker> markers;
+        QVector<Marker> markers;    ///< Drawn faintly (the selected part's labelled); targets when attaching
     };
 
     /// A line from a parent's pivot to the joint of a part hanging from it.

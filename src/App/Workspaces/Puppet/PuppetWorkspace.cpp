@@ -277,6 +277,8 @@ void PuppetWorkspace::setupUi() {
         attachSelectedPart(PuppetEditing::partNames(*puppet).indexOf(parent), parentMarker, childMarker);
     });
     connect(m_properties, &PuppetPropertiesPanel::detachRequested, this, &PuppetWorkspace::detachSelectedPart);
+    connect(m_properties, &PuppetPropertiesPanel::hiddenMarkersChanged, this,
+            &PuppetWorkspace::setSelectedPartHiddenMarkers);
     connect(m_properties, &PuppetPropertiesPanel::angleChanged, this, [this](int angle) {
         tryTurning(m_selection.part, angle);
     });
@@ -536,6 +538,7 @@ void PuppetWorkspace::updateCanvas() {
             bool hasPivotMarker = false;
             for (const NamedPoint& marker : sprite->points) {
                 hasPivotMarker = hasPivotMarker || marker.name == PIVOT_MARKER;
+                if (marker.name != PIVOT_MARKER && part.hiddenMarkers.contains(marker.name)) continue;
                 drawn.markers.append({marker.name, drawn.transform.map(PuppetMotion::markerPoint(marker)),
                                       drawn.transform.map(PuppetMotion::markerShape(marker))});
             }
@@ -593,12 +596,26 @@ void PuppetWorkspace::updateProperties() {
             placement.angleMin = joint->angleMin;
             placement.angleMax = joint->angleMax;
         }
+        // Hidden markers aren't offered, but the joint's own stay listed.
+        const auto offered = [](QVector<PuppetPropertiesPanel::MarkerChoice> choices, const QStringList& hidden,
+                                const QString& used) {
+            choices.removeIf([&](const PuppetPropertiesPanel::MarkerChoice& choice) {
+                return choice.name != used && hidden.contains(choice.name);
+            });
+            return choices;
+        };
         for (int j = 0; j < puppet->parts.size(); ++j) {
             if (!PuppetEditing::canAttach(*puppet, i, j)) continue;
-            placement.parents.append(puppet->parts[j].name);
-            placement.parentMarkers.insert(puppet->parts[j].name, jointMarkers(puppet->parts[j], false));
+            const PuppetPart& parent = puppet->parts[j];
+            const QString used = parent.name == placement.parent ? placement.parentMarker : QString();
+            placement.parents.append(parent.name);
+            placement.parentMarkers.insert(parent.name, offered(jointMarkers(parent, false), parent.hiddenMarkers, used));
         }
-        placement.childMarkers = jointMarkers(part, true);
+        placement.childMarkers = offered(jointMarkers(part, true), part.hiddenMarkers, placement.childMarker);
+        for (const PuppetPropertiesPanel::MarkerChoice& marker : jointMarkers(part, false)) {
+            if (marker.name != PIVOT_MARKER) placement.markers.append(marker.name);
+        }
+        placement.hiddenMarkers = part.hiddenMarkers;
         placement.angle = int(std::lround(triedStates(*puppet)[i].angle));
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
         m_properties->showPart(part.name, placement, placements[i].problem,
@@ -995,14 +1012,24 @@ void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
     updateCanvas();
 }
 
+void PuppetWorkspace::setSelectedPartHiddenMarkers(const QStringList& hiddenMarkers) {
+    if (!selectedPuppet() || m_selection.part < 0) return;
+    QVector<Puppet> after = puppets();
+    after[m_selection.puppet].parts[m_selection.part].hiddenMarkers = hiddenMarkers;
+    if (after == puppets()) return;
+    pushEdit(tr("Show Markers"), after, m_selection);
+}
+
 void PuppetWorkspace::tryPulling(int partIndex, const QPointF& grip, const QPointF& target) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
     const QVector<PuppetPartState> before = triedStates(*puppet);
-    const QVector<PuppetPartState> after =
-        PuppetMotion::reach(*puppet, before, partIndex, grip, target, spriteLookup());
+    const QVector<PuppetPartState> after = PuppetMotion::reach(
+        *puppet, before, partIndex, grip, target, spriteLookup(),
+        [this, puppet](int part) { return parentMarkerOf(*puppet, part); });
     for (int i = 0; i < puppet->parts.size(); ++i) {
         if (after[i].angle != before[i].angle) m_tried[puppet->parts[i].name].angle = after[i].angle;
+        if (after[i].offset != before[i].offset) m_tried[puppet->parts[i].name].offset = after[i].offset;
     }
     updateCanvas();
     if (m_selection.part >= 0) m_properties->setAngle(int(std::lround(after[m_selection.part].angle)));

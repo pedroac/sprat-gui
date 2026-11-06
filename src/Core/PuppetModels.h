@@ -2,6 +2,7 @@
 #include <optional>
 #include <QPoint>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include "AnimationModels.h"
 
@@ -37,6 +38,9 @@ struct PuppetPart {
     /// Where the sprite's pivot goes in the puppet's space (origin = puppet pivot, Y down,
     /// original-image pixels), for a part with no parent.
     std::optional<QPoint> position;
+    /// Markers of its sprites the editor neither shows nor offers for joints. Kept in the
+    /// project only: sprat-cli has no such setting, so it is never exported.
+    QStringList hiddenMarkers;
 
     bool operator==(const PuppetPart&) const = default;
 };

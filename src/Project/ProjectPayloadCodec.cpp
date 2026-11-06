@@ -112,6 +112,7 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
             variantsArr.append(vObj);
         }
         partObj["variants"] = variantsArr;
+        if (!part.hiddenMarkers.isEmpty()) partObj["hidden_markers"] = QJsonArray::fromStringList(part.hiddenMarkers);
         partsArr.append(partObj);
     }
     pObj["parts"] = partsArr;
@@ -181,6 +182,7 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
         PuppetPart part;
         part.name = partObj["name"].toString();
         part.position = pointFromJson(partObj["at"]);
+        for (const auto& marker : partObj["hidden_markers"].toArray()) part.hiddenMarkers.append(marker.toString());
         for (const auto& vVal : partObj["variants"].toArray()) {
             const QJsonObject vObj = vVal.toObject();
             PuppetVariant variant;

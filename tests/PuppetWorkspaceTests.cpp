@@ -17,6 +17,7 @@
 #include <QDialogButtonBox>
 #include <QMimeData>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSpinBox>
@@ -642,6 +643,80 @@ void PuppetWorkspaceTests::testPullingAHandTurnsTheArm() {
     // The upper arm turned: its Angle field says so.
     workspace.select({0, 1, -1});
     QVERIFY(workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->value() != 0);
+}
+
+void PuppetWorkspaceTests::testPullingSlidesWithinTheLeeway() {
+    Doll doll;
+    doll.project.session.activeAtlas().puppets.first().attachments.first().leeway = 12;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+
+    // Pulled 12 px right by its middle, the head slides off the neck instead of turning...
+    dragOnCanvas(workspace.canvas(), QPointF(0, -46), QPointF(12, -46));
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0, QPointF(12, -38)));
+    // ...and beyond the leeway, it turns too.
+    dragOnCanvas(workspace.canvas(), QPointF(12, -46), QPointF(60, -38));
+    QCOMPARE(workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->value() != 0, true);
+    QCOMPARE(doll.project.undoStack.count(), 0);
+}
+
+void PuppetWorkspaceTests::testHiddenMarkersAreNotOffered() {
+    Doll doll;
+    Puppet& puppet = doll.project.session.activeAtlas().puppets.first();
+    puppet.attachments.clear();
+    puppet.parts[1].position = QPoint(40, 0);  // the head on the ground, beside the body
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+
+    // Every marker is ticked to start with; unticking one hides it, as one undo step.
+    workspace.select({0, 0, -1});
+    auto* markers = workspace.findChild<QListWidget*>(QStringLiteral("partMarkers"));
+    QVERIFY(markers);
+    QCOMPARE(markers->count(), 1);
+    QCOMPARE(markers->item(0)->text(), QStringLiteral("neck"));
+    QCOMPARE(markers->item(0)->checkState(), Qt::Checked);
+    markers->item(0)->setCheckState(Qt::Unchecked);
+    QCOMPARE(doll.puppet().parts[0].hiddenMarkers, QStringList{QStringLiteral("neck")});
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Show Markers"));
+
+    // The head can't hang from it: dropping its pivot there places it there instead.
+    workspace.select({0, 1, -1});
+    auto* parentMarker = workspace.findChild<QComboBox*>(QStringLiteral("partParentMarkerCombo"));
+    QCOMPARE(parentMarker->findData(QStringLiteral("neck")), -1);
+    dragOnCanvas(workspace.canvas(), QPointF(40, 0), QPointF(0, -38));
+    QVERIFY(doll.puppet().attachments.isEmpty());
+    QCOMPARE(doll.puppet().parts[1].position, std::optional<QPoint>(QPoint(0, -38)));
+
+    // Ticked again, it is offered again.
+    doll.project.undoStack.undo();
+    doll.project.undoStack.undo();
+    workspace.select({0, 1, -1});
+    QVERIFY(parentMarker->findData(QStringLiteral("neck")) >= 0);
+}
+
+void PuppetWorkspaceTests::testMarkerListDoesNotSpreadThePanelRows() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.resize(1000, 900);  // a tall panel, with room to spare
+    workspace.show();
+    workspace.refreshSprites();
+    auto* name = workspace.findChild<QLineEdit*>(QStringLiteral("partNameEdit"));
+    auto* byPosition = workspace.findChild<QRadioButton*>(QStringLiteral("partByPosition"));
+    auto* markers = workspace.findChild<QListWidget*>(QStringLiteral("partMarkers"));
+    const auto gap = [&]() {
+        QCoreApplication::processEvents();
+        return byPosition->mapTo(&workspace, QPoint()).y() - name->mapTo(&workspace, QPoint()).y();
+    };
+
+    // The head's sprite has no markers; the body's has one, listed.
+    workspace.select({0, 1, -1});
+    const int withoutMarkers = gap();
+    QVERIFY(!markers->isVisibleTo(&workspace));
+    workspace.select({0, 0, -1});
+    QVERIFY(markers->isVisibleTo(&workspace));
+    QCOMPARE(gap(), withoutMarkers);
+    // The list is as tall as its one marker.
+    QVERIFY(markers->height() < 2 * markers->sizeHintForRow(0) + 2 * markers->frameWidth());
 }
 
 void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {

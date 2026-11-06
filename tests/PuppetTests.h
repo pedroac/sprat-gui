@@ -24,4 +24,5 @@ private slots:
     void testJointsTurnWithinTheirLimits();
     void testJointsDriftWithinTheirMarkerAndLeeway();
     void testPullingAPartTurnsThePartsItHangsFrom();
+    void testPullingAPartSlidesItsJointFirst();
 };

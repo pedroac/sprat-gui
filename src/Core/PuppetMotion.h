@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+#include <optional>
 #include <QPainterPath>
 #include <QPoint>
 #include <QPointF>
@@ -32,12 +34,17 @@ QPoint clampOffset(const NamedPoint& marker, int leeway, const QPointF& offset);
 /// around a point marker). Empty when it can't move at all.
 QPainterPath jointArea(const NamedPoint& marker, int leeway);
 
-/// Pulls attached part @p partIndex: turns it and the attached parts it hangs from (up to a
-/// part placed by position, which stays) so that its point @p grabbed, in its shown sprite's
-/// pixels, gets as close to @p target, in the puppet's space, as their angle limits allow.
-/// Moving a hand turns the forearm and the upper arm. Cyclic coordinate descent, from the
-/// part up; offsets, variants and positions are kept. Returns @p states with the new angles.
+/// The marker a part hangs from, in its parent's sprite, or nullopt (positioned, or not found).
+using PuppetParentMarker = std::function<std::optional<NamedPoint>(int partIndex)>;
+
+/// Pulls attached part @p partIndex so that its point @p grabbed, in its shown sprite's pixels,
+/// gets as close to @p target, in the puppet's space, as its joints allow. From the part up
+/// to the first part placed by position (which stays), each joint first moves within its
+/// parent marker's shape and leeway (a pupil in its socket), then turns within its angle
+/// limits (moving a hand turns the forearm and the upper arm). Cyclic coordinate descent.
+/// Without @p parentMarker, joints only turn. Returns @p states with the new angles and offsets.
 QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> states, int partIndex,
-                               const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup);
+                               const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup,
+                               const PuppetParentMarker& parentMarker = {});
 
 }  // namespace PuppetMotion

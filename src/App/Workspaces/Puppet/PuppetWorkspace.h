@@ -77,6 +77,8 @@ public:
     /// Places the selected part by position so that its joint (the pivot handle) is at @p scenePos.
     void placeSelectedPartJointAt(const QPointF& scenePos);
     void setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax);
+    /// Sets which of the selected part's markers are neither shown nor offered for joints.
+    void setSelectedPartHiddenMarkers(const QStringList& hiddenMarkers);
 
     // Trying the joints: turns and drifts shown on the canvas, never saved (a rig is its rest pose).
     /// Turns part @p partIndex to @p angle: an attached part from its parent, within its

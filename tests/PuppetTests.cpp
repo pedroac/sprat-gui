@@ -388,6 +388,9 @@ void PuppetTests::testProjectPayloadKeepsPuppets() {
     PuppetVariant byName;  // a sprite a puppets file named by name, not a path
     byName.source = QStringLiteral("eye");
     puppet.parts[3].variants = {byName};
+    puppet.parts[1].hiddenMarkers = {QStringLiteral("chin"), QStringLiteral("ear")};
+    // The editor's own setting: never written to sprat-cli's puppets file.
+    QVERIFY(!PuppetTextCodec::write({puppet}).contains(QStringLiteral("chin")));
 
     AtlasEntry atlas;
     atlas.id = QStringLiteral("main");
@@ -621,6 +624,40 @@ void PuppetTests::testPullingAPartTurnsThePartsItHangsFrom() {
     const QVector<PuppetPartState> elbow = PuppetMotion::reach(puppet, {}, 2, QPointF(10, 0), QPointF(0, 20), lookup);
     QCOMPARE(elbow[3].angle, 0.0);
     QVERIFY(elbow[1].angle != 0.0);
+}
+
+void PuppetTests::testPullingAPartSlidesItsJointFirst() {
+    // A pupil hanging by its pivot in a round socket, radius 5, of a face placed at the origin.
+    Puppet puppet;
+    puppet.name = QStringLiteral("eye");
+    puppet.parts = {{QStringLiteral("face"), {spriteVariant(QStringLiteral("/s/face.png"))}, QPoint(0, 0)},
+                    {QStringLiteral("pupil"), {spriteVariant(QStringLiteral("/s/pupil.png"))}, std::nullopt}};
+    puppet.attachments = {{QStringLiteral("pupil"), QStringLiteral("pivot"), QStringLiteral("face"),
+                           QStringLiteral("socket"), 1, std::nullopt, std::nullopt}};
+    PuppetSpriteGeometry face;
+    face.markers.insert(QStringLiteral("socket"), QPointF(10, 10));
+    PuppetSpriteGeometry pupil;
+    pupil.pivot = QPointF(1, 1);
+    const PuppetSpriteLookup lookup = lookupIn({{QStringLiteral("/s/face.png"), face}, {QStringLiteral("/s/pupil.png"), pupil}});
+    NamedPoint socket;
+    socket.kind = MarkerKind::Circle;
+    socket.x = 10;
+    socket.y = 10;
+    socket.radius = 5;
+    const PuppetMotion::PuppetParentMarker parentMarker = [socket](int part) {
+        return part == 1 ? std::optional<NamedPoint>(socket) : std::nullopt;
+    };
+
+    // Inside the socket, the pupil just goes there.
+    QVector<PuppetPartState> states = PuppetMotion::reach(puppet, {}, 1, QPointF(1, 1), QPointF(13, 8), lookup, parentMarker);
+    QCOMPARE(states[1].offset, QPointF(3, -2));
+    QCOMPARE(states[1].angle, 0.0);
+    // Beyond it, it stops at the socket's edge plus the leeway: 6 px from the center.
+    states = PuppetMotion::reach(puppet, {}, 1, QPointF(1, 1), QPointF(40, 10), lookup, parentMarker);
+    QCOMPARE(states[1].offset, QPointF(6, 0));
+    // Without the markers, joints only turn.
+    states = PuppetMotion::reach(puppet, {}, 1, QPointF(1, 1), QPointF(13, 8), lookup);
+    QCOMPARE(states[1].offset, QPointF());
 }
 
 void PuppetTests::testJointsDriftWithinTheirMarkerAndLeeway() {

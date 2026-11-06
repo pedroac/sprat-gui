@@ -106,33 +106,57 @@ QPoint clampOffset(const NamedPoint& marker, int leeway, const QPointF& offset) 
 }
 
 QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> states, int partIndex,
-                               const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup) {
+                               const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup,
+                               const PuppetParentMarker& parentMarker) {
     constexpr int MAX_PASSES = 16;
     constexpr qreal CLOSE_ENOUGH = 0.5;  // pixels
     states.resize(puppet.parts.size());
     if (partIndex < 0 || partIndex >= puppet.parts.size()) return states;
 
     // The part, its parent, and so on, while they hang from another part.
-    QVector<QPair<int, const PuppetAttachment*>> chain;
+    struct Link {
+        int part;
+        const PuppetAttachment* joint;
+        int parent;
+    };
+    QVector<Link> chain;
     QSet<int> seen;
     for (int i = partIndex; i >= 0 && !seen.contains(i);) {
         seen.insert(i);
         const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
         if (!joint) break;
-        chain.append({i, joint});
-        i = -1;
+        int parent = -1;
         for (int p = 0; p < puppet.parts.size(); ++p) {
-            if (puppet.parts[p].name == joint->parent) i = p;
+            if (puppet.parts[p].name == joint->parent) parent = p;
         }
+        chain.append({i, joint, parent});
+        i = parent;
     }
 
     for (int pass = 0; pass < MAX_PASSES; ++pass) {
-        bool turned = false;
-        for (const auto& [index, joint] : chain) {
-            const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(puppet, states, lookup);
+        bool changed = false;
+        for (const auto& [index, joint, parent] : chain) {
+            QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(puppet, states, lookup);
             if (!placements[partIndex].placed || !placements[index].placed) return states;
+            QPointF effector = placements[partIndex].transform.map(grabbed);
+            if (QLineF(effector, target).length() < CLOSE_ENOUGH) return states;
+
+            // Slide the joint first, as far as its marker and leeway let it.
+            const std::optional<NamedPoint> marker = parentMarker && parent >= 0 ? parentMarker(index) : std::nullopt;
+            if (marker && parent >= 0 && placements[parent].placed) {
+                // The offset is in the parent's sprite pixels, so it turns with the parent.
+                const QTransform toParent = placements[parent].transform.inverted();
+                const QPointF wanted = states[index].offset + toParent.map(target) - toParent.map(effector);
+                const QPointF offset = QPointF(clampOffset(*marker, joint->leeway, wanted));
+                if (offset != states[index].offset) {
+                    states[index].offset = offset;
+                    changed = true;
+                    placements = PuppetEvaluator::evaluate(puppet, states, lookup);
+                    effector = placements[partIndex].transform.map(grabbed);
+                }
+            }
+
             const QPointF pivot = placements[index].pivot;
-            const QPointF effector = placements[partIndex].transform.map(grabbed);
             if (QLineF(effector, target).length() < CLOSE_ENOUGH) return states;
             if (QLineF(pivot, effector).length() < CLOSE_ENOUGH || QLineF(pivot, target).length() < CLOSE_ENOUGH)
                 continue;
@@ -140,10 +164,10 @@ QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> st
             // QLineF angles go counter-clockwise with y up; the puppet's go clockwise with y down.
             step = step > 180 ? 360 - step : -step;
             const int angle = clampAngle(*joint, states[index].angle + step);
-            turned = turned || angle != int(std::lround(states[index].angle));
+            changed = changed || angle != int(std::lround(states[index].angle));
             states[index].angle = angle;
         }
-        if (!turned) break;
+        if (!changed) break;
     }
     return states;
 }

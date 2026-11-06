@@ -474,8 +474,29 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
             drawLabel(painter, handle, QStringLiteral("%1°").arg(std::lround(range.angle)), highlight);
     }
 
-    if (!m_attaching) return;
     const qreal dot = MARKER_DOT_RADIUS / qMax(0.01, zoom());
+    if (!m_attaching) {
+        // Every part's markers, faint, and the selected part's, labelled. Pivots have their
+        // crosses and bones.
+        for (int p = 0; p < m_parts.size(); ++p) {
+            const Part& part = m_parts[p];
+            if (!part.placed) continue;
+            const bool selected = p == m_selectedPart;
+            const QColor color(255, 210, 0, selected ? 230 : 120);
+            QPen pen(color, 1);
+            pen.setCosmetic(true);
+            for (const Marker& marker : part.markers) {
+                if (marker.name == QLatin1String("pivot")) continue;
+                painter->setPen(pen);
+                painter->setBrush(Qt::NoBrush);
+                if (!marker.shape.isEmpty()) painter->drawPath(marker.shape);
+                painter->setBrush(color);
+                painter->drawEllipse(marker.point, dot * 0.7, dot * 0.7);
+                if (selected) drawLabel(painter, marker.point, marker.name, color);
+            }
+        }
+        return;
+    }
     for (int p = 0; p < m_parts.size(); ++p) {
         const Part& part = m_parts[p];
         if (!part.attachTarget || !part.placed) continue;

@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSignalBlocker>
@@ -23,6 +24,8 @@ constexpr int MAX_POSITION = 99999;
 constexpr int MAX_LEEWAY = 9999;
 constexpr int THUMBNAIL_SIZE = 128;
 
+/// Most height of the part's marker list; it scrolls beyond that.
+constexpr int MARKER_LIST_HEIGHT = 110;
 const char* WARNING_STYLE = "color: #d9534f;";
 
 QLabel* makeWarningLabel(QWidget* parent) {
@@ -70,7 +73,7 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         pageLayout->setContentsMargins(0, 0, 0, 0);
         pageLayout->addWidget(makeTitle(tr("Puppet"), page));
         auto* form = new QFormLayout;
-        form->addRow(tr("Name:"), buildNameRow(m_puppetName, m_puppetNameProblem));
+        addNameRows(form, page, m_puppetName, m_puppetNameProblem);
         m_puppetName->setObjectName(QStringLiteral("puppetNameEdit"));
         pageLayout->addLayout(form);
         m_puppetInfo = new QLabel(page);
@@ -86,14 +89,16 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         pageLayout->setContentsMargins(0, 0, 0, 0);
         pageLayout->addWidget(makeTitle(tr("Part"), page));
         auto* form = new QFormLayout;
-        form->addRow(tr("Name:"), buildNameRow(m_partName, m_partNameProblem));
+        addNameRows(form, page, m_partName, m_partNameProblem);
         m_partName->setObjectName(QStringLiteral("partNameEdit"));
 
-        m_positionRow = new QWidget(page);
-        auto* positionLayout = new QHBoxLayout(m_positionRow);
-        positionLayout->setContentsMargins(0, 0, 0, 0);
-        auto makeCoordinate = [this](const QString& prefix) {
-            auto* spin = new QSpinBox(m_positionRow);
+        // Rows hold widgets or plain layouts, never container widgets, so every label lines
+        // up with its field whatever the style.
+        m_positionRow = new QHBoxLayout;
+        auto makeCoordinate = [this, page](const QString& prefix) {
+            auto* spin = new QSpinBox(page);
+            spin->setToolTip(tr("Where the part's pivot goes, from the puppet's origin (the large cross). "
+                                "Y grows downwards."));
             spin->setRange(-MAX_POSITION, MAX_POSITION);
             spin->setPrefix(prefix);
             spin->setSuffix(tr(" px"));
@@ -108,10 +113,8 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         m_positionX->setObjectName(QStringLiteral("partPositionX"));
         m_positionY = makeCoordinate(tr("Y: "));
         m_positionY->setObjectName(QStringLiteral("partPositionY"));
-        positionLayout->addWidget(m_positionX);
-        positionLayout->addWidget(m_positionY);
-        m_positionRow->setToolTip(tr("Where the part's pivot goes, from the puppet's origin (the large cross). "
-                                     "Y grows downwards."));
+        m_positionRow->addWidget(m_positionX);
+        m_positionRow->addWidget(m_positionY);
         m_partForm = form;
         buildPlacement(page, form);
         pageLayout->addLayout(form);
@@ -129,7 +132,7 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         pageLayout->setContentsMargins(0, 0, 0, 0);
         pageLayout->addWidget(makeTitle(tr("Variant"), page));
         auto* form = new QFormLayout;
-        form->addRow(tr("Name:"), buildNameRow(m_variantName, m_variantNameProblem));
+        addNameRows(form, page, m_variantName, m_variantNameProblem);
         m_variantName->setObjectName(QStringLiteral("variantNameEdit"));
         m_variantName->setToolTip(tr("Leave empty to use the default name, which follows the sprite or animation"));
         m_variantSource = new QLabel(page);
@@ -157,20 +160,15 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
     showNothing();
 }
 
-QWidget* PuppetPropertiesPanel::buildNameRow(QLineEdit*& edit, QLabel*& problem) {
-    auto* row = new QWidget(this);
-    auto* rowLayout = new QVBoxLayout(row);
-    rowLayout->setContentsMargins(0, 0, 0, 0);
-    rowLayout->setSpacing(2);
-    edit = new QLineEdit(row);
-    problem = makeWarningLabel(row);
-    rowLayout->addWidget(edit);
-    rowLayout->addWidget(problem);
+void PuppetPropertiesPanel::addNameRows(QFormLayout* form, QWidget* page, QLineEdit*& edit, QLabel*& problem) {
+    edit = new QLineEdit(page);
+    problem = makeWarningLabel(page);
+    form->addRow(tr("Name:"), edit);
+    form->addRow(static_cast<QWidget*>(nullptr), problem);
     QLineEdit* field = edit;
     QLabel* label = problem;
     connect(field, &QLineEdit::textEdited, this, [this, field, label]() { checkName(field, label); });
     connect(field, &QLineEdit::editingFinished, this, [this, field, label]() { commitName(field, label); });
-    return row;
 }
 
 void PuppetPropertiesPanel::checkName(QLineEdit* edit, QLabel* problem) {
@@ -261,6 +259,18 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     m_angleMax->setValue(limited ? *placement.angleMax : 45);
     updatePlacementRows();
     m_angle->setValue(placement.angle);
+    {
+        const QSignalBlocker blockMarkers(m_markers);
+        m_markers->clear();
+        for (const QString& marker : placement.markers) {
+            auto* item = new QListWidgetItem(marker, m_markers);
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+            item->setCheckState(placement.hiddenMarkers.contains(marker) ? Qt::Unchecked : Qt::Checked);
+        }
+        m_partForm->setRowVisible(m_markers, !placement.markers.isEmpty());
+        const int rows = m_markers->count() > 0 ? m_markers->sizeHintForRow(0) * m_markers->count() : 0;
+        m_markers->setFixedHeight(qMin(MARKER_LIST_HEIGHT, rows + 2 * m_markers->frameWidth()));
+    }
 
     m_partProblem->setText(problem);
     m_partProblem->setVisible(!problem.isEmpty());
@@ -276,12 +286,8 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     auto* group = new QButtonGroup(page);
     group->addButton(m_byPosition);
     group->addButton(m_attached);
-    auto* modeRow = new QWidget(page);
-    auto* modeLayout = new QVBoxLayout(modeRow);
-    modeLayout->setContentsMargins(0, 0, 0, 0);
-    modeLayout->addWidget(m_byPosition);
-    modeLayout->addWidget(m_attached);
-    form->addRow(tr("Placed:"), modeRow);
+    form->addRow(tr("Placed:"), m_byPosition);
+    form->addRow(static_cast<QWidget*>(nullptr), m_attached);
     form->addRow(tr("Position:"), m_positionRow);
 
     m_parentCombo = new QComboBox(page);
@@ -307,14 +313,13 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     m_leeway->setToolTip(tr("How far the joint may drift beyond the marker when posing"));
     form->addRow(tr("Leeway:"), m_leeway);
 
-    m_angleRow = new QWidget(page);
-    auto* angleLayout = new QHBoxLayout(m_angleRow);
-    angleLayout->setContentsMargins(0, 0, 0, 0);
-    m_limitAngle = new QCheckBox(m_angleRow);
+    m_angleRow = new QHBoxLayout;
+    QHBoxLayout* angleLayout = m_angleRow;
+    m_limitAngle = new QCheckBox(page);
     m_limitAngle->setObjectName(QStringLiteral("partLimitAngle"));
     m_limitAngle->setToolTip(tr("Limit how far the part turns from its parent; unticked, it turns freely"));
-    auto makeAngle = [this]() {
-        auto* spin = new QSpinBox(m_angleRow);
+    auto makeAngle = [page]() {
+        auto* spin = new QSpinBox(page);
         spin->setRange(-PUPPET_MAX_ANGLE, PUPPET_MAX_ANGLE);
         spin->setSuffix(QStringLiteral("°"));
         spin->setKeyboardTracking(false);
@@ -326,7 +331,7 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     m_angleMax->setObjectName(QStringLiteral("partAngleMax"));
     angleLayout->addWidget(m_limitAngle);
     angleLayout->addWidget(m_angleMin);
-    angleLayout->addWidget(new QLabel(tr("to"), m_angleRow));
+    angleLayout->addWidget(new QLabel(tr("to"), page));
     angleLayout->addWidget(m_angleMax);
     angleLayout->addStretch();
     form->addRow(tr("Turns:"), m_angleRow);
@@ -339,6 +344,22 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
                            "pivot when placed by position. Not saved: Reset puts the puppet back at rest"));
     form->addRow(tr("Angle:"), m_angle);
     connect(m_angle, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::angleChanged);
+
+    m_markers = new QListWidget(page);
+    m_markers->setObjectName(QStringLiteral("partMarkers"));
+    m_markers->setToolTip(tr("The markers shown on the canvas and offered for joints. Untick the ones "
+                             "that are only for the game (hit boxes, spawn points...)"));
+    // As tall as its markers: a list that can grow would make the form spread its spare height
+    // between every row.
+    m_markers->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    form->addRow(tr("Markers:"), m_markers);
+    connect(m_markers, &QListWidget::itemChanged, this, [this]() {
+        QStringList hidden;
+        for (int i = 0; i < m_markers->count(); ++i) {
+            if (m_markers->item(i)->checkState() != Qt::Checked) hidden.append(m_markers->item(i)->text());
+        }
+        emit hiddenMarkersChanged(hidden);
+    });
 
     connect(m_byPosition, &QRadioButton::toggled, this, [this](bool checked) {
         updatePlacementRows();
