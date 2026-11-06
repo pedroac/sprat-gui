@@ -555,6 +555,8 @@ Save/load project data with multiple formats.
 - JSON serialization/deserialization
 - Selective block persistence
 - Version compatibility
+- Sprite states (name, aliases, pivot, markers, nine-slice insets) live in `"spritemarkers"/"sprites"`, keyed by path relative to `currentFolder`; `spriteStateToJson()` / `applySpriteState()` / `findSpriteState()` convert them. Only the active atlas is laid out, so `ProjectSession::storedSpriteStates` keeps the loaded states and those of sprites that left the layout: `LayoutOrchestrator` applies them to newly laid-out sprites, and `build()` writes them under every atlas's laid-out sprites
+- `atlasExportPayload()` narrows the payload to one atlas's sprites and timelines; `ExportCoordinator` exports each atlas with it
 
 #### ProjectFileLoader
 - Load a project folder's `project.spart.json`, or a `.zip` holding one

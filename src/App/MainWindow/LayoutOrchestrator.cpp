@@ -3,6 +3,7 @@
 #include "LayoutCanvas.h"
 #include "AtlasesManagementWorkspace.h"
 #include "ProjectSession.h"
+#include "ProjectPayloadCodec.h"
 #include "LayoutRunner.h"
 #include "LayoutParser.h"
 #include "ResolutionUtils.h"
@@ -606,9 +607,25 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
                 oldSprites[s->path] = s;
             }
         }
+        // Sprites leaving the layout keep their state for when their atlas is laid out.
+        for (const auto& oldS : std::as_const(oldSprites)) {
+            m_cfg.session->storedSpriteStates.insert(
+                ProjectPayloadCodec::spriteStateKey(m_cfg.session->currentFolder, oldS->path),
+                ProjectPayloadCodec::spriteStateToJson(*oldS));
+        }
         for (auto& model : newModels) {
             for (auto& s : model.sprites) {
                 if (!oldSprites.contains(s->path)) {
+                    const std::optional<QJsonObject> stored = ProjectPayloadCodec::findSpriteState(
+                        m_cfg.session->storedSpriteStates, m_cfg.session->currentFolder, s->path);
+                    if (stored) {
+                        const int pivotX = s->pivotX, pivotY = s->pivotY;
+                        ProjectPayloadCodec::applySpriteState(*s, *stored);
+                        if (forceCenter) {
+                            s->pivotX = pivotX;
+                            s->pivotY = pivotY;
+                        }
+                    }
                     continue;
                 }
                 auto oldS = oldSprites[s->path];

@@ -60,6 +60,7 @@ void ProjectSession::clear() {
     selectedPointName.clear();
 
     pendingProjectPayload = QJsonObject();
+    storedSpriteStates = QJsonObject();
     spriteIndex.clear();
 
     emit atlasesChanged();

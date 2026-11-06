@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <QJsonObject>
 #include "models.h"
 
@@ -23,7 +24,11 @@ struct ProjectPayloadBuildInput {
     QStringList selectedSpritePaths;
     QString primarySelectedSpritePath;
     QString selectedPointName;
+    /// Every atlas's laid-out sprites, the active atlas's last (its sprites win).
     QVector<LayoutModel> layoutModels;
+    /// Sprite states (keyed like "spritemarkers") of sprites that aren't laid out: written
+    /// first, then replaced by the laid-out ones.
+    QJsonObject storedSpriteStates;
     QString layoutOutput;
     double layoutScale = 1.0;
     QString profile;
@@ -83,4 +88,22 @@ public:
     static ProjectPayloadApplyResult applyToLayout(const QJsonObject& root, const QString& currentFolder,
                                                    QVector<LayoutModel>& layoutModels,
                                                    const QString& projectDir = QString());
+
+    /// A sprite's name, aliases, pivot, markers and nine-slice insets as the project file
+    /// stores them in "spritemarkers"/"sprites".
+    static QJsonObject spriteStateToJson(const Sprite& sprite);
+    /// Applies a state written by spriteStateToJson() (or an older project) to a sprite.
+    static void applySpriteState(Sprite& sprite, const QJsonObject& state);
+    /// The "spritemarkers"/"sprites" key of a sprite: its path relative to currentFolder.
+    static QString spriteStateKey(const QString& currentFolder, const QString& spritePath);
+    /// A sprite's state by its relative path, or by its file name as older projects stored it.
+    static std::optional<QJsonObject> findSpriteState(const QJsonObject& spriteStates,
+                                                      const QString& currentFolder,
+                                                      const QString& spritePath);
+
+    /// The payload ProjectSaveService exports one atlas from: only the atlas's sprites in
+    /// "spritemarkers" and its own timelines in "animations".
+    static QJsonObject atlasExportPayload(const QJsonObject& payload, const QStringList& spritePaths,
+                                          const QVector<AnimationTimeline>& timelines,
+                                          const QString& currentFolder);
 };

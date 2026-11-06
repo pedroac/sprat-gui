@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
 
 ### Fixed
+- Projects with several atlases keep the pivots, markers, names and nine-slice insets of sprites in atlases other than the selected one. They used to be lost on save, and when switching to another atlas after opening a project
+- Exporting several atlases writes each atlas's own markers and animations. The first atlas used to get the selected atlas's animations, and the others got no markers or animations
 - Save (Ctrl+S) on a project opened from a ZIP updates the ZIP, instead of writing a project file and `sprites/` folder next to it
 - Restoring an autosave of an open project finds its sprites and excluded sprites again
 - Undoing "Exclude from Layout" puts the sprites back in their atlas and takes them off the excluded list; redo excludes them again

@@ -8,6 +8,7 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -176,6 +177,108 @@ void ProjectTests::testProjectPayloadKeepsAnimationLoopMode() {
         ProjectPayloadCodec::applyToLayout(edited, "/tmp/project", layoutModels);
     QCOMPARE(editedResult.timelines.size(), 1);
     QCOMPARE(editedResult.timelines[0].loopMode, AnimationLoopMode::Loop);
+}
+
+namespace {
+SpritePtr spriteWithMarker(const QString& path, const QString& markerName, int x, int y) {
+    auto sprite = std::make_shared<Sprite>();
+    sprite->path = path;
+    sprite->name = QFileInfo(path).completeBaseName();
+    sprite->pivotX = 3;
+    sprite->pivotY = 4;
+    NamedPoint marker;
+    marker.name = markerName;
+    marker.x = x;
+    marker.y = y;
+    sprite->points.append(marker);
+    return sprite;
+}
+}  // namespace
+
+void ProjectTests::testProjectPayloadKeepsSpritesOfOtherAtlases() {
+    // "gem" belongs to an atlas that isn't laid out: only its stored state knows its marker.
+    const QString folder = "/tmp/project";
+    const SpritePtr gem = spriteWithMarker(folder + "/b/gem.png", "shine", 1, 2);
+    const SpritePtr staleHero = spriteWithMarker(folder + "/a/hero.png", "hand", 0, 0);
+    const SpritePtr hero = spriteWithMarker(folder + "/a/hero.png", "hand", 7, 8);
+    ProjectPayloadBuildInput input;
+    input.currentFolder = folder;
+    input.storedSpriteStates = QJsonObject{
+        {"b/gem.png", ProjectPayloadCodec::spriteStateToJson(*gem)},
+        {"a/hero.png", ProjectPayloadCodec::spriteStateToJson(*staleHero)}};
+    LayoutModel model;
+    model.sprites = {hero};
+    input.layoutModels = {model};
+
+    const QJsonObject payload = ProjectPayloadCodec::build(input);
+    const QJsonObject states = payload["spritemarkers"].toObject()["sprites"].toObject();
+    QCOMPARE(states.size(), 2);
+
+    // The laid-out sprite wins over its stored copy.
+    auto loadedHero = std::make_shared<Sprite>();
+    loadedHero->path = hero->path;
+    const auto heroState = ProjectPayloadCodec::findSpriteState(states, folder, hero->path);
+    QVERIFY(heroState.has_value());
+    ProjectPayloadCodec::applySpriteState(*loadedHero, *heroState);
+    QCOMPARE(loadedHero->points.size(), 1);
+    QCOMPARE(loadedHero->points[0].x, 7);
+
+    // The other atlas's sprite gets its marker and pivot back when it is laid out.
+    auto loadedGem = std::make_shared<Sprite>();
+    loadedGem->path = gem->path;
+    const auto gemState = ProjectPayloadCodec::findSpriteState(states, folder, gem->path);
+    QVERIFY(gemState.has_value());
+    ProjectPayloadCodec::applySpriteState(*loadedGem, *gemState);
+    QCOMPARE(loadedGem->name, QString("gem"));
+    QCOMPARE(loadedGem->pivotX, 3);
+    QCOMPARE(loadedGem->pivotY, 4);
+    QCOMPARE(loadedGem->points.size(), 1);
+    QCOMPARE(loadedGem->points[0].name, QString("shine"));
+    QCOMPARE(loadedGem->points[0].y, 2);
+
+    // Older projects keyed sprites by file name.
+    const QJsonObject byFileName{{"gem.png", ProjectPayloadCodec::spriteStateToJson(*gem)}};
+    QVERIFY(ProjectPayloadCodec::findSpriteState(byFileName, folder, gem->path).has_value());
+    QVERIFY(!ProjectPayloadCodec::findSpriteState(byFileName, folder, hero->path).has_value());
+}
+
+void ProjectTests::testAtlasExportPayloadHoldsOnlyThatAtlas() {
+    const QString folder = "/tmp/project";
+    const SpritePtr hero = spriteWithMarker(folder + "/a/hero.png", "hand", 7, 8);
+    const SpritePtr gem = spriteWithMarker(folder + "/b/gem.png", "shine", 1, 2);
+    AnimationTimeline walk;
+    walk.name = "walk";
+    walk.fps = 12;
+    walk.frames = {hero->path};
+    AnimationTimeline sparkle;
+    sparkle.name = "sparkle";
+    sparkle.fps = 6;
+    sparkle.frames = {gem->path};
+
+    ProjectPayloadBuildInput input;
+    input.currentFolder = folder;
+    LayoutModel model;
+    model.sprites = {hero, gem};
+    input.layoutModels = {model};
+    input.timelines = {walk};  // the active atlas's
+    const QJsonObject payload = ProjectPayloadCodec::build(input);
+
+    const QJsonObject gemAtlas =
+        ProjectPayloadCodec::atlasExportPayload(payload, {gem->path}, {sparkle}, folder);
+    const QJsonObject states = gemAtlas["spritemarkers"].toObject()["sprites"].toObject();
+    QCOMPARE(states.keys(), QStringList{"b/gem.png"});
+    const QJsonObject animations = gemAtlas["animations"].toObject();
+    const QJsonArray timelines = animations["timelines"].toArray();
+    QCOMPARE(timelines.size(), 1);
+    QCOMPARE(timelines[0].toObject()["name"].toString(), QString("sparkle"));
+    QCOMPARE(animations["animation_fps"].toInt(), 6);
+    // Everything else is the project's.
+    QCOMPARE(gemAtlas["layout"], payload["layout"]);
+
+    const QJsonObject empty = ProjectPayloadCodec::atlasExportPayload(payload, {}, {}, folder);
+    QVERIFY(empty["spritemarkers"].toObject()["sprites"].toObject().isEmpty());
+    QVERIFY(empty["animations"].toObject()["timelines"].toArray().isEmpty());
+    QVERIFY(!empty["animations"].toObject().contains("animation_fps"));
 }
 
 void ProjectTests::testProjectFileLoaderLoad() {
