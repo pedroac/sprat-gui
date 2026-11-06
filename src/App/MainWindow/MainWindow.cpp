@@ -480,6 +480,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         updateUiState();
     });
     connect(m_cliSetup, &CliSetupController::binaryPathsResolved, this, [this](const CliPaths& paths) {
+        m_cliPaths = paths;
         m_spratLayoutBin  = paths.layoutBinary;
         m_spratPackBin    = paths.packBinary;
         m_spratConvertBin = paths.convertBinary;
