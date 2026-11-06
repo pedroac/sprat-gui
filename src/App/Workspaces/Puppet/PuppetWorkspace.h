@@ -4,11 +4,11 @@
 #include <QWidget>
 #include "IWorkspace.h"
 #include "PuppetCommands.h"
+#include "PuppetCanvas.h"
 #include "PuppetEvaluator.h"
 #include "PuppetPropertiesPanel.h"
 #include "SpriteModels.h"
 
-class PuppetCanvas;
 class PuppetTreeWidget;
 class ProjectSession;
 class QComboBox;
@@ -75,6 +75,15 @@ public:
     void placeSelectedPartJointAt(const QPointF& scenePos);
     void setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax);
 
+    // Trying the joints: turns and drifts shown on the canvas, never saved (a rig is its rest pose).
+    /// Turns attached part @p partIndex to @p angle from its parent, within its limits.
+    void tryTurning(int partIndex, double angle);
+    /// Moves attached part @p partIndex's joint @p sceneOffset from where the drag started,
+    /// within its parent marker and leeway.
+    void tryDrifting(int partIndex, const QPointF& sceneOffset);
+    /// Puts every part back at rest.
+    void resetTriedPose();
+
 signals:
     void atlasSelected(int atlasIndex);
 
@@ -103,6 +112,12 @@ private:
     /// The markers a joint of @p part can use (as the child: point markers only), each with
     /// the variants that lack it.
     QVector<PuppetPropertiesPanel::MarkerChoice> jointMarkers(const PuppetPart& part, bool asChild) const;
+    /// The marker of its parent that part @p partIndex hangs from, in the parent's rest sprite.
+    std::optional<NamedPoint> parentMarkerOf(const Puppet& puppet, int partIndex) const;
+    /// The tried turns and drifts as evaluator states, within the joints' limits.
+    QVector<PuppetPartState> triedStates(const Puppet& puppet) const;
+    std::optional<PuppetCanvas::JointRange> jointRange(const Puppet& puppet,
+                                                       const QVector<PuppetPartPlacement>& placements) const;
     QTreeWidgetItem* itemFor(const PuppetSelection& selection) const;
 
     ProjectSession* m_session = nullptr;
@@ -113,6 +128,16 @@ private:
     bool m_rebuilding = false;
     QPoint m_dragStartPosition;  ///< The dragged part's position when the drag started
     int m_dragCount = 0;         ///< Numbers drags, so each drag is its own undo step
+
+    /// A tried turn and drift of an attached part.
+    struct TriedJoint {
+        double angle = 0;
+        QPointF offset;
+    };
+    QHash<QString, TriedJoint> m_tried;  ///< By part name, for the shown puppet
+    QString m_triedPuppet;               ///< Atlas id and name of the puppet m_tried is for
+    TriedJoint m_turnStart;              ///< The turned part's, when the drag started
+    QPushButton* m_resetPoseButton = nullptr;
     mutable QHash<QString, QPixmap> m_images;  ///< By sprite path
     QHash<QString, SpritePtr> m_spritesByPath;  ///< The active atlas's laid-out sprites
     QHash<QString, SpritePtr> m_spritesByName;

@@ -564,6 +564,8 @@ set(PROJECT_SOURCES
     src/Core/PuppetEvaluator.h
     src/Core/PuppetEditing.cpp
     src/Core/PuppetEditing.h
+    src/Core/PuppetMotion.cpp
+    src/Core/PuppetMotion.h
     src/Core/ViewUtils.cpp
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
@@ -793,6 +795,7 @@ if(BUILD_TESTING)
         src/Project/PuppetTextCodec.cpp
         src/Core/PuppetEvaluator.cpp
         src/Core/PuppetEditing.cpp
+        src/Core/PuppetMotion.cpp
         src/Project/ProjectFileLoader.cpp
         src/Project/AutosaveProjectStore.cpp
         src/Project/ProjectSession.cpp

@@ -3,11 +3,14 @@
 #include "ProjectSession.h"
 #include "PuppetCanvas.h"
 #include "PuppetEditing.h"
+#include "PuppetMotion.h"
 #include "PuppetPropertiesPanel.h"
 #include "PuppetTreeWidget.h"
 #include "SpritePickerDialog.h"
 
+#include <cmath>
 #include <QAction>
+#include <QtMath>
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
@@ -42,35 +45,6 @@ QIcon restVariantIcon(const QPalette& palette) {
     painter.setPen(palette.color(QPalette::WindowText));
     painter.drawText(pixmap.rect(), Qt::AlignCenter, QStringLiteral("★"));
     return QIcon(pixmap);
-}
-
-/// The point a marker stands for in a joint, as sprat-cli's markers file writes it.
-QPointF markerPoint(const NamedPoint& marker) {
-    if (marker.kind == MarkerKind::Polygon && !marker.polygonPoints.isEmpty())
-        return marker.polygonPoints.first();
-    return QPointF(marker.x, marker.y);
-}
-
-/// A marker's outline in its sprite's pixels; empty for a point.
-QPainterPath markerShape(const NamedPoint& marker) {
-    QPainterPath path;
-    switch (marker.kind) {
-    case MarkerKind::Circle:
-        path.addEllipse(QPointF(marker.x, marker.y), marker.radius, marker.radius);
-        break;
-    case MarkerKind::Rectangle:
-        path.addRect(QRectF(marker.x, marker.y, marker.w, marker.h));
-        break;
-    case MarkerKind::Polygon:
-        if (marker.polygonPoints.size() >= 3) {
-            path.addPolygon(QPolygonF(QPolygon(marker.polygonPoints)));
-            path.closeSubpath();
-        }
-        break;
-    case MarkerKind::Point:
-        break;
-    }
-    return path;
 }
 
 /// Whether a sprite has a marker a joint can use: "pivot" always does (the sprite's pivot
@@ -209,8 +183,15 @@ void PuppetWorkspace::setupUi() {
         fitButton->setToolTip(tr("Zoom to show the whole puppet"));
         row->addWidget(fitButton);
         row->addStretch();
+        m_resetPoseButton = new QPushButton(tr("Reset"), middle);
+        m_resetPoseButton->setObjectName(QStringLiteral("puppetResetPose"));
+        m_resetPoseButton->setToolTip(tr("Put every part back at rest. Turning attached parts on the canvas "
+                                         "tries their joints; it isn't saved, as a rig is its rest pose"));
+        m_resetPoseButton->setEnabled(false);
+        row->addWidget(m_resetPoseButton);
         middleLayout->addLayout(row);
         connect(fitButton, &QPushButton::clicked, this, [this]() { m_canvas->fitPuppet(); });
+        connect(m_resetPoseButton, &QPushButton::clicked, this, &PuppetWorkspace::resetTriedPose);
     }
     m_canvas = new PuppetCanvas(middle);
     m_canvas->setObjectName(QStringLiteral("puppetCanvas"));
@@ -249,6 +230,17 @@ void PuppetWorkspace::setupUi() {
     connect(m_canvas, &PuppetCanvas::detachRequested, this, [this](int part, const QPointF& scenePos) {
         if (part != m_selection.part) return;
         placeSelectedPartJointAt(scenePos);
+    });
+    connect(m_canvas, &PuppetCanvas::partTurnStarted, this, [this](int part, bool) {
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet || part < 0 || part >= puppet->parts.size()) return;
+        m_turnStart = m_tried.value(puppet->parts[part].name);
+    });
+    connect(m_canvas, &PuppetCanvas::partTurned, this, [this](int part, double degrees) {
+        tryTurning(part, m_turnStart.angle + degrees);
+    });
+    connect(m_canvas, &PuppetCanvas::partDrifted, this, [this](int part, const QPointF& offset) {
+        tryDrifting(part, offset);
     });
     connect(m_canvas, &PuppetCanvas::partNudged, this, [this](int part, const QPoint& offset) {
         const Puppet* puppet = selectedPuppet();
@@ -395,7 +387,7 @@ PuppetSpriteLookup PuppetWorkspace::spriteLookup() const {
         if (!sprite) return std::nullopt;
         PuppetSpriteGeometry geometry;
         geometry.pivot = QPointF(sprite->pivotX, sprite->pivotY);
-        for (const NamedPoint& marker : sprite->points) geometry.markers.insert(marker.name, markerPoint(marker));
+        for (const NamedPoint& marker : sprite->points) geometry.markers.insert(marker.name, PuppetMotion::markerPoint(marker));
         return geometry;
     };
 }
@@ -502,7 +494,14 @@ void PuppetWorkspace::updateCanvas() {
         m_fittedPuppet.clear();
         return;
     }
-    const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
+    // Another puppet starts at rest.
+    const QString puppetKey = m_session->activeAtlas().id + QLatin1Char('/') + puppet->name;
+    if (puppetKey != m_triedPuppet) {
+        m_triedPuppet = puppetKey;
+        m_tried.clear();
+    }
+    const QVector<PuppetPartPlacement> placements =
+        PuppetEvaluator::evaluate(*puppet, triedStates(*puppet), spriteLookup());
     QVector<PuppetCanvas::Part> parts;
     parts.reserve(puppet->parts.size());
     for (int i = 0; i < puppet->parts.size(); ++i) {
@@ -513,14 +512,16 @@ void PuppetWorkspace::updateCanvas() {
         // A part placed by its attachment moves with its parent, not on its own.
         drawn.movable = part.position.has_value() && !puppetParentAttachment(*puppet, part.name);
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
+        drawn.turnable = puppetParentAttachment(*puppet, part.name) != nullptr;
+        drawn.joint = placements[i].pivot;
         const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants.first());
         drawn.image = imageOf(sprite);
         if (sprite) {
             bool hasPivotMarker = false;
             for (const NamedPoint& marker : sprite->points) {
                 hasPivotMarker = hasPivotMarker || marker.name == PIVOT_MARKER;
-                drawn.markers.append({marker.name, drawn.transform.map(markerPoint(marker)),
-                                      drawn.transform.map(markerShape(marker))});
+                drawn.markers.append({marker.name, drawn.transform.map(PuppetMotion::markerPoint(marker)),
+                                      drawn.transform.map(PuppetMotion::markerShape(marker))});
             }
             if (!hasPivotMarker)
                 drawn.markers.append({PIVOT_MARKER, drawn.transform.map(QPointF(sprite->pivotX, sprite->pivotY)), {}});
@@ -539,7 +540,8 @@ void PuppetWorkspace::updateCanvas() {
     std::optional<QPointF> pivot;
     if (selectedPart >= 0 && selectedPart < placements.size() && placements[selectedPart].placed)
         pivot = placements[selectedPart].pivot;
-    m_canvas->showPuppet(parts, bones, selectedPart, pivot);
+    m_canvas->showPuppet(parts, bones, selectedPart, pivot, jointRange(*puppet, placements));
+    m_resetPoseButton->setEnabled(!m_tried.isEmpty());
 
     // Fit when another puppet is shown, not after every edit of this one.
     const QString fitKey = m_session->activeAtlas().id + QLatin1Char('/') + QString::number(m_selection.puppet);
@@ -851,7 +853,7 @@ void PuppetWorkspace::placeSelectedPartJointAt(const QPointF& scenePos) {
     if (joint && sprite) {
         for (const NamedPoint& marker : sprite->points) {
             if (marker.name == joint->childMarker)
-                pivotOffset = markerPoint(marker) - QPointF(sprite->pivotX, sprite->pivotY);
+                pivotOffset = PuppetMotion::markerPoint(marker) - QPointF(sprite->pivotX, sprite->pivotY);
         }
     }
     const QPointF position = scenePos - pivotOffset;
@@ -869,4 +871,92 @@ void PuppetWorkspace::setSelectedPartLimits(int leeway, std::optional<int> angle
     if (after == puppets()) return;
     pushEdit(tr("Change Joint Limits"), after, m_selection,
              QStringLiteral("limits %1 %2").arg(m_selection.puppet).arg(m_selection.part));
+}
+
+std::optional<NamedPoint> PuppetWorkspace::parentMarkerOf(const Puppet& puppet, int partIndex) const {
+    const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[partIndex].name);
+    const PuppetPart* parent = joint ? puppetPart(puppet, joint->parent) : nullptr;
+    const SpritePtr sprite = (parent && !parent->variants.isEmpty()) ? spriteFor(parent->variants.first()) : nullptr;
+    if (!sprite) return std::nullopt;
+    for (const NamedPoint& marker : sprite->points) {
+        if (marker.name == joint->parentMarker) return marker;
+    }
+    if (joint->parentMarker != PIVOT_MARKER) return std::nullopt;
+    NamedPoint pivot;
+    pivot.name = PIVOT_MARKER;
+    pivot.x = sprite->pivotX;
+    pivot.y = sprite->pivotY;
+    return pivot;
+}
+
+QVector<PuppetPartState> PuppetWorkspace::triedStates(const Puppet& puppet) const {
+    QVector<PuppetPartState> states(puppet.parts.size());
+    for (int i = 0; i < puppet.parts.size(); ++i) {
+        const auto it = m_tried.constFind(puppet.parts[i].name);
+        const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
+        if (it == m_tried.constEnd() || !joint) continue;
+        // The rig may have changed since: keep within its limits as they are now.
+        states[i].angle = PuppetMotion::clampAngle(*joint, it->angle);
+        const std::optional<NamedPoint> marker = parentMarkerOf(puppet, i);
+        states[i].offset = marker ? QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, it->offset))
+                                  : QPointF();
+    }
+    return states;
+}
+
+std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet& puppet,
+                                                                    const QVector<PuppetPartPlacement>& placements) const {
+    const int i = m_selection.part;
+    if (i < 0 || i >= puppet.parts.size() || !placements[i].placed) return std::nullopt;
+    const PuppetPart& part = puppet.parts[i];
+    const PuppetAttachment* joint = puppetParentAttachment(puppet, part.name);
+    const int parent = joint ? PuppetEditing::partNames(puppet).indexOf(joint->parent) : -1;
+    if (parent < 0 || !placements[parent].placed) return std::nullopt;
+
+    PuppetCanvas::JointRange range;
+    range.point = placements[i].pivot;
+    range.angle = triedStates(puppet)[i].angle;
+    range.angleMin = joint->angleMin;
+    range.angleMax = joint->angleMax;
+    // The direction the part points in at angle 0: from its joint to its middle.
+    const QPixmap image = part.variants.isEmpty() ? QPixmap() : imageOf(spriteFor(part.variants.first()));
+    const QPointF middle = placements[i].transform.map(QRectF(image.rect()).center());
+    const QPointF towards = middle - range.point;
+    const double now = towards.isNull() ? placements[i].totalAngle
+                                        : qRadiansToDegrees(std::atan2(towards.y(), towards.x()));
+    range.restDirection = now - range.angle;
+    if (const std::optional<NamedPoint> marker = parentMarkerOf(puppet, i))
+        range.area = placements[parent].transform.map(PuppetMotion::jointArea(*marker, joint->leeway));
+    return range;
+}
+
+void PuppetWorkspace::tryTurning(int partIndex, double angle) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[partIndex].name);
+    if (!joint) return;
+    m_tried[puppet->parts[partIndex].name].angle = PuppetMotion::clampAngle(*joint, angle);
+    updateCanvas();
+}
+
+void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[partIndex].name);
+    const std::optional<NamedPoint> marker = parentMarkerOf(*puppet, partIndex);
+    const int parent = joint ? PuppetEditing::partNames(*puppet).indexOf(joint->parent) : -1;
+    if (!marker || parent < 0) return;
+    // The offset is in the parent's sprite pixels, so it turns with the parent.
+    const QVector<PuppetPartPlacement> placements =
+        PuppetEvaluator::evaluate(*puppet, triedStates(*puppet), spriteLookup());
+    const QTransform toParent = placements[parent].transform.inverted();
+    const QPointF delta = toParent.map(sceneOffset) - toParent.map(QPointF(0, 0));
+    m_tried[puppet->parts[partIndex].name].offset =
+        QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, m_turnStart.offset + delta));
+    updateCanvas();
+}
+
+void PuppetWorkspace::resetTriedPose() {
+    m_tried.clear();
+    updateCanvas();
 }

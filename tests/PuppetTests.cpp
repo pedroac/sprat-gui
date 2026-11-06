@@ -2,6 +2,7 @@
 #include "ProjectPayloadCodec.h"
 #include "PuppetEditing.h"
 #include "PuppetEvaluator.h"
+#include "PuppetMotion.h"
 #include "PuppetTextCodec.h"
 
 #include <QJsonArray>
@@ -541,4 +542,54 @@ void PuppetTests::testAttachingRefusesLoops() {
     const Puppet before = puppet;
     PuppetEditing::attachPart(puppet, 0, 2, "pivot", "pivot");
     QVERIFY(puppet == before);
+}
+
+void PuppetTests::testJointsTurnWithinTheirLimits() {
+    PuppetAttachment free{"nose", "pivot", "face", "nose"};
+    QCOMPARE(PuppetMotion::clampAngle(free, 30.4), 30);
+    QCOMPARE(PuppetMotion::clampAngle(free, 270), -90);  // a free part takes the short way
+    QCOMPARE(PuppetMotion::clampAngle(free, -540), 180);
+
+    PuppetAttachment limited = free;
+    limited.angleMin = -15;
+    limited.angleMax = 10;
+    QCOMPARE(PuppetMotion::clampAngle(limited, 5), 5);
+    QCOMPARE(PuppetMotion::clampAngle(limited, 90), 10);
+    QCOMPARE(PuppetMotion::clampAngle(limited, -90), -15);
+}
+
+void PuppetTests::testJointsDriftWithinTheirMarkerAndLeeway() {
+    NamedPoint point;
+    point.x = 10;
+    point.y = 10;
+    QCOMPARE(PuppetMotion::clampOffset(point, 0, QPointF(3, 4)), QPoint(0, 0));
+    QCOMPARE(PuppetMotion::clampOffset(point, 10, QPointF(3, 4)), QPoint(3, 4));
+    QCOMPARE(PuppetMotion::clampOffset(point, 2, QPointF(30, 40)), QPoint(1, 2));  // 2 px along (3,4)
+    QVERIFY(PuppetMotion::jointArea(point, 0).isEmpty());
+    QVERIFY(PuppetMotion::jointArea(point, 2).contains(QPointF(11, 11)));
+
+    NamedPoint socket;  // an eye socket: the pupil may go anywhere in it
+    socket.kind = MarkerKind::Circle;
+    socket.x = 0;
+    socket.y = 0;
+    socket.radius = 5;
+    QCOMPARE(PuppetMotion::clampOffset(socket, 0, QPointF(3, -2)), QPoint(3, -2));
+    QCOMPARE(PuppetMotion::clampOffset(socket, 0, QPointF(10, 0)), QPoint(5, 0));
+    QCOMPARE(PuppetMotion::clampOffset(socket, 1, QPointF(10, 0)), QPoint(6, 0));
+
+    NamedPoint box;  // offsets are from the rectangle's corner
+    box.kind = MarkerKind::Rectangle;
+    box.x = 0;
+    box.y = 0;
+    box.w = 8;
+    box.h = 4;
+    QCOMPARE(PuppetMotion::clampOffset(box, 0, QPointF(6, 3)), QPoint(6, 3));
+    QCOMPARE(PuppetMotion::clampOffset(box, 0, QPointF(20, -5)), QPoint(8, 0));
+
+    NamedPoint triangle;  // offsets are from its first vertex
+    triangle.kind = MarkerKind::Polygon;
+    triangle.polygonPoints = {QPoint(0, 0), QPoint(10, 0), QPoint(0, 10)};
+    QCOMPARE(PuppetMotion::clampOffset(triangle, 0, QPointF(2, 2)), QPoint(2, 2));
+    QCOMPARE(PuppetMotion::clampOffset(triangle, 0, QPointF(10, 10)), QPoint(5, 5));
+    QCOMPARE(PuppetMotion::clampOffset(triangle, 0, QPointF(-4, 3)), QPoint(0, 3));
 }

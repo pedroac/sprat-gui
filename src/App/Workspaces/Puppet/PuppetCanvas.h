@@ -15,7 +15,8 @@ class QGraphicsScene;
  *        hanging from it.
  *
  * Clicking a part selects it; dragging a movable part, or the arrow keys on the selected
- * one, asks to move it. Dragging the selected part's pivot handle shows the markers it can
+ * one, asks to move it. Dragging a turnable (attached) part asks to turn it around its joint;
+ * Shift+dragging it asks to move its joint. Dragging the selected part's pivot handle shows the markers it can
  * hang from: dropping on one asks to attach the part there, dropping elsewhere asks to place
  * it there by position.
  *
@@ -38,6 +39,8 @@ public:
         QTransform transform;
         bool placed = false;
         bool movable = false;       ///< Placed by its position, so dragging it moves it
+        bool turnable = false;      ///< Attached, so dragging it turns it around its joint
+        QPointF joint;              ///< Where it turns: its pivot or its joint
         bool attachTarget = false;  ///< The selected part may hang from it
         QVector<Marker> markers;
     };
@@ -49,12 +52,22 @@ public:
         bool selected = false;  ///< Its part is selected
     };
 
+    /// How far the selected part may turn and drift, drawn around its joint.
+    struct JointRange {
+        QPointF point;
+        double restDirection = 0;  ///< Degrees, from the joint to the part's center at angle 0
+        double angle = 0;          ///< Its angle now, from the parent
+        std::optional<int> angleMin;
+        std::optional<int> angleMax;
+        QPainterPath area;         ///< Where the joint may go; empty when it can't drift
+    };
+
     explicit PuppetCanvas(QWidget* parent = nullptr);
 
     /// Shows @p parts, in draw order (the first at the back). @p selectedPart is outlined,
     /// with its pivot handle at @p selectedPivot.
     void showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
-                    std::optional<QPointF> selectedPivot);
+                    std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint = std::nullopt);
     /// Shows only the origin cross.
     void clearPuppet();
     /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms.
@@ -69,6 +82,12 @@ signals:
     void partDragStarted(int partIndex);
     /// The dragged part moved @p offset scene pixels from where the drag started.
     void partDragged(int partIndex, const QPoint& offset);
+    /// A turnable part started being turned (by dragging) or drifted (Shift+dragging).
+    void partTurnStarted(int partIndex, bool drift);
+    /// The turned part turned @p degrees (clockwise, unwrapped) since the drag started.
+    void partTurned(int partIndex, double degrees);
+    /// The drifted part's joint moved @p offset scene pixels since the drag started.
+    void partDrifted(int partIndex, const QPointF& offset);
     /// The arrow keys asked to move the selected part by @p offset.
     void partNudged(int partIndex, const QPoint& offset);
     /// The selected part's pivot handle was dropped on marker @p marker of part @p parentIndex.
@@ -93,6 +112,9 @@ private:
     /// The part drawn at @p viewPos (topmost), or -1.
     int partAt(const QPoint& viewPos) const;
     bool isMovable(int part) const;
+    bool isTurnable(int part) const;
+    /// Degrees clockwise of @p scenePos around the turned part's joint.
+    double angleAround(const QPointF& scenePos) const;
     /// Whether @p viewPos is on the selected part's pivot handle.
     bool onPivotHandle(const QPoint& viewPos) const;
     /// The marker of an attach target nearest to @p viewPos, if it is close enough.
@@ -113,6 +135,13 @@ private:
     QPoint m_pressPos;
     QPointF m_pressScenePos;
     bool m_dragging = false;
+
+    int m_turnPart = -1;         ///< The turnable part under the left button, or -1
+    bool m_drift = false;        ///< Shift was down: moving its joint, not turning
+    bool m_turning = false;      ///< Past the drag distance
+    double m_turnLastAngle = 0;  ///< The pointer's angle around the joint at the last move
+    double m_turnTotal = 0;      ///< Degrees turned since the press, unwrapped
+    std::optional<JointRange> m_selectedJoint;
 
     bool m_handlePressed = false;  ///< The left button went down on the pivot handle
     bool m_attaching = false;      ///< The pivot handle is being dragged

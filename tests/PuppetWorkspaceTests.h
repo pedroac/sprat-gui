@@ -15,6 +15,9 @@ private slots:
     void testDraggingThePivotAwayDetaches();
     void testPanelAttachesAndDetaches();
     void testPanelSetsJointLimits();
+    void testTurningAnAttachedPartIsNotSaved();
+    void testTurningStopsAtTheAngleLimits();
+    void testDriftingStaysWithinTheLeeway();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();

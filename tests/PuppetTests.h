@@ -21,4 +21,6 @@ private slots:
     void testAddingSpriteVariants();
     void testAttachingAndDetachingParts();
     void testAttachingRefusesLoops();
+    void testJointsTurnWithinTheirLimits();
+    void testJointsDriftWithinTheirMarkerAndLeeway();
 };

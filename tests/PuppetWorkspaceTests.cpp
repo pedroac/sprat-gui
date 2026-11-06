@@ -13,6 +13,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
@@ -381,6 +382,69 @@ void PuppetWorkspaceTests::testPanelSetsJointLimits() {
 
     limit->setChecked(false);
     QVERIFY(!doll.puppet().attachments.first().angleMin);
+}
+
+namespace {
+/// Where the doll's 16x16 head is drawn when turned @p degrees around its joint on the neck.
+QRectF turnedHead(qreal degrees, const QPointF& joint = QPointF(0, -38)) {
+    QTransform transform;
+    transform.translate(joint.x(), joint.y());
+    transform.rotate(degrees);
+    transform.translate(-8, -16);
+    return transform.mapRect(QRectF(0, 0, 16, 16));
+}
+}  // namespace
+
+void PuppetWorkspaceTests::testTurningAnAttachedPartIsNotSaved() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+    const Puppet before = doll.puppet();
+    auto* reset = workspace.findChild<QPushButton*>(QStringLiteral("puppetResetPose"));
+    QVERIFY(reset && !reset->isEnabled());
+
+    // From above the joint to its right: a quarter turn clockwise.
+    dragOnCanvas(workspace.canvas(), QPointF(0, -50), QPointF(12, -38));
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(90));
+    QVERIFY(doll.puppet() == before);
+    QCOMPARE(doll.project.undoStack.count(), 0);
+    QVERIFY(reset->isEnabled());
+
+    reset->click();
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
+    QVERIFY(!reset->isEnabled());
+}
+
+void PuppetWorkspaceTests::testTurningStopsAtTheAngleLimits() {
+    Doll doll;
+    doll.project.session.activeAtlas().puppets.first().attachments.first().angleMin = -15;
+    doll.project.session.activeAtlas().puppets.first().attachments.first().angleMax = 15;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+
+    dragOnCanvas(workspace.canvas(), QPointF(0, -50), QPointF(12, -38));
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(15));
+    dragOnCanvas(workspace.canvas(), QPointF(2, -50), QPointF(-12, -38));
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(-15));
+}
+
+void PuppetWorkspaceTests::testDriftingStaysWithinTheLeeway() {
+    Doll doll;
+    doll.project.session.activeAtlas().puppets.first().attachments.first().leeway = 2;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+    PuppetCanvas* canvas = workspace.canvas();
+    const QPoint start = canvas->mapFromScene(QPointF(0, -46));
+    QTest::mousePress(canvas->viewport(), Qt::LeftButton, Qt::ShiftModifier, start);
+    QTest::mouseMove(canvas->viewport(), start + QPoint(5, 0));
+    QTest::mouseMove(canvas->viewport(), start + QPoint(10, 0));
+    QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::ShiftModifier, start + QPoint(10, 0));
+    // 10 px asked, 2 px allowed from the neck, a point marker.
+    QCOMPARE(drawnParts(canvas)[1], turnedHead(0, QPointF(2, -38)));
+    QCOMPARE(doll.project.undoStack.count(), 0);
 }
 
 void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {

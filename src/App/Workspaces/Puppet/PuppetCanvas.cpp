@@ -1,5 +1,6 @@
 #include "PuppetCanvas.h"
 
+#include <cmath>
 #include <QApplication>
 #include <QGraphicsItem>
 #include <QGraphicsPixmapItem>
@@ -28,6 +29,16 @@ constexpr int PIVOT_HANDLE_RADIUS = 7;
 constexpr int MARKER_SNAP_DISTANCE = 12;
 /// Screen size of a point marker's dot while attaching.
 constexpr qreal MARKER_DOT_RADIUS = 3.5;
+/// Screen radius of the selected part's turn range arc.
+constexpr qreal TURN_ARC_RADIUS = 36;
+/// Degrees between the points of a drawn arc.
+constexpr double ARC_STEP = 4;
+
+/// The point @p radius from @p center in direction @p degrees (clockwise, y down).
+QPointF pointAt(const QPointF& center, double degrees, qreal radius) {
+    const double radians = qDegreesToRadians(degrees);
+    return center + QPointF(std::cos(radians), std::sin(radians)) * radius;
+}
 
 /// The key of a pixmap item's part index (QGraphicsItem::data).
 constexpr int PART_INDEX_KEY = 0;
@@ -75,8 +86,9 @@ void PuppetCanvas::clearPuppet() {
 }
 
 void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
-                              std::optional<QPointF> selectedPivot) {
+                              std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint) {
     m_scene->clear();
+    m_selectedJoint = selectedJoint;
     m_parts = parts;
     m_bones = bones;
     m_selectedPart = selectedPart;
@@ -151,6 +163,15 @@ bool PuppetCanvas::isMovable(int part) const {
     return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].movable;
 }
 
+bool PuppetCanvas::isTurnable(int part) const {
+    return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].turnable;
+}
+
+double PuppetCanvas::angleAround(const QPointF& scenePos) const {
+    const QPointF from = m_parts[m_turnPart].joint;
+    return qRadiansToDegrees(std::atan2(scenePos.y() - from.y(), scenePos.x() - from.x()));
+}
+
 bool PuppetCanvas::onPivotHandle(const QPoint& viewPos) const {
     if (!m_selectedPivot) return false;
     const QPoint handle = mapFromScene(*m_selectedPivot);
@@ -199,6 +220,9 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton || m_isPanning) return;
     const int part = partAt(event->pos());
     m_pressedPart = isMovable(part) ? part : -1;
+    m_turnPart = isTurnable(part) ? part : -1;
+    m_drift = event->modifiers() & Qt::ShiftModifier;
+    m_turning = false;
     m_pressPos = event->pos();
     m_pressScenePos = mapToScene(event->pos());
     m_dragging = false;
@@ -215,6 +239,30 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
         viewport()->update();
         return;
     }
+    if (m_turnPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
+        const QPointF scenePos = mapToScene(event->pos());
+        if (!m_turning) {
+            if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
+            m_turning = true;
+            m_dragging = true;  // keeps the scene rect, so the view doesn't shift under the pointer
+            m_turnTotal = 0;
+            m_turnLastAngle = angleAround(m_pressScenePos);
+            emit partTurnStarted(m_turnPart, m_drift);
+        }
+        if (m_drift) {
+            emit partDrifted(m_turnPart, scenePos - m_pressScenePos);
+        } else {
+            // Unwrapped, so a part can be turned past the half turn and round again.
+            const double angle = angleAround(scenePos);
+            double step = angle - m_turnLastAngle;
+            if (step > 180) step -= 360;
+            if (step < -180) step += 360;
+            m_turnLastAngle = angle;
+            m_turnTotal += step;
+            emit partTurned(m_turnPart, m_turnTotal);
+        }
+        return;
+    }
     if (m_pressedPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
         if (!m_dragging) {
             if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
@@ -227,8 +275,10 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     ZoomableGraphicsView::mouseMoveEvent(event);
     if (event->buttons() == Qt::NoButton) {
+        const int hovered = partAt(event->pos());
         const Qt::CursorShape cursor = onPivotHandle(event->pos()) ? Qt::CrossCursor
-            : isMovable(partAt(event->pos()))                       ? Qt::SizeAllCursor
+            : isMovable(hovered)                                    ? Qt::SizeAllCursor
+            : isTurnable(hovered)                                   ? Qt::OpenHandCursor
                                                                     : Qt::ArrowCursor;
         viewport()->setCursor(cursor);
     }
@@ -252,6 +302,8 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
     const bool dragged = m_dragging;
     if (event->button() == Qt::LeftButton) {
         m_pressedPart = -1;
+        m_turnPart = -1;
+        m_turning = false;
         m_dragging = false;
     }
     if (dragged) updateSceneRect();
@@ -319,6 +371,47 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
         painter->setPen(pen);
         painter->setBrush(Qt::NoBrush);
         painter->drawEllipse(*m_selectedPivot, radius, radius);
+    }
+
+    // How to try the selected attached part, in the view's corner.
+    if (m_selectedJoint && !m_attaching && !m_turning) {
+        painter->save();
+        painter->resetTransform();
+        const QString hint = tr("Drag to turn it, Shift+drag to move its joint (not saved)");
+        const QRect area = viewport()->rect().adjusted(8, 0, -8, -6);
+        painter->setPen(palette().color(QPalette::PlaceholderText));
+        painter->drawText(area, Qt::AlignLeft | Qt::AlignBottom | Qt::TextWordWrap, hint);
+        painter->restore();
+    }
+
+    // The selected part's range: where its joint may drift, and how far it may turn.
+    if (m_selectedJoint && !m_attaching) {
+        const JointRange& range = *m_selectedJoint;
+        QPen areaPen(QColor(255, 210, 0), 1, Qt::DashLine);
+        areaPen.setCosmetic(true);
+        if (!range.area.isEmpty()) {
+            painter->setPen(areaPen);
+            painter->setBrush(QColor(255, 210, 0, 40));
+            painter->drawPath(range.area);
+        }
+        const qreal radius = TURN_ARC_RADIUS / qMax(0.01, zoom());
+        const bool limited = range.angleMin && range.angleMax;
+        const double from = range.restDirection + (limited ? *range.angleMin : -180.0);
+        const double to = range.restDirection + (limited ? *range.angleMax : 180.0);
+        QPolygonF arc;
+        arc << range.point;
+        for (double a = from; a < to; a += ARC_STEP) arc << pointAt(range.point, a, radius);
+        arc << pointAt(range.point, to, radius) << range.point;
+        painter->setPen(areaPen);
+        painter->setBrush(QColor(255, 210, 0, limited ? 40 : 15));
+        painter->drawPolygon(arc);
+        QPen nowPen(highlight, 2);
+        nowPen.setCosmetic(true);
+        painter->setPen(nowPen);
+        painter->drawLine(range.point, pointAt(range.point, range.restDirection + range.angle, radius));
+        if (std::lround(range.angle) != 0)
+            drawLabel(painter, pointAt(range.point, range.restDirection + range.angle, radius),
+                      QStringLiteral("%1°").arg(std::lround(range.angle)), highlight);
     }
 
     if (!m_attaching) return;
