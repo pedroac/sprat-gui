@@ -143,7 +143,7 @@ sh build.sh
 ```
 
 `build.sh` behavior:
-- Updates `DEPENDENCIES` to the newest published `sprat-cli` release tag if network access is available.
+- Updates `DEPENDENCIES` to the `../sprat-cli` checkout's version if that version is a published tag, otherwise to the newest published `sprat-cli` release tag, if network access is available. An untagged local version is never pinned, since CI clones the pinned tag.
 - Configures with `cmake -B build -S .`.
 - Builds with `cmake --build build`.
 - Runs tests with `ctest --test-dir build --output-on-failure`.

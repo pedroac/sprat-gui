@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export: sprite, marker, alias and animation names containing quotes or line breaks no longer break the export. Unknown marker kinds in a project file are skipped, and unknown nine-slice fill modes fall back to stretch, instead of being passed to sprat-cli
 
 ### Dependencies
+- Updated sprat-cli to v0.32.4, which describes puppets (rigs, poses and pose sequences) and writes raw format version 8
 - Updated sprat-cli to v0.28.1, which labels layout values, reports mistakes in hand-written markers and animations files, and writes raw format version 4
 - Updated sprat-cli to v0.24.0, which adds animation loop modes and rejects animations faster than 100 FPS
 - macOS: the bundled sprat-cli tools are built from source with the app instead of being taken from sprat-cli's macOS release
