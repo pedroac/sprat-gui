@@ -10,6 +10,7 @@
 #include "ProjectSessionTests.h"
 #include "NineSliceWorkspaceTests.h"
 #include "PuppetTests.h"
+#include "PuppetWorkspaceTests.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -43,6 +44,9 @@ int main(int argc, char** argv) {
 
     PuppetTests puppetTests;
     runTest(&puppetTests);
+
+    PuppetWorkspaceTests puppetWorkspaceTests;
+    runTest(&puppetWorkspaceTests);
 
     return status;
 }

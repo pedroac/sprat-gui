@@ -10,6 +10,8 @@
 #include "PackedAtlasView.h"
 #include "AtlasesManagementWorkspace.h"
 #include "NineSliceWorkspace.h"
+#include "PuppetWorkspace.h"
+#include "PuppetCanvas.h"
 #include "NineSliceEditorCanvas.h"
 #include "UndoCommands.h"
 #include "PathSafety.h"
@@ -424,6 +426,14 @@ void MainWindow::setupUi() {
     connect(m_nineSliceWorkspace, &NineSliceWorkspace::definitionsChanged,
             this, &MainWindow::markWorkspaceEdited);
 
+    // Page 5: Puppet Workspace
+    m_puppetWorkspace = new PuppetWorkspace(m_session, m_undoStack, this);
+    m_mainStack->addWidget(m_puppetWorkspace);  // page 4
+    connect(m_puppetWorkspace, &PuppetWorkspace::atlasSelected, this, [this](int atlasIndex) {
+        selectActiveAtlas(atlasIndex);
+        updateNavigatorAtlasCombo();  // the other workspaces show the same atlas
+    });
+
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
 
@@ -772,6 +782,10 @@ void MainWindow::setupUi() {
         QIcon(":/icons/film.svg"), tr("Frame Animation"), QKeySequence(Qt::ALT | Qt::Key_F));
     connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_frameAnimWorkspace); });
 
+    m_puppetWorkspaceAction = addWorkspaceAction(
+        QIcon(":/icons/puppet.svg"), tr("Puppets"), QKeySequence(Qt::ALT | Qt::Key_P));
+    connect(m_puppetWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_puppetWorkspace); });
+
     setupWorkspaceTabs();
 
     auto* debugShortcut = new QAction(this);
@@ -1010,6 +1024,8 @@ void MainWindow::setupZoomShortcuts() {
             return (fw && m_exportWorkspace->isAncestorOf(fw)) ? fw : m_exportWorkspace;
         if (m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace)
             return (fw && m_nineSliceWorkspace->isAncestorOf(fw)) ? fw : m_nineSliceWorkspace;
+        if (m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace)
+            return (fw && m_puppetWorkspace->isAncestorOf(fw)) ? fw : m_puppetWorkspace;
         if (m_currentWorkspace == m_frameAnimWorkspace)
             return animCanvas;
         return canvas;
@@ -1044,6 +1060,10 @@ void MainWindow::setupZoomShortcuts() {
         if (!targetSpin && m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace
                 && (fw == m_nineSliceWorkspace || m_nineSliceWorkspace->isAncestorOf(fw))) {
             targetSpin = m_nineSliceWorkspace->zoomSpin();
+        }
+        if (!targetSpin && m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace
+                && (fw == m_puppetWorkspace || m_puppetWorkspace->isAncestorOf(fw))) {
+            targetSpin = m_puppetWorkspace->zoomSpin();
         }
         if (!targetSpin) {
             return;
@@ -1092,6 +1112,10 @@ void MainWindow::setupZoomShortcuts() {
             auto* nsCanvas = m_nineSliceWorkspace->canvas();
             if (fitToContent) { nsCanvas->setZoomManual(false); nsCanvas->initialFit(); }
             else              { nsCanvas->setZoomManual(true);  m_nineSliceWorkspace->zoomSpin()->setValue(100.0); }
+        } else if (m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace
+                   && (fw == m_puppetWorkspace || m_puppetWorkspace->isAncestorOf(fw))) {
+            if (fitToContent) m_puppetWorkspace->canvas()->fitPuppet();
+            else              m_puppetWorkspace->zoomSpin()->setValue(100.0);
         }
     };
 
@@ -1136,6 +1160,7 @@ void MainWindow::setupWorkspaceTabs() {
         {m_atlasWorkspace, m_atlasWorkspaceAction},
         {m_nineSliceWorkspace, m_nineSliceWorkspaceAction},
         {m_frameAnimWorkspace, m_frameAnimWorkspaceAction},
+        {m_puppetWorkspace, m_puppetWorkspaceAction},
         {m_exportWorkspace, m_exportationWorkspaceAction},
     };
     for (const auto& [workspace, action] : m_workspaceTabs) {
@@ -1214,12 +1239,13 @@ void MainWindow::updateUiState() {
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
     if (m_nineSliceWorkspaceAction)     m_nineSliceWorkspaceAction->setEnabled(viewEnabled);
+    if (m_puppetWorkspaceAction)        m_puppetWorkspaceAction->setEnabled(viewEnabled);
     updateWorkspaceTabs();
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
     if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace
-            || m_currentWorkspace == m_nineSliceWorkspace) return;
+            || m_currentWorkspace == m_nineSliceWorkspace || m_currentWorkspace == m_puppetWorkspace) return;
 
     const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
     if (hasModels) {
@@ -1250,7 +1276,7 @@ void MainWindow::updateMainContentView() {
     const bool hasProject = !projectFilePathUi.isEmpty();
 
     if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace
-            && m_currentWorkspace != m_nineSliceWorkspace) {
+            && m_currentWorkspace != m_nineSliceWorkspace && m_currentWorkspace != m_puppetWorkspace) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1351,6 +1377,8 @@ void MainWindow::refreshSpriteTree() {
         // Also refresh the NineSlice workspace navigator so it stays in sync
         if (m_nineSliceWorkspace)
             m_nineSliceWorkspace->refreshSprites();
+        if (m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace)
+            m_puppetWorkspace->refreshSprites();
         return;
     }
 
@@ -1790,6 +1818,8 @@ void MainWindow::updateNavigatorAtlasCombo() {
     auto* timelinePanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
     if (timelinePanel)
         timelinePanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+    if (m_puppetWorkspace)
+        m_puppetWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
 }
 
 void MainWindow::selectActiveAtlas(int atlasIndex) {

@@ -479,6 +479,15 @@ set(PROJECT_SOURCES
     src/App/Workspaces/AtlasesManagement/PackedAtlasView.cpp
     src/App/Workspaces/NineSlice/NineSliceWorkspace.h
     src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
+    src/App/Workspaces/Puppet/PuppetWorkspace.h
+    src/App/Workspaces/Puppet/PuppetWorkspace.cpp
+    src/App/Workspaces/Puppet/PuppetCanvas.h
+    src/App/Workspaces/Puppet/PuppetCanvas.cpp
+    src/App/Workspaces/Puppet/PuppetPropertiesPanel.h
+    src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
+    src/App/Workspaces/Puppet/PuppetTreeWidget.h
+    src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
+    src/App/MainWindow/Undo/PuppetCommands.h
     src/NineSlice/NineSliceEditorCanvas.h
     src/NineSlice/NineSliceInsets.h
     src/NineSlice/NineSliceEditorCanvas.cpp
@@ -553,6 +562,8 @@ set(PROJECT_SOURCES
     src/Core/PuppetModels.h
     src/Core/PuppetEvaluator.cpp
     src/Core/PuppetEvaluator.h
+    src/Core/PuppetEditing.cpp
+    src/Core/PuppetEditing.h
     src/Core/ViewUtils.cpp
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
@@ -603,7 +614,9 @@ target_include_directories(sprat-gui PRIVATE
     src/App/Workspaces/Export
     src/App/Workspaces/FrameAnimation
     src/App/Workspaces/NineSlice
+    src/App/Workspaces/Puppet
     src/App/Workspaces/Shared
+    src/App/MainWindow/Undo
     src/NineSlice
     src/Animation
     src/Animation/Timelines
@@ -754,8 +767,14 @@ if(BUILD_TESTING)
         tests/ProjectSessionTests.cpp
         tests/NineSliceWorkspaceTests.cpp
         tests/PuppetTests.cpp
+        tests/PuppetWorkspaceTests.cpp
         assets/icons.qrc
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
+        src/App/Workspaces/Puppet/PuppetWorkspace.cpp
+        src/App/Workspaces/Puppet/PuppetCanvas.cpp
+        src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
+        src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
+        src/Core/MessageDialog.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
         src/App/Workspaces/Shared/SpritePickerDialog.cpp
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
@@ -773,6 +792,7 @@ if(BUILD_TESTING)
         src/Project/ProjectPayloadCodec.cpp
         src/Project/PuppetTextCodec.cpp
         src/Core/PuppetEvaluator.cpp
+        src/Core/PuppetEditing.cpp
         src/Project/ProjectFileLoader.cpp
         src/Project/AutosaveProjectStore.cpp
         src/Project/ProjectSession.cpp
@@ -791,7 +811,9 @@ if(BUILD_TESTING)
         src/App/MainWindow
         src/App/Workspaces
         src/App/Workspaces/NineSlice
+        src/App/Workspaces/Puppet
         src/App/Workspaces/Shared
+        src/App/MainWindow/Undo
         src/Animation
         src/Animation/Test
         src/Animation/Timelines

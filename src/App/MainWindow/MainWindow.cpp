@@ -1068,6 +1068,7 @@ void MainWindow::onShowHotkeys() {
     row(tr("Atlases"), actionKeys(m_atlasesManagementWorkspaceAction));
     row(tr("Nine-Slice"), actionKeys(m_nineSliceWorkspaceAction));
     row(tr("Frame Animation"), actionKeys(m_frameAnimWorkspaceAction));
+    row(tr("Puppets"), actionKeys(m_puppetWorkspaceAction));
     row(tr("Export"), actionKeys(m_exportationWorkspaceAction));
     endSection();
 

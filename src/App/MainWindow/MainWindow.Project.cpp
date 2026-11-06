@@ -16,6 +16,7 @@
 #include "ExportWorkspace.h"
 #include "FrameAnimationWorkspace.h"
 #include "NineSliceWorkspace.h"
+#include "PuppetWorkspace.h"
 
 #include "ArchiveExtractor.h"
 #include "AutosaveProjectStore.h"
@@ -1848,6 +1849,11 @@ void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
         if (m_animationDock) m_animationDock->hide();
         m_mainStack->setCurrentIndex(3);
         m_mainStack->show();
+    } else if (ws == m_puppetWorkspace) {
+        if (m_atlasDock)     m_atlasDock->hide();
+        if (m_animationDock) m_animationDock->hide();
+        m_mainStack->setCurrentIndex(4);
+        m_mainStack->show();
     }
 }
 
@@ -1878,7 +1884,7 @@ void MainWindow::switchWorkspace(IWorkspace* next)
                 m_exportLayoutCanvas->hide();
             }
             m_mainStack->setCurrentIndex(0);
-        } else if (prev == m_nineSliceWorkspace) {
+        } else if (prev == m_nineSliceWorkspace || prev == m_puppetWorkspace) {
             m_mainStack->setCurrentIndex(0);
         } else if (prev == m_atlasesManagementWorkspace) {
             if (m_atlasesManagementWorkspace &&
@@ -1905,12 +1911,13 @@ void MainWindow::switchWorkspace(IWorkspace* next)
 
     m_currentWorkspace = next;
 
-    // Inform layout orchestrator of the new active workspace (0=Atlas, 1=FrameAnim, 2=Export, 3=AtlasMgt)
+    // Inform layout orchestrator of the new active workspace (0=Atlas, 1=FrameAnim, 2=Export, 3=AtlasMgt, 4=NineSlice, 5=Puppet)
     if (m_layoutOrchestrator) {
         const int wsIdx = (next == m_frameAnimWorkspace) ? 1
                         : (next == m_exportWorkspace)    ? 2
                         : (next == m_atlasesManagementWorkspace) ? 3
                         : (next == m_nineSliceWorkspace)    ? 4
+                        : (next == m_puppetWorkspace)       ? 5
                         : 0;
         m_layoutOrchestrator->setActiveWorkspace(wsIdx);
     }
@@ -1926,6 +1933,8 @@ void MainWindow::switchWorkspace(IWorkspace* next)
         m_atlasesManagementWorkspaceAction->setChecked(next == m_atlasesManagementWorkspace);
     if (m_nineSliceWorkspaceAction)
         m_nineSliceWorkspaceAction->setChecked(next == m_nineSliceWorkspace);
+    if (m_puppetWorkspaceAction)
+        m_puppetWorkspaceAction->setChecked(next == m_puppetWorkspace);
     updateWorkspaceTabs();
 
     // Apply dock/stack layout for the incoming workspace

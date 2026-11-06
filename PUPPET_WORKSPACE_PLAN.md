@@ -170,7 +170,8 @@ listing the atlas's timelines, as the source for variants.
 1. **Foundation, no UI** (done): model + schema 6, `PuppetTextCodec` (import/export, round-trip
    test including poses and sequences), export through `ProjectSaveService` and Layout text,
    rest-pose `PuppetEvaluator`, unit tests, an e2e test through sprat-cli.
-2. **Workspace shell**: tab, `Alt+P`, menu entry; puppets tree (draw order, labels, reorder);
+2. **Workspace shell** (done; the tree lists the active atlas's puppets with an Atlas combo, as
+   Frame Animation does, and **Add Sprites...** uses the existing picker until phase 3): tab, `Alt+P`, menu entry; puppets tree (draw order, labels, reorder);
    canvas with origin and pivot crosses; right panel for puppet, part, variant; add/rename/remove
    with undo.
 3. **Variants**: drag and drop, group menu, picker with Animations tab and marker check,

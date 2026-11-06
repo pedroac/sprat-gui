@@ -56,6 +56,9 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - **Nine-slice editing**
   Mark individual sprites as nine-sliced and define left/top/right/bottom insets using an interactive canvas editor. Set horizontal and vertical fill modes (stretch, repeat, mirror) and preview the result at a configurable target size. Nine-slice definitions are saved in the project and exported with the atlas metadata.
 
+- **Puppets (cutout rigs)**
+  Build sprat-cli puppets from an atlas's sprites: parts drawn in order, each with the sprites it can show. The Puppet workspace draws the puppet as it stands at rest. Puppets are saved in the project and exported for sprat-cli's `raw` format and in Layout text's `puppets.txt`.
+
 - **Visual customization**
   Customize workspace and sprite frame background colors, toggle transparency checkerboard, and configure sprite border styles.
 
@@ -275,6 +278,20 @@ Focuses on timeline authoring and animation preview: the timeline list on the le
 
 ![Frame Animation workspace](README_assets/frame_animation_workspace.png)
 
+### **Puppet Workspace** (`Alt+P`)
+Builds sprat-cli puppets: cutout rigs whose parts each show one of their sprites, joined at markers. A puppet belongs to an atlas and uses its sprites; with several atlases, **Atlas** above the tree picks whose puppets are listed.
+
+- **Left panel**: the puppets tree, puppet › part › variant (a sprite the part can show).
+  - Parts are listed in draw order: the first is drawn at the back. The column next to a part says where it goes: `at X,Y` for a part placed by position, `↳ PARENT:MARKER` for one hanging from another part's marker.
+  - ★ marks a part's rest variant, the first one: the part shows it unless a pose picks another.
+  - Drag a part to change the draw order, or a variant to reorder the variants (drop it on its part to make it the rest variant). Right-click for **Bring Forward**, **Send Backward** and **Make Rest Variant**.
+  - **Add** › **New Puppet**, **New Part** (placed at the puppet's origin) or **Add Sprites...** (pick sprites from the atlas for the selected part). **Remove** (or `Delete`) removes the selected puppet, part or variant; removing a part also removes the attachments to and from it.
+  - Rename with `F2` or in the right panel. Names must be unique, as sprat-cli requires: puppets in the atlas, parts in their puppet, variants in their part.
+- **Canvas**: the selected puppet at rest. The large cross is the puppet's origin; the small one is the selected part's pivot. Click a part to select it.
+- **Right panel**: the selected item's name; a part's position, or what it hangs from; a variant's sprite and preview. A ⚠ in the tree marks a part that can't be drawn (the panel says why) or a sprite that isn't in the atlas.
+
+Every change can be undone.
+
 ### **Exportation Workspace** (`Alt+X`)
 A full-screen preview and configuration area for final output. Preview exactly how your atlases will be packed and choose your metadata format before exporting to disk.
 
@@ -382,6 +399,12 @@ A full-screen preview and configuration area for final output. Preview exactly h
 - `Space + Drag` or `Middle Mouse Drag`: Pan canvas.
 - Drag a slice line: adjust the corresponding inset.
 - Drag the right/bottom/corner resize handle: change the target preview size.
+
+### **Puppet Workspace**
+- `F2`: Rename the selected puppet, part or variant.
+- `Delete`: Remove the selected puppet, part or variant.
+- `Ctrl + Wheel`: Zoom canvas.
+- `Space + Drag` or `Middle Mouse Drag`: Pan canvas.
 
 ### **Animation Test Preview**
 - `Wheel`: Scroll preview viewport.

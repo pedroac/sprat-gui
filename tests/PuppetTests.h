@@ -14,4 +14,9 @@ private slots:
     void testEvaluatorTurnsChildrenWithTheirParent();
     void testEvaluatorReportsPartsItCannotPlace();
     void testProjectPayloadKeepsPuppets();
+    void testEditingChecksNames();
+    void testRenamingAPartRenamesItsJointsAndPoses();
+    void testRemovingAPartRemovesItsJointsAndPoses();
+    void testNamingVariants();
+    void testAddingSpriteVariants();
 };

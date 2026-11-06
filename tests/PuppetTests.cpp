@@ -1,5 +1,6 @@
 #include "PuppetTests.h"
 #include "ProjectPayloadCodec.h"
+#include "PuppetEditing.h"
 #include "PuppetEvaluator.h"
 #include "PuppetTextCodec.h"
 
@@ -386,4 +387,106 @@ void PuppetTests::testProjectPayloadKeepsPuppets() {
     QVERIFY(loaded);
     QCOMPARE(loaded->puppets.size(), 1);
     QVERIFY(loaded->puppets.first() == puppet);
+}
+
+namespace {
+
+/// A face with a nose hanging from it, and a pose that turns the nose and shows its long variant.
+Puppet faceWithNose() {
+    Puppet puppet;
+    puppet.name = "pinocchio";
+    PuppetVariant face{PuppetVariant::Kind::Sprite, "/p/face.png", {}, false};
+    PuppetVariant shortNose{PuppetVariant::Kind::Sprite, "/p/nose-short.png", "short", false};
+    PuppetVariant longNose{PuppetVariant::Kind::Sprite, "/p/nose-long.png", {}, false};
+    puppet.parts = {{"face", {face}, QPoint(0, -40)}, {"nose", {shortNose, longNose}, std::nullopt}};
+    puppet.attachments = {{"nose", "pivot", "face", "nose"}};
+    PuppetPoseSetting lie;
+    lie.part = "nose";
+    lie.variant = "nose-long";
+    lie.angle = 10;
+    puppet.poses = {{"lie", {lie}}};
+    return puppet;
+}
+
+}  // namespace
+
+void PuppetTests::testEditingChecksNames() {
+    using namespace PuppetEditing;
+    QCOMPARE(uniqueName("part", {}), QString("part"));
+    QCOMPARE(uniqueName("part", {"part", "part 2"}), QString("part 3"));
+
+    const QVector<Puppet> puppets{faceWithNose()};
+    QVERIFY(puppetNameProblem(puppets, 0, "pinocchio").isEmpty());  // its own name
+    QVERIFY(!puppetNameProblem(puppets, -1, "pinocchio").isEmpty());
+    QVERIFY(!puppetNameProblem(puppets, 0, " ").isEmpty());
+
+    const Puppet& puppet = puppets.first();
+    QVERIFY(!partNameProblem(puppet, 1, "face").isEmpty());
+    QVERIFY(partNameProblem(puppet, 1, "beak").isEmpty());
+
+    const PuppetPart& nose = puppet.parts[1];
+    QVERIFY(!variantNameProblem(nose, 0, "nose-long").isEmpty());
+    // Empty goes back to the default name, nose-short, which nothing else uses.
+    QVERIFY(variantNameProblem(nose, 0, "").isEmpty());
+}
+
+void PuppetTests::testRenamingAPartRenamesItsJointsAndPoses() {
+    Puppet puppet = faceWithNose();
+    PuppetEditing::renamePart(puppet, 0, "head");
+    QCOMPARE(puppet.parts[0].name, QString("head"));
+    QCOMPARE(puppet.attachments[0].parent, QString("head"));
+    PuppetEditing::renamePart(puppet, 1, "beak");
+    QCOMPARE(puppet.attachments[0].child, QString("beak"));
+    QCOMPARE(puppet.poses[0].settings[0].part, QString("beak"));
+
+    PuppetEditing::movePart(puppet, 1, 0);
+    QCOMPARE(puppet.parts[0].name, QString("beak"));
+    PuppetEditing::movePart(puppet, 0, 5);  // out of range: nothing
+    QCOMPARE(puppet.parts[0].name, QString("beak"));
+}
+
+void PuppetTests::testRemovingAPartRemovesItsJointsAndPoses() {
+    Puppet puppet = faceWithNose();
+    PuppetEditing::removePart(puppet, 0);  // the face the nose hangs from
+    QCOMPARE(puppet.parts.size(), 1);
+    QVERIFY(puppet.attachments.isEmpty());
+    QCOMPARE(puppet.poses[0].settings.size(), 1);
+
+    PuppetEditing::removePart(puppet, 0);
+    QVERIFY(puppet.poses[0].settings.isEmpty());
+    QCOMPARE(puppet.poses.size(), 1);  // the pose itself stays
+}
+
+void PuppetTests::testNamingVariants() {
+    Puppet puppet = faceWithNose();
+    PuppetEditing::setVariantName(puppet, 1, 1, "long");
+    QCOMPARE(puppet.parts[1].variants[1].name, QString("long"));
+    QCOMPARE(puppet.poses[0].settings[0].variant, QString("long"));
+
+    // The default name is stored as no name, so it follows the sprite.
+    PuppetEditing::setVariantName(puppet, 1, 1, "nose-long");
+    QVERIFY(puppet.parts[1].variants[1].name.isEmpty());
+    QCOMPARE(puppet.poses[0].settings[0].variant, QString("nose-long"));
+    PuppetEditing::setVariantName(puppet, 1, 0, "");
+    QCOMPARE(puppetVariantName(puppet.parts[1].variants[0]), QString("nose-short"));
+
+    PuppetEditing::moveVariant(puppet, 1, 1, 0);
+    QCOMPARE(puppetVariantName(puppet.parts[1].variants[0]), QString("nose-long"));
+
+    PuppetEditing::removeVariant(puppet, 1, 0);
+    QCOMPARE(puppet.parts[1].variants.size(), 1);
+    // The pose keeps turning the nose, with whatever variant it shows.
+    QVERIFY(puppet.poses[0].settings[0].variant.isEmpty());
+    QCOMPARE(puppet.poses[0].settings[0].angle, std::optional<int>(10));
+}
+
+void PuppetTests::testAddingSpriteVariants() {
+    Puppet puppet = faceWithNose();
+    const int added = PuppetEditing::addSpriteVariants(
+        puppet, 0, {"/p/face.png", "/p/happy/face.png", "/p/sad/face.png", "/p/eye.png"});
+    QCOMPARE(added, 3);
+    QStringList names;
+    for (const PuppetVariant& variant : puppet.parts[0].variants) names.append(puppetVariantName(variant));
+    QCOMPARE(names, (QStringList{"face", "face 2", "face 3", "eye"}));
+    QCOMPARE(PuppetEditing::addSpriteVariants(puppet, 7, {"/p/eye.png"}), 0);
 }
