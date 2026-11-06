@@ -23,6 +23,9 @@ public:
     bool resolveCliBinaries(QStringList& missing);
     void installCliTools();
 
+    /// Folder the installer puts the CLI tools in on this platform.
+    static QString installDir();
+
 signals:
 #ifndef SPRAT_EMBEDDED_CLI
     void installFinished(int exitCode, QProcess::ExitStatus exitStatus);

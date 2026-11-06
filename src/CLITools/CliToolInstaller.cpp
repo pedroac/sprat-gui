@@ -54,6 +54,16 @@ bool CliToolInstaller::resolveCliBinaries(QStringList& missing) {
 #endif
 }
 
+QString CliToolInstaller::installDir() {
+#ifdef Q_OS_MACOS
+    // The CLI goes in the bundle's Resources/cli, where resolveBinary() looks
+    // for it; Contents/MacOS must hold only code for the bundle to stay signable.
+    return QDir(QApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../Resources/cli"));
+#else
+    return CliToolsConfig::defaultInstallDir();
+#endif
+}
+
 void CliToolInstaller::installCliTools() {
     emit installStarted();
 
@@ -240,13 +250,12 @@ void CliToolInstaller::onDownloadFinished(QNetworkReply* reply) {
 void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
 #ifndef SPRAT_EMBEDDED_CLI
     Q_UNUSED(filePath);
-    QString appDir = QApplication::applicationDirPath();
     QString expectedVersion = m_cliVersion;
 
 #ifdef Q_OS_WIN
     emit installLog("Extracting ZIP...");
     // Extract ZIP into the CLI directory
-    QString destDir = CliToolsConfig::defaultInstallDir();
+    QString destDir = installDir();
     QDir().mkpath(destDir);
     QString script = QString("$ErrorActionPreference = 'Stop'; "
                              "Expand-Archive -Path '%1' -DestinationPath '%2' -Force; "
@@ -277,9 +286,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
     m_installProcess->start("powershell", QStringList() << "-Command" << script);
 #elif defined(Q_OS_MACOS)
     emit installLog("Mounting DMG and copying files...");
-    // The CLI goes in the bundle's Resources/cli, where resolveBinary() looks
-    // for it; Contents/MacOS must hold only code for the bundle to stay signable.
-    const QString cliDir = QDir(appDir).absoluteFilePath(QStringLiteral("../Resources/cli"));
+    const QString cliDir = installDir();
     // Use hdiutil to mount and cp while preserving structure
     // Paths are safely quoted using shellQuote() to prevent shell injection
     QString script = QString("set -euo pipefail\n"
