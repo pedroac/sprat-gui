@@ -11,6 +11,10 @@ private slots:
     void testClickingAPartSelectsIt();
     void testDraggingAPartMovesIt();
     void testArrowKeysNudgeTheSelectedPart();
+    void testDraggingThePivotOntoAMarkerAttaches();
+    void testDraggingThePivotAwayDetaches();
+    void testPanelAttachesAndDetaches();
+    void testPanelSetsJointLimits();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();

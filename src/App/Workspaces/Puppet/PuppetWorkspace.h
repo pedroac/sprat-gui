@@ -5,10 +5,10 @@
 #include "IWorkspace.h"
 #include "PuppetCommands.h"
 #include "PuppetEvaluator.h"
+#include "PuppetPropertiesPanel.h"
 #include "SpriteModels.h"
 
 class PuppetCanvas;
-class PuppetPropertiesPanel;
 class PuppetTreeWidget;
 class ProjectSession;
 class QComboBox;
@@ -67,6 +67,13 @@ public:
     /// undo step; an empty key merges the panel's edits of this part.
     void setSelectedPartPosition(const QPoint& position, const QString& mergeKey = QString());
     void select(const PuppetSelection& selection);
+    /// Hangs the selected part from @p parentMarker of part @p parentIndex by its @p childMarker.
+    void attachSelectedPart(int parentIndex, const QString& parentMarker, const QString& childMarker);
+    /// Places the selected part by position, where it is now.
+    void detachSelectedPart();
+    /// Places the selected part by position so that its joint (the pivot handle) is at @p scenePos.
+    void placeSelectedPartJointAt(const QPointF& scenePos);
+    void setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax);
 
 signals:
     void atlasSelected(int atlasIndex);
@@ -93,6 +100,9 @@ private:
     QPixmap imageOf(const SpritePtr& sprite) const;
     PuppetSpriteLookup spriteLookup() const;
     QString describeSource(const PuppetVariant& variant) const;
+    /// The markers a joint of @p part can use (as the child: point markers only), each with
+    /// the variants that lack it.
+    QVector<PuppetPropertiesPanel::MarkerChoice> jointMarkers(const PuppetPart& part, bool asChild) const;
     QTreeWidgetItem* itemFor(const PuppetSelection& selection) const;
 
     ProjectSession* m_session = nullptr;

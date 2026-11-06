@@ -1,4 +1,7 @@
 #pragma once
+#include <optional>
+#include <QPoint>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -38,6 +41,24 @@ void setVariantName(Puppet& puppet, int partIndex, int variantIndex, const QStri
 void removeVariant(Puppet& puppet, int partIndex, int variantIndex);
 /// Moves a variant; the first is the rest variant. @p to is its index afterwards.
 void moveVariant(Puppet& puppet, int partIndex, int from, int to);
+
+/// The parts that hang from part @p partIndex, directly or through others, by their
+/// parent attachments. A part can't be attached to any of them: that would make a loop.
+QSet<int> partsHangingFrom(const Puppet& puppet, int partIndex);
+/// Whether part @p childIndex may hang from part @p parentIndex.
+bool canAttach(const Puppet& puppet, int childIndex, int parentIndex);
+
+/// Hangs a part from @p parentMarker of part @p parentIndex by its own @p childMarker.
+/// An attached part keeps its leeway and angle limits; a positioned part loses its
+/// position, and the new attachment goes before its others so it becomes the parent.
+void attachPart(Puppet& puppet, int partIndex, int parentIndex, const QString& parentMarker,
+                const QString& childMarker);
+/// Places an attached part by @p position instead, removing its parent attachment.
+void detachPart(Puppet& puppet, int partIndex, const QPoint& position);
+/// Sets how far an attached part's joint may drift and how far it may turn.
+void setAttachmentLimits(Puppet& puppet, int partIndex, int leeway, std::optional<int> angleMin,
+                         std::optional<int> angleMax);
+
 /// Adds a sprite variant for each path the part doesn't show yet. A sprite whose name
 /// another variant already goes by gets a unique explicit name. Returns how many it added.
 int addSpriteVariants(Puppet& puppet, int partIndex, const QStringList& spritePaths);

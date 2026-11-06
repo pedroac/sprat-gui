@@ -22,6 +22,12 @@ constexpr int ORIGIN_CROSS_HALF_SIZE = 24;
 constexpr int PIVOT_CROSS_HALF_SIZE = 8;
 /// Pixels Shift+arrow moves a part; an arrow alone moves it one.
 constexpr int NUDGE_STEP_LARGE = 10;
+/// Screen pixels around the selected part's pivot that grab its handle.
+constexpr int PIVOT_HANDLE_RADIUS = 7;
+/// Screen pixels from a marker within which the dragged handle snaps to it.
+constexpr int MARKER_SNAP_DISTANCE = 12;
+/// Screen size of a point marker's dot while attaching.
+constexpr qreal MARKER_DOT_RADIUS = 3.5;
 
 /// The key of a pixmap item's part index (QGraphicsItem::data).
 constexpr int PART_INDEX_KEY = 0;
@@ -65,14 +71,16 @@ PuppetCanvas::PuppetCanvas(QWidget* parent)
 }
 
 void PuppetCanvas::clearPuppet() {
-    showPuppet({}, -1, std::nullopt);
+    showPuppet({}, {}, -1, std::nullopt);
 }
 
-void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart, std::optional<QPointF> selectedPivot) {
+void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
+                              std::optional<QPointF> selectedPivot) {
     m_scene->clear();
-    m_movable.clear();
-    for (const Part& part : parts) m_movable.append(part.placed && part.movable);
+    m_parts = parts;
+    m_bones = bones;
     m_selectedPart = selectedPart;
+    m_selectedPivot = selectedPivot;
     for (int i = 0; i < parts.size(); ++i) {
         const Part& part = parts[i];
         if (!part.placed || part.image.isNull()) continue;
@@ -97,6 +105,7 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart, std:
         addCross(*selectedPivot, PIVOT_CROSS_HALF_SIZE, palette().color(QPalette::Highlight), parts.size() + 2);
     // A new scene rect while dragging would shift the view under the pointer.
     if (!m_dragging) updateSceneRect();
+    viewport()->update();
 }
 
 void PuppetCanvas::addCross(const QPointF& at, int halfSize, const QColor& color, qreal z) {
@@ -138,11 +147,58 @@ int PuppetCanvas::partAt(const QPoint& viewPos) const {
     return -1;
 }
 
+bool PuppetCanvas::isMovable(int part) const {
+    return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].movable;
+}
+
+bool PuppetCanvas::onPivotHandle(const QPoint& viewPos) const {
+    if (!m_selectedPivot) return false;
+    const QPoint handle = mapFromScene(*m_selectedPivot);
+    return (viewPos - handle).manhattanLength() <= 2 * PIVOT_HANDLE_RADIUS
+        && QLineF(viewPos, handle).length() <= PIVOT_HANDLE_RADIUS;
+}
+
+PuppetCanvas::Target PuppetCanvas::targetAt(const QPoint& viewPos) const {
+    Target nearest;
+    qreal nearestDistance = MARKER_SNAP_DISTANCE;
+    Target inside;
+    const QPointF scenePos = mapToScene(viewPos);
+    // Front parts first, so a marker drawn over another wins a tie.
+    for (int p = m_parts.size() - 1; p >= 0; --p) {
+        const Part& part = m_parts[p];
+        if (!part.attachTarget || !part.placed) continue;
+        for (int m = 0; m < part.markers.size(); ++m) {
+            const Marker& marker = part.markers[m];
+            const qreal distance = QLineF(QPointF(viewPos), QPointF(mapFromScene(marker.point))).length();
+            if (distance <= nearestDistance) {
+                nearestDistance = distance;
+                nearest = {p, m};
+            }
+            if (inside.part < 0 && !marker.shape.isEmpty() && marker.shape.contains(scenePos)) inside = {p, m};
+        }
+    }
+    return nearest.part >= 0 ? nearest : inside;
+}
+
+void PuppetCanvas::cancelAttach() {
+    m_handlePressed = false;
+    m_attaching = false;
+    m_attachTarget = {};
+    viewport()->update();
+}
+
 void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && !m_spacePressed && onPivotHandle(event->pos())) {
+        setFocus();
+        m_handlePressed = true;
+        m_pressPos = event->pos();
+        event->accept();
+        return;
+    }
     ZoomableGraphicsView::mousePressEvent(event);
     if (event->button() != Qt::LeftButton || m_isPanning) return;
     const int part = partAt(event->pos());
-    m_pressedPart = (part >= 0 && part < m_movable.size() && m_movable[part]) ? part : -1;
+    m_pressedPart = isMovable(part) ? part : -1;
     m_pressPos = event->pos();
     m_pressScenePos = mapToScene(event->pos());
     m_dragging = false;
@@ -150,6 +206,15 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (m_handlePressed && (event->buttons() & Qt::LeftButton)) {
+        if (!m_attaching && (event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance())
+            return;
+        m_attaching = true;
+        m_attachTarget = targetAt(event->pos());
+        m_attachPointer = mapToScene(event->pos());
+        viewport()->update();
+        return;
+    }
     if (m_pressedPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
         if (!m_dragging) {
             if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
@@ -162,13 +227,28 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     ZoomableGraphicsView::mouseMoveEvent(event);
     if (event->buttons() == Qt::NoButton) {
-        const int part = partAt(event->pos());
-        const bool movable = part >= 0 && part < m_movable.size() && m_movable[part];
-        viewport()->setCursor(movable ? Qt::SizeAllCursor : Qt::ArrowCursor);
+        const Qt::CursorShape cursor = onPivotHandle(event->pos()) ? Qt::CrossCursor
+            : isMovable(partAt(event->pos()))                       ? Qt::SizeAllCursor
+                                                                    : Qt::ArrowCursor;
+        viewport()->setCursor(cursor);
     }
 }
 
 void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (m_handlePressed && event->button() == Qt::LeftButton) {
+        const bool attaching = m_attaching;
+        const Target target = m_attachTarget;
+        const QPointF dropped = mapToScene(event->pos());
+        const int part = m_selectedPart;
+        cancelAttach();
+        if (attaching && target.part >= 0) {
+            emit attachRequested(part, target.part, m_parts[target.part].markers[target.marker].name);
+        } else if (attaching) {
+            emit detachRequested(part, dropped);
+        }
+        event->accept();
+        return;
+    }
     const bool dragged = m_dragging;
     if (event->button() == Qt::LeftButton) {
         m_pressedPart = -1;
@@ -179,7 +259,11 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void PuppetCanvas::keyPressEvent(QKeyEvent* event) {
-    const bool movable = m_selectedPart >= 0 && m_selectedPart < m_movable.size() && m_movable[m_selectedPart];
+    if (event->key() == Qt::Key_Escape && m_handlePressed) {
+        cancelAttach();
+        event->accept();
+        return;
+    }
     const int step = (event->modifiers() & Qt::ShiftModifier) ? NUDGE_STEP_LARGE : 1;
     QPoint offset;
     switch (event->key()) {
@@ -189,10 +273,83 @@ void PuppetCanvas::keyPressEvent(QKeyEvent* event) {
     case Qt::Key_Down:  offset = QPoint(0, step); break;
     default: break;
     }
-    if (movable && !offset.isNull()) {
+    if (isMovable(m_selectedPart) && !offset.isNull()) {
         emit partNudged(m_selectedPart, offset);
         event->accept();
         return;
     }
     ZoomableGraphicsView::keyPressEvent(event);
+}
+
+void PuppetCanvas::drawLabel(QPainter* painter, const QPointF& scenePos, const QString& text, const QColor& color) {
+    // Labels keep their size whatever the zoom: drawn in view pixels.
+    painter->save();
+    const QPointF at = painter->transform().map(scenePos) + QPointF(6, -6);
+    painter->resetTransform();
+    painter->setPen(QColor(0, 0, 0, 180));
+    painter->drawText(at + QPointF(1, 1), text);
+    painter->setPen(color);
+    painter->drawText(at, text);
+    painter->restore();
+}
+
+void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
+    ZoomableGraphicsView::drawForeground(painter, rect);
+    const QColor highlight = palette().color(QPalette::Highlight);
+    painter->setRenderHint(QPainter::Antialiasing, true);
+
+    // What hangs from what: faint for every part, strong for the selected one.
+    for (const Bone& bone : m_bones) {
+        // A dark line under a light one, like the crosses, shows on any sprite.
+        QPen under(QColor(0, 0, 0, bone.selected ? 160 : 70), 3, Qt::SolidLine, Qt::RoundCap);
+        under.setCosmetic(true);
+        painter->setPen(under);
+        painter->drawLine(bone.from, bone.to);
+        QPen over(bone.selected ? highlight : QColor(255, 255, 255, 140), 1);
+        over.setCosmetic(true);
+        painter->setPen(over);
+        painter->drawLine(bone.from, bone.to);
+    }
+
+    // The pivot handle: a ring around the selected part's pivot cross.
+    if (m_selectedPivot) {
+        const qreal radius = PIVOT_HANDLE_RADIUS / qMax(0.01, zoom());
+        QPen pen(highlight, 1.5);
+        pen.setCosmetic(true);
+        painter->setPen(pen);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(*m_selectedPivot, radius, radius);
+    }
+
+    if (!m_attaching) return;
+    const qreal dot = MARKER_DOT_RADIUS / qMax(0.01, zoom());
+    for (int p = 0; p < m_parts.size(); ++p) {
+        const Part& part = m_parts[p];
+        if (!part.attachTarget || !part.placed) continue;
+        for (int m = 0; m < part.markers.size(); ++m) {
+            const Marker& marker = part.markers[m];
+            const bool hovered = m_attachTarget.part == p && m_attachTarget.marker == m;
+            const QColor color = hovered ? highlight : QColor(255, 210, 0);
+            QPen pen(color, hovered ? 2 : 1);
+            pen.setCosmetic(true);
+            painter->setPen(pen);
+            painter->setBrush(Qt::NoBrush);
+            if (!marker.shape.isEmpty()) painter->drawPath(marker.shape);
+            painter->setBrush(color);
+            painter->drawEllipse(marker.point, dot, dot);
+            drawLabel(painter, marker.point, marker.name, color);
+        }
+    }
+    // The joint being dragged, from where it is now to where it would go.
+    if (m_selectedPivot) {
+        const QPointF end = m_attachTarget.part >= 0
+            ? m_parts[m_attachTarget.part].markers[m_attachTarget.marker].point
+            : m_attachPointer;
+        QPen pen(highlight, 1, Qt::DashLine);
+        pen.setCosmetic(true);
+        painter->setPen(pen);
+        painter->drawLine(*m_selectedPivot, end);
+        painter->setBrush(highlight);
+        painter->drawEllipse(end, dot, dot);
+    }
 }

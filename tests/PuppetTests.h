@@ -19,4 +19,6 @@ private slots:
     void testRemovingAPartRemovesItsJointsAndPoses();
     void testNamingVariants();
     void testAddingSpriteVariants();
+    void testAttachingAndDetachingParts();
+    void testAttachingRefusesLoops();
 };

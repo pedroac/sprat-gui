@@ -17,6 +17,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QSet>
 #include <QSignalBlocker>
@@ -49,6 +50,39 @@ QPointF markerPoint(const NamedPoint& marker) {
         return marker.polygonPoints.first();
     return QPointF(marker.x, marker.y);
 }
+
+/// A marker's outline in its sprite's pixels; empty for a point.
+QPainterPath markerShape(const NamedPoint& marker) {
+    QPainterPath path;
+    switch (marker.kind) {
+    case MarkerKind::Circle:
+        path.addEllipse(QPointF(marker.x, marker.y), marker.radius, marker.radius);
+        break;
+    case MarkerKind::Rectangle:
+        path.addRect(QRectF(marker.x, marker.y, marker.w, marker.h));
+        break;
+    case MarkerKind::Polygon:
+        if (marker.polygonPoints.size() >= 3) {
+            path.addPolygon(QPolygonF(QPolygon(marker.polygonPoints)));
+            path.closeSubpath();
+        }
+        break;
+    case MarkerKind::Point:
+        break;
+    }
+    return path;
+}
+
+/// Whether a sprite has a marker a joint can use: "pivot" always does (the sprite's pivot
+/// stands in for it), a child's marker only when it's a point.
+bool hasJointMarker(const Sprite& sprite, const QString& name, bool asChild) {
+    for (const NamedPoint& marker : sprite.points) {
+        if (marker.name == name) return !asChild || marker.kind == MarkerKind::Point;
+    }
+    return name == QLatin1String("pivot");
+}
+
+const QString PIVOT_MARKER = QStringLiteral("pivot");
 
 }  // namespace
 
@@ -205,6 +239,17 @@ void PuppetWorkspace::setupUi() {
         if (part != m_selection.part) return;
         setSelectedPartPosition(m_dragStartPosition + offset, QStringLiteral("drag %1").arg(m_dragCount));
     });
+    connect(m_canvas, &PuppetCanvas::attachRequested, this, [this](int part, int parent, const QString& marker) {
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet || part != m_selection.part) return;
+        // A part already hanging keeps the marker it hangs by; a new joint uses its pivot.
+        const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[part].name);
+        attachSelectedPart(parent, marker, joint ? joint->childMarker : PIVOT_MARKER);
+    });
+    connect(m_canvas, &PuppetCanvas::detachRequested, this, [this](int part, const QPointF& scenePos) {
+        if (part != m_selection.part) return;
+        placeSelectedPartJointAt(scenePos);
+    });
     connect(m_canvas, &PuppetCanvas::partNudged, this, [this](int part, const QPoint& offset) {
         const Puppet* puppet = selectedPuppet();
         if (!puppet || part != m_selection.part || !puppet->parts[part].position) return;
@@ -214,17 +259,29 @@ void PuppetWorkspace::setupUi() {
 
     // === Right: properties ===
     m_properties = new PuppetPropertiesPanel(splitter);
-    m_properties->setMinimumWidth(220);
+    m_properties->setMinimumWidth(260);
     splitter->addWidget(m_properties);
     connect(m_properties, &PuppetPropertiesPanel::renameRequested, this, &PuppetWorkspace::renameSelected);
     connect(m_properties, &PuppetPropertiesPanel::positionChanged, this,
             [this](const QPoint& position) { setSelectedPartPosition(position); });
     connect(m_properties, &PuppetPropertiesPanel::makeRestVariantRequested, this, [this]() { moveSelected(0); });
+    connect(m_properties, &PuppetPropertiesPanel::attachRequested, this,
+            [this](const QString& parent, const QString& parentMarker, const QString& childMarker) {
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet) return;
+        attachSelectedPart(PuppetEditing::partNames(*puppet).indexOf(parent), parentMarker, childMarker);
+    });
+    connect(m_properties, &PuppetPropertiesPanel::detachRequested, this, &PuppetWorkspace::detachSelectedPart);
+    connect(m_properties, &PuppetPropertiesPanel::limitsChanged, this,
+            [this](int leeway, bool limited, int angleMin, int angleMax) {
+        setSelectedPartLimits(leeway, limited ? std::optional<int>(angleMin) : std::nullopt,
+                              limited ? std::optional<int>(angleMax) : std::nullopt);
+    });
 
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
     splitter->setStretchFactor(2, 0);
-    splitter->setSizes({260, 600, 260});
+    splitter->setSizes({260, 580, 280});
 
     connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* current) {
         if (m_rebuilding) return;
@@ -455,14 +512,34 @@ void PuppetWorkspace::updateCanvas() {
         drawn.transform = placements[i].transform;
         // A part placed by its attachment moves with its parent, not on its own.
         drawn.movable = part.position.has_value() && !puppetParentAttachment(*puppet, part.name);
-        if (!part.variants.isEmpty()) drawn.image = imageOf(spriteFor(part.variants.first()));
+        drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
+        const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants.first());
+        drawn.image = imageOf(sprite);
+        if (sprite) {
+            bool hasPivotMarker = false;
+            for (const NamedPoint& marker : sprite->points) {
+                hasPivotMarker = hasPivotMarker || marker.name == PIVOT_MARKER;
+                drawn.markers.append({marker.name, drawn.transform.map(markerPoint(marker)),
+                                      drawn.transform.map(markerShape(marker))});
+            }
+            if (!hasPivotMarker)
+                drawn.markers.append({PIVOT_MARKER, drawn.transform.map(QPointF(sprite->pivotX, sprite->pivotY)), {}});
+        }
         parts.append(drawn);
+    }
+    QVector<PuppetCanvas::Bone> bones;
+    const QStringList names = PuppetEditing::partNames(*puppet);
+    for (int i = 0; i < puppet->parts.size(); ++i) {
+        const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[i].name);
+        const int parent = joint ? names.indexOf(joint->parent) : -1;
+        if (parent < 0 || !placements[i].placed || !placements[parent].placed) continue;
+        bones.append({placements[parent].pivot, placements[i].pivot, i == m_selection.part});
     }
     const int selectedPart = m_selection.part;
     std::optional<QPointF> pivot;
     if (selectedPart >= 0 && selectedPart < placements.size() && placements[selectedPart].placed)
         pivot = placements[selectedPart].pivot;
-    m_canvas->showPuppet(parts, selectedPart, pivot);
+    m_canvas->showPuppet(parts, bones, selectedPart, pivot);
 
     // Fit when another puppet is shown, not after every edit of this one.
     const QString fitKey = m_session->activeAtlas().id + QLatin1Char('/') + QString::number(m_selection.puppet);
@@ -488,13 +565,24 @@ void PuppetWorkspace::updateProperties() {
     const int i = m_selection.part;
     const PuppetPart& part = puppet->parts[i];
     if (m_selection.variant < 0) {
-        QString attachment;
+        PuppetPropertiesPanel::Placement placement;
+        placement.position = part.position;
         if (const PuppetAttachment* joint = puppetParentAttachment(*puppet, part.name)) {
-            attachment = tr("Attached to part \"%1\" at its marker \"%2\", by this part's marker \"%3\".")
-                             .arg(joint->parent, joint->parentMarker, joint->childMarker);
+            placement.parent = joint->parent;
+            placement.parentMarker = joint->parentMarker;
+            placement.childMarker = joint->childMarker;
+            placement.leeway = joint->leeway;
+            placement.angleMin = joint->angleMin;
+            placement.angleMax = joint->angleMax;
         }
+        for (int j = 0; j < puppet->parts.size(); ++j) {
+            if (!PuppetEditing::canAttach(*puppet, i, j)) continue;
+            placement.parents.append(puppet->parts[j].name);
+            placement.parentMarkers.insert(puppet->parts[j].name, jointMarkers(puppet->parts[j], false));
+        }
+        placement.childMarkers = jointMarkers(part, true);
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
-        m_properties->showPart(part.name, part.position, attachment, placements[i].problem,
+        m_properties->showPart(part.name, placement, placements[i].problem,
                                [this, p, i](const QString& name) {
             return PuppetEditing::partNameProblem(puppets()[p], i, name);
         });
@@ -698,4 +786,87 @@ void PuppetWorkspace::setSelectedPartPosition(const QPoint& position, const QStr
     pushEdit(tr("Move Part"), after, m_selection,
              mergeKey.isEmpty() ? QStringLiteral("position %1 %2").arg(m_selection.puppet).arg(m_selection.part)
                                 : mergeKey);
+}
+
+QVector<PuppetPropertiesPanel::MarkerChoice> PuppetWorkspace::jointMarkers(const PuppetPart& part, bool asChild) const {
+    // Every marker any variant has, "pivot" first, each with the variants that lack it.
+    QStringList names{PIVOT_MARKER};
+    QVector<SpritePtr> sprites;
+    for (const PuppetVariant& variant : part.variants) {
+        const SpritePtr sprite = spriteFor(variant);
+        sprites.append(sprite);
+        if (!sprite) continue;
+        for (const NamedPoint& marker : sprite->points) {
+            const bool usable = !asChild || marker.kind == MarkerKind::Point;
+            if (usable && !names.contains(marker.name)) names.append(marker.name);
+        }
+    }
+    QVector<PuppetPropertiesPanel::MarkerChoice> choices;
+    for (const QString& name : names) {
+        PuppetPropertiesPanel::MarkerChoice choice{name, {}};
+        for (int v = 0; v < part.variants.size(); ++v) {
+            if (!sprites[v] || !hasJointMarker(*sprites[v], name, asChild))
+                choice.missingIn.append(puppetVariantName(part.variants[v]));
+        }
+        choices.append(choice);
+    }
+    return choices;
+}
+
+void PuppetWorkspace::attachSelectedPart(int parentIndex, const QString& parentMarker, const QString& childMarker) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0) return;
+    QVector<Puppet> after = puppets();
+    PuppetEditing::attachPart(after[m_selection.puppet], m_selection.part, parentIndex, parentMarker, childMarker);
+    if (after == puppets()) return;
+    pushEdit(tr("Attach Part"), after, {m_selection.puppet, m_selection.part, -1});
+}
+
+void PuppetWorkspace::detachSelectedPart() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0) return;
+    const PuppetPart& part = puppet->parts[m_selection.part];
+    // Keep it where it is: its sprite's pivot, wherever the attachment put it.
+    const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
+    const PuppetPartPlacement& placement = placements[m_selection.part];
+    const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants.first());
+    QPoint position = part.position.value_or(QPoint());
+    if (placement.placed && sprite)
+        position = placement.transform.map(QPointF(sprite->pivotX, sprite->pivotY)).toPoint();
+    QVector<Puppet> after = puppets();
+    PuppetEditing::detachPart(after[m_selection.puppet], m_selection.part, position);
+    if (after == puppets()) return;
+    pushEdit(tr("Detach Part"), after, {m_selection.puppet, m_selection.part, -1});
+}
+
+void PuppetWorkspace::placeSelectedPartJointAt(const QPointF& scenePos) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0) return;
+    const PuppetPart& part = puppet->parts[m_selection.part];
+    // The handle is the part's joint: its pivot, or the marker it hangs by. The position
+    // is where the pivot goes, so it keeps the marker's offset from the pivot.
+    QPointF pivotOffset;
+    const PuppetAttachment* joint = puppetParentAttachment(*puppet, part.name);
+    const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants.first());
+    if (joint && sprite) {
+        for (const NamedPoint& marker : sprite->points) {
+            if (marker.name == joint->childMarker)
+                pivotOffset = markerPoint(marker) - QPointF(sprite->pivotX, sprite->pivotY);
+        }
+    }
+    const QPointF position = scenePos - pivotOffset;
+    QVector<Puppet> after = puppets();
+    PuppetEditing::detachPart(after[m_selection.puppet], m_selection.part,
+                              QPoint(qRound(position.x()), qRound(position.y())));
+    if (after == puppets()) return;
+    pushEdit(joint ? tr("Detach Part") : tr("Move Part"), after, {m_selection.puppet, m_selection.part, -1});
+}
+
+void PuppetWorkspace::setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax) {
+    if (!selectedPuppet() || m_selection.part < 0) return;
+    QVector<Puppet> after = puppets();
+    PuppetEditing::setAttachmentLimits(after[m_selection.puppet], m_selection.part, leeway, angleMin, angleMax);
+    if (after == puppets()) return;
+    pushEdit(tr("Change Joint Limits"), after, m_selection,
+             QStringLiteral("limits %1 %2").arg(m_selection.puppet).arg(m_selection.part));
 }

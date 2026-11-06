@@ -10,7 +10,10 @@
 #include <QGraphicsScene>
 #include <QImage>
 #include <QLabel>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QLineEdit>
+#include <QRadioButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTreeWidgetItemIterator>
@@ -248,6 +251,136 @@ void PuppetWorkspaceTests::testArrowKeysNudgeTheSelectedPart() {
     QTest::keyClick(canvas, Qt::Key_Left);
     QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(2, -10)));
     QCOMPARE(doll.project.undoStack.count(), 1);
+}
+
+namespace {
+/// Drags with the left button from @p from to @p to, in scene coordinates.
+void dragOnCanvas(PuppetCanvas* canvas, const QPointF& from, const QPointF& to) {
+    QWidget* viewport = canvas->viewport();
+    const QPoint start = canvas->mapFromScene(from);
+    const QPoint end = canvas->mapFromScene(to);
+    QTest::mousePress(viewport, Qt::LeftButton, {}, start);
+    QTest::mouseMove(viewport, start + (end - start) / 2);
+    QTest::mouseMove(viewport, end);
+    QTest::mouseRelease(viewport, Qt::LeftButton, {}, end);
+}
+
+/// Shows @p workspace at 100% zoom, one view pixel per sprite pixel.
+void showAtFullSize(PuppetWorkspace& workspace) {
+    workspace.resize(1000, 600);
+    workspace.show();
+    workspace.refreshSprites();
+    workspace.select({0, -1, -1});
+    workspace.zoomSpin()->setValue(100.0);
+}
+}  // namespace
+
+void PuppetWorkspaceTests::testDraggingThePivotOntoAMarkerAttaches() {
+    Doll doll;
+    Puppet& puppet = doll.project.session.activeAtlas().puppets.first();
+    puppet.attachments.clear();
+    puppet.parts[1].position = QPoint(40, 0);  // the head on the ground, beside the body
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+
+    // From the head's pivot to just beside the body's neck: it snaps onto the marker.
+    dragOnCanvas(workspace.canvas(), QPointF(40, 0), QPointF(2, -37));
+    QVERIFY(!doll.puppet().parts[1].position);
+    QCOMPARE(doll.puppet().attachments.size(), 1);
+    const PuppetAttachment& joint = doll.puppet().attachments.first();
+    QCOMPARE(joint.child, QStringLiteral("head"));
+    QCOMPARE(joint.childMarker, QStringLiteral("pivot"));
+    QCOMPARE(joint.parent, QStringLiteral("body"));
+    QCOMPARE(joint.parentMarker, QStringLiteral("neck"));
+    QCOMPARE(drawnParts(workspace.canvas())[1], QRectF(-8, -54, 16, 16));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Attach Part"));
+    QCOMPARE(treeRows(workspace.tree())[3], QStringLiteral("  head | ↳ body:neck"));
+}
+
+void PuppetWorkspaceTests::testDraggingThePivotAwayDetaches() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+
+    // The head's pivot is on the neck, at 0,-38.
+    dragOnCanvas(workspace.canvas(), QPointF(0, -38), QPointF(60, 10));
+    QCOMPARE(doll.puppet().parts[1].position, std::optional<QPoint>(QPoint(60, 10)));
+    QVERIFY(doll.puppet().attachments.isEmpty());
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Detach Part"));
+
+    // The body can't hang from the head that hangs from it.
+    doll.project.undoStack.undo();
+    workspace.select({0, 0, -1});
+    auto* attached = workspace.findChild<QRadioButton*>(QStringLiteral("partAttached"));
+    QVERIFY(attached && !attached->isEnabled());
+    dragOnCanvas(workspace.canvas(), QPointF(0, 0), QPointF(0, -38));
+    QCOMPARE(doll.puppet().attachments.size(), 1);
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(0, -38)));
+}
+
+void PuppetWorkspaceTests::testPanelAttachesAndDetaches() {
+    Doll doll;
+    doll.head->points.append(pointMarker("chin", 8, 14));  // only the first head has a chin
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.refreshSprites();
+    workspace.select({0, 1, -1});
+    auto* byPosition = workspace.findChild<QRadioButton*>(QStringLiteral("partByPosition"));
+    auto* attached = workspace.findChild<QRadioButton*>(QStringLiteral("partAttached"));
+    auto* parentMarker = workspace.findChild<QComboBox*>(QStringLiteral("partParentMarkerCombo"));
+    auto* childMarker = workspace.findChild<QComboBox*>(QStringLiteral("partChildMarkerCombo"));
+    QVERIFY(byPosition && attached && parentMarker && childMarker);
+    QVERIFY(attached->isChecked());
+    QCOMPARE(parentMarker->currentText(), QStringLiteral("neck"));
+    QCOMPARE(childMarker->count(), 2);
+    QCOMPARE(childMarker->itemText(1), QStringLiteral("⚠ chin"));
+    QCOMPARE(childMarker->itemData(1, Qt::ToolTipRole).toString(), QStringLiteral("Missing in: head-smiling"));
+
+    // Hanging by the chin moves the head so its chin, 2 px above its pivot, is on the neck.
+    childMarker->setCurrentIndex(1);
+    QCOMPARE(doll.puppet().attachments.first().childMarker, QStringLiteral("chin"));
+    QCOMPARE(drawnParts(workspace.canvas())[1], QRectF(-8, -52, 16, 16));
+
+    // By position keeps the head where it is.
+    byPosition->setChecked(true);
+    QVERIFY(doll.puppet().attachments.isEmpty());
+    QCOMPARE(doll.puppet().parts[1].position, std::optional<QPoint>(QPoint(0, -36)));
+    QCOMPARE(drawnParts(workspace.canvas())[1], QRectF(-8, -52, 16, 16));
+
+    // Attached hangs it from the first part it can, by its pivot, at that part's pivot.
+    attached->setChecked(true);
+    const PuppetAttachment& joint = doll.puppet().attachments.first();
+    QCOMPARE(joint.parent, QStringLiteral("body"));
+    QCOMPARE(joint.parentMarker, QStringLiteral("pivot"));
+    QCOMPARE(joint.childMarker, QStringLiteral("pivot"));
+    QCOMPARE(doll.project.undoStack.count(), 3);
+}
+
+void PuppetWorkspaceTests::testPanelSetsJointLimits() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.refreshSprites();
+    workspace.select({0, 1, -1});
+    auto* leeway = workspace.findChild<QSpinBox*>(QStringLiteral("partLeeway"));
+    auto* limit = workspace.findChild<QCheckBox*>(QStringLiteral("partLimitAngle"));
+    auto* angleMin = workspace.findChild<QSpinBox*>(QStringLiteral("partAngleMin"));
+    auto* angleMax = workspace.findChild<QSpinBox*>(QStringLiteral("partAngleMax"));
+    QVERIFY(leeway && limit && angleMin && angleMax);
+
+    leeway->setValue(3);
+    limit->setChecked(true);
+    angleMin->setValue(-10);
+    angleMax->setValue(20);
+    const PuppetAttachment& joint = doll.puppet().attachments.first();
+    QCOMPARE(joint.leeway, 3);
+    QCOMPARE(joint.angleMin, std::optional<int>(-10));
+    QCOMPARE(joint.angleMax, std::optional<int>(20));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+
+    limit->setChecked(false);
+    QVERIFY(!doll.puppet().attachments.first().angleMin);
 }
 
 void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {

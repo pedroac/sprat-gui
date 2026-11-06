@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QPointF>
 #include <QTransform>
@@ -9,9 +10,14 @@
 class QGraphicsScene;
 
 /**
- * @brief Draws a puppet in its rest pose, with a large cross at the puppet's origin and a
- *        small one at the selected part's pivot. Clicking a part selects it; dragging a
- *        movable part, or the arrow keys on the selected one, asks to move it.
+ * @brief Draws a puppet in its rest pose, with a large cross at the puppet's origin, a
+ *        small one at the selected part's pivot, and a line from each parent to the parts
+ *        hanging from it.
+ *
+ * Clicking a part selects it; dragging a movable part, or the arrow keys on the selected
+ * one, asks to move it. Dragging the selected part's pivot handle shows the markers it can
+ * hang from: dropping on one asks to attach the part there, dropping elsewhere asks to place
+ * it there by position.
  *
  * Scene coordinates are the puppet's space: origin = the puppet's pivot, Y down, in the
  * sprites' original-image pixels.
@@ -19,19 +25,36 @@ class QGraphicsScene;
 class PuppetCanvas : public ZoomableGraphicsView {
     Q_OBJECT
 public:
+    /// A marker of a part, in scene coordinates.
+    struct Marker {
+        QString name;
+        QPointF point;      ///< Where a joint on it goes
+        QPainterPath shape; ///< A circle, rectangle or polygon; empty for a point
+    };
+
     /// A part as drawn: its shown sprite's image and where PuppetEvaluator placed it.
     struct Part {
         QPixmap image;
         QTransform transform;
         bool placed = false;
-        bool movable = false;  ///< Placed by its position, so dragging it moves it
+        bool movable = false;       ///< Placed by its position, so dragging it moves it
+        bool attachTarget = false;  ///< The selected part may hang from it
+        QVector<Marker> markers;
+    };
+
+    /// A line from a parent's pivot to the joint of a part hanging from it.
+    struct Bone {
+        QPointF from;
+        QPointF to;
+        bool selected = false;  ///< Its part is selected
     };
 
     explicit PuppetCanvas(QWidget* parent = nullptr);
 
     /// Shows @p parts, in draw order (the first at the back). @p selectedPart is outlined,
-    /// with a cross at @p selectedPivot.
-    void showPuppet(const QVector<Part>& parts, int selectedPart, std::optional<QPointF> selectedPivot);
+    /// with its pivot handle at @p selectedPivot.
+    void showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
+                    std::optional<QPointF> selectedPivot);
     /// Shows only the origin cross.
     void clearPuppet();
     /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms.
@@ -48,25 +71,51 @@ signals:
     void partDragged(int partIndex, const QPoint& offset);
     /// The arrow keys asked to move the selected part by @p offset.
     void partNudged(int partIndex, const QPoint& offset);
+    /// The selected part's pivot handle was dropped on marker @p marker of part @p parentIndex.
+    void attachRequested(int partIndex, int parentIndex, const QString& marker);
+    /// The selected part's pivot handle was dropped away from any marker, at @p scenePos.
+    void detachRequested(int partIndex, const QPointF& scenePos);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void drawForeground(QPainter* painter, const QRectF& rect) override;
 
 private:
+    /// A marker the pivot handle is over: part index and marker index.
+    struct Target {
+        int part = -1;
+        int marker = -1;
+    };
+
     /// The part drawn at @p viewPos (topmost), or -1.
     int partAt(const QPoint& viewPos) const;
+    bool isMovable(int part) const;
+    /// Whether @p viewPos is on the selected part's pivot handle.
+    bool onPivotHandle(const QPoint& viewPos) const;
+    /// The marker of an attach target nearest to @p viewPos, if it is close enough.
+    Target targetAt(const QPoint& viewPos) const;
+    void cancelAttach();
+    void drawLabel(QPainter* painter, const QPointF& scenePos, const QString& text, const QColor& color);
 
     void addCross(const QPointF& at, int halfSize, const QColor& color, qreal z);
     void updateSceneRect();
 
     QGraphicsScene* m_scene = nullptr;
-    QVector<bool> m_movable;  ///< By part index, as last shown
+    QVector<Part> m_parts;  ///< As last shown
+    QVector<Bone> m_bones;
     int m_selectedPart = -1;
+    std::optional<QPointF> m_selectedPivot;
+
     int m_pressedPart = -1;   ///< The movable part under the left button, or -1
     QPoint m_pressPos;
     QPointF m_pressScenePos;
     bool m_dragging = false;
+
+    bool m_handlePressed = false;  ///< The left button went down on the pivot handle
+    bool m_attaching = false;      ///< The pivot handle is being dragged
+    QPointF m_attachPointer;       ///< Where it is, in scene coordinates
+    Target m_attachTarget;
 };

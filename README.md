@@ -287,8 +287,9 @@ Builds sprat-cli puppets: cutout rigs whose parts each show one of their sprites
   - Drag a part to change the draw order, or a variant to reorder the variants (drop it on its part to make it the rest variant). Right-click for **Bring Forward**, **Send Backward** and **Make Rest Variant**.
   - **Add** › **New Puppet**, **New Part** (placed at the puppet's origin) or **Add Sprites...** (pick sprites from the atlas for the selected part). **Remove** (or `Delete`) removes the selected puppet, part or variant; removing a part also removes the attachments to and from it.
   - Rename with `F2` or in the right panel. Names must be unique, as sprat-cli requires: puppets in the atlas, parts in their puppet, variants in their part.
-- **Canvas**: the selected puppet at rest. The large cross is the puppet's origin; the small one is the selected part's pivot. Click a part to select it, and drag it to move it; parts hanging from it move along. The arrow keys move the selected part by one pixel (ten with `Shift`). A part hanging from another moves with that part, not on its own.
-- **Right panel**: the selected item's name; a part's position, or what it hangs from; a variant's sprite and preview. A ⚠ in the tree marks a part that can't be drawn (the panel says why) or a sprite that isn't in the atlas.
+- **Canvas**: the selected puppet at rest. The large cross is the puppet's origin; the small one, in a ring, is the selected part's pivot. Lines show what hangs from what. Click a part to select it, and drag it to move it; parts hanging from it move along. The arrow keys move the selected part by one pixel (ten with `Shift`). A part hanging from another moves with that part, not on its own.
+- **Attaching parts**: drag the selected part's pivot ring. The markers it can hang from appear, labelled; drop on one to hang the part there (it snaps on), or drop elsewhere to place the part there by position. A part can't hang from itself or from the parts hanging from it. Markers are added to sprites in the Sprites workspace; every sprite also has a `pivot` marker, its pivot.
+- **Right panel**: the selected item's name; a variant's sprite and preview; and how a part is placed, **By position** (X, Y) or **Attached**: the part it hangs from, at which of its markers, by which of this part's markers (its pivot or a point marker), the **Leeway** its joint may drift when posed, and how far it may **Turn** from its parent. ⚠ marks a marker that some of the part's variants lack. Switching to **By position** keeps the part where it is. A ⚠ in the tree marks a part that can't be drawn (the panel says why) or a sprite that isn't in the atlas.
 
 Every change can be undone.
 
@@ -404,6 +405,7 @@ A full-screen preview and configuration area for final output. Preview exactly h
 - `F2`: Rename the selected puppet, part or variant.
 - `Delete`: Remove the selected puppet, part or variant.
 - Drag a part on the canvas: move it (one undo step per drag).
+- Drag the selected part's pivot ring: attach it to the marker you drop it on, or place it where you drop it. `Escape` cancels.
 - `Arrow Keys` on the canvas: move the selected part 1 px (`Shift`: 10 px).
 - `Ctrl + Wheel`: Zoom canvas.
 - `Space + Drag` or `Middle Mouse Drag`: Pan canvas.

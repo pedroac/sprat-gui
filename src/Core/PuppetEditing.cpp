@@ -26,6 +26,17 @@ bool takenByOther(const QStringList& names, int index, const QString& name) {
     return false;
 }
 
+/// The index of the attachment that places part @p name (its first one, when it has no
+/// position), or -1.
+int parentAttachmentIndex(const Puppet& puppet, const QString& name) {
+    const PuppetPart* part = puppetPart(puppet, name);
+    if (!part || part->position) return -1;
+    for (int i = 0; i < puppet.attachments.size(); ++i) {
+        if (puppet.attachments[i].child == name) return i;
+    }
+    return -1;
+}
+
 }  // namespace
 
 namespace PuppetEditing {
@@ -149,6 +160,83 @@ void removeVariant(Puppet& puppet, int partIndex, int variantIndex) {
 void moveVariant(Puppet& puppet, int partIndex, int from, int to) {
     if (!validVariant(puppet, partIndex, from) || !validVariant(puppet, partIndex, to) || from == to) return;
     puppet.parts[partIndex].variants.move(from, to);
+}
+
+QSet<int> partsHangingFrom(const Puppet& puppet, int partIndex) {
+    QSet<int> hanging;
+    if (!validPart(puppet, partIndex)) return hanging;
+    QStringList pending{puppet.parts[partIndex].name};
+    while (!pending.isEmpty()) {
+        const QString parent = pending.takeFirst();
+        for (int i = 0; i < puppet.parts.size(); ++i) {
+            if (i == partIndex || hanging.contains(i)) continue;
+            const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
+            if (joint && joint->parent == parent) {
+                hanging.insert(i);
+                pending.append(puppet.parts[i].name);
+            }
+        }
+    }
+    return hanging;
+}
+
+bool canAttach(const Puppet& puppet, int childIndex, int parentIndex) {
+    return validPart(puppet, childIndex) && validPart(puppet, parentIndex) && childIndex != parentIndex
+        && !partsHangingFrom(puppet, childIndex).contains(parentIndex);
+}
+
+void attachPart(Puppet& puppet, int partIndex, int parentIndex, const QString& parentMarker,
+                const QString& childMarker) {
+    if (!canAttach(puppet, partIndex, parentIndex)) return;
+    PuppetPart& part = puppet.parts[partIndex];
+    const int current = parentAttachmentIndex(puppet, part.name);
+    if (current >= 0) {
+        PuppetAttachment& joint = puppet.attachments[current];
+        joint.parent = puppet.parts[parentIndex].name;
+        joint.parentMarker = parentMarker;
+        joint.childMarker = childMarker;
+        return;
+    }
+    // Its attachments so far were constraints; the first one becomes the parent once the
+    // position is gone, so the new one goes before them.
+    int insertAt = puppet.attachments.size();
+    for (int i = 0; i < puppet.attachments.size(); ++i) {
+        if (puppet.attachments[i].child == part.name) {
+            insertAt = i;
+            break;
+        }
+    }
+    PuppetAttachment joint;
+    joint.child = part.name;
+    joint.childMarker = childMarker;
+    joint.parent = puppet.parts[parentIndex].name;
+    joint.parentMarker = parentMarker;
+    puppet.attachments.insert(insertAt, joint);
+    part.position.reset();
+}
+
+void detachPart(Puppet& puppet, int partIndex, const QPoint& position) {
+    if (!validPart(puppet, partIndex)) return;
+    PuppetPart& part = puppet.parts[partIndex];
+    const int current = parentAttachmentIndex(puppet, part.name);
+    if (current >= 0) puppet.attachments.removeAt(current);
+    part.position = position;
+}
+
+void setAttachmentLimits(Puppet& puppet, int partIndex, int leeway, std::optional<int> angleMin,
+                         std::optional<int> angleMax) {
+    if (!validPart(puppet, partIndex)) return;
+    const int current = parentAttachmentIndex(puppet, puppet.parts[partIndex].name);
+    if (current < 0) return;
+    PuppetAttachment& joint = puppet.attachments[current];
+    joint.leeway = qMax(0, leeway);
+    if (angleMin && angleMax) {
+        joint.angleMin = qBound(-PUPPET_MAX_ANGLE, qMin(*angleMin, *angleMax), PUPPET_MAX_ANGLE);
+        joint.angleMax = qBound(-PUPPET_MAX_ANGLE, qMax(*angleMin, *angleMax), PUPPET_MAX_ANGLE);
+    } else {
+        joint.angleMin.reset();
+        joint.angleMax.reset();
+    }
 }
 
 int addSpriteVariants(Puppet& puppet, int partIndex, const QStringList& spritePaths) {

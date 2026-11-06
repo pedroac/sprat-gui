@@ -490,3 +490,55 @@ void PuppetTests::testAddingSpriteVariants() {
     QCOMPARE(names, (QStringList{"face", "face 2", "face 3", "eye"}));
     QCOMPARE(PuppetEditing::addSpriteVariants(puppet, 7, {"/p/eye.png"}), 0);
 }
+
+void PuppetTests::testAttachingAndDetachingParts() {
+    Puppet puppet = faceWithNose();
+    PuppetPart eye{"eye", {{PuppetVariant::Kind::Sprite, "/p/eye.png", {}, false}}, QPoint(5, 5)};
+    puppet.parts.append(eye);
+    // A positioned part's attachments are constraints; this one stays one.
+    puppet.attachments.append({"eye", "pivot", "nose", "pivot"});
+
+    PuppetEditing::attachPart(puppet, 2, 0, "socket", "pivot");
+    QVERIFY(!puppet.parts[2].position);
+    QCOMPARE(puppet.attachments.size(), 3);
+    // The new one goes before the old constraint, so it is the eye's parent.
+    QCOMPARE(puppetParentAttachment(puppet, "eye")->parent, QString("face"));
+    QCOMPARE(puppetParentAttachment(puppet, "eye")->parentMarker, QString("socket"));
+    QCOMPARE(puppet.attachments[2].parent, QString("nose"));
+
+    // Moving the joint keeps its limits.
+    PuppetEditing::setAttachmentLimits(puppet, 2, 3, 20, -10);  // given backwards
+    PuppetEditing::attachPart(puppet, 2, 1, "tip", "pivot");
+    const PuppetAttachment* joint = puppetParentAttachment(puppet, "eye");
+    QCOMPARE(joint->parent, QString("nose"));
+    QCOMPARE(joint->parentMarker, QString("tip"));
+    QCOMPARE(joint->leeway, 3);
+    QCOMPARE(joint->angleMin, std::optional<int>(-10));
+    QCOMPARE(joint->angleMax, std::optional<int>(20));
+    PuppetEditing::setAttachmentLimits(puppet, 2, 0, std::nullopt, std::nullopt);
+    QVERIFY(!puppetParentAttachment(puppet, "eye")->angleMin);
+
+    PuppetEditing::detachPart(puppet, 2, QPoint(7, -3));
+    QCOMPARE(puppet.parts[2].position, std::optional<QPoint>(QPoint(7, -3)));
+    QVERIFY(!puppetParentAttachment(puppet, "eye"));
+    // Only the parent attachment went; the old constraint is still there.
+    QCOMPARE(puppet.attachments.size(), 2);
+    QCOMPARE(puppet.attachments[1].child, QString("eye"));
+}
+
+void PuppetTests::testAttachingRefusesLoops() {
+    Puppet puppet = faceWithNose();
+    PuppetPart pupil{"pupil", {}, std::nullopt};
+    puppet.parts.append(pupil);
+    puppet.attachments.append({"pupil", "pivot", "nose", "tip"});  // face > nose > pupil
+
+    QCOMPARE(PuppetEditing::partsHangingFrom(puppet, 0), (QSet<int>{1, 2}));
+    QVERIFY(PuppetEditing::partsHangingFrom(puppet, 2).isEmpty());
+    QVERIFY(!PuppetEditing::canAttach(puppet, 0, 2));  // the face from its own pupil
+    QVERIFY(!PuppetEditing::canAttach(puppet, 1, 1));
+    QVERIFY(PuppetEditing::canAttach(puppet, 2, 0));
+
+    const Puppet before = puppet;
+    PuppetEditing::attachPart(puppet, 0, 2, "pivot", "pivot");
+    QVERIFY(puppet == before);
+}

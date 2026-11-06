@@ -176,7 +176,8 @@ listing the atlas's timelines, as the source for variants.
    with undo.
 3. **Variants**: drag and drop, group menu, picker with Animations tab and marker check,
    New puppet from selection.
-4. **Attachments**: attach by drag and in the panel, attachment lines, marker shapes, leeway
+4. **Attachments** (attach by dragging the pivot and in the panel, joint lines, leeway and angle
+   limits: done after phase 2; still to do: marker shapes and arcs for the selected part, constraints): attach by drag and in the panel, attachment lines, marker shapes, leeway
    and angle arcs, constraints, positioned parts' `at:` handle; Problems panel; Import.
 5. **Later**: poses and sequences (how they appear in the workspace is still open), then
    constraint solving while posing.
