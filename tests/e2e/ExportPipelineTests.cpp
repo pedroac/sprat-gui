@@ -8,6 +8,7 @@
 #include "ArchiveExtractor.h"
 #include "LayoutParser.h"
 #include "ProjectSaveService.h"
+#include "PuppetTextCodec.h"
 #ifdef SPRAT_EMBEDDED_CLI
 #include "EmbeddedCli.h"
 #endif
@@ -122,11 +123,12 @@ QString ExportPipelineTests::toolPath(const QString& toolName) const {
 
 ExportPipelineTests::ExportRun ExportPipelineTests::exportSprites(
     const QString& spritesDir, const QString& destination, const QString& transform,
-    const SpratProfile& profile, const QJsonObject& projectPayload) const {
+    const SpratProfile& profile, const QJsonObject& projectPayload, const QString& puppetsText) const {
     SaveConfig config;
     config.destination = destination;
     config.transform = transform;
     config.profiles = {profile.name};
+    config.puppetsText = puppetsText;
 
     ExportRun run;
     ProjectSaveService::SaveCallbacks callbacks;
@@ -423,6 +425,78 @@ void ExportPipelineTests::testAnimationLoopModesAreExported() {
     QCOMPARE(animations["wave"]["loop"].toString(), QStringLiteral("once-pingpong"));
     QCOMPARE(animations["swing_left"]["alias"].toString(), QStringLiteral("swing"));
     QCOMPARE(animations["swing_left"]["flip"].toString(), QStringLiteral("h"));
+}
+
+void ExportPipelineTests::testPuppetsAreExported() {
+    const QString spritesDir = m_root.filePath(QStringLiteral("puppet sprites"));
+    QVERIFY(QDir().mkpath(spritesDir));
+    const QDir dir(spritesDir);
+    const QString body = dir.filePath(QStringLiteral("body.png"));
+    const QString head = dir.filePath(QStringLiteral("head.png"));
+    const QString headBlink = dir.filePath(QStringLiteral("head_blink.png"));
+    writeSprite(body, {16, 32}, Qt::blue);
+    writeSprite(head, {16, 16}, Qt::yellow);
+    writeSprite(headBlink, {16, 16}, Qt::darkYellow);
+
+    // The body has a "neck" marker; the heads are attached by their pivot.
+    const QJsonArray neck{QJsonObject{{"name", "neck"}, {"kind", "point"}, {"x", 8}, {"y", 0}}};
+    const QJsonObject sprites{
+        {body, QJsonObject{{"pivot_x", 8}, {"pivot_y", 32}, {"markers", neck}}},
+        {head, QJsonObject{{"pivot_x", 8}, {"pivot_y", 16}}},
+        {headBlink, QJsonObject{{"pivot_x", 8}, {"pivot_y", 16}}}};
+    const QJsonArray timelines{QJsonObject{{"name", "blink"}, {"fps", 4}, {"frames", QJsonArray{head, headBlink}}}};
+    const QJsonObject payload{{"spritemarkers", QJsonObject{{"sprites", sprites}}},
+                              {"animations", QJsonObject{{"timelines", timelines}}}};
+
+    Puppet puppet;
+    puppet.name = QStringLiteral("doll");
+    PuppetVariant bodySprite;
+    bodySprite.source = body;
+    PuppetVariant headSprite;
+    headSprite.source = head;
+    PuppetVariant blink;
+    blink.kind = PuppetVariant::Kind::Animation;
+    blink.source = QStringLiteral("blink");
+    puppet.parts = {{QStringLiteral("body"), {bodySprite}, QPoint(0, -32)},
+                    {QStringLiteral("head"), {headSprite, blink}, std::nullopt}};
+    puppet.attachments = {{QStringLiteral("head"), QStringLiteral("pivot"), QStringLiteral("body"),
+                           QStringLiteral("neck"), 1, -15, 15}};
+    puppet.poses = {{QStringLiteral("nod"), {{QStringLiteral("head"), QString(), 10, std::nullopt, std::nullopt}}}};
+    const QString puppetsText = PuppetTextCodec::write({puppet});
+
+    // raw is the transform that writes puppets.
+    const QString rawDestination = m_root.filePath(QStringLiteral("puppet raw export"));
+    const ExportRun raw = exportSprites(spritesDir, rawDestination, QStringLiteral("raw"), makeProfile(),
+                                        payload, puppetsText);
+    QVERIFY2(raw.ok, qPrintable(describe(raw.error, raw.log)));
+    QString rawOutput;
+    const QDir rawDir(QDir(rawDestination).filePath(PROFILE_NAME));
+    for (const QString& name : rawDir.entryList(QDir::Files))
+        rawOutput += readTextFile(rawDir.filePath(name));
+    // raw writes names length-prefixed and refers to parts, variants and sprites by index.
+    const QStringList expectedRecords{
+        QStringLiteral("puppet 2 1 1 0 4:doll"),
+        QStringLiteral("part -1 1 0 -32 1 4:body"),       // positioned at 0,-32
+        QStringLiteral("part 0 0 0 0 2 4:head"),          // hangs from part 0, two variants
+        QStringLiteral("variant 1 0 5:blink"),            // an animation variant
+        QStringLiteral("joint 1 0 0 1 1 -15 15 5:pivot 4:neck"),  // leeway 1, angle -15..15
+        QStringLiteral("pose 1 3:nod")};
+    const QStringList rawLines = rawOutput.split(QLatin1Char('\n'));
+    for (const QString& record : expectedRecords)
+        QVERIFY2(rawLines.contains(record), qPrintable(record + QStringLiteral(" not in:\n") + rawOutput));
+
+    // Layout text writes puppets.txt next to the other text files.
+    const QString textDestination = m_root.filePath(QStringLiteral("puppet text export"));
+    const ExportRun text = exportSprites(spritesDir, textDestination, kLayoutTextTransform, makeProfile(),
+                                         payload, puppetsText);
+    QVERIFY2(text.ok, qPrintable(describe(text.error, text.log)));
+    const QString written =
+        readTextFile(QDir(QDir(textDestination).filePath(PROFILE_NAME)).filePath(QStringLiteral("puppets.txt")));
+    QCOMPARE(written, puppetsText);
+    const PuppetTextReadResult reread = PuppetTextCodec::read(written);
+    QVERIFY2(reread.error.isEmpty(), qPrintable(reread.error));
+    QCOMPARE(reread.puppets.size(), 1);
+    QVERIFY(reread.puppets.first() == puppet);
 }
 
 QTEST_MAIN(ExportPipelineTests)

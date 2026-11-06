@@ -492,6 +492,8 @@ set(PROJECT_SOURCES
     src/SpriteSheetLayout/LayoutParser.h
     src/Project/ProjectPayloadCodec.cpp
     src/Project/ProjectPayloadCodec.h
+    src/Project/PuppetTextCodec.cpp
+    src/Project/PuppetTextCodec.h
     src/Project/AutosaveProjectStore.cpp
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
@@ -547,6 +549,10 @@ set(PROJECT_SOURCES
     src/Core/ArchiveExtractor.cpp
     src/Core/ArchiveExtractor.h
     src/Core/models.h
+    src/Core/CliTextFormat.h
+    src/Core/PuppetModels.h
+    src/Core/PuppetEvaluator.cpp
+    src/Core/PuppetEvaluator.h
     src/Core/ViewUtils.cpp
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
@@ -747,6 +753,7 @@ if(BUILD_TESTING)
         tests/ImageDiscoveryTests.cpp
         tests/ProjectSessionTests.cpp
         tests/NineSliceWorkspaceTests.cpp
+        tests/PuppetTests.cpp
         assets/icons.qrc
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
@@ -764,6 +771,8 @@ if(BUILD_TESTING)
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp
+        src/Project/PuppetTextCodec.cpp
+        src/Core/PuppetEvaluator.cpp
         src/Project/ProjectFileLoader.cpp
         src/Project/AutosaveProjectStore.cpp
         src/Project/ProjectSession.cpp
@@ -816,6 +825,7 @@ if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
         tests/e2e/ExportPipelineTests.cpp
         tests/e2e/ExportPipelineTests.h
         src/Project/ProjectSaveService.cpp
+        src/Project/PuppetTextCodec.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
         src/CLITools/LayoutArguments.cpp

@@ -167,7 +167,7 @@ listing the atlas's timelines, as the source for variants.
 
 ## Phases
 
-1. **Foundation, no UI**: model + schema 6, `PuppetTextCodec` (import/export, round-trip
+1. **Foundation, no UI** (done): model + schema 6, `PuppetTextCodec` (import/export, round-trip
    test including poses and sequences), export through `ProjectSaveService` and Layout text,
    rest-pose `PuppetEvaluator`, unit tests, an e2e test through sprat-cli.
 2. **Workspace shell**: tab, `Alt+P`, menu entry; puppets tree (draw order, labels, reorder);

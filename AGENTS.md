@@ -568,6 +568,11 @@ Save/load project data with multiple formats.
 - Autosave with crash recovery
 - ZIP compression support
 
+#### PuppetTextCodec
+- Reads and writes sprat-cli's hand-written `puppets.txt` (`read()` returns puppets, the `root` line, warnings for ignored lines, or an error for a repeated name); follows spratconvert's parser in `sprat-cli/src/commands/spratconvert_command.cpp`, which the GUI can't link
+- References (sprites, animations, parts, variants, poses) are kept as written; spratconvert checks them
+- Export: `ExportCoordinator` writes each atlas's puppets into `SaveConfig::puppetsText`; `ProjectSaveService` appends it to spratconvert's input stream and, for Layout text, writes `puppets.txt`
+
 #### ImageDiscoveryService
 - Recursively find images in folders
 - Filter by supported formats (PNG, JPG)
@@ -627,10 +632,13 @@ Central data structures:
 - `NamedPoint` - Point with name/metadata
 - `MarkerKind` - Enum for marker types
 - `SyncMode` - Watch vs Manual folder sync
+- `Puppet` (`PuppetModels.h`) - sprat-cli cutout rig, stored per `AtlasEntry` (project schema 6): parts in draw order, each with sprite/animation variants (first = rest variant), attachments in file order (a part's first is its parent unless it has a position; further ones are constraints), plus poses and sequences kept as data. `puppetVariantName()` and `puppetSpriteName()` give sprat-cli's default names
 
 #### Utilities
 - `ArchiveExtractor` - ZIP/tar handling. Extraction only writes plain files and folders (links are skipped) inside the destination; `createZip` writes through `QSaveFile`, so a failure never replaces the existing ZIP
 - `PathSafety` - Checks for names and paths read from project files before the app writes to or deletes them (`isPlainName` for profile names, `isContainedRelativePath` for atlas output folders, `isInsideFolder` before deleting, `folderNameFromLabel` for folder names made from atlas names). Use it for any new project value that becomes a path
+- `CliTextFormat` - `cliQuoted()` quotes names for sprat-cli's text formats (markers, animations, puppets)
+- `PuppetEvaluator` - Pure function placing a puppet's parts as sprat-cli's "Playing a puppet" says: each part's `QTransform` from its shown sprite's original-image pixels into the puppet's space (origin = the puppet's pivot), parents before children, and a `problem` for parts it can't place. Takes per-part states (variant, angle, offset, position) so poses can layer on later; `evaluateRest()` is the rest pose
 - `ZoomableGraphicsView` - Reusable zoomable canvas
 - `ViewUtils` - Graphics utilities (transformations, scaling)
 - `MarkerUtils` - Marker rendering and manipulation
@@ -1036,8 +1044,9 @@ ctest --output-on-failure
 - `TestCoreModels.cpp` - Data structure operations
 - `TestImageDiscovery.cpp` - Image discovery service
 - `TestProjectSession.cpp` - Session state management
+- `PuppetTests.cpp` - `PuppetTextCodec` (sprat-cli README example, write/read round trip, bad lines, repeated names, quoting), default variant names, `PuppetEvaluator` placements and problems, puppets in the project file
 - `NineSliceWorkspaceTests.cpp` - Nine-Slice workspace widgets on a session (offscreen): loading a sprite fits its insets and keeps the spin boxes, canvas and sprite in sync; the list holds only nine-sliced sprites; adding gives every added sprite thirds; removing keeps insets; `SpritePickerDialog` lists only the sprites its filter accepts and picks groups in group mode
-- `e2e/ExportPipelineTests.cpp` - End-to-end exports through the real sprat-cli tools (`sprat-gui-e2e` target). Generates sprites, runs `ProjectSaveService`, and checks the written atlases and metadata. Paths include spaces and non-ASCII characters. Embedded builds run the CLI in-process; other builds also build sprat-cli's executables and pass their folder in `SPRAT_CLI_DIR`. Turn off with `-DSPRAT_E2E_TESTS=OFF`. CI runs it on Linux, Windows and macOS.
+- `e2e/ExportPipelineTests.cpp` - End-to-end exports through the real sprat-cli tools (`sprat-gui-e2e` target). Generates sprites, runs `ProjectSaveService`, and checks the written atlases and metadata, including puppets (raw records and Layout text `puppets.txt`). Paths include spaces and non-ASCII characters. Embedded builds run the CLI in-process; other builds also build sprat-cli's executables and pass their folder in `SPRAT_CLI_DIR`. Turn off with `-DSPRAT_E2E_TESTS=OFF`. CI runs it on Linux, Windows and macOS.
 - `deploy/smoke-test.sh <executable> [options]` - Starts the app with `--smoke-test` on the real platform plugin (under `xvfb-run` on headless Linux) and fails if the main window does not appear (exit 2) or, with `--require-cli`, if sprat-cli's transforms or profiles config can't be found (exit 3). With `--smoke-test-zip <zip>` it then opens the ZIP through the GUI, ticks folders in the folder picker (`--smoke-test-folder`, default the top-level ones), lays it out with `--smoke-test-profile` (default `fast`) and checks the sprite count (`--smoke-test-expect-sprites`); a failed layout, profile fallback or any other dialog exits 4, a hang exits 5. The flow lives in `MainWindow::runSmokeTestImport()` (`MainWindow.SmokeTest.cpp`) and waits for `LayoutOrchestrator::layoutAppliedToCanvas`. CI uses `tests/assets/streets_of_fight_files.zip` (67 PNGs, 63 sprites after the default exact deduplication; art by Luis Zuno, redistributable per its `public-license.txt`). `--smoke-test` runs with `QStandardPaths` test mode and an emptied `sprat/` config folder, so results don't depend on the machine's saved settings. This is the only check that the app actually opens: ctest runs offscreen and never creates `MainWindow`. CI runs it on the build output on every push, and on the AppImage, Windows `dist/` folder and the macOS app unpacked from the ZIP whenever packaging runs (the DMG is then checked to hold the same app, with a valid signature). On an Apple Silicon Mac, the script runs a universal app twice, natively and its x86_64 slice under Rosetta, so both slices and the bundled sprat-cli are tested; the log's `architecture:` line shows which one ran.
 - `deploy/macos/check-bundle.sh <app> [max minimum macOS]` - Fails unless every Mach-O file in the bundle has arm64 and x86_64 slices, needs macOS 11.0 or older (or the given version), and links only system libraries or ones inside the bundle (no Homebrew). It also checks that the sprat-cli tools are in `Contents/Resources/cli`. CI runs it on the packaged app. The macOS build makes it pass by configuring with `CMAKE_OSX_ARCHITECTURES=arm64;x86_64` and `CMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local`, plus the `CMAKE_OSX_DEPLOYMENT_TARGET` default of 11.0 in `CMakeLists.txt`. `SPRAT_BUNDLE_CLI` (default ON on macOS, non-embedded builds) builds sprat-cli's tools from source and copies them into the bundle.
 

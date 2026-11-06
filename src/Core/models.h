@@ -5,6 +5,7 @@
 #include "SpriteModels.h"
 #include "LayoutModels.h"
 #include "AnimationModels.h"
+#include "PuppetModels.h"
 #include "ProjectModels.h"
 #include "ExportModels.h"
 #include "AppSettings.h"

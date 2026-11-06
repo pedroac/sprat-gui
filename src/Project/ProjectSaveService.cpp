@@ -4,6 +4,7 @@
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
 #include "ArchiveExtractor.h"
+#include "CliTextFormat.h"
 #include "LayoutArguments.h"
 #include "NineSliceInsets.h"
 
@@ -35,24 +36,13 @@ namespace {
         return QCoreApplication::translate("ProjectSaveService", text);
     }
 
-    /// Returns true when the output format expects rotated sprites turned counter-clockwise.
-    /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
-    /// `text` as a quoted string of sprat-cli's text formats: quotes and
-    /// backslashes are escaped, and line breaks, which can't be represented
-    /// (each record is one line), become spaces.
-    QString cliQuoted(QString text) {
-        text.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
-        text.replace(QLatin1Char('"'), QLatin1String("\\\""));
-        text.replace(QLatin1Char('\r'), QLatin1Char(' '));
-        text.replace(QLatin1Char('\n'), QLatin1Char(' '));
-        return QLatin1Char('"') + text + QLatin1Char('"');
-    }
-
     bool isMarkerKind(const QString& kind) {
         return kind == QLatin1String("point") || kind == QLatin1String("circle")
             || kind == QLatin1String("rectangle") || kind == QLatin1String("polygon");
     }
 
+    /// Returns true when the output format expects rotated sprites turned counter-clockwise.
+    /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
     bool transformRequiresCcwRotation(const QString& transform) {
         return transform.trimmed().compare(QLatin1String("libgdx"), Qt::CaseInsensitive) == 0;
     }
@@ -779,14 +769,22 @@ bool ProjectSaveService::save(
         combinedInput.append(markersContent.toUtf8());
         if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
         combinedInput.append(animContent.toUtf8());
+        // spratconvert reads puppets from the layout stream when --puppets isn't given.
+        if (!config.puppetsText.isEmpty()) {
+            if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
+            combinedInput.append(config.puppetsText.toUtf8());
+        }
 
         if (config.transform == kLayoutTextTransform) {
             struct RawFile { QString name; QByteArray data; };
-            const RawFile rawFiles[] = {
+            QVector<RawFile> rawFiles = {
                 { QStringLiteral("layout.txt"),     layoutData              },
                 { QStringLiteral("markers.txt"),    markersContent.toUtf8() },
                 { QStringLiteral("animations.txt"), animContent.toUtf8()    },
             };
+            if (!config.puppetsText.isEmpty()) {
+                rawFiles.append({ QStringLiteral("puppets.txt"), config.puppetsText.toUtf8() });
+            }
             for (const auto& rf : rawFiles) {
                 QFile f(profileDir.filePath(rf.name));
                 if (!f.open(QIODevice::WriteOnly) || f.write(rf.data) < 0) {

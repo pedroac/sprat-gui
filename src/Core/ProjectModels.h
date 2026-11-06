@@ -4,6 +4,7 @@
 #include <QVector>
 #include "AnimationModels.h"
 #include "LayoutModels.h"
+#include "PuppetModels.h"
 
 /**
  * @enum SourceType
@@ -60,6 +61,7 @@ struct AtlasEntry {
     bool isExcluded  = false;
     QStringList spritePaths;
     QVector<AnimationTimeline> timelines;
+    QVector<Puppet> puppets;
     QVector<LayoutModel> layoutModels;
     QString outputSubdir;
     AtlasExportConfig exportConfig;
