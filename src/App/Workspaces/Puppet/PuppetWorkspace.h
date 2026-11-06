@@ -85,6 +85,9 @@ public:
     /// Moves attached part @p partIndex's joint @p sceneOffset from where the drag started,
     /// within its parent marker and leeway.
     void tryDrifting(int partIndex, const QPointF& sceneOffset);
+    /// Pulls attached part @p partIndex by its point @p grip (in its sprite's pixels) towards
+    /// @p target (puppet space), turning it and the parts it hangs from within their limits.
+    void tryPulling(int partIndex, const QPointF& grip, const QPointF& target);
     /// Puts every part back at rest.
     void resetTriedPose();
 
@@ -145,6 +148,7 @@ private:
     QHash<QString, TriedJoint> m_tried;  ///< By part name, for the shown puppet
     QString m_triedPuppet;               ///< Atlas id and name of the puppet m_tried is for
     TriedJoint m_turnStart;              ///< The turned part's, when the drag started
+    QPointF m_pullGrip;                  ///< Where the pulled part is held, in its sprite's pixels
     QPushButton* m_resetPoseButton = nullptr;
     mutable QHash<QString, QPixmap> m_images;  ///< By sprite path
     QHash<QString, SpritePtr> m_spritesByPath;  ///< The active atlas's laid-out sprites

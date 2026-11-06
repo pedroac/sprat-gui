@@ -197,8 +197,8 @@ bool PuppetCanvas::isMovable(int part) const {
     return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].movable;
 }
 
-bool PuppetCanvas::isTurnable(int part) const {
-    return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].turnable;
+bool PuppetCanvas::isAttached(int part) const {
+    return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].attached;
 }
 
 double PuppetCanvas::angleAround(const QPointF& scenePos) const {
@@ -266,9 +266,14 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton || m_isPanning) return;
     const bool onHandle = onTurnHandle(event->pos());
     const int part = onHandle ? m_selectedPart : partAt(event->pos());
+    const bool shift = event->modifiers() & Qt::ShiftModifier;
+    // The handle turns any part; dragging a part moves it: a positioned one to a new place,
+    // an attached one by pulling it (or, with Shift, by moving its joint).
     m_pressedPart = !onHandle && isMovable(part) ? part : -1;
-    m_turnPart = onHandle || isTurnable(part) ? part : -1;
-    m_drift = !onHandle && (event->modifiers() & Qt::ShiftModifier);
+    m_pullPart = !onHandle && isAttached(part) && !shift ? part : -1;
+    m_turnPart = onHandle || (isAttached(part) && shift) ? part : -1;
+    m_drift = !onHandle && shift;
+    m_pulling = false;
     m_turning = false;
     m_pressPos = event->pos();
     m_pressScenePos = mapToScene(event->pos());
@@ -284,6 +289,16 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
         m_attachTarget = targetAt(event->pos());
         m_attachPointer = mapToScene(event->pos());
         viewport()->update();
+        return;
+    }
+    if (m_pullPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
+        if (!m_pulling) {
+            if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
+            m_pulling = true;
+            m_dragging = true;
+            emit partPullStarted(m_pullPart, m_pressScenePos);
+        }
+        emit partPulled(m_pullPart, mapToScene(event->pos()));
         return;
     }
     if (m_turnPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
@@ -326,7 +341,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
         const Qt::CursorShape cursor = onPivotHandle(event->pos()) ? Qt::CrossCursor
             : onTurnHandle(event->pos())                            ? Qt::OpenHandCursor
             : isMovable(hovered)                                    ? Qt::SizeAllCursor
-            : isTurnable(hovered)                                   ? Qt::OpenHandCursor
+            : isAttached(hovered)                                   ? Qt::SizeAllCursor
                                                                     : Qt::ArrowCursor;
         viewport()->setCursor(cursor);
     }
@@ -352,6 +367,8 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
         m_pressedPart = -1;
         m_turnPart = -1;
         m_turning = false;
+        m_pullPart = -1;
+        m_pulling = false;
         m_dragging = false;
     }
     if (dragged) setZoomManual(true);

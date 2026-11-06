@@ -97,6 +97,33 @@ QHash<QString, PuppetSpriteGeometry> faceAndNoseSprites() {
     return {{QStringLiteral("/s/face.png"), face}, {QStringLiteral("/s/nose.png"), nose}};
 }
 
+// An arm on a body placed at the origin: an upper arm, a forearm and a hand, each 10 px
+// long and pointing right at rest, hanging by its pivot from the previous one's "end".
+Puppet arm() {
+    Puppet puppet;
+    puppet.name = QStringLiteral("arm");
+    const QStringList names{QStringLiteral("body"), QStringLiteral("upper"), QStringLiteral("fore"),
+                            QStringLiteral("hand")};
+    for (const QString& name : names) {
+        PuppetPart part{name, {spriteVariant(QStringLiteral("/s/%1.png").arg(name))}, std::nullopt};
+        puppet.parts.append(part);
+    }
+    puppet.parts.first().position = QPoint(0, 0);
+    for (int i = 1; i < names.size(); ++i)
+        puppet.attachments.append({names[i], QStringLiteral("pivot"), names[i - 1], QStringLiteral("end"), 0,
+                                   std::nullopt, std::nullopt});
+    return puppet;
+}
+
+QHash<QString, PuppetSpriteGeometry> armSprites() {
+    PuppetSpriteGeometry body;
+    body.markers.insert(QStringLiteral("end"), QPointF(0, 0));  // the shoulder, on the pivot
+    PuppetSpriteGeometry bone;
+    bone.markers.insert(QStringLiteral("end"), QPointF(10, 0));
+    return {{QStringLiteral("/s/body.png"), body}, {QStringLiteral("/s/upper.png"), bone},
+            {QStringLiteral("/s/fore.png"), bone}, {QStringLiteral("/s/hand.png"), bone}};
+}
+
 }  // namespace
 
 void PuppetTests::testReadsReadmeExample() {
@@ -559,6 +586,41 @@ void PuppetTests::testJointsTurnWithinTheirLimits() {
     QCOMPARE(PuppetMotion::clampAngle(limited, 5), 5);
     QCOMPARE(PuppetMotion::clampAngle(limited, 90), 10);
     QCOMPARE(PuppetMotion::clampAngle(limited, -90), -15);
+}
+
+void PuppetTests::testPullingAPartTurnsThePartsItHangsFrom() {
+    Puppet puppet = arm();
+    const PuppetSpriteLookup lookup = lookupIn(armSprites());
+    const QPointF fingers(5, 0);  // in the hand's sprite: 25 px from the shoulder at rest
+    const auto fingersAt = [&](const QVector<PuppetPartState>& states) {
+        return PuppetEvaluator::evaluate(puppet, states, lookup)[3].transform.map(fingers);
+    };
+
+    // Within reach: the arm bends so the fingers get there; the body, placed by position, stays.
+    const QPointF target(5, 15);
+    const QVector<PuppetPartState> reached = PuppetMotion::reach(puppet, {}, 3, fingers, target, lookup);
+    QVERIFY2(QLineF(fingersAt(reached), target).length() < 1.5,
+             qPrintable(QStringLiteral("fingers at %1,%2").arg(fingersAt(reached).x()).arg(fingersAt(reached).y())));
+    QCOMPARE(reached[0].angle, 0.0);
+    for (const PuppetPartState& state : reached) QCOMPARE(state.angle, std::round(state.angle));
+
+    // Limits hold: a stiff elbow and wrist leave only the shoulder, which turns 30° at most.
+    puppet.attachments[0].angleMin = -30;
+    puppet.attachments[0].angleMax = 30;
+    for (int i = 1; i < 3; ++i) {
+        puppet.attachments[i].angleMin = 0;
+        puppet.attachments[i].angleMax = 0;
+    }
+    const QVector<PuppetPartState> stiff = PuppetMotion::reach(puppet, {}, 3, fingers, QPointF(0, 25), lookup);
+    QCOMPARE(stiff[1].angle, 30.0);
+    QCOMPARE(stiff[2].angle, 0.0);
+    QCOMPARE(stiff[3].angle, 0.0);
+
+    // Only parts the pulled one hangs from turn: pulling the forearm leaves the hand's own angle.
+    puppet = arm();
+    const QVector<PuppetPartState> elbow = PuppetMotion::reach(puppet, {}, 2, QPointF(10, 0), QPointF(0, 20), lookup);
+    QCOMPARE(elbow[3].angle, 0.0);
+    QVERIFY(elbow[1].angle != 0.0);
 }
 
 void PuppetTests::testJointsDriftWithinTheirMarkerAndLeeway() {

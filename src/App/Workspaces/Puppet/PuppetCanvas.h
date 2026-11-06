@@ -14,10 +14,10 @@ class QGraphicsScene;
  *        small one at the selected part's pivot, and a line from each parent to the parts
  *        hanging from it.
  *
- * Clicking a part selects it; dragging a movable part, or the arrow keys on the selected
- * one, asks to move it. Dragging a turnable (attached) part asks to turn it around its joint;
- * Shift+dragging it asks to move its joint. Dragging the selected part's turn handle asks to
- * turn it, whether attached or placed by position. Dragging the selected part's pivot handle shows the markers it can
+ * Clicking a part selects it; dragging a movable (positioned) part, or the arrow keys on the
+ * selected one, asks to move it. Dragging an attached part asks to pull it (turning the parts
+ * it hangs from); Shift+dragging it asks to move its joint. Dragging the selected part's turn
+ * handle asks to turn it, whether attached or placed by position. Dragging the selected part's pivot handle shows the markers it can
  * hang from: dropping on one asks to attach the part there, dropping elsewhere asks to place
  * it there by position.
  *
@@ -40,7 +40,7 @@ public:
         QTransform transform;
         bool placed = false;
         bool movable = false;       ///< Placed by its position, so dragging it moves it
-        bool turnable = false;      ///< Attached, so dragging it turns it around its joint
+        bool attached = false;      ///< Hangs from another part: dragging it pulls it
         QPointF joint;              ///< Where it turns: its pivot or its joint
         bool attachTarget = false;  ///< The selected part may hang from it
         QVector<Marker> markers;
@@ -86,12 +86,16 @@ signals:
     void partDragStarted(int partIndex);
     /// The dragged part moved @p offset scene pixels from where the drag started.
     void partDragged(int partIndex, const QPoint& offset);
-    /// A turnable part started being turned (by dragging) or drifted (Shift+dragging).
+    /// A part started being turned (by its handle) or, attached, drifted (Shift+dragging).
     void partTurnStarted(int partIndex, bool drift);
     /// The turned part turned @p degrees (clockwise, unwrapped) since the drag started.
     void partTurned(int partIndex, double degrees);
     /// The drifted part's joint moved @p offset scene pixels since the drag started.
     void partDrifted(int partIndex, const QPointF& offset);
+    /// An attached part started being pulled, by its point at @p scenePos.
+    void partPullStarted(int partIndex, const QPointF& scenePos);
+    /// The pulled part's point is asked to be at @p scenePos.
+    void partPulled(int partIndex, const QPointF& scenePos);
     /// The arrow keys asked to move the selected part by @p offset.
     void partNudged(int partIndex, const QPoint& offset);
     /// The selected part's pivot handle was dropped on marker @p marker of part @p parentIndex.
@@ -117,7 +121,7 @@ private:
     /// The part drawn at @p viewPos (topmost), or -1.
     int partAt(const QPoint& viewPos) const;
     bool isMovable(int part) const;
-    bool isTurnable(int part) const;
+    bool isAttached(int part) const;
     /// Degrees clockwise of @p scenePos around the turned part's joint.
     double angleAround(const QPointF& scenePos) const;
     /// Whether @p viewPos is on the selected part's pivot handle.
@@ -145,7 +149,9 @@ private:
     QPointF m_pressScenePos;
     bool m_dragging = false;
 
-    int m_turnPart = -1;         ///< The turnable part under the left button, or -1
+    int m_pullPart = -1;         ///< The attached part pulled by the left button, or -1
+    bool m_pulling = false;      ///< Past the drag distance
+    int m_turnPart = -1;         ///< The part turned or drifted by the left button, or -1
     bool m_drift = false;        ///< Shift was down: moving its joint, not turning
     bool m_turning = false;      ///< Past the drag distance
     double m_turnLastAngle = 0;  ///< The pointer's angle around the joint at the last move

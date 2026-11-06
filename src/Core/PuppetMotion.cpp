@@ -4,6 +4,7 @@
 #include <QLineF>
 #include <QPainterPathStroker>
 #include <QPolygonF>
+#include <QSet>
 
 namespace {
 
@@ -102,6 +103,49 @@ QPoint clampOffset(const NamedPoint& marker, int leeway, const QPointF& offset) 
     if (distance > leeway) wanted = nearest + (wanted - nearest) * (qMax(0, leeway) / distance);
     const QPointF clamped = wanted - origin;
     return QPoint(int(std::lround(clamped.x())), int(std::lround(clamped.y())));
+}
+
+QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> states, int partIndex,
+                               const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup) {
+    constexpr int MAX_PASSES = 16;
+    constexpr qreal CLOSE_ENOUGH = 0.5;  // pixels
+    states.resize(puppet.parts.size());
+    if (partIndex < 0 || partIndex >= puppet.parts.size()) return states;
+
+    // The part, its parent, and so on, while they hang from another part.
+    QVector<QPair<int, const PuppetAttachment*>> chain;
+    QSet<int> seen;
+    for (int i = partIndex; i >= 0 && !seen.contains(i);) {
+        seen.insert(i);
+        const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
+        if (!joint) break;
+        chain.append({i, joint});
+        i = -1;
+        for (int p = 0; p < puppet.parts.size(); ++p) {
+            if (puppet.parts[p].name == joint->parent) i = p;
+        }
+    }
+
+    for (int pass = 0; pass < MAX_PASSES; ++pass) {
+        bool turned = false;
+        for (const auto& [index, joint] : chain) {
+            const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(puppet, states, lookup);
+            if (!placements[partIndex].placed || !placements[index].placed) return states;
+            const QPointF pivot = placements[index].pivot;
+            const QPointF effector = placements[partIndex].transform.map(grabbed);
+            if (QLineF(effector, target).length() < CLOSE_ENOUGH) return states;
+            if (QLineF(pivot, effector).length() < CLOSE_ENOUGH || QLineF(pivot, target).length() < CLOSE_ENOUGH)
+                continue;
+            double step = QLineF(pivot, effector).angleTo(QLineF(pivot, target));
+            // QLineF angles go counter-clockwise with y up; the puppet's go clockwise with y down.
+            step = step > 180 ? 360 - step : -step;
+            const int angle = clampAngle(*joint, states[index].angle + step);
+            turned = turned || angle != int(std::lround(states[index].angle));
+            states[index].angle = angle;
+        }
+        if (!turned) break;
+    }
+    return states;
 }
 
 QPainterPath jointArea(const NamedPoint& marker, int leeway) {

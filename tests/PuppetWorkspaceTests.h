@@ -21,6 +21,7 @@ private slots:
     void testTurningStopsAtTheAngleLimits();
     void testDriftingStaysWithinTheLeeway();
     void testTurningAPositionedPartByItsHandle();
+    void testPullingAHandTurnsTheArm();
     void testAngleFieldTurnsThePart();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();

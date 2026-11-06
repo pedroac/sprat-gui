@@ -608,6 +608,42 @@ void PuppetWorkspaceTests::testTurningAPositionedPartByItsHandle() {
     QCOMPARE(angle->value(), 90);
 }
 
+void PuppetWorkspaceTests::testPullingAHandTurnsTheArm() {
+    // A shoulder at the origin and an arm pointing right: upper arm, forearm and hand, 10 px
+    // each, each hanging by its pivot from the previous one's "end".
+    PuppetProject project;
+    const SpritePtr body = project.addSprite(QStringLiteral("body"), 4, 4, QPoint(2, 2), {pointMarker("end", 2, 2)});
+    Puppet puppet;
+    puppet.name = QStringLiteral("arm");
+    puppet.parts.append({QStringLiteral("body"), {spriteVariant(body)}, QPoint(0, 0)});
+    QString previous = QStringLiteral("body");
+    for (const QString& name : {QStringLiteral("upper"), QStringLiteral("fore"), QStringLiteral("hand")}) {
+        const SpritePtr bone = project.addSprite(name, 10, 2, QPoint(0, 1), {pointMarker("end", 10, 1)});
+        puppet.parts.append({name, {spriteVariant(bone)}, std::nullopt});
+        puppet.attachments.append({name, QStringLiteral("pivot"), previous, QStringLiteral("end")});
+        previous = name;
+    }
+    project.session.activeAtlas().puppets = {puppet};
+    PuppetWorkspace workspace(&project.session, &project.undoStack);
+    showAtFullSize(workspace);
+    PuppetCanvas* canvas = workspace.canvas();
+
+    // Pull the hand by its middle, from 25,0 to below the shoulder: the arm bends to get it there.
+    const QPointF target(5, 15);
+    dragOnCanvas(canvas, QPointF(25, 0), target);
+    bool handThere = false;
+    for (QGraphicsItem* item : canvas->scene()->items(target))
+        handThere = handThere || item->data(0).toInt() == 3;
+    QVERIFY(handThere);
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 3, -1}));
+    QCOMPARE(project.undoStack.count(), 0);
+    QVERIFY(project.session.activeAtlas().puppets.first() == puppet);
+
+    // The upper arm turned: its Angle field says so.
+    workspace.select({0, 1, -1});
+    QVERIFY(workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->value() != 0);
+}
+
 void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {
     Doll doll;
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);

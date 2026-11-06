@@ -241,6 +241,17 @@ void PuppetWorkspace::setupUi() {
     connect(m_canvas, &PuppetCanvas::partTurned, this, [this](int part, double degrees) {
         tryTurning(part, m_turnStart.angle + degrees);
     });
+    connect(m_canvas, &PuppetCanvas::partPullStarted, this, [this](int part, const QPointF& scenePos) {
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet || part < 0 || part >= puppet->parts.size()) return;
+        const QVector<PuppetPartPlacement> placements =
+            PuppetEvaluator::evaluate(*puppet, triedStates(*puppet), spriteLookup());
+        // Held by that point of its sprite, which then follows the pointer.
+        m_pullGrip = placements[part].transform.inverted().map(scenePos);
+    });
+    connect(m_canvas, &PuppetCanvas::partPulled, this, [this](int part, const QPointF& scenePos) {
+        tryPulling(part, m_pullGrip, scenePos);
+    });
     connect(m_canvas, &PuppetCanvas::partDrifted, this, [this](int part, const QPointF& offset) {
         tryDrifting(part, offset);
     });
@@ -517,7 +528,7 @@ void PuppetWorkspace::updateCanvas() {
         // A part placed by its attachment moves with its parent, not on its own.
         drawn.movable = part.position.has_value() && !puppetParentAttachment(*puppet, part.name);
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
-        drawn.turnable = puppetParentAttachment(*puppet, part.name) != nullptr;
+        drawn.attached = puppetParentAttachment(*puppet, part.name) != nullptr;
         drawn.joint = placements[i].pivot;
         const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants.first());
         drawn.image = imageOf(sprite);
@@ -982,6 +993,19 @@ void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
     m_tried[puppet->parts[partIndex].name].offset =
         QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, m_turnStart.offset + delta));
     updateCanvas();
+}
+
+void PuppetWorkspace::tryPulling(int partIndex, const QPointF& grip, const QPointF& target) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const QVector<PuppetPartState> before = triedStates(*puppet);
+    const QVector<PuppetPartState> after =
+        PuppetMotion::reach(*puppet, before, partIndex, grip, target, spriteLookup());
+    for (int i = 0; i < puppet->parts.size(); ++i) {
+        if (after[i].angle != before[i].angle) m_tried[puppet->parts[i].name].angle = after[i].angle;
+    }
+    updateCanvas();
+    if (m_selection.part >= 0) m_properties->setAngle(int(std::lround(after[m_selection.part].angle)));
 }
 
 void PuppetWorkspace::resetTriedPose() {

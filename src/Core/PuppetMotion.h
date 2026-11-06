@@ -3,6 +3,7 @@
 #include <QPoint>
 #include <QPointF>
 #include "MarkerModels.h"
+#include "PuppetEvaluator.h"
 #include "PuppetModels.h"
 
 /// How far an attached part may turn and drift, as sprat-cli's "Puppets" says: within its
@@ -30,5 +31,13 @@ QPoint clampOffset(const NamedPoint& marker, int leeway, const QPointF& offset);
 /// Where the joint may go: the marker's shape grown by @p leeway (a circle of that radius
 /// around a point marker). Empty when it can't move at all.
 QPainterPath jointArea(const NamedPoint& marker, int leeway);
+
+/// Pulls attached part @p partIndex: turns it and the attached parts it hangs from (up to a
+/// part placed by position, which stays) so that its point @p grabbed, in its shown sprite's
+/// pixels, gets as close to @p target, in the puppet's space, as their angle limits allow.
+/// Moving a hand turns the forearm and the upper arm. Cyclic coordinate descent, from the
+/// part up; offsets, variants and positions are kept. Returns @p states with the new angles.
+QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> states, int partIndex,
+                               const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup);
 
 }  // namespace PuppetMotion

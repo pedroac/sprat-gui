@@ -23,4 +23,5 @@ private slots:
     void testAttachingRefusesLoops();
     void testJointsTurnWithinTheirLimits();
     void testJointsDriftWithinTheirMarkerAndLeeway();
+    void testPullingAPartTurnsThePartsItHangsFrom();
 };
