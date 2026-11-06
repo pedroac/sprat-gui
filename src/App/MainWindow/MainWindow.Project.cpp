@@ -1799,32 +1799,17 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
 
 void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
 {
-    // Capture Frame Animation dock widths before potentially hiding the animation dock.
-    // m_animationDock is only visible when Frame Animation is active, so this is
-    // a reliable guard against saving state from other workspaces.
-    if (m_atlasDock && m_animationDock && m_animationDock->isVisible()) {
-        m_savedAtlasDockW = m_atlasDock->width();
-        m_savedAnimDockW  = m_animationDock->width();
-    }
-
     auto* atlasSplitter = m_atlasWorkspace ? m_atlasWorkspace->atlasSplitter() : nullptr;
-    auto* editorContent = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel() : nullptr;
     if (ws == m_atlasWorkspace) {
         // AtlasWorkspace::leave() already saved splitter H sizes; restore to Horizontal here
         if (atlasSplitter) atlasSplitter->setOrientation(Qt::Horizontal);
         if (m_atlasDock)     m_atlasDock->show();
         if (m_animationDock) m_animationDock->hide();
     } else if (ws == m_frameAnimWorkspace) {
-        // AtlasWorkspace::leave() already saved splitter H sizes; flip to Vertical now
-        if (atlasSplitter)  atlasSplitter->setOrientation(Qt::Vertical);
-        if (editorContent)  editorContent->hide();
-        if (m_atlasDock)      m_atlasDock->show();
+        // Sprites are picked in dialogs (Add Timeline, Add Frames), so the animation dock
+        // takes the whole width.
+        if (m_atlasDock)      m_atlasDock->hide();
         if (m_animationDock)  m_animationDock->show();
-        // Restore dock widths saved when leaving Frame Animation; prevents the atlas
-        // dock from staying expanded after the animation dock was hidden in Sprites.
-        if (m_savedAtlasDockW > 0 && m_savedAnimDockW > 0)
-            resizeDocks({m_atlasDock, m_animationDock},
-                        {m_savedAtlasDockW, m_savedAnimDockW}, Qt::Horizontal);
     } else if (ws == m_exportWorkspace) {
         if (m_atlasDock)     m_atlasDock->hide();
         if (m_animationDock) m_animationDock->hide();

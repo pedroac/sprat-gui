@@ -760,6 +760,7 @@ if(BUILD_TESTING)
         src/Animation/AnimationPreviewService.cpp
         src/Animation/AnimationPlaybackService.cpp
         src/Animation/Test/AnimationTestOps.cpp
+        src/Animation/Timelines/AnimationTimelineOps.cpp
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp

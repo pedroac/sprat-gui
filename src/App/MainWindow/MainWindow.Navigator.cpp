@@ -477,7 +477,7 @@ void MainWindow::onSpritesDroppedToTimeline(const QStringList& paths,
 
     // Sort paths within each group.
     for (auto& group : grouped) {
-        std::sort(group.begin(), group.end());
+        group = AnimationTimelineOps::naturallySorted(group);
     }
 
     const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;

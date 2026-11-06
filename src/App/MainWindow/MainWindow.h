@@ -717,6 +717,8 @@ private:
     void refreshHandleCombo();
     void refreshSpriteTree();
     void updateNavigatorAtlasCombo();
+    /// Makes the atlas at @p atlasIndex the active one and refreshes what shows it.
+    void selectActiveAtlas(int atlasIndex);
     void syncExcludedAtlas();
     /// Absolute paths of the excluded sprites whose images exist.
     QStringList excludedSpritePaths() const;
@@ -954,8 +956,6 @@ private:
     // Layout Canvas Area
     QStackedWidget* m_profileSelectorStack = nullptr;
     double          m_layoutZoom     = 100.0;
-    int             m_savedAtlasDockW  = -1;
-    int             m_savedAnimDockW   = -1;
 
     // Animation Test Area
     QFutureWatcher<bool> m_gifSyncWatcher;

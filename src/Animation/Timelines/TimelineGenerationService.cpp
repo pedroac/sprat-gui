@@ -21,7 +21,15 @@ bool TimelineGenerationService::generateFromSprites(
         statusMessage = trTimelineGeneration("No frame names match the supported timeline patterns.");
         return false;
     }
+    return addTimelines(generated, timelines, focusIndex, resolveConflict, statusMessage);
+}
 
+bool TimelineGenerationService::addTimelines(
+    const QVector<TimelineSeed>& generated,
+    QVector<AnimationTimeline>& timelines,
+    int& focusIndex,
+    const ConflictResolver& resolveConflict,
+    QString& statusMessage) {
     bool changed = false;
     focusIndex = -1;
     for (const auto& seed : generated) {

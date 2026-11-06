@@ -14,4 +14,5 @@ private slots:
     void testRemovingKeepsInsetsAndShowsAnotherSprite();
     void testRemovingTheLastSpriteShowsTheEmptyState();
     void testPickerListsOnlyFilteredSprites();
+    void testPickerPicksGroups();
 };

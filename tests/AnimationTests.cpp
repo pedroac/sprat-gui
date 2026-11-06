@@ -1,6 +1,7 @@
 #include "AnimationTests.h"
 #include "AnimationPlaybackService.h"
 #include "AnimationPreviewService.h"
+#include "AnimationTimelineOps.h"
 #include "models.h"
 #include <QImage>
 #include <QDir>
@@ -212,4 +213,12 @@ void AnimationTests::testPlaybackRestartsFinishedOnceAnimation() {
     QVERIFY(AnimationPlaybackService::togglePlayPause({timeline}, 0, 10, frameIndex, playStep, playing, &timer));
     QCOMPARE(playStep, 0);
     timer.stop();
+}
+
+void AnimationTests::testFramePathsSortNaturally() {
+    const QStringList sorted = AnimationTimelineOps::naturallySorted({
+        "/art/Walk/walk10.png", "/art/Walk/walk2.png", "/art/Idle/idle1.png", "/art/Walk/Walk1.png"});
+    const QStringList expected{
+        "/art/Idle/idle1.png", "/art/Walk/Walk1.png", "/art/Walk/walk2.png", "/art/Walk/walk10.png"};
+    QCOMPARE(sorted, expected);
 }

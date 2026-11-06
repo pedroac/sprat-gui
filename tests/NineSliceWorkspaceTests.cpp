@@ -7,7 +7,10 @@
 #include "SpriteModels.h"
 #include "SpritePickerDialog.h"
 
+#include <QDialogButtonBox>
 #include <QDir>
+#include <QFileInfo>
+#include <QTreeWidgetItemIterator>
 #include <QImage>
 #include <QPushButton>
 #include <QSpinBox>
@@ -28,6 +31,7 @@ struct SpriteProject {
         session.currentFolder = dir.path();
         for (int i = 0; i < names.size(); ++i) {
             const QString path = QDir::cleanPath(dir.filePath(names[i] + QStringLiteral(".png")));
+            QDir().mkpath(QFileInfo(path).absolutePath());
             QImage image(sizes[i], sizes[i], QImage::Format_ARGB32);
             image.fill(Qt::gray);
             image.save(path);
@@ -283,4 +287,60 @@ void NineSliceWorkspaceTests::testPickerListsOnlyFilteredSprites() {
     QStringList expected{project.sprites[1]->path, project.sprites[2]->path};
     expected.sort();
     QCOMPARE(picked, expected);
+}
+
+void NineSliceWorkspaceTests::testPickerPicksGroups() {
+    // A "hero" group holding two groups of two sprites, plus one sprite outside any group.
+    SpriteProject project({QStringLiteral("hero/walk/walk1"), QStringLiteral("hero/walk/walk2"),
+                           QStringLiteral("hero/idle/idle1"), QStringLiteral("hero/idle/idle2"),
+                           QStringLiteral("coin")},
+                          {16, 16, 16, 16, 16});
+    QVERIFY(project.dir.isValid());
+
+    SpritePickerDialog::Options options;
+    options.pickGroups = true;
+    SpritePickerDialog dialog(&project.session, options);
+    auto* navigator = dialog.findChild<NavigatorPanel*>();
+    auto* tree = navigator->tree();
+    auto* createButton = dialog.findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+    QVERIFY(dialog.selectedGroups().isEmpty());
+    QVERIFY(!createButton->isEnabled());
+
+    QTreeWidgetItem* hero = nullptr;
+    QTreeWidgetItem* walk = nullptr;
+    for (QTreeWidgetItemIterator it(tree); *it; ++it) {
+        if ((*it)->text(0) == QLatin1String("hero")) hero = *it;
+        if ((*it)->text(0) == QLatin1String("walk")) walk = *it;
+    }
+    QVERIFY(hero && walk);
+
+    // Clicking a sprite doesn't select it; only groups can be picked.
+    QTreeWidgetItem* coin = navigator->findSpriteItem(project.sprites[4]->path);
+    QVERIFY(coin);
+    dialog.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&dialog));
+    tree->expandAll();
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      tree->visualItemRect(coin).center());
+    QVERIFY(!coin->isSelected());
+    QVERIFY(dialog.selectedGroups().isEmpty());
+
+    // Selecting "hero" (and "walk" inside it) gives each group that holds sprites once,
+    // with its own sprites and its path from the top of the tree.
+    hero->setSelected(true);
+    walk->setSelected(true);
+    const QVector<SpritePickerDialog::Group> groups = dialog.selectedGroups();
+    QCOMPARE(groups.size(), 2);
+    QHash<QString, SpritePickerDialog::Group> byName;
+    for (const auto& group : groups) byName.insert(group.name, group);
+    QVERIFY(byName.value("walk").path.endsWith(QLatin1String("hero/walk")));
+    QVERIFY(byName.value("idle").path.endsWith(QLatin1String("hero/idle")));
+    QStringList walkSprites = byName.value("walk").spritePaths;
+    walkSprites.sort();
+    QCOMPARE(walkSprites, (QStringList{project.sprites[0]->path, project.sprites[1]->path}));
+    QStringList idleSprites = byName.value("idle").spritePaths;
+    idleSprites.sort();
+    QCOMPARE(idleSprites, (QStringList{project.sprites[2]->path, project.sprites[3]->path}));
+    QVERIFY(createButton->isEnabled());
+    QCOMPARE(createButton->text(), QStringLiteral("OK (2)"));
 }

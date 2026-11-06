@@ -9,9 +9,11 @@
 #include <QLineEdit>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSet>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -37,12 +39,56 @@ QPixmap fitPreview(const QPixmap& pixmap)
     if (factor >= 1.0) return pixmap;
     return pixmap.scaled(PREVIEW_SIZE, PREVIEW_SIZE, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
+
+/// Paths of the visible sprites directly in `group` (not in its subgroups), in tree order.
+QStringList directSpritePaths(QTreeWidgetItem* group)
+{
+    QStringList paths;
+    for (int i = 0; i < group->childCount(); ++i) {
+        QTreeWidgetItem* child = group->child(i);
+        if (child->isHidden()) continue;
+        const auto sprite = child->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && !sprite->path.isEmpty() && !paths.contains(sprite->path))
+            paths.append(sprite->path);
+    }
+    return paths;
+}
+
+/// The item's name and its parents' names, from the top of the tree down, joined by "/".
+QString treePath(QTreeWidgetItem* item)
+{
+    QStringList names;
+    for (QTreeWidgetItem* node = item; node; node = node->parent())
+        names.prepend(node->text(0));
+    return names.join(QLatin1Char('/'));
+}
+
+/// Paths of the visible sprites under `group`, in tree order.
+QStringList spritePathsUnder(QTreeWidgetItem* group)
+{
+    QStringList paths;
+    // QTreeWidgetItemIterator walks on past the group's subtree, so stop at the first item
+    // that isn't inside it.
+    for (QTreeWidgetItemIterator it(group); *it; ++it) {
+        bool inside = false;
+        for (QTreeWidgetItem* node = *it; node; node = node->parent())
+            if (node == group) { inside = true; break; }
+        if (!inside) break;
+        if ((*it)->isHidden()) continue;
+        const auto sprite = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
+        if (sprite && !sprite->path.isEmpty() && !paths.contains(sprite->path))
+            paths.append(sprite->path);
+    }
+    return paths;
+}
 }
 
 SpritePickerDialog::SpritePickerDialog(const ProjectSession* session, const Options& options,
                                        QWidget* parent)
     : QDialog(parent)
-    , m_multiSelect(options.multiSelect)
+    , m_multiSelect(options.multiSelect && !options.pickGroups)
+    , m_pickGroups(options.pickGroups)
+    , m_allowEmpty(options.allowEmpty)
     , m_acceptText(options.acceptText.isEmpty() ? tr("OK") : options.acceptText)
 {
     setWindowTitle(options.title.isEmpty() ? tr("Sprites") : options.title);
@@ -54,13 +100,20 @@ SpritePickerDialog::SpritePickerDialog(const ProjectSession* session, const Opti
     m_navigatorPanel->configure({
         /* atlasCombo      */ false,
         /* showHidden      */ false,
-        /* checkboxes      */ options.multiSelect,
+        /* checkboxes      */ m_multiSelect,
         /* filterBar       */ true,
         /* addSourceButton */ false,
-        /* selectionMode   */ QAbstractItemView::SingleSelection
+        /* selectionMode   */ m_pickGroups ? QAbstractItemView::ExtendedSelection
+                                           : QAbstractItemView::SingleSelection
     });
     m_navigatorPanel->setSpriteFilter(options.filter);
     m_navigatorPanel->refresh(session, false);
+    if (m_pickGroups) {
+        // Only groups can be picked; sprites stay visible to show what each group holds.
+        for (QTreeWidgetItemIterator it(m_navigatorPanel->tree()); *it; ++it)
+            if ((*it)->data(0, Qt::UserRole).value<SpritePtr>())
+                (*it)->setFlags((*it)->flags() & ~Qt::ItemIsSelectable);
+    }
 
     auto* previewPanel = new QWidget(this);
     auto* previewLayout = new QVBoxLayout(previewPanel);
@@ -102,6 +155,7 @@ SpritePickerDialog::SpritePickerDialog(const ProjectSession* session, const Opti
     connect(tree, &QTreeWidget::itemSelectionChanged, this, &SpritePickerDialog::updateAcceptButton);
     connect(tree, &QTreeWidget::itemChanged, this, &SpritePickerDialog::updateAcceptButton);
     connect(tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
+        if (m_pickGroups) return;  // double-click expands or collapses the group
         const auto sprite = item->data(0, Qt::UserRole).value<SpritePtr>();
         if (!sprite || sprite->path.isEmpty()) return;
         // Double-clicking picks this sprite alone, whatever else is ticked.
@@ -121,6 +175,37 @@ QStringList SpritePickerDialog::selectedSpritePaths() const
     return m_navigatorPanel->selectedSpritePaths();
 }
 
+QVector<SpritePickerDialog::Group> SpritePickerDialog::selectedGroups() const
+{
+    QVector<Group> groups;
+    if (!m_pickGroups) return groups;
+    auto* tree = m_navigatorPanel->tree();
+    const QList<QTreeWidgetItem*> selectedList = tree->selectedItems();
+    const QSet<QTreeWidgetItem*> selected(selectedList.begin(), selectedList.end());
+    auto isUnderSelection = [&selected](QTreeWidgetItem* item) {
+        for (QTreeWidgetItem* node = item; node; node = node->parent())
+            if (selected.contains(node)) return true;
+        return false;
+    };
+    for (QTreeWidgetItemIterator it(tree); *it; ++it) {
+        QTreeWidgetItem* item = *it;
+        if (item->isHidden() || item->data(0, Qt::UserRole).value<SpritePtr>()) continue;
+        if (!isUnderSelection(item)) continue;
+        const QStringList sprites = directSpritePaths(item);
+        if (!sprites.isEmpty()) groups.append({item->text(0), treePath(item), sprites});
+    }
+    return groups;
+}
+
+QVector<SpritePickerDialog::Group> SpritePickerDialog::pickGroups(QWidget* parent, const ProjectSession* session,
+                                                                  Options options)
+{
+    options.pickGroups = true;
+    SpritePickerDialog dialog(session, options, parent);
+    if (dialog.exec() != QDialog::Accepted) return {};
+    return dialog.selectedGroups();
+}
+
 QStringList SpritePickerDialog::pick(QWidget* parent, const ProjectSession* session, const Options& options)
 {
     SpritePickerDialog dialog(session, options, parent);
@@ -131,6 +216,15 @@ QStringList SpritePickerDialog::pick(QWidget* parent, const ProjectSession* sess
 void SpritePickerDialog::updatePreview(QTreeWidgetItem* current)
 {
     const auto sprite = current ? current->data(0, Qt::UserRole).value<SpritePtr>() : nullptr;
+    if (m_pickGroups && current && !sprite) {
+        // A group: show its first sprite and how many it holds.
+        const QStringList paths = spritePathsUnder(current);
+        const QPixmap first = paths.isEmpty() ? QPixmap() : QPixmap(paths.first());
+        if (first.isNull()) m_previewImage->clear();
+        else m_previewImage->setPixmap(fitPreview(first));
+        m_previewInfo->setText(tr("%1\n%n sprite(s)", nullptr, paths.size()).arg(current->text(0)));
+        return;
+    }
     const QPixmap pixmap = sprite ? QPixmap(sprite->path) : QPixmap();
     if (pixmap.isNull()) {
         m_previewImage->clear();
@@ -144,9 +238,9 @@ void SpritePickerDialog::updatePreview(QTreeWidgetItem* current)
 
 void SpritePickerDialog::updateAcceptButton()
 {
-    const int count = selectedSpritePaths().size();
+    const int count = m_pickGroups ? selectedGroups().size() : selectedSpritePaths().size();
     QPushButton* acceptButton = m_buttons->button(QDialogButtonBox::Ok);
-    acceptButton->setEnabled(count > 0);
-    acceptButton->setText(m_multiSelect && count > 0 ? tr("%1 (%2)").arg(m_acceptText).arg(count)
-                                                     : m_acceptText);
+    acceptButton->setEnabled(count > 0 || m_allowEmpty);
+    const bool showCount = (m_multiSelect || m_pickGroups) && count > 0;
+    acceptButton->setText(showCount ? tr("%1 (%2)").arg(m_acceptText).arg(count) : m_acceptText);
 }

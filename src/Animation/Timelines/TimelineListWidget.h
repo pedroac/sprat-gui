@@ -38,6 +38,12 @@ signals:
      * @param index Index of the frame to duplicate.
      */
     void duplicateFrameRequested(int index);
+    /**
+     * @brief Emitted when the user asks to add frames from the context menu.
+     * @param index Where the new frames go: before the frame at this index, or at the end
+     *        when it equals count().
+     */
+    void addFramesRequested(int index);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;

@@ -463,18 +463,7 @@ void MainWindow::setupUi() {
     connect(m_atlasWorkspace->addProfilesBtn(), &QPushButton::clicked,
             this, &MainWindow::onManageProfiles);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::atlasIndexChanged,
-            this, [this](int atlasIndex) {
-        if (!m_session) return;
-        if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
-            m_session->activeAtlasIndex = atlasIndex;
-            refreshSpriteTree();
-            refreshTimelineList();
-            refreshAnimationTest();
-            scheduleLayoutRebuild(true);
-        } else {
-            refreshSpriteTree();
-        }
-    });
+            this, &MainWindow::selectActiveAtlas);
     connect(m_atlasWorkspace, &AtlasWorkspace::showHiddenToggled,
             this, [this](bool) { refreshSpriteTree(); });
     connect(m_atlasWorkspace, &AtlasWorkspace::deleteFramesRequested,
@@ -538,6 +527,10 @@ void MainWindow::setupUi() {
         [this](const QString& text) { if (m_statusLabel) m_statusLabel->setText(text); });
     connect(timelineEditorPanel, &TimelineEditorPanel::spritesToTimelineRequested,
         this, &MainWindow::onSpritesDroppedToTimeline);
+    connect(timelineEditorPanel, &TimelineEditorPanel::atlasSelected, this, [this](int atlasIndex) {
+        selectActiveAtlas(atlasIndex);
+        updateNavigatorAtlasCombo();  // the Sprites workspace shows the same atlas
+    });
 
     // The panel widget itself is never placed in any layout — its sub-widgets are
     // distributed directly into the animation dock. Hide it so it doesn't sit as
@@ -698,9 +691,9 @@ void MainWindow::setupUi() {
     m_atlasDock->setTitleBarWidget(new QWidget(this));
     m_atlasDock->setWidget(m_atlasWorkspace);
 
-    // Animation dock (right column in Frame Animation workspace):
-    //   Top  = timeline list
-    //   Bottom = selected-timeline editor  +  animation preview
+    // Animation dock (the Frame Animation workspace):
+    //   Left  = timeline list
+    //   Right = selected-timeline editor  +  animation preview
     m_animationDock = new QDockWidget(tr("Animation"), this);
     m_animationDock->setObjectName("animationDock");
     m_animationDock->setFont(boldFont);
@@ -714,11 +707,13 @@ void MainWindow::setupUi() {
         animBottomLayout->addWidget(m_frameAnimWorkspace->timelinePanel()->timelineEditorContainer());
         animBottomLayout->addWidget(m_frameAnimWorkspace->animPanel(), 1);
 
-        auto* animSplitter = new QSplitter(Qt::Vertical, m_animationDock);
+        // Timelines on the left, the selected timeline and its preview on the right.
+        auto* animSplitter = new QSplitter(Qt::Horizontal, m_animationDock);
         animSplitter->addWidget(m_frameAnimWorkspace->timelinePanel()->listAreaWidget());
         animSplitter->addWidget(animBottomPanel);
-        animSplitter->setStretchFactor(0, 2);
-        animSplitter->setStretchFactor(1, 3);
+        animSplitter->setStretchFactor(0, 1);
+        animSplitter->setStretchFactor(1, 2);
+        animSplitter->setSizes({360, 720});
         m_animationDock->setWidget(animSplitter);
     }
 
@@ -1226,17 +1221,16 @@ void MainWindow::updateUiState() {
     if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace
             || m_currentWorkspace == m_nineSliceWorkspace) return;
 
+    const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
     if (hasModels) {
         m_mainStack->hide();
-        if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
+        if (m_atlasDock) m_atlasDock->setVisible(!wantsAnim);
         if (m_animationDock) m_animationDock->setVisible(wantsAnim);
         if (m_atlasWorkspace && m_atlasWorkspace->atlasViewStack() && m_atlasWorkspace->atlasViewStack()->currentIndex() == 2)
             m_atlasWorkspace->atlasViewStack()->setCurrentIndex(1); // Navigation
     } else if (hasProject) {
         m_mainStack->hide();
-        if (m_atlasDock && m_atlasDock->isHidden()) m_atlasDock->show();
-        const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
+        if (m_atlasDock) m_atlasDock->setVisible(!wantsAnim);
         if (m_animationDock) m_animationDock->setVisible(wantsAnim);
         if (m_atlasWorkspace && m_atlasWorkspace->atlasViewStack()) m_atlasWorkspace->atlasViewStack()->setCurrentIndex(2); // Empty-state placeholder
     } else {
@@ -1793,24 +1787,22 @@ void MainWindow::updateNavigatorAtlasCombo() {
     auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
     if (navigatorPanel)
         navigatorPanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
-    if (navigatorPanel)
-        return;
-    // Fallback: direct combo manipulation (kept for safety)
-    auto* navigatorAtlasCombo = navigatorPanel ? navigatorPanel->atlasCombo() : nullptr;
-    if (!navigatorAtlasCombo) return;
-    navigatorAtlasCombo->blockSignals(true);
-    navigatorAtlasCombo->clear();
-    int selectComboIdx = 0;
-    for (int i = 0; i < m_session->atlases.size(); ++i) {
-        const auto& atlas = m_session->atlases[i];
-        if (atlas.isExcluded) continue;
-        if (atlas.spritePaths.isEmpty()) continue;  // Hide empty atlases
-        if (i == m_session->activeAtlasIndex)
-            selectComboIdx = navigatorAtlasCombo->count();
-        navigatorAtlasCombo->addItem(atlas.name, i);  // Store real atlas index as item data
+    auto* timelinePanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
+    if (timelinePanel)
+        timelinePanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+}
+
+void MainWindow::selectActiveAtlas(int atlasIndex) {
+    if (!m_session) return;
+    if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
+        m_session->activeAtlasIndex = atlasIndex;
+        refreshSpriteTree();
+        refreshTimelineList();
+        refreshAnimationTest();
+        scheduleLayoutRebuild(true);
+    } else {
+        refreshSpriteTree();
     }
-    navigatorAtlasCombo->setCurrentIndex(selectComboIdx);
-    navigatorAtlasCombo->blockSignals(false);
 }
 
 // ---------------------------------------------------------------------------

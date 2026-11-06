@@ -1,4 +1,6 @@
 #include "AnimationTimelineOps.h"
+#include <QCollator>
+#include <algorithm>
 
 bool AnimationTimelineOps::dropFrame(QVector<AnimationTimeline>& timelines, int timelineIndex, const QString& path, int index) {
     if (timelineIndex < 0 || timelineIndex >= timelines.size()) {
@@ -62,4 +64,13 @@ bool AnimationTimelineOps::removeFrames(QVector<AnimationTimeline>& timelines, i
         }
     }
     return removed;
+}
+
+QStringList AnimationTimelineOps::naturallySorted(QStringList framePaths) {
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::stable_sort(framePaths.begin(), framePaths.end(),
+                     [&collator](const QString& a, const QString& b) { return collator.compare(a, b) < 0; });
+    return framePaths;
 }
