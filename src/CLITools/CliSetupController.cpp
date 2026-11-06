@@ -390,6 +390,11 @@ void CliSetupController::onInstallerFinished(int exitCode,
         emit statusMessageChanged(tr("CLI installation finished"));
         emit installFinished(true);
 #ifndef SPRAT_EMBEDDED_CLI
+        // Use the tools just installed: base_dir is searched first, so if it
+        // still named another folder (build-from-source.sh sets one), the old
+        // tools would be found again and the upgrade prompt would never end.
+        m_cliPaths.baseDir = CliToolInstaller::installDir();
+        CliToolsConfig::saveAppSettings(CliToolsConfig::loadAppSettings(), m_cliPaths);
         CliToolsConfig::invalidateCaches();  // ensure freshly installed binaries are re-queried
 #endif
         check();
