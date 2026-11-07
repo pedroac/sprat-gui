@@ -795,6 +795,7 @@ if(BUILD_TESTING)
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
         src/App/MainWindow/SpritePreviewTooltip.cpp
         src/NineSlice/NineSliceEditorCanvas.cpp
+        src/SelectedSpriteFrame/EditorOverlayItem.cpp
         src/Core/SpriteTreeUtils.cpp
         src/Core/ViewUtils.cpp
         src/Core/ZoomableGraphicsView.cpp
@@ -836,6 +837,7 @@ if(BUILD_TESTING)
         src/Animation/Test
         src/Animation/Timelines
         src/NineSlice
+        src/SelectedSpriteFrame
         src/Project
         src/Core
         src/SpriteSheetLayout

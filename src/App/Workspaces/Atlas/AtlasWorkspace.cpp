@@ -19,6 +19,7 @@
 #include "../../../Core/SpriteTreeUtils.h"
 #include "../../../Profiles/SpratProfilesConfig.h"
 
+#include <algorithm>
 #include <QIcon>
 #include <QVBoxLayout>
 #include <QSplitter>
@@ -1224,5 +1225,18 @@ void AtlasWorkspace::onPointsConfigClicked() {
             m_session->selectedSprite, oldPoints, newPoints,
             [this]() { refreshMarkerDisplay(); },
             std::move(coTargets)));
+
+        // Select the last marker created, so a click on the canvas positions it.
+        QString createdName;
+        for (const auto& point : newPoints) {
+            const bool existed = std::any_of(oldPoints.begin(), oldPoints.end(),
+                [&](const NamedPoint& old) { return old.name == point.name; });
+            if (!existed) createdName = point.name;
+        }
+        auto* combo = m_spriteEditorPanel->handleCombo();
+        if (!createdName.isEmpty() && combo) {
+            const int idx = combo->findText(createdName);
+            if (idx > 0) combo->setCurrentIndex(idx);
+        }
     }
 }

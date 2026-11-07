@@ -1052,7 +1052,7 @@ ctest --output-on-failure
 - `TestAnimationGeneration.cpp` - Timeline generation
 - `TestAnimationPlayback.cpp` - Playback logic
 - `TestProjectPayload.cpp` - Save/load functionality
-- `TestCoreModels.cpp` - Data structure operations
+- `TestCoreModels.cpp` - Data structure operations (`CoreTests` also clicks `EditorOverlayItem`: empty space positions the selected marker, or the pivot when none is selected)
 - `TestImageDiscovery.cpp` - Image discovery service
 - `TestProjectSession.cpp` - Session state management
 - `PuppetTests.cpp` - `PuppetTextCodec` (sprat-cli README example, write/read round trip, bad lines, repeated names, quoting), default variant names, `PuppetEvaluator` placements and problems, puppets in the project file, `PuppetEditing` (name checks, renaming/removing parts with their attachments and poses, variant names, adding sprites, attaching/detaching, loops), `PuppetMotion` (angle limits, drift within point, circle, rectangle and polygon markers plus leeway, reaching with an arm within limits, a pupil sliding in its socket), `PuppetPosing` (a pose's settings as states), pose edits keeping sequences in step, `PuppetSequencing` (tweens, holds, variant snaps, ease:step, loop, once, ping-pong and its track position, base values, unknown poses), the editor-only hidden markers in the project file but not in `puppets.txt`

@@ -13,4 +13,5 @@ private slots:
     void testArchiveExtractionSkipsLinks();
     void testCreateZipRoundTripsAndKeepsOriginalOnFailure();
     void testTrashBinMoveFolderKeepsExistingTarget();
+    void testClickOnEmptySpacePositionsSelectedMarker();
 };

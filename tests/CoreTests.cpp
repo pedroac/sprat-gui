@@ -4,12 +4,15 @@
 #include "ArchiveExtractor.h"
 #include "PathSafety.h"
 #include "Undo/TrashBin.h"
+#include "EditorOverlayItem.h"
 
 #include <archive.h>
 #include <archive_entry.h>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 
 void CoreTests::testMarkerKindConversions() {
     QCOMPARE(markerKindToString(MarkerKind::Point), QString("point"));
@@ -236,4 +239,62 @@ void CoreTests::testTrashBinMoveFolderKeepsExistingTarget() {
     QVERIFY(TrashBin::moveFolder(from, moved));
     QVERIFY(!QDir(from).exists());
     QVERIFY(QDir(QDir(moved).filePath("sub")).exists());
+}
+
+namespace {
+void clickOverlay(QGraphicsScene& scene, EditorOverlayItem* overlay, const QPointF& pos) {
+    for (auto type : {QEvent::GraphicsSceneMousePress, QEvent::GraphicsSceneMouseRelease}) {
+        QGraphicsSceneMouseEvent event(type);
+        event.setButton(Qt::LeftButton);
+        event.setButtons(type == QEvent::GraphicsSceneMousePress ? Qt::LeftButton : Qt::NoButton);
+        event.setPos(pos);
+        event.setScenePos(pos);
+        scene.sendEvent(overlay, &event);
+    }
+}
+}
+
+void CoreTests::testClickOnEmptySpacePositionsSelectedMarker() {
+    auto sprite = std::make_shared<Sprite>();
+    sprite->pivotX = 5;
+    sprite->pivotY = 5;
+    NamedPoint hand;
+    hand.name = "hand";
+    hand.x = 10;
+    hand.y = 10;
+    NamedPoint box;
+    box.name = "box";
+    box.kind = MarkerKind::Rectangle;
+    box.x = 60;
+    box.y = 60;
+    box.w = 10;
+    box.h = 20;
+    sprite->points = {hand, box};
+
+    QGraphicsScene scene;
+    auto* overlay = new EditorOverlayItem;
+    scene.addItem(overlay);
+    overlay->setSceneSize(QSize(100, 100));
+    overlay->setSprites({sprite});
+    QSignalSpy finished(overlay, &EditorOverlayItem::markerDragFinished);
+
+    overlay->setSelectedMarker("hand");
+    clickOverlay(scene, overlay, QPointF(40, 30));
+    QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
+    QCOMPARE(QPoint(sprite->pivotX, sprite->pivotY), QPoint(5, 5));
+    QCOMPARE(overlay->selectedMarkerName(), QString("hand"));
+    QCOMPARE(finished.count(), 1);
+
+    // A rectangle is centred on the click.
+    overlay->setSelectedMarker("box");
+    clickOverlay(scene, overlay, QPointF(20, 80));
+    QCOMPARE(QRect(sprite->points[1].x, sprite->points[1].y, sprite->points[1].w, sprite->points[1].h),
+             QRect(15, 70, 10, 20));
+    QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
+
+    // With no marker selected, the click places the pivot.
+    overlay->setSelectedMarker(QString());
+    clickOverlay(scene, overlay, QPointF(90, 10));
+    QCOMPARE(QPoint(sprite->pivotX, sprite->pivotY), QPoint(90, 10));
+    QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
 }
