@@ -12,6 +12,7 @@
 #include "SpriteModels.h"
 
 class PuppetPoseStrip;
+class PuppetSequenceTrack;
 class PuppetTreeWidget;
 class ProjectSession;
 class QComboBox;
@@ -19,6 +20,9 @@ class QDoubleSpinBox;
 class QLabel;
 class QListWidget;
 class QPushButton;
+class QSpinBox;
+class QTabBar;
+class QTimer;
 class QStackedWidget;
 class QToolButton;
 class QTreeWidgetItem;
@@ -114,6 +118,28 @@ public:
     PuppetPoseStrip* poseStrip() const { return m_poseStrip; }
     QListWidget* poseParts() const { return m_poseParts; }
 
+    // Animations (sprat-cli's sequences): poses played one after another, each reached in
+    // `in` frames and held `hold` frames. Each edit is one undo step.
+    void selectSequence(int sequenceIndex);
+    void selectStep(int stepIndex);
+    void addSequence(int sequenceIndex);
+    void duplicateSequence(int sequenceIndex);
+    void removeSequence(int sequenceIndex);
+    void renameSequence(int sequenceIndex, const QString& name);
+    /// Adds a step showing @p pose at index @p stepIndex of the selected animation, and selects it.
+    void addStep(int stepIndex, const QString& pose);
+    void moveStep(int from, int to);
+    void duplicateStep(int stepIndex);
+    void removeStep(int stepIndex);
+    void setPlaying(bool playing);
+    int selectedSequence() const { return m_sequence; }
+    int selectedStep() const { return m_step; }
+    int playFrame() const { return m_playFrame; }
+    QTabBar* bottomTabs() const { return m_bottomTabs; }
+    /// The page below the canvas for tab @p tab.
+    QWidget* bottomPage(int tab) const { return m_bottomPages.value(tab); }
+    PuppetSequenceTrack* sequenceTrack() const { return m_track; }
+
 signals:
     void atlasSelected(int atlasIndex);
 
@@ -165,6 +191,20 @@ private:
     /// What the canvas shows: the selected pose on its own (rest elsewhere), within the joints'
     /// limits, or the rest pose on Rest.
     QVector<PuppetPartState> shownStates(const Puppet& puppet) const;
+    /// @p states within the rig's limits: angles in their joint's, offsets in the parent marker
+    /// and leeway, positions only for parts placed by position.
+    QVector<PuppetPartState> limitedStates(const Puppet& puppet, QVector<PuppetPartState> states) const;
+    /// The selected animation, and those playing along, at the playhead.
+    QVector<PuppetPartState> animationStates(const Puppet& puppet) const;
+    QWidget* buildAnimationsTab(QWidget* parent);
+    /// Shows the current tab's page below the canvas, and only it.
+    void fitBottomTabs();
+    void updateSequences();
+    void updatePlayhead();
+    void advancePlayback();
+    /// Applies @p change to the selected animation (or its selected step) as one undo step.
+    void editSequence(const QString& text, const QString& mergeKey, const std::function<void(PuppetSequence&)>& change);
+    void editStep(const QString& text, const QString& mergeKey, const std::function<void(PuppetSequenceStep&)>& change);
     /// The parts the selected pose sets.
     QSet<int> partsInPose(const Puppet& puppet) const;
     std::optional<PuppetCanvas::JointRange> jointRange(const Puppet& puppet,
@@ -192,6 +232,30 @@ private:
     QLabel* m_poseStatus = nullptr;
     QLabel* m_posePartsTitle = nullptr;
     QListWidget* m_poseParts = nullptr;
+    QVector<QPixmap> m_poseThumbnails;  ///< As the strip shows them, for the animations' steps
+
+    QTabBar* m_bottomTabs = nullptr;
+    QVector<QWidget*> m_bottomPages;  ///< Only the current tab's is shown
+    bool m_animating = false;  ///< The Animations tab is shown: the canvas plays
+    int m_sequence = -1;       ///< The selected animation
+    int m_step = -1;           ///< Its selected step
+    int m_playFrame = 0;       ///< The playhead, in the selected animation's frames
+    QSet<QString> m_playAlong;  ///< Animations ticked to play along (preview only, not saved)
+    bool m_rebuildingSequences = false;
+    QTimer* m_playTimer = nullptr;
+    QListWidget* m_sequenceList = nullptr;
+    QPushButton* m_addSequenceButton = nullptr;
+    QPushButton* m_removeSequenceButton = nullptr;
+    QToolButton* m_playButton = nullptr;
+    QSpinBox* m_sequenceFps = nullptr;
+    QComboBox* m_sequenceLoop = nullptr;
+    QLabel* m_sequenceInfo = nullptr;
+    PuppetSequenceTrack* m_track = nullptr;
+    QLabel* m_stepLabel = nullptr;
+    QComboBox* m_stepPose = nullptr;
+    QSpinBox* m_stepIn = nullptr;
+    QSpinBox* m_stepHold = nullptr;
+    QComboBox* m_stepEase = nullptr;
     mutable QHash<QString, QPixmap> m_images;  ///< By sprite path
     QHash<QString, SpritePtr> m_spritesByPath;  ///< The active atlas's laid-out sprites
     QHash<QString, SpritePtr> m_spritesByName;

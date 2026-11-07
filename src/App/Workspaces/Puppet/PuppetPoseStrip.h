@@ -24,6 +24,7 @@ public:
 
     explicit PuppetPoseStrip(QWidget* parent = nullptr);
 
+
     /// Shows the rest pose and the poses (names and thumbnails, in order), with frame
     /// @p selected selected: -1 for Rest.
     void showFrames(const QPixmap& rest, const QStringList& poseNames, const QVector<QPixmap>& thumbnails,

@@ -182,7 +182,9 @@ listing the atlas's timelines, as the source for variants.
 5. **Poses**: done. A strip under the canvas holds Rest (the rig) and the poses; editing on a
    pose frame changes that pose directly, and a list under the tree ticks the parts it sets
    (others are faint), so poses combine.
-6. **Later**: sequences (on the strip: poses in order with `in`/`hold`), onion skin of the
-   previous pose, then constraint solving while posing.
+6. **Animations**: done. An Animations tab lists the sequences; each shows its steps as
+   blocks sized by frames, poses added from its context menu, and plays on the canvas, others
+   playing along.
+7. **Later**: onion skin of the previous pose, then constraint solving while posing.
 
 Each phase updates README.md (workspace section and hotkeys), CHANGELOG.md and AGENTS.md.

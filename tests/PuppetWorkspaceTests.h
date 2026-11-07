@@ -25,6 +25,7 @@ private slots:
     void testPullingSlidesWithinTheLeeway();
     void testHiddenMarkersAreNotOffered();
     void testMarkerListDoesNotSpreadThePanelRows();
+    void testPosesTabIsAsTallAsItsContent();
     void testAngleFieldTurnsThePart();
     void testNewPoseSetsOnlyThePartsChanged();
     void testSelectingAPoseShowsIt();
@@ -33,6 +34,8 @@ private slots:
     void testPosingMovesPositionedPartsInThePose();
     void testPoseStripRenamesReordersAndRemoves();
     void testPoseStripContextMenuWorksLikeTheFrameList();
+    void testBuildingAnAnimationFromPoses();
+    void testPlayingAnAnimation();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();

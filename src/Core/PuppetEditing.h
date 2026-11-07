@@ -18,6 +18,7 @@ QString uniqueName(const QString& base, const QStringList& taken);
 QStringList puppetNames(const QVector<Puppet>& puppets);
 QStringList partNames(const Puppet& puppet);
 QStringList poseNames(const Puppet& puppet);
+QStringList sequenceNames(const Puppet& puppet);
 /// The names the part's variants go by (see puppetVariantName()).
 QStringList variantNames(const PuppetPart& part);
 
@@ -26,6 +27,7 @@ QStringList variantNames(const PuppetPart& part);
 QString puppetNameProblem(const QVector<Puppet>& puppets, int index, const QString& name);
 QString partNameProblem(const Puppet& puppet, int index, const QString& name);
 QString poseNameProblem(const Puppet& puppet, int index, const QString& name);
+QString sequenceNameProblem(const Puppet& puppet, int index, const QString& name);
 /// @p name is what the variant would go by: an empty name means the default name.
 QString variantNameProblem(const PuppetPart& part, int index, const QString& name);
 
@@ -67,6 +69,9 @@ void renamePose(Puppet& puppet, int poseIndex, const QString& name);
 void removePose(Puppet& puppet, int poseIndex);
 /// Moves a pose in the list; @p to is its index afterwards.
 void movePose(Puppet& puppet, int from, int to);
+/// Moves a sequence, or a step within sequence @p sequenceIndex; @p to is its index afterwards.
+void moveSequence(Puppet& puppet, int from, int to);
+void moveStep(Puppet& puppet, int sequenceIndex, int from, int to);
 
 /// Adds a sprite variant for each path the part doesn't show yet. A sprite whose name
 /// another variant already goes by gets a unique explicit name. Returns how many it added.

@@ -7,6 +7,8 @@
 #include "PuppetMotion.h"
 #include "PuppetPoseStrip.h"
 #include "PuppetPosing.h"
+#include "PuppetSequenceTrack.h"
+#include "PuppetSequencing.h"
 #include "PuppetPropertiesPanel.h"
 #include "PuppetTreeWidget.h"
 #include "SpritePickerDialog.h"
@@ -26,6 +28,11 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSpinBox>
+#include <QTabBar>
+#include <QTimer>
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -39,6 +46,13 @@
 namespace {
 /// Most height of the selected pose's part list; it scrolls beyond that.
 constexpr int POSE_PARTS_HEIGHT = 160;
+/// The tabs below the canvas.
+constexpr int POSES_TAB = 0;
+constexpr int ANIMATIONS_TAB = 1;
+constexpr int SEQUENCE_LIST_WIDTH = 150;
+/// A new step reaches its pose in this many frames, then holds it this many.
+constexpr int DEFAULT_STEP_IN = 4;
+constexpr int DEFAULT_STEP_HOLD = 4;
 
 constexpr int NAME_COLUMN = 0;
 constexpr int DETAIL_COLUMN = 1;
@@ -224,8 +238,19 @@ void PuppetWorkspace::setupUi() {
     m_canvas = new PuppetCanvas(middle);
     m_canvas->setObjectName(QStringLiteral("puppetCanvas"));
     middleLayout->addWidget(m_canvas, 1);
+    // Below the canvas: the poses, and the animations that play them.
+    // A tab bar over pages of which only the current one is shown: the area is as tall as
+    // that page (a QTabWidget is as tall as its tallest page, spreading the rest around).
+    m_bottomTabs = new QTabBar(middle);
+    m_bottomTabs->setObjectName(QStringLiteral("puppetBottomTabs"));
+    m_bottomTabs->setExpanding(false);
+    m_bottomTabs->setDrawBase(true);
+    middleLayout->addWidget(m_bottomTabs);
     {
         // The poses, one frame each after Rest (the rig), like an animation's frames.
+        auto* posesPage = new QWidget(middle);
+        auto* posesLayout = new QVBoxLayout(posesPage);
+        posesLayout->setContentsMargins(4, 4, 4, 4);
         auto* row = new QHBoxLayout;
         m_newPoseButton = new QPushButton(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add Pose"), middle);
         m_newPoseButton->setObjectName(QStringLiteral("puppetNewPose"));
@@ -244,10 +269,13 @@ void PuppetWorkspace::setupUi() {
         row->addWidget(m_duplicatePoseButton);
         row->addWidget(m_removePoseButton);
         row->addWidget(m_poseStatus, 1);
-        middleLayout->addLayout(row);
-        m_poseStrip = new PuppetPoseStrip(middle);
+        posesLayout->addLayout(row);
+        m_poseStrip = new PuppetPoseStrip(posesPage);
         m_poseStrip->setObjectName(QStringLiteral("puppetPoseStrip"));
-        middleLayout->addWidget(m_poseStrip);
+        posesLayout->addWidget(m_poseStrip);
+        m_bottomTabs->addTab(tr("Poses"));
+        m_bottomPages.append(posesPage);
+        middleLayout->addWidget(posesPage);
         connect(m_newPoseButton, &QPushButton::clicked, this, [this]() { addPose(m_pose + 1); });
         connect(m_duplicatePoseButton, &QPushButton::clicked, this, [this]() { duplicatePose(m_pose); });
         connect(m_poseStrip, &PuppetPoseStrip::addRequested, this, &PuppetWorkspace::addPose);
@@ -258,6 +286,17 @@ void PuppetWorkspace::setupUi() {
         connect(m_poseStrip, &PuppetPoseStrip::moveRequested, this, &PuppetWorkspace::movePose);
         connect(m_poseStrip, &PuppetPoseStrip::removeRequested, this, &PuppetWorkspace::removePose);
     }
+    m_bottomTabs->addTab(tr("Animations"));
+    m_bottomPages.append(buildAnimationsTab(middle));
+    middleLayout->addWidget(m_bottomPages.last());
+    fitBottomTabs();
+    connect(m_bottomTabs, &QTabBar::currentChanged, this, [this](int tab) {
+        fitBottomTabs();
+        m_animating = tab == ANIMATIONS_TAB;
+        if (!m_animating) setPlaying(false);
+        updateCanvas();
+        updateProperties();
+    });
     splitter->addWidget(middle);
     connect(m_zoomSpin, &QDoubleSpinBox::valueChanged, this, [this](double percent) {
         m_canvas->setZoomManual(true);
@@ -589,6 +628,11 @@ void PuppetWorkspace::updateCanvas() {
     if (puppetKey != m_posedPuppet) {
         m_posedPuppet = puppetKey;
         m_pose = -1;
+        m_sequence = -1;
+        m_step = -1;
+        m_playFrame = 0;
+        m_playAlong.clear();
+        setPlaying(false);
         updatePoseStrip();
     }
     const QVector<PuppetPartState> states = shownStates(*puppet);
@@ -606,7 +650,7 @@ void PuppetWorkspace::updateCanvas() {
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
         drawn.attached = puppetParentAttachment(*puppet, part.name) != nullptr;
         drawn.joint = placements[i].pivot;
-        drawn.included = m_pose < 0 || inPose.contains(i);
+        drawn.included = m_animating || m_pose < 0 || inPose.contains(i);
         // The variant the pose shows (the rest variant unless it picks another).
         const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants[states[i].variant]);
         drawn.image = imageOf(sprite);
@@ -635,7 +679,9 @@ void PuppetWorkspace::updateCanvas() {
     std::optional<QPointF> pivot;
     if (selectedPart >= 0 && selectedPart < placements.size() && placements[selectedPart].placed)
         pivot = placements[selectedPart].pivot;
-    m_canvas->setPosing(m_pose >= 0);
+    // While animating, the canvas only plays: poses are changed in the Poses tab.
+    m_canvas->setPosing(m_pose >= 0 && !m_animating);
+    m_canvas->setEditable(!m_animating);
     m_canvas->showPuppet(parts, bones, selectedPart, pivot, jointRange(*puppet, placements));
     updatePoseButtons();
 
@@ -697,7 +743,7 @@ void PuppetWorkspace::updateProperties() {
         }
         placement.hiddenMarkers = part.hiddenMarkers;
         const PuppetPartState shown = shownStates(*puppet)[i];
-        placement.posing = m_pose >= 0;
+        placement.posing = m_pose >= 0 && !m_animating;
         placement.angle = int(std::lround(shown.angle));
         placement.variant = shown.variant;
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
@@ -1019,8 +1065,13 @@ std::optional<NamedPoint> PuppetWorkspace::parentMarkerOf(const Puppet& puppet, 
 }
 
 QVector<PuppetPartState> PuppetWorkspace::shownStates(const Puppet& puppet) const {
+    if (m_animating) return animationStates(puppet);
     if (m_pose < 0 || m_pose >= puppet.poses.size()) return QVector<PuppetPartState>(puppet.parts.size());
-    QVector<PuppetPartState> states = PuppetPosing::statesOf(puppet, puppet.poses[m_pose]);
+    return limitedStates(puppet, PuppetPosing::statesOf(puppet, puppet.poses[m_pose]));
+}
+
+QVector<PuppetPartState> PuppetWorkspace::limitedStates(const Puppet& puppet, QVector<PuppetPartState> states) const {
+    states.resize(puppet.parts.size());
     for (int i = 0; i < puppet.parts.size(); ++i) {
         // The rig may have changed since: keep within its limits as they are now.
         states[i].angle = limitedAngle(puppet, i, states[i].angle);
@@ -1343,8 +1394,10 @@ void PuppetWorkspace::updatePoseStrip() {
         m_pose = -1;
         m_poseStrip->showFrames({}, {}, {}, -1);
         m_poseStrip->setEnabled(false);
+        m_poseThumbnails.clear();
         updatePoseButtons();
         updatePoseParts();
+        updateSequences();
         return;
     }
     m_poseStrip->setEnabled(true);
@@ -1366,9 +1419,11 @@ void PuppetWorkspace::updatePoseStrip() {
     for (const QVector<PuppetPartState>& states : poseStates) cover(states);
     QVector<QPixmap> thumbnails;
     for (const QVector<PuppetPartState>& states : poseStates) thumbnails.append(renderThumbnail(*puppet, states, frame));
+    m_poseThumbnails = thumbnails;
     m_poseStrip->showFrames(renderThumbnail(*puppet, {}, frame), PuppetEditing::poseNames(*puppet), thumbnails, m_pose);
     updatePoseButtons();
     updatePoseParts();
+    updateSequences();
 }
 
 QPixmap PuppetWorkspace::renderThumbnail(const Puppet& puppet, const QVector<PuppetPartState>& states,
@@ -1394,3 +1449,455 @@ QPixmap PuppetWorkspace::renderThumbnail(const Puppet& puppet, const QVector<Pup
     return thumbnail;
 }
 
+
+void PuppetWorkspace::fitBottomTabs() {
+    for (int i = 0; i < m_bottomPages.size(); ++i) {
+        m_bottomPages[i]->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        m_bottomPages[i]->setVisible(i == m_bottomTabs->currentIndex());
+    }
+}
+
+// === Animations: the puppet's sequences of poses ===
+
+QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
+    auto* page = new QWidget(parent);
+    auto* layout = new QHBoxLayout(page);
+    layout->setContentsMargins(4, 4, 4, 4);
+
+    // Left: the animations, ticked to play along with the selected one.
+    auto* listColumn = new QVBoxLayout;
+    m_sequenceList = new QListWidget(page);
+    m_sequenceList->setObjectName(QStringLiteral("puppetAnimations"));
+    m_sequenceList->setFixedWidth(SEQUENCE_LIST_WIDTH);
+    m_sequenceList->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    m_sequenceList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_sequenceList->setToolTip(tr("Double-click to rename. Tick others to play them along with the selected one, "
+                                  "as a game would combine them"));
+    listColumn->addWidget(m_sequenceList, 1);
+    auto* listButtons = new QHBoxLayout;
+    m_addSequenceButton = new QPushButton(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add"), page);
+    m_addSequenceButton->setObjectName(QStringLiteral("puppetAddAnimation"));
+    m_addSequenceButton->setToolTip(tr("Add an animation after the selected one"));
+    m_removeSequenceButton = new QPushButton(tr("Delete"), page);
+    m_removeSequenceButton->setObjectName(QStringLiteral("puppetRemoveAnimation"));
+    listButtons->addWidget(m_addSequenceButton);
+    listButtons->addWidget(m_removeSequenceButton);
+    listColumn->addLayout(listButtons);
+    layout->addLayout(listColumn);
+
+    // Right: the selected animation's settings, its steps and the selected step.
+    auto* right = new QVBoxLayout;
+    auto* header = new QHBoxLayout;
+    m_playButton = new QToolButton(page);
+    m_playButton->setObjectName(QStringLiteral("puppetPlay"));
+    m_playButton->setCheckable(true);
+    m_playButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    m_playButton->setToolTip(tr("Play the animation on the canvas"));
+    header->addWidget(m_playButton);
+    m_sequenceFps = new QSpinBox(page);
+    m_sequenceFps->setObjectName(QStringLiteral("puppetAnimationFps"));
+    m_sequenceFps->setRange(1, MAX_ANIMATION_FPS);
+    m_sequenceFps->setSuffix(tr(" fps"));
+    m_sequenceFps->setKeyboardTracking(false);
+    header->addWidget(m_sequenceFps);
+    m_sequenceLoop = new QComboBox(page);
+    m_sequenceLoop->setObjectName(QStringLiteral("puppetAnimationLoop"));
+    m_sequenceLoop->addItem(tr("Loop"), int(AnimationLoopMode::Loop));
+    m_sequenceLoop->addItem(tr("Once"), int(AnimationLoopMode::Once));
+    m_sequenceLoop->addItem(tr("Ping-pong"), int(AnimationLoopMode::PingPong));
+    m_sequenceLoop->addItem(tr("Once ping-pong"), int(AnimationLoopMode::OncePingPong));
+    header->addWidget(m_sequenceLoop);
+    m_sequenceInfo = new QLabel(page);
+    m_sequenceInfo->setObjectName(QStringLiteral("puppetAnimationInfo"));
+    m_sequenceInfo->setForegroundRole(QPalette::PlaceholderText);
+    header->addWidget(m_sequenceInfo, 1);
+    right->addLayout(header);
+
+    m_track = new PuppetSequenceTrack(page);
+    m_track->setObjectName(QStringLiteral("puppetAnimationSteps"));
+    auto* trackScroll = new QScrollArea(page);
+    trackScroll->setWidget(m_track);
+    trackScroll->setWidgetResizable(true);
+    trackScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    trackScroll->setFixedHeight(m_track->sizeHint().height() + trackScroll->horizontalScrollBar()->sizeHint().height()
+                                + 2 * trackScroll->frameWidth());
+    right->addWidget(trackScroll);
+
+    auto* stepRow = new QHBoxLayout;
+    m_stepLabel = new QLabel(page);
+    stepRow->addWidget(m_stepLabel);
+    m_stepPose = new QComboBox(page);
+    m_stepPose->setObjectName(QStringLiteral("puppetStepPose"));
+    stepRow->addWidget(m_stepPose, 1);
+    const auto makeFrames = [page](const QString& objectName, const QString& prefix, const QString& tip) {
+        auto* spin = new QSpinBox(page);
+        spin->setObjectName(objectName);
+        spin->setRange(0, PUPPET_MAX_STEP_FRAMES);
+        spin->setPrefix(prefix);
+        spin->setSuffix(tr(" frames"));
+        spin->setKeyboardTracking(false);
+        spin->setToolTip(tip);
+        return spin;
+    };
+    m_stepIn = makeFrames(QStringLiteral("puppetStepIn"), tr("In: "), tr("Frames to reach the pose from the step before"));
+    m_stepHold = makeFrames(QStringLiteral("puppetStepHold"), tr("Hold: "), tr("Frames the pose is held once reached"));
+    stepRow->addWidget(m_stepIn);
+    stepRow->addWidget(m_stepHold);
+    m_stepEase = new QComboBox(page);
+    m_stepEase->setObjectName(QStringLiteral("puppetStepEase"));
+    m_stepEase->addItem(tr("Linear"));
+    m_stepEase->addItem(tr("Step"));
+    m_stepEase->setToolTip(tr("Linear moves to the pose over In frames; Step keeps the pose before, then snaps"));
+    stepRow->addWidget(m_stepEase);
+    right->addLayout(stepRow);
+    layout->addLayout(right, 1);
+
+    m_playTimer = new QTimer(this);
+    connect(m_playTimer, &QTimer::timeout, this, &PuppetWorkspace::advancePlayback);
+    connect(m_playButton, &QToolButton::toggled, this, &PuppetWorkspace::setPlaying);
+    connect(m_addSequenceButton, &QPushButton::clicked, this, [this]() { addSequence(m_sequence + 1); });
+    connect(m_removeSequenceButton, &QPushButton::clicked, this, [this]() { removeSequence(m_sequence); });
+    connect(m_sequenceList, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (!m_rebuildingSequences && row >= 0) selectSequence(row);
+    });
+    connect(m_sequenceList, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
+        if (m_rebuildingSequences) return;
+        // Both may rebuild the list: they act once Qt is done with the item.
+        const int row = m_sequenceList->row(item);
+        const QString name = item->text().trimmed();
+        const bool along = item->checkState() == Qt::Checked;
+        QMetaObject::invokeMethod(this, [this, row, name, along]() {
+            const Puppet* puppet = selectedPuppet();
+            if (!puppet || row < 0 || row >= puppet->sequences.size()) return;
+            if (name != puppet->sequences[row].name) {
+                renameSequence(row, name);
+            } else if (along != m_playAlong.contains(name)) {
+                if (along) m_playAlong.insert(name); else m_playAlong.remove(name);
+                updateCanvas();
+            }
+        }, Qt::QueuedConnection);
+    });
+    connect(m_sequenceList, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QListWidgetItem* item = m_sequenceList->itemAt(pos);
+        const int row = item ? m_sequenceList->row(item) : -1;
+        auto* menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->addAction(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add Animation"), this,
+                        [this, row]() { addSequence(row >= 0 ? row + 1 : int(selectedPuppet()->sequences.size())); });
+        if (row >= 0) {
+            menu->addAction(tr("Duplicate"), this, [this, row]() { duplicateSequence(row); });
+            menu->addSeparator();
+            menu->addAction(tr("Delete"), this, [this, row]() { removeSequence(row); });
+        }
+        menu->popup(m_sequenceList->viewport()->mapToGlobal(pos));
+    });
+    connect(m_sequenceFps, &QSpinBox::valueChanged, this, [this](int fps) {
+        editSequence(tr("Animation Speed"), QStringLiteral("fps %1").arg(m_sequence),
+                     [fps](PuppetSequence& sequence) { sequence.fps = fps; });
+    });
+    connect(m_sequenceLoop, &QComboBox::currentIndexChanged, this, [this]() {
+        const auto mode = AnimationLoopMode(m_sequenceLoop->currentData().toInt());
+        editSequence(tr("Animation Loop"), QString(), [mode](PuppetSequence& sequence) { sequence.loopMode = mode; });
+    });
+    connect(m_track, &PuppetSequenceTrack::stepSelected, this, &PuppetWorkspace::selectStep);
+    connect(m_track, &PuppetSequenceTrack::playheadMoved, this, [this](int frame) {
+        setPlaying(false);
+        m_playFrame = frame;
+        updatePlayhead();
+        updateCanvas();
+    });
+    connect(m_track, &PuppetSequenceTrack::stepActivated, this, [this](int step) {
+        // Its pose, to change it: in the Poses tab.
+        const Puppet* puppet = selectedPuppet();
+        if (!puppet || m_sequence < 0) return;
+        const int pose = PuppetEditing::poseNames(*puppet).indexOf(puppet->sequences[m_sequence].steps[step].pose);
+        if (pose < 0) return;
+        m_bottomTabs->setCurrentIndex(POSES_TAB);
+        selectPose(pose);
+    });
+    connect(m_track, &PuppetSequenceTrack::addRequested, this, &PuppetWorkspace::addStep);
+    connect(m_track, &PuppetSequenceTrack::moveRequested, this, &PuppetWorkspace::moveStep);
+    connect(m_track, &PuppetSequenceTrack::duplicateRequested, this, &PuppetWorkspace::duplicateStep);
+    connect(m_track, &PuppetSequenceTrack::removeRequested, this, &PuppetWorkspace::removeStep);
+    connect(m_stepPose, &QComboBox::currentIndexChanged, this, [this]() {
+        const QString pose = m_stepPose->currentData().toString();
+        editStep(tr("Step Pose"), QString(), [pose](PuppetSequenceStep& step) { step.pose = pose; });
+    });
+    connect(m_stepIn, &QSpinBox::valueChanged, this, [this](int in) {
+        editStep(tr("Step Frames"), QStringLiteral("in %1 %2").arg(m_sequence).arg(m_step), [in](PuppetSequenceStep& step) {
+            step.in = in;
+            if (step.in + step.hold < 1) step.hold = 1;  // a step lasts a frame at least
+        });
+    });
+    connect(m_stepHold, &QSpinBox::valueChanged, this, [this](int hold) {
+        editStep(tr("Step Frames"), QStringLiteral("hold %1 %2").arg(m_sequence).arg(m_step), [hold](PuppetSequenceStep& step) {
+            step.hold = hold;
+            if (step.in + step.hold < 1) step.in = 1;
+        });
+    });
+    connect(m_stepEase, &QComboBox::currentIndexChanged, this, [this](int ease) {
+        editStep(tr("Step Ease"), QString(), [ease](PuppetSequenceStep& step) { step.snap = ease == 1; });
+    });
+    return page;
+}
+
+void PuppetWorkspace::selectSequence(int sequenceIndex) {
+    const Puppet* puppet = selectedPuppet();
+    m_sequence = puppet && sequenceIndex >= 0 && sequenceIndex < puppet->sequences.size() ? sequenceIndex : -1;
+    m_step = -1;
+    m_playFrame = 0;
+    updateSequences();
+    updateCanvas();
+}
+
+void PuppetWorkspace::selectStep(int stepIndex) {
+    m_step = stepIndex;
+    const Puppet* puppet = selectedPuppet();
+    if (puppet && m_sequence >= 0 && stepIndex >= 0) {
+        // The playhead goes where the step's pose has arrived.
+        const PuppetSequence& sequence = puppet->sequences[m_sequence];
+        const PuppetSequenceStep& step = sequence.steps.value(stepIndex);
+        m_playFrame = PuppetSequencing::stepStart(sequence, stepIndex) + std::max(0, step.in - 1);
+    }
+    updateSequences();
+    updateCanvas();
+}
+
+void PuppetWorkspace::editSequence(const QString& text, const QString& mergeKey,
+                                   const std::function<void(PuppetSequence&)>& change) {
+    const Puppet* puppet = selectedPuppet();
+    if (m_rebuildingSequences || !puppet || m_sequence < 0 || m_sequence >= puppet->sequences.size()) return;
+    QVector<Puppet> after = puppets();
+    change(after[m_selection.puppet].sequences[m_sequence]);
+    if (after == puppets()) return;
+    pushEdit(text, after, m_selection, mergeKey);
+}
+
+void PuppetWorkspace::editStep(const QString& text, const QString& mergeKey,
+                               const std::function<void(PuppetSequenceStep&)>& change) {
+    const int step = m_step;
+    editSequence(text, mergeKey, [&](PuppetSequence& sequence) {
+        if (step >= 0 && step < sequence.steps.size()) change(sequence.steps[step]);
+    });
+}
+
+void PuppetWorkspace::addSequence(int sequenceIndex) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet) return;
+    QVector<Puppet> after = puppets();
+    Puppet& animated = after[m_selection.puppet];
+    PuppetSequence sequence;
+    sequence.name = PuppetEditing::uniqueName(tr("animation"), PuppetEditing::sequenceNames(animated));
+    const int index = std::clamp(sequenceIndex, 0, int(animated.sequences.size()));
+    animated.sequences.insert(index, sequence);
+    pushEdit(tr("New Animation"), after, m_selection);
+    selectSequence(index);
+}
+
+void PuppetWorkspace::duplicateSequence(int sequenceIndex) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || sequenceIndex < 0 || sequenceIndex >= puppet->sequences.size()) return;
+    QVector<Puppet> after = puppets();
+    Puppet& animated = after[m_selection.puppet];
+    PuppetSequence copy = animated.sequences[sequenceIndex];
+    copy.name = PuppetEditing::uniqueName(copy.name, PuppetEditing::sequenceNames(animated));
+    animated.sequences.insert(sequenceIndex + 1, copy);
+    pushEdit(tr("Duplicate Animation"), after, m_selection);
+    selectSequence(sequenceIndex + 1);
+}
+
+void PuppetWorkspace::removeSequence(int sequenceIndex) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || sequenceIndex < 0 || sequenceIndex >= puppet->sequences.size()) return;
+    QVector<Puppet> after = puppets();
+    after[m_selection.puppet].sequences.removeAt(sequenceIndex);
+    pushEdit(tr("Remove Animation"), after, m_selection);
+    selectSequence(std::min(sequenceIndex, int(after[m_selection.puppet].sequences.size()) - 1));
+}
+
+void PuppetWorkspace::renameSequence(int sequenceIndex, const QString& name) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || sequenceIndex < 0 || sequenceIndex >= puppet->sequences.size()) return;
+    const QString problem = PuppetEditing::sequenceNameProblem(*puppet, sequenceIndex, name);
+    if (!problem.isEmpty()) {
+        updateSequences();  // puts the name back
+        m_sequenceInfo->setText(problem);
+        return;
+    }
+    const QString old = puppet->sequences[sequenceIndex].name;
+    QVector<Puppet> after = puppets();
+    after[m_selection.puppet].sequences[sequenceIndex].name = name;
+    if (m_playAlong.remove(old)) m_playAlong.insert(name);
+    pushEdit(tr("Rename Animation"), after, m_selection);
+}
+
+void PuppetWorkspace::addStep(int stepIndex, const QString& pose) {
+    const int sequence = m_sequence;
+    int added = -1;
+    editSequence(tr("Add Pose to Animation"), QString(), [&](PuppetSequence& edited) {
+        PuppetSequenceStep step;
+        step.pose = pose;
+        step.in = DEFAULT_STEP_IN;
+        step.hold = DEFAULT_STEP_HOLD;
+        added = std::clamp(stepIndex, 0, int(edited.steps.size()));
+        edited.steps.insert(added, step);
+    });
+    if (added >= 0 && sequence == m_sequence) selectStep(added);
+}
+
+void PuppetWorkspace::moveStep(int from, int to) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_sequence < 0) return;
+    QVector<Puppet> after = puppets();
+    PuppetEditing::moveStep(after[m_selection.puppet], m_sequence, from, to);
+    if (after == puppets()) return;
+    pushEdit(tr("Move Pose in Animation"), after, m_selection);
+    if (m_step == from) selectStep(to);
+}
+
+void PuppetWorkspace::duplicateStep(int stepIndex) {
+    bool duplicated = false;
+    editSequence(tr("Duplicate Pose in Animation"), QString(), [&](PuppetSequence& sequence) {
+        if (stepIndex < 0 || stepIndex >= sequence.steps.size()) return;
+        sequence.steps.insert(stepIndex + 1, sequence.steps[stepIndex]);
+        duplicated = true;
+    });
+    if (duplicated) selectStep(stepIndex + 1);
+}
+
+void PuppetWorkspace::removeStep(int stepIndex) {
+    bool removed = false;
+    editSequence(tr("Remove Pose from Animation"), QString(), [&](PuppetSequence& sequence) {
+        if (stepIndex < 0 || stepIndex >= sequence.steps.size()) return;
+        sequence.steps.removeAt(stepIndex);
+        removed = true;
+    });
+    if (!removed) return;
+    const int remaining = selectedPuppet()->sequences[m_sequence].steps.size();
+    selectStep(remaining == 0 ? -1 : std::min(stepIndex, remaining - 1));
+}
+
+void PuppetWorkspace::setPlaying(bool playing) {
+    const Puppet* puppet = selectedPuppet();
+    const bool playable = puppet && m_sequence >= 0 && m_sequence < puppet->sequences.size()
+                       && !puppet->sequences[m_sequence].steps.isEmpty();
+    playing = playing && playable;
+    if (playing) {
+        const PuppetSequence& sequence = puppet->sequences[m_sequence];
+        const bool once = sequence.loopMode == AnimationLoopMode::Once
+                       || sequence.loopMode == AnimationLoopMode::OncePingPong;
+        // A finished animation that plays once starts again.
+        if (once && m_playFrame >= PuppetSequencing::cycleFrames(sequence) - 1) m_playFrame = 0;
+        m_playTimer->start(1000 / sanitizedAnimationFps(sequence.fps));
+    } else {
+        m_playTimer->stop();
+    }
+    const QSignalBlocker blocker(m_playButton);
+    m_playButton->setChecked(playing);
+    m_playButton->setIcon(style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+}
+
+void PuppetWorkspace::advancePlayback() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_sequence < 0 || m_sequence >= puppet->sequences.size()) {
+        setPlaying(false);
+        return;
+    }
+    const PuppetSequence& sequence = puppet->sequences[m_sequence];
+    const int cycle = PuppetSequencing::cycleFrames(sequence);
+    const bool once = sequence.loopMode == AnimationLoopMode::Once || sequence.loopMode == AnimationLoopMode::OncePingPong;
+    ++m_playFrame;
+    if (once && m_playFrame >= cycle - 1) {
+        m_playFrame = cycle - 1;
+        setPlaying(false);
+    }
+    updatePlayhead();
+    updateCanvas();
+}
+
+void PuppetWorkspace::updatePlayhead() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_sequence < 0 || m_sequence >= puppet->sequences.size()) {
+        m_track->setPlayhead(-1);
+        return;
+    }
+    const PuppetSequence& sequence = puppet->sequences[m_sequence];
+    const int cycle = std::max(1, PuppetSequencing::cycleFrames(sequence));
+    m_track->setPlayhead(PuppetSequencing::passFrameOf(sequence, m_playFrame));
+    m_sequenceInfo->setText(tr("Frame %1 of %2 · %3 s").arg(m_playFrame % cycle + 1).arg(cycle)
+                                .arg(QString::number(double(cycle) / sanitizedAnimationFps(sequence.fps), 'g', 3)));
+}
+
+QVector<PuppetPartState> PuppetWorkspace::animationStates(const Puppet& puppet) const {
+    QVector<PuppetPartState> states(puppet.parts.size());
+    if (m_sequence < 0 || m_sequence >= puppet.sequences.size()) return states;
+    // The others play along on the same clock, each at its own fps, in list order: the
+    // later one wins where two set the same part.
+    const double seconds = double(m_playFrame) / sanitizedAnimationFps(puppet.sequences[m_sequence].fps);
+    for (int i = 0; i < puppet.sequences.size(); ++i) {
+        const PuppetSequence& sequence = puppet.sequences[i];
+        if (i != m_sequence && !m_playAlong.contains(sequence.name)) continue;
+        const int frame = i == m_sequence ? m_playFrame : int(seconds * sanitizedAnimationFps(sequence.fps));
+        states = PuppetSequencing::statesAt(puppet, sequence, frame, states);
+    }
+    return limitedStates(puppet, states);
+}
+
+void PuppetWorkspace::updateSequences() {
+    const Puppet* puppet = selectedPuppet();
+    m_rebuildingSequences = true;
+    m_sequenceList->clear();
+    if (puppet && m_sequence >= puppet->sequences.size()) m_sequence = puppet->sequences.size() - 1;
+    if (puppet && m_sequence < 0 && !puppet->sequences.isEmpty()) m_sequence = 0;
+    if (!puppet) m_sequence = -1;
+    if (puppet) {
+        for (const PuppetSequence& sequence : puppet->sequences) {
+            auto* item = new QListWidgetItem(sequence.name, m_sequenceList);
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsUserCheckable);
+            item->setCheckState(m_playAlong.contains(sequence.name) ? Qt::Checked : Qt::Unchecked);
+        }
+        m_sequenceList->setCurrentRow(m_sequence);
+    }
+    const bool hasSequence = m_sequence >= 0;
+    const PuppetSequence* sequence = hasSequence ? &puppet->sequences[m_sequence] : nullptr;
+    if (sequence && m_step >= sequence->steps.size()) m_step = sequence->steps.size() - 1;
+    m_removeSequenceButton->setEnabled(hasSequence);
+    m_addSequenceButton->setEnabled(puppet != nullptr);
+    m_playButton->setEnabled(sequence && !sequence->steps.isEmpty());
+    m_sequenceFps->setEnabled(hasSequence);
+    m_sequenceLoop->setEnabled(hasSequence);
+    m_sequenceFps->setValue(sequence ? sanitizedAnimationFps(sequence->fps) : DEFAULT_ANIMATION_FPS);
+    m_sequenceLoop->setCurrentIndex(std::max(0, m_sequenceLoop->findData(int(sequence ? sequence->loopMode
+                                                                                        : AnimationLoopMode::Loop))));
+
+    // The steps, with the poses' thumbnails.
+    QVector<PuppetSequenceTrack::Block> blocks;
+    const QStringList poses = puppet ? PuppetEditing::poseNames(*puppet) : QStringList();
+    if (sequence) {
+        for (const PuppetSequenceStep& step : sequence->steps) {
+            const int pose = poses.indexOf(step.pose);
+            blocks.append({step.pose, step.in, step.hold, step.snap, m_poseThumbnails.value(pose), pose < 0});
+        }
+    }
+    m_track->setEnabled(hasSequence);
+    m_track->showSteps(blocks, m_step, poses);
+
+    const bool hasStep = sequence && m_step >= 0 && m_step < sequence->steps.size();
+    m_stepLabel->setText(hasStep ? tr("Step %1:").arg(m_step + 1) : tr("Select a step to change it."));
+    for (QWidget* field : {static_cast<QWidget*>(m_stepPose), static_cast<QWidget*>(m_stepIn),
+                           static_cast<QWidget*>(m_stepHold), static_cast<QWidget*>(m_stepEase)})
+        field->setVisible(hasStep);
+    if (hasStep) {
+        const PuppetSequenceStep& step = sequence->steps[m_step];
+        m_stepPose->clear();
+        for (const QString& pose : poses) m_stepPose->addItem(pose, pose);
+        if (m_stepPose->findData(step.pose) < 0) m_stepPose->addItem(QStringLiteral("⚠ %1").arg(step.pose), step.pose);
+        m_stepPose->setCurrentIndex(m_stepPose->findData(step.pose));
+        m_stepIn->setValue(step.in);
+        m_stepHold->setValue(step.hold);
+        m_stepEase->setCurrentIndex(step.snap ? 1 : 0);
+    }
+    m_rebuildingSequences = false;
+    updatePlayhead();
+    if (!hasSequence) m_sequenceInfo->setText(puppet ? tr("Add an animation: a sequence of poses.") : QString());
+}

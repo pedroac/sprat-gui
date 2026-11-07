@@ -94,6 +94,10 @@ void PuppetCanvas::setPosing(bool posing) {
     m_posing = posing;
 }
 
+void PuppetCanvas::setEditable(bool editable) {
+    m_editable = editable;
+}
+
 void PuppetCanvas::clearPuppet() {
     showPuppet({}, {}, -1, std::nullopt);
 }
@@ -271,7 +275,7 @@ void PuppetCanvas::cancelAttach() {
 }
 
 void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton && !m_spacePressed && onPivotHandle(event->pos())) {
+    if (m_editable && event->button() == Qt::LeftButton && !m_spacePressed && onPivotHandle(event->pos())) {
         setFocus();
         m_handlePressed = true;
         m_pressPos = event->pos();
@@ -280,8 +284,13 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     }
     ZoomableGraphicsView::mousePressEvent(event);
     if (event->button() != Qt::LeftButton || m_isPanning) return;
-    const bool onHandle = onTurnHandle(event->pos());
+    const bool onHandle = m_editable && onTurnHandle(event->pos());
     const int part = onHandle ? m_selectedPart : partAt(event->pos());
+    if (!m_editable) {
+        m_pressedPart = m_pullPart = m_turnPart = -1;
+        emit partClicked(part);
+        return;
+    }
     const bool shift = event->modifiers() & Qt::ShiftModifier;
     // The handle turns any part; dragging a part moves it: a positioned one to a new place,
     // an attached one by pulling it (or, with Shift, by moving its joint).
@@ -354,7 +363,8 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     ZoomableGraphicsView::mouseMoveEvent(event);
     if (event->buttons() == Qt::NoButton) {
         const int hovered = partAt(event->pos());
-        const Qt::CursorShape cursor = onPivotHandle(event->pos()) ? Qt::CrossCursor
+        const Qt::CursorShape cursor = !m_editable                  ? Qt::ArrowCursor
+            : onPivotHandle(event->pos())                           ? Qt::CrossCursor
             : onTurnHandle(event->pos())                            ? Qt::OpenHandCursor
             : isMovable(hovered)                                    ? Qt::SizeAllCursor
             : isAttached(hovered) && m_posing                       ? Qt::SizeAllCursor
@@ -406,7 +416,7 @@ void PuppetCanvas::keyPressEvent(QKeyEvent* event) {
     case Qt::Key_Down:  offset = QPoint(0, step); break;
     default: break;
     }
-    if (isMovable(m_selectedPart) && !offset.isNull()) {
+    if (m_editable && isMovable(m_selectedPart) && !offset.isNull()) {
         emit partNudged(m_selectedPart, offset);
         event->accept();
         return;

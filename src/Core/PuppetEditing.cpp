@@ -67,6 +67,12 @@ QStringList poseNames(const Puppet& puppet) {
     return names;
 }
 
+QStringList sequenceNames(const Puppet& puppet) {
+    QStringList names;
+    for (const PuppetSequence& sequence : puppet.sequences) names.append(sequence.name);
+    return names;
+}
+
 QStringList variantNames(const PuppetPart& part) {
     QStringList names;
     for (const PuppetVariant& variant : part.variants) names.append(puppetVariantName(variant));
@@ -92,6 +98,26 @@ QString poseNameProblem(const Puppet& puppet, int index, const QString& name) {
     if (takenByOther(poseNames(puppet), index, name))
         return trPEd("Puppet \"%1\" already has a pose called \"%2\".").arg(puppet.name, name);
     return {};
+}
+
+QString sequenceNameProblem(const Puppet& puppet, int index, const QString& name) {
+    if (name.trimmed().isEmpty()) return trPEd("An animation needs a name.");
+    if (takenByOther(sequenceNames(puppet), index, name))
+        return trPEd("Puppet \"%1\" already has an animation called \"%2\".").arg(puppet.name, name);
+    return {};
+}
+
+void moveSequence(Puppet& puppet, int from, int to) {
+    const int count = puppet.sequences.size();
+    if (from < 0 || from >= count || to < 0 || to >= count || from == to) return;
+    puppet.sequences.move(from, to);
+}
+
+void moveStep(Puppet& puppet, int sequenceIndex, int from, int to) {
+    if (sequenceIndex < 0 || sequenceIndex >= puppet.sequences.size()) return;
+    QVector<PuppetSequenceStep>& steps = puppet.sequences[sequenceIndex].steps;
+    if (from < 0 || from >= steps.size() || to < 0 || to >= steps.size() || from == to) return;
+    steps.move(from, to);
 }
 
 void renamePose(Puppet& puppet, int poseIndex, const QString& name) {

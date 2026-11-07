@@ -75,6 +75,8 @@ public:
     /// Whether a pose is shown: only then do the turn handle, pulling and moving joints work.
     /// At rest (the rig), dragging a part placed by position still moves it.
     void setPosing(bool posing);
+    /// Off while an animation plays: clicks still select parts, but nothing moves or attaches.
+    void setEditable(bool editable);
     /// Shows only the origin cross.
     void clearPuppet();
     /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms
@@ -163,6 +165,7 @@ private:
     std::optional<JointRange> m_selectedJoint;
 
     bool m_posing = false;
+    bool m_editable = true;
     bool m_handlePressed = false;  ///< The left button went down on the pivot handle
     bool m_attaching = false;      ///< The pivot handle is being dragged
     QPointF m_attachPointer;       ///< Where it is, in scene coordinates

@@ -4,6 +4,7 @@
 #include "PuppetEvaluator.h"
 #include "PuppetMotion.h"
 #include "PuppetPosing.h"
+#include "PuppetSequencing.h"
 #include "PuppetTextCodec.h"
 
 #include <QJsonArray>
@@ -709,6 +710,70 @@ void PuppetTests::testEditingPosesKeepsSequencesInStep() {
     QCOMPARE(PuppetEditing::poseNames(puppet), QStringList{"truth"});
     QCOMPARE(puppet.sequences[0].steps.size(), 1);
     QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("truth"));
+}
+
+void PuppetTests::testSequencesTweenPosesOverTheirFrames() {
+    // nose turns to 10° in "up", to -10° showing "nose-long" in "down".
+    Puppet puppet = faceWithNose();
+    PuppetPoseSetting up;
+    up.part = QStringLiteral("nose");
+    up.angle = 10;
+    PuppetPoseSetting down = up;
+    down.angle = -10;
+    down.variant = QStringLiteral("nose-long");
+    puppet.poses = {{QStringLiteral("up"), {up}}, {QStringLiteral("down"), {down}}};
+    PuppetSequence nod{QStringLiteral("nod"), 8, AnimationLoopMode::Loop,
+                       {{QStringLiteral("up"), 2, 1, false}, {QStringLiteral("down"), 4, 0, false}}};
+    QCOMPARE(PuppetSequencing::passFrames(nod), 7);
+    QCOMPARE(PuppetSequencing::cycleFrames(nod), 7);
+    QCOMPARE(PuppetSequencing::stepStart(nod, 1), 3);
+    QCOMPARE(PuppetSequencing::stepAt(nod, 3), 1);
+    const auto nose = [&](const PuppetSequence& sequence, int frame) {
+        return PuppetSequencing::statesAt(puppet, sequence, frame, {})[1];
+    };
+
+    // "up" over 2 frames, held 1; "down" over 4, switching variant when it arrives.
+    QCOMPARE(nose(nod, 0).angle, 5.0);
+    QCOMPARE(nose(nod, 1).angle, 10.0);
+    QCOMPARE(nose(nod, 2).angle, 10.0);
+    QCOMPARE(nose(nod, 3).angle, 5.0);
+    QCOMPARE(nose(nod, 3).variant, 0);
+    QCOMPARE(nose(nod, 6).angle, -10.0);
+    QCOMPARE(nose(nod, 6).variant, 1);
+    // Looping, it starts again from where it left off: half way from -10° to 10°, still long.
+    QCOMPARE(nose(nod, 7).angle, 0.0);
+    QCOMPARE(nose(nod, 7).variant, 1);
+
+    // Once holds the last frame; ease:step keeps the angle, then snaps.
+    PuppetSequence once = nod;
+    once.loopMode = AnimationLoopMode::Once;
+    QCOMPARE(nose(once, 100).angle, -10.0);
+    PuppetSequence snap = nod;
+    snap.steps[1].snap = true;
+    QCOMPARE(nose(snap, 4).angle, 10.0);
+    QCOMPARE(nose(snap, 6).angle, -10.0);
+
+    // Ping-pong goes back through "up" without repeating "down": the track shows it there.
+    PuppetSequence pingPong = nod;
+    pingPong.loopMode = AnimationLoopMode::PingPong;
+    QCOMPARE(PuppetSequencing::cycleFrames(pingPong), 10);
+    QCOMPARE(nose(pingPong, 7).angle, 0.0);
+    QCOMPARE(PuppetSequencing::passFrameOf(pingPong, 7), 0);
+    QCOMPARE(PuppetSequencing::passFrameOf(pingPong, 12), 2);
+
+    // What no pose sets stays as the base has it; an unknown pose sets nothing.
+    QVector<PuppetPartState> base(2);
+    base[0].angle = 5;
+    QCOMPARE(PuppetSequencing::statesAt(puppet, nod, 1, base)[0].angle, 5.0);
+    PuppetSequence unknown{QStringLiteral("u"), 8, AnimationLoopMode::Loop, {{QStringLiteral("gone"), 2, 0, false}}};
+    QCOMPARE(PuppetSequencing::statesAt(puppet, unknown, 1, base)[1].angle, 0.0);
+
+    // Names and moving steps.
+    puppet.sequences = {nod, unknown};
+    QVERIFY(!PuppetEditing::sequenceNameProblem(puppet, 1, QStringLiteral("nod")).isEmpty());
+    QVERIFY(PuppetEditing::sequenceNameProblem(puppet, 1, QStringLiteral("shake")).isEmpty());
+    PuppetEditing::moveStep(puppet, 0, 0, 1);
+    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("down"));
 }
 
 void PuppetTests::testJointsDriftWithinTheirMarkerAndLeeway() {

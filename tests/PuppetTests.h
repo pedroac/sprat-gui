@@ -27,4 +27,5 @@ private slots:
     void testPullingAPartSlidesItsJointFirst();
     void testPoseStatesComeFromWhatItSets();
     void testEditingPosesKeepsSequencesInStep();
+    void testSequencesTweenPosesOverTheirFrames();
 };
