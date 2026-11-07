@@ -1,4 +1,5 @@
 #include "PuppetPoseStrip.h"
+#include "AppIcons.h"
 #include "PuppetModels.h"
 
 #include <QContextMenuEvent>
@@ -93,7 +94,7 @@ void PuppetPoseStrip::keyPressEvent(QKeyEvent* event) {
 
 QMenu* PuppetPoseStrip::createContextMenu(int frame) {
     auto* menu = new QMenu(this);
-    const QIcon add(QStringLiteral(":/icons/add-ellipse.svg"));
+    const QIcon add = AppIcons::icon(QStringLiteral("add"));
     const int poses = m_names.size();
     if (frame < 0) {
         menu->addAction(add, tr("Add Pose"), this, [this, poses]() { emit addRequested(poses); });

@@ -3,6 +3,7 @@
 #include "models.h"
 #include "ArchiveExtractor.h"
 #include "PathSafety.h"
+#include "MessageText.h"
 #include "Undo/TrashBin.h"
 #include "EditorOverlayItem.h"
 
@@ -297,4 +298,27 @@ void CoreTests::testClickOnEmptySpacePositionsSelectedMarker() {
     clickOverlay(scene, overlay, QPointF(90, 10));
     QCOMPARE(QPoint(sprite->pivotX, sprite->pivotY), QPoint(90, 10));
     QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
+}
+
+void CoreTests::testMessagesShowParagraphsAndToolOutput() {
+    // A blank line starts a paragraph; a single line break stays a line break.
+    QCOMPARE(MessageText::toHtml(QStringLiteral("Layout failed.\n\nCheck the profile.\nThen retry.")),
+             QStringLiteral("<qt><p>Layout failed.</p><p>Check the profile.<br>Then retry.</p></qt>"));
+    // Tool output is its own block, fixed-width, and escaped: "<stdin>" stays visible.
+    const QString message = MessageText::withToolOutput(QStringLiteral("spratlayout said:"),
+                                                        QStringLiteral("error: <stdin> line 3\n\n  bad & wrong\n"));
+    QCOMPARE(message, QStringLiteral("spratlayout said:\n\n  error: <stdin> line 3\n  bad & wrong"));
+    QCOMPARE(MessageText::toHtml(message),
+             QStringLiteral("<qt><p>spratlayout said:</p>"
+                            "<p style=\"font-family: monospace; white-space: pre-wrap;\">"
+                            "error: &lt;stdin&gt; line 3<br>bad &amp; wrong</p></qt>"));
+    // No output: just the message. Long output is cut, saying how much was left out.
+    QCOMPARE(MessageText::withToolOutput(QStringLiteral("Failed."), QStringLiteral("  \n")), QStringLiteral("Failed."));
+    QStringList many;
+    for (int i = 1; i <= 15; ++i) many.append(QStringLiteral("line %1").arg(i));
+    const QStringList cut = MessageText::toolOutput(many.join(QLatin1Char('\n')), 12).split(QLatin1Char('\n'));
+    QCOMPARE(cut.size(), 13);
+    QCOMPARE(cut.last(), QStringLiteral("  … 3 more line(s)"));
+    // Rich text already made stays as it is.
+    QCOMPARE(MessageText::toHtml(QStringLiteral("<qt><b>x</b></qt>")), QStringLiteral("<qt><b>x</b></qt>"));
 }

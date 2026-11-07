@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Frame Animation workspace: each timeline has a loop mode (Loop, Once, Ping-pong or Ping-pong once). The preview, GIF/video export and exported metadata play it that way; an alias plays the way its source does. Projects saved before keep looping
 
 ### Changed
+- Importing many sprites is faster and no longer freezes the window: sprite list thumbnails load in the background (shared by every list, so pickers open at once), and adding sprites to the atlas no longer slows down quadratically (2,500 sprites: 2.9 s → 1.5 s to the laid-out canvas)
+- Canvases say what to do when they have nothing to show (Sprites: select a sprite; Nine-Slice: select or add sprites; Puppets: select a puppet), and Nine-Slice's W/H are off without a sprite
+- Puppet workspace: the canvas uses the workspace colour like the other canvases instead of white; the tree's names line up whether or not they are starred, and its second column is "Details"; animation frames are named `walk frame 1` so they don't read as animations; parts aren't faded while editing an animation frame, so the onion skin stands out; the Animations list says its ticks play along
+- The status bar shows how many sprites are loaded ("63 sprite(s)") instead of "Frames: 63 (manual selection)"
+- Frame Animation: the add-timeline button is labelled **Add**
+- Help › Quick Start describes the app as it is now: the File menu's Add Source actions, every workspace including Puppets, saving project folders and the Exportation workspace without its Cancel button. Help › Hotkeys lists the Puppets workspace's keys, and the README is brought up to date (the Sprites and Atlases workspaces, sources, shortcuts that no longer existed)
+- Sprites workspace: right-click a source for **Sync Source to Layout** and **Sync Layout to Source...**, which had no way to be reached
+- About credits the icons as adapted with AI from the SVG Repo icons used before
+- New icons, drawn in one style (thin rounded outlines) that follows light and dark themes, replacing a mix of SVGRepo icons and the platform's built-in ones: each action has its own (Exclude and Delete, Save, Save As and Export, adding a folder, an image or a URL no longer share icons), menus that had none have one (Open ZIP Project, the Add Source button's menu), and message dialogs use matching information, question, warning and error icons
+- Messages are easier to read: each idea is its own paragraph (what went wrong, what sprat-cli said, what to do), and what sprat-cli printed is shown in a fixed-width block, cut when it is long. Layout errors during export now include spratlayout's own message. Messages that used internal terms ("temporary frame list", "No session.", "virtual animation group") say what happened and what to do instead
+- The status bar says when the project was autosaved ("Autosaved project at 07/11/2026 14:32", in your locale's format), and when a restored autosave was made
+- Exportation: the **Cancel** button is gone; the workspace tabs switch away
 - Frame Animation workspace: the sprite column is gone; the timeline list sits on the left and the selected timeline with its preview on the right. With several atlases, an **Atlas** selector above the timelines picks whose timelines are shown
 - Frame Animation workspace: **Add timeline** opens a sprite picker (as in the Nine-Slice workspace); tick sprites or whole groups, or create it empty. Right-click the timeline list for **Auto-create Timelines...**: pick one or more groups (or a source), and each group holding sprites becomes a timeline named after it, inside a folder named after its source and parent groups. Right-click a frame for **Add Frames Before...** / **Add Frames After...**, or empty space in the frames for **Add Frames...**
 - Sprites picked or dropped into a timeline are ordered by their numbers (`walk2` before `walk10`), not alphabetically
@@ -37,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
 
 ### Fixed
+- Messages lost their paragraph breaks and ran together as one block, and text in angle brackets from sprat-cli (such as `<stdin>`) disappeared from them
+- Switching to the Sprites or Frame Animation workspace no longer makes the window taller (it could grow past a laptop screen and hide the status bar)
 - Sprites: clicking empty space on the sprite preview now moves the selected marker there (centred on the click) instead of moving the pivot and deselecting the marker
 - Sprites: a marker created in the Markers dialog is selected when the dialog closes, so the next click on the preview positions it
 - Projects with several atlases keep the pivots, markers, names and nine-slice insets of sprites in atlases other than the selected one. They used to be lost on save, and when switching to another atlas after opening a project

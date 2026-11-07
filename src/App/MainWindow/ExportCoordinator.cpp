@@ -1,4 +1,5 @@
 #include "ExportCoordinator.h"
+#include "MessageText.h"
 #include "ProjectPayloadCodec.h"
 #include "PuppetTextCodec.h"
 #include "AtlasOutputFolder.h"
@@ -434,7 +435,7 @@ void ExportCoordinator::handleExportResult(const ExportResult& result) {
 #ifdef Q_OS_WASM
         MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Download started."));
 #else
-        MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+        MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Saved to:\n\n%1").arg(MessageText::toolOutput(QDir::toNativeSeparators(result.savedDestination))));
 #endif
     } else {
         emitStatus(tr("Save failed"));
@@ -561,7 +562,7 @@ void ExportCoordinator::doRunPreviewPack() {
         if (!framePaths.isEmpty()) {
             frameListFile.setFileTemplate(
                 QDir::temp().filePath("sprat-preview-frames-XXXXXX.txt"));
-            if (!frameListFile.open()) return {{}, tr("Could not create temporary frame list"), {}, {}, -1, {}};
+            if (!frameListFile.open()) return {{}, tr("Couldn't save the sprite list to the temporary folder. Check that the disk isn't full."), {}, {}, -1, {}};
             {
                 QTextStream out(&frameListFile);
                 for (const QString& p : framePaths) out << p << "\n";

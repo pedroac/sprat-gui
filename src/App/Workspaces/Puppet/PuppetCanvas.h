@@ -93,7 +93,7 @@ public:
     void setRigEditable(bool rigEditable);
     /// Drawn behind the parts from the next showPuppet() on; empty for none.
     void setOnionSkins(const QVector<OnionSkin>& skins);
-    /// Shows only the origin cross.
+    /// Shows nothing (no puppet is selected).
     void clearPuppet();
     /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms
     /// or the puppet changes. Nothing else moves the view: edits leave it where it is.

@@ -1,4 +1,5 @@
 #include "PreviewCanvas.h"
+#include "AppIcons.h"
 #include <QFileInfo>
 #include <QGraphicsItem>
 #include <QGraphicsPixmapItem>
@@ -75,6 +76,7 @@ PreviewCanvas::PreviewCanvas(QWidget* parent) : ZoomableGraphicsView(parent) {
     m_scene = new QGraphicsScene(this);
     setScene(m_scene);
     setBackgroundBrush(m_settings.workspaceColor);
+    setEmptyText(tr("Select a sprite on the left to edit its pivot and markers"));
 
     m_overlay = new EditorOverlayItem();
     m_scene->addItem(m_overlay);
@@ -226,6 +228,7 @@ void PreviewCanvas::setSprites(const QList<SpritePtr>& sprites) {
 
     m_sprites = sprites;
     m_overlay->setSprites(sprites);
+    setEmptyText(sprites.isEmpty() ? tr("Select a sprite on the left to edit its pivot and markers") : QString());
 
     for (auto* item : m_imageItems) delete item;
     m_imageItems.clear();
@@ -376,7 +379,7 @@ void PreviewCanvas::contextMenuEvent(QContextMenuEvent* event) {
     }
     
     QMenu menu(this);
-    QAction* copyAction = menu.addAction(QIcon(":/icons/copy-2.svg"), tr("Copy Image"));
+    QAction* copyAction = menu.addAction(AppIcons::icon(QStringLiteral("copy-image")), tr("Copy Image"));
     QAction* selected = menu.exec(event->globalPos());
     if (selected == copyAction) {
         QApplication::clipboard()->setImage(QImage(m_sprites.first()->path));

@@ -1,4 +1,5 @@
 #include "LayoutOrchestrator.h"
+#include "MessageText.h"
 #include "ILayoutContext.h"
 #include "LayoutCanvas.h"
 #include "AtlasesManagementWorkspace.h"
@@ -553,8 +554,8 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
         if (!m_layoutFailureDialogShown && !result.error.contains("stopped", Qt::CaseInsensitive)) {
             if (!result.output.isEmpty() || !result.error.isEmpty()) {
                 MessageDialog::critical(dialogParent(), tr("Layout Failed"),
-                    tr("None of the enabled profiles could lay out these sprites.\n\n"
-                       "spratlayout reported:\n%1").arg(details));
+                    MessageText::withToolOutput(tr("None of the enabled profiles could lay out these sprites. "
+                                                   "spratlayout said:"), details));
                 m_layoutFailureDialogShown = true;
             }
         }
@@ -791,8 +792,8 @@ void LayoutOrchestrator::onRunnerError(const QString& details) {
 
     if (!m_layoutFailureDialogShown) {
         MessageDialog::critical(dialogParent(), tr("Layout Failed"),
-            tr("spratlayout could not be run:\n%1\n\n"
-               "Check the sprat-cli tools in Settings > CLI Tools.").arg(details));
+            MessageText::withToolOutput(tr("spratlayout could not be run:"), details)
+                + QStringLiteral("\n\n") + tr("Check the sprat-cli tools in Settings > CLI Tools."));
         m_layoutFailureDialogShown = true;
     }
 

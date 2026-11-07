@@ -153,6 +153,10 @@ signals:
     void autoCreateTimelinesForSourceRequested(int sourceIndex);
     void removeSourceRequested(int sourceIndex);
     void retrySourceRequested(int sourceIndex);
+    /// Reload the source's changes into the project.
+    void syncSourceRequested(int sourceIndex);
+    /// Write the project's sprites back into the source's original file or folder.
+    void syncLayoutRequested(int sourceIndex);
     void unhideGroupRequested(int sourceIdx, const QString& relPath);
     void reincludeFromSourceRequested(int sourceIdx, const QString& relPath);
     void reincludeAllFromSourceRequested(int sourceIdx);

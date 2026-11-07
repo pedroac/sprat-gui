@@ -425,11 +425,16 @@ int poseIndexOf(const Puppet& puppet, const QString& name) {
     return -1;
 }
 
-/// The first "SEQUENCE N" pose name not taken, N from 1.
+/// "SEQUENCE frame ": what an animation's frames are named after, so they read as frames.
+QString framePrefix(const QString& sequence) {
+    return sequence + QStringLiteral(" frame ");
+}
+
+/// The first "SEQUENCE frame N" pose name not taken, N from 1.
 QString animationPoseName(const Puppet& puppet, const QString& sequence) {
     const QStringList taken = PuppetEditing::poseNames(puppet);
     for (int n = 1;; ++n) {
-        const QString candidate = QStringLiteral("%1 %2").arg(sequence).arg(n);
+        const QString candidate = framePrefix(sequence) + QString::number(n);
         if (!taken.contains(candidate)) return candidate;
     }
 }
@@ -514,17 +519,17 @@ void renameSequence(Puppet& puppet, int sequenceIndex, const QString& name) {
     const QString old = puppet.sequences[sequenceIndex].name;
     if (old == name) return;
     puppet.sequences[sequenceIndex].name = name;
-    const QString prefix = old + QLatin1Char(' ');
+    const QString prefix = framePrefix(old);
     for (int i = 0; i < puppet.poses.size(); ++i) {
         PuppetPose& pose = puppet.poses[i];
         if (pose.owner != old) continue;
         pose.owner = name;
-        // "walk 3" becomes "run 3"; a pose the user named otherwise keeps its name.
+        // "walk frame 3" becomes "run frame 3"; a pose the user named otherwise keeps its name.
         bool numbered = false;
         const QString number = pose.name.startsWith(prefix) ? pose.name.mid(prefix.size()) : QString();
         number.toInt(&numbered);
         if (!numbered) continue;
-        const QString renamed = QStringLiteral("%1 %2").arg(name, number);
+        const QString renamed = framePrefix(name) + number;
         if (poseIndexOf(puppet, renamed) < 0) renamePose(puppet, i, renamed);
     }
 }

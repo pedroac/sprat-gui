@@ -1,4 +1,5 @@
 #include "ProjectSaveService.h"
+#include "MessageText.h"
 #include "PathSafety.h"
 #include "AnimationModels.h"
 #include "MarkerUtils.h"
@@ -411,7 +412,7 @@ bool ProjectSaveService::save(
     if (!framePaths.isEmpty()) {
         saveFrameList.setFileTemplate(QDir::temp().filePath("sprat-gui-save-frames-XXXXXX.txt"));
         if (!saveFrameList.open()) {
-            error = trPS("Could not create temporary frame list for save.");
+            error = trPS("Couldn't save the sprite list to the temporary folder. Check that the disk isn't full, then export again.");
             return false;
         }
         QTextStream out(&saveFrameList);
@@ -446,7 +447,8 @@ bool ProjectSaveService::save(
         }
         if (!ok) {
             const QString stderrText = QString::fromUtf8(stderrData).trimmed();
-            error = stderrText.isEmpty() ? trPS("Command failed: %1").arg(step) : stderrText;
+            // What failed, then what the tool said, as a block of its own.
+            error = stderrText.isEmpty() ? step : MessageText::withToolOutput(step, stderrText);
         }
         return ok;
     };
@@ -537,7 +539,7 @@ bool ProjectSaveService::save(
                         layoutArgs.removeAll("--trim-transparent");
                         continue;
                     }
-                    error = QString(trPS("Layout generation failed for profile '%1'")).arg(profileName);
+                    // error is the step and spratlayout's message (runProcess).
                     return false;
                 }
                 layoutSuccess = true;
@@ -612,11 +614,7 @@ bool ProjectSaveService::save(
                      "profile '%1' was saved as a regular PNG.").arg(profileName), -1});
         }
         if (!packSuccess) {
-            const QString packDetails = error;
-            error = packStep;
-            if (!packDetails.isEmpty()) {
-                error += QStringLiteral("\n\n") + packDetails;
-            }
+            if (error.isEmpty()) error = packStep;
             return false;
         }
         const bool isMultipack = layoutData.contains("multipack true") || layoutData.count("atlas ") > 1;
@@ -820,12 +818,8 @@ bool ProjectSaveService::save(
 
             const QString convertStep = trPS("Format conversion failed for profile '%1'").arg(profileName);
             if (!runProcess(spratConvertBin, convArgs, convertStep, &combinedInput, nullptr)) {
-                // Keep the tool's message: transforms explain what to change (e.g. rotation direction).
-                const QString convertDetails = error;
-                error = convertStep;
-                if (!convertDetails.isEmpty()) {
-                    error += QStringLiteral("\n\n") + convertDetails;
-                }
+                // error keeps the tool's message: transforms explain what to change (e.g.
+                // rotation direction).
                 return false;
             }
             if (callbacks.logEntry)

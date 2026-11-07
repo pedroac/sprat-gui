@@ -1,4 +1,5 @@
 #include "FrameDetectionDialog.h"
+#include "AppIcons.h"
 #include <QtConcurrent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -90,7 +91,7 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
     m_rectangleColorBtn->setStyleSheet(
         QString("QPushButton { background-color: %1; border: 1px solid #555; }"
                 "QPushButton:disabled { background-color: rgba(%2,%3,%4,80); border: 1px solid #777;"
-                " image: url(:/icons/disabled.svg); }")
+                " image: url(:/canvas/disabled.svg); }")
             .arg(m_rectangleColor.name())
             .arg(m_rectangleColor.red()).arg(m_rectangleColor.green()).arg(m_rectangleColor.blue()));
     m_rectangleColorBtn->setFixedWidth(48);
@@ -105,7 +106,7 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
             m_rectangleColorBtn->setStyleSheet(
                 QString("QPushButton { background-color: %1; border: 1px solid #555; }"
                         "QPushButton:disabled { background-color: rgba(%2,%3,%4,80); border: 1px solid #777;"
-                        " image: url(:/icons/disabled.svg); }")
+                        " image: url(:/canvas/disabled.svg); }")
                     .arg(m_rectangleColor.name())
                     .arg(m_rectangleColor.red()).arg(m_rectangleColor.green()).arg(m_rectangleColor.blue()));
             m_redetectTimer->start();
@@ -144,10 +145,10 @@ FrameDetectionDialog::FrameDetectionDialog(const QString& imagePath, const QVect
             this, [this](int) { m_redetectTimer->start(); });
 
     auto* style_ = QApplication::style();
-    m_acceptBtn = new QPushButton(style_->standardIcon(QStyle::SP_DialogApplyButton), tr("Accept Frames"), this);
-    m_rejectBtn = new QPushButton(style_->standardIcon(QStyle::SP_FileIcon), tr("Use as Single Frame"), this);
-    m_cancelBtn = new QPushButton(style_->standardIcon(QStyle::SP_DialogCancelButton), tr("Cancel"), this);
-    m_resetBtn  = new QPushButton(style_->standardIcon(QStyle::SP_DialogResetButton), tr("Reset"), this);
+    m_acceptBtn = new QPushButton(AppIcons::icon(QStringLiteral("check")), tr("Accept Frames"), this);
+    m_rejectBtn = new QPushButton(AppIcons::icon(QStringLiteral("image")), tr("Use as Single Frame"), this);
+    m_cancelBtn = new QPushButton(AppIcons::icon(QStringLiteral("cancel")), tr("Cancel"), this);
+    m_resetBtn  = new QPushButton(AppIcons::icon(QStringLiteral("reset")), tr("Reset"), this);
     m_resetBtn->setToolTip(tr("Discard all manual edits and restore the last detected frames"));
 
     connect(m_acceptBtn, &QPushButton::clicked, this, &FrameDetectionDialog::onAcceptClicked);

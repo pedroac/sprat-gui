@@ -565,6 +565,10 @@ set(PROJECT_SOURCES
     src/Core/ArchiveExtractor.h
     src/Core/models.h
     src/Core/CliTextFormat.h
+    src/Core/MessageText.cpp
+    src/Core/MessageText.h
+    src/Core/AppIcons.cpp
+    src/Core/AppIcons.h
     src/Core/PuppetModels.h
     src/Core/PuppetEvaluator.cpp
     src/Core/PuppetEvaluator.h
@@ -790,6 +794,8 @@ if(BUILD_TESTING)
         src/App/Workspaces/Puppet/PuppetSequenceTrack.cpp
         src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
         src/Core/MessageDialog.cpp
+        src/Core/MessageText.cpp
+        src/Core/AppIcons.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
         src/App/Workspaces/Shared/SpritePickerDialog.cpp
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
@@ -867,6 +873,7 @@ if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
         tests/e2e/ExportPipelineTests.cpp
         tests/e2e/ExportPipelineTests.h
         src/Project/ProjectSaveService.cpp
+        src/Core/MessageText.cpp
         src/Project/PuppetTextCodec.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp

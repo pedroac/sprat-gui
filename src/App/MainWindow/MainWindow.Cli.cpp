@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppIcons.h"
 #include "AnimationPreviewPanel.h"
 #include "FrameAnimationWorkspace.h"
 #include "LayoutOrchestrator.h"
@@ -104,7 +105,7 @@ void MainWindow::setupCliInstallOverlay() {
     layout->addWidget(m_cliInstallLog);
 
     m_cancelLoadingButton = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_DialogCancelButton), tr("Cancel"), m_cliInstallOverlay);
+        AppIcons::icon(QStringLiteral("cancel")), tr("Cancel"), m_cliInstallOverlay);
     m_cancelLoadingButton->setStyleSheet("background: #d32f2f; color: white; border-radius: 4px; padding: 4px 8px; font-weight: bold; font-size: 11px;");
     m_cancelLoadingButton->setCursor(Qt::PointingHandCursor);
     m_cancelLoadingButton->setMaximumWidth(80);

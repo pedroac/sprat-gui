@@ -1,4 +1,5 @@
 #include "WasmFolderBrowserDialog.h"
+#include "AppIcons.h"
 
 #ifdef Q_OS_WASM
 #include "WasmFileDialog.h"
@@ -213,7 +214,7 @@ void WasmFolderBrowserDialog::setupUi()
 QTreeWidgetItem* WasmFolderBrowserDialog::ensureDirectoryItem(const QString& relativeDirPath) {
     QTreeWidgetItem* root = nullptr;
     if (m_tree->topLevelItemCount() == 0) {
-        static const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
+        static const QIcon folderIcon = AppIcons::icon(QStringLiteral("folder"));
         root = new QTreeWidgetItem(m_tree);
         root->setText(0, QFileInfo(m_folderPath).fileName().isEmpty()
                              ? m_folderPath
@@ -230,7 +231,7 @@ QTreeWidgetItem* WasmFolderBrowserDialog::ensureDirectoryItem(const QString& rel
         return root;
     }
 
-    static const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
+    static const QIcon folderIcon = AppIcons::icon(QStringLiteral("folder"));
     QDir baseDir(m_folderPath);
     QString normalizedPath = QDir::cleanPath(relativeDirPath);
     QStringList segments = normalizedPath.split('/', Qt::SkipEmptyParts);
@@ -404,7 +405,7 @@ void WasmFolderBrowserDialog::populateTree()
         ensureDirectoryItem(baseDir.relativeFilePath(dirPath));
     }
 
-    static const QIcon fileIcon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
+    static const QIcon fileIcon = AppIcons::icon(QStringLiteral("file"));
     QDirIterator fileIt(m_folderPath, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
     while (fileIt.hasNext()) {
         const QString absPath = fileIt.next();

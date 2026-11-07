@@ -66,7 +66,6 @@ public:
 
 signals:
     void exportRequested(SaveConfig config);
-    void cancelled();
     /** Emitted when any preview combo (atlas, profile, or scale filter) changes. */
     void previewRefreshRequested(int atlasIndex, QString profileName, QString scaleFilter);
     /** Emitted when a per-atlas override combo changes. */

@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppIcons.h"
 #include "NineSliceWorkspace.h"
 #include "AnimationPreviewPanel.h"
 #include "ExportWorkspace.h"
@@ -660,9 +661,9 @@ bool MainWindow::confirmDiscardUnsavedChanges(const QString& question) {
         {tr("Save"), tr("Don't Save"), tr("Cancel")},
         0,
         tr("Unsaved Changes"),
-        {QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton),
-         QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
-         QApplication::style()->standardIcon(QStyle::SP_DialogCancelButton)});
+        {AppIcons::icon(QStringLiteral("save")),
+         AppIcons::icon(QStringLiteral("delete")),
+         AppIcons::icon(QStringLiteral("cancel"))});
     switch (choice) {
     case 0:  return onSaveClicked(); // a canceled or failed save keeps the current project
     case 1:  return true;
@@ -688,7 +689,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 void MainWindow::updateFolderLabel(const QString& folder) {
     if (!m_folderLabel) return;
     if (folder.isEmpty()) {
-        m_folderLabel->setText(tr("Folder: none"));
+        m_folderLabel->setText(tr("No source folder"));
         return;
     }
     QString text = tr("Folder: ") + folder;
@@ -898,109 +899,100 @@ void MainWindow::onQuickStart() {
 
         "<h3>Workflow Overview</h3>"
         "<ol>"
-        "<li><b>Load sprites</b> &mdash; drag a folder, archive, or image onto the window.</li>"
-        "<li><b>Sprites workspace</b> &mdash; select sprites to edit pivots and markers.</li>"
-        "<li><b>Atlases workspace</b> &mdash; organize sprites across named atlases.</li>"
-        "<li><b>Nine-Slice workspace</b> &mdash; define scalable nine-patch regions for UI sprites.</li>"
-        "<li><b>Frame Animation workspace</b> &mdash; build timelines and preview animations.</li>"
-        "<li><b>Save</b> &mdash; Ctrl+S saves the project state to <tt>.json</tt> or <tt>.zip</tt>.</li>"
-        "<li><b>Exportation workspace</b> &mdash; preview the packed atlas and export to disk.</li>"
+        "<li><b>Add sprites</b> &mdash; drop a folder, image, archive or project on the window.</li>"
+        "<li><b>Sprites</b> (Alt+S) &mdash; name sprites and place their pivots and markers.</li>"
+        "<li><b>Atlases</b> (Alt+A) &mdash; split sprites into atlases and see how they pack.</li>"
+        "<li><b>Nine-Slice</b> (Alt+N) &mdash; mark UI sprites that stretch without distorting their corners.</li>"
+        "<li><b>Frame Animation</b> (Alt+F) &mdash; build timelines from sprites and preview them.</li>"
+        "<li><b>Puppets</b> (Alt+P) &mdash; build cutout rigs, pose them and animate the poses.</li>"
+        "<li><b>Save</b> &mdash; Ctrl+S saves the project folder.</li>"
+        "<li><b>Exportation</b> (Alt+X) &mdash; preview the packed atlases and export them.</li>"
         "</ol>"
+        "<p>The tabs at the top of the window switch workspaces.</p>"
 
-        "<h3>1 &mdash; Loading Sprites</h3>"
-        "<p>Drag and drop onto the window or use <i>File &rarr; Load Images Folder</i>:</p>"
+        "<h3>1 &mdash; Adding Sprites</h3>"
+        "<p>Drop them on the window, or use the <i>File</i> menu:</p>"
         "<ul>"
-        "<li><b>Folder</b> &mdash; individual sprite images (PNG, JPG, BMP, GIF, WebP, TGA, DDS).</li>"
-        "<li><b>Single image</b> &mdash; a sprite sheet; the Frame Detection dialog slices it into frames.</li>"
-        "<li><b>Archive</b> &mdash; ZIP or TAR extracted automatically.</li>"
-        "<li><b>URL</b> &mdash; <i>File &rarr; Load URL</i> downloads an image, archive, or project.</li>"
-        "<li><b>Clipboard</b> &mdash; Ctrl+V imports an image directly.</li>"
-        "<li><b>Project file</b> &mdash; reopens a previously saved <tt>.json</tt> with all metadata.</li>"
+        "<li><b>Folder</b> (<i>Add Source Folder</i>) &mdash; sprite images (PNG, JPG, BMP, GIF, WebP, TGA, DDS).</li>"
+        "<li><b>Image</b> (<i>Add Source File</i>) &mdash; a sprite sheet is cut into frames in the "
+        "Frame Detection window; an animated GIF gives one sprite per frame.</li>"
+        "<li><b>Archive</b> &mdash; a ZIP or TAR; when it holds several folders, you pick which ones.</li>"
+        "<li><b>URL</b> (<i>Add Source URL</i>) &mdash; downloads an image, an archive or a project.</li>"
+        "<li><b>Clipboard</b> &mdash; Ctrl+V pastes an image.</li>"
         "</ul>"
-        "<p>If sprites are already loaded you will be asked to <b>Replace</b> or <b>Merge</b>.</p>"
-        "<p>In <i>Settings &rarr; Atlas Sprites</i> enable <b>Manual</b> or <b>Watch</b> sync "
-        "to keep the project updated when files change on disk.</p>"
+        "<p>If sprites are already loaded, you choose to <b>Replace</b> them or <b>Merge</b>.</p>"
 
         "<h3>2 &mdash; Sprites Workspace</h3>"
-        "<p>The default workspace. The atlas canvas (left) shows the packed layout; "
-        "the right panel is the sprite editor.</p>"
         "<ul>"
-        "<li>Use the <b>Layout / Navigator</b> toggle above the canvas to switch between "
-        "the packed atlas view and a folder tree of all sprites.</li>"
-        "<li>Click a sprite to select it. The right panel shows a zoomed preview where you can "
-        "rename the sprite, drag the <b>pivot point</b>, and add or edit "
-        "<b>markers</b> (point, circle, rectangle, polygon).</li>"
-        "<li>In the Navigator right-click sprites or folders to delete, group/ungroup, "
-        "add frames, or create timelines in one step.</li>"
+        "<li>The tree on the left lists every source and its sprites. Click a sprite to edit it on the right: "
+        "its name, its <b>pivot</b>, and its <b>markers</b> (point, circle, rectangle, polygon) for "
+        "hit boxes, spawn points and joints.</li>"
+        "<li><b>Trim</b>, <b>Onion</b> and <b>Grid</b> above the sprite show its trimmed area, its "
+        "neighbouring frames and a pixel grid.</li>"
+        "<li>Right-click the tree to exclude sprites, detect frames in an image or create timelines. "
+        "Right-click a source to sync it with the project either way (<i>Sync Source to Layout</i>, "
+        "<i>Sync Layout to Source</i>), retry it or remove it.</li>"
         "</ul>"
 
         "<h3>3 &mdash; Atlases Workspace</h3>"
-        "<p>Open <i>Manage Atlases</i> from the toolbar to organize sprites across named atlases:</p>"
         "<ul>"
-        "<li>Add or remove atlases with the <b>Add / Remove</b> buttons; double-click to rename.</li>"
-        "<li>The sprite tree shows sprites for the selected atlas. "
-        "Use <b>Ctrl+Click</b> to toggle a sprite&rsquo;s checkbox or <b>Shift+Click</b> to check a range. "
-        "Then <b>drag</b> checked sprites onto an atlas in the left list, or "
-        "<b>right-click an atlas</b> and choose <i>Move checked sprites to &ldquo;&hellip;&rdquo;</i>.</li>"
-        "<li><b>Right-click a folder/group</b> in the sprite tree:"
-        "<ul>"
-        "<li><i>Create atlas from &ldquo;&lt;group&gt;&rdquo;</i> &mdash; creates a new atlas named after "
-        "the folder and moves all its sprites there.</li>"
-        "<li><i>Move &ldquo;&lt;group&gt;&rdquo; to atlas</i> &mdash; if an atlas with that name already "
-        "exists, moves the sprites into it instead.</li>"
-        "</ul></li>"
-        "<li><b>Right-click a source node</b> &rarr; <i>Autocreate atlases</i> &mdash; "
-        "creates one atlas per direct subfolder of that source automatically.</li>"
-        "<li>Each named atlas is exported independently and can be previewed in the "
-        "Exportation workspace.</li>"
+        "<li>Add, remove and rename atlases on the left. Tick sprites in the tree "
+        "(Ctrl+Click, or Shift+Click for a range) and drag them onto an atlas, or right-click an atlas "
+        "to move the ticked sprites there.</li>"
+        "<li>Right-click a folder to make an atlas of it, or a source to make one atlas per subfolder.</li>"
+        "<li><b>Layout</b> (right panel) shows how the selected atlas packs; there you also pick its "
+        "profiles and source resolution.</li>"
         "</ul>"
 
         "<h3>4 &mdash; Nine-Slice Workspace</h3>"
-        "<p>Open from the <i>Nine-Slice</i> tab (Alt+N). Pick the sprites to nine-slice and define "
-        "their slice regions:</p>"
         "<ul>"
-        "<li>The left list shows only nine-sliced sprites. Click <b>Add</b> and tick one or more "
-        "sprites; their slice lines start at image thirds.</li>"
-        "<li>Drag the slice lines on the canvas, or type values in the "
-        "<b>L / T / R / B</b> spinboxes.</li>"
-        "<li>Choose <b>horizontal</b> and <b>vertical fill modes</b>: "
-        "<i>stretch</i>, <i>repeat</i>, or <i>mirror</i>.</li>"
-        "<li>Set a <b>target size</b> (W / H) or drag the canvas resize handles to preview "
-        "the nine-slice result at the intended render dimensions.</li>"
-        "<li><b>Remove</b> (or Delete) stops nine-slicing the selected sprites. Their slice lines "
-        "are kept if you add them again.</li>"
+        "<li>Click <b>Add</b> and tick the sprites that stretch, such as buttons and panels; their slice "
+        "lines start at image thirds.</li>"
+        "<li>Drag the slice lines, or type the <b>L / T / R / B</b> insets. Choose how the edges and "
+        "middle fill: <i>stretch</i>, <i>repeat</i>, <i>mirror</i> or <i>fixed</i>.</li>"
+        "<li>Set <b>W / H</b>, or drag the canvas handles, to preview the sprite at another size.</li>"
+        "<li><b>Remove</b> stops nine-slicing a sprite and keeps its insets for later.</li>"
         "</ul>"
-        "<p>Nine-slice definitions are saved in the project and exported with the atlas metadata.</p>"
 
         "<h3>5 &mdash; Frame Animation Workspace</h3>"
-        "<p>Open from the toolbar. The Timelines panel lists all animations:</p>"
         "<ul>"
-        "<li>Add a timeline, then drag sprites from the canvas into it. Reorder frames by dragging.</li>"
-        "<li>Set the FPS and use play/pause/step controls to preview the animation.</li>"
-        "<li>Right-click the preview to export as GIF, MP4, WebM, or other formats "
-        "(requires FFmpeg or ImageMagick).</li>"
-        "<li>Use <i>Auto-create timelines</i> (right-click in the Navigator) to generate "
-        "animations automatically from naming patterns such as <tt>Run_0</tt>, <tt>Run_1</tt>, &hellip;</li>"
+        "<li><b>Add</b> opens a sprite picker: tick the frames, or a whole folder, and press <b>Create</b>.</li>"
+        "<li>Right-click the list for <i>Auto-create Timelines</i>: pick groups, and each becomes a "
+        "timeline. A group is a folder, or sprites sharing a name such as <tt>run_1</tt>, <tt>run_2</tt>.</li>"
+        "<li>Right-click a frame to add frames before or after it; drag frames to reorder them.</li>"
+        "<li>Set the FPS and how it plays (loop, once, ping-pong). Right-click the preview to save it "
+        "as a GIF or video (needs ImageMagick or FFmpeg).</li>"
         "</ul>"
 
-        "<h3>6 &mdash; Save</h3>"
-        "<p><i>File &rarr; Save</i> (Ctrl+S) saves the full project state &mdash; layout options, "
-        "sprite names, pivots, markers, timelines &mdash; to a <tt>.json</tt> file or a <tt>.zip</tt> "
-        "archive. The app autosaves every 5 minutes and offers to restore on next launch.</p>"
-
-        "<h3>7 &mdash; Exportation Workspace</h3>"
-        "<p>Open from the toolbar (or use the quick <i>Export</i> button to re-export to the last "
-        "used folder without opening the workspace).</p>"
+        "<h3>6 &mdash; Puppets Workspace</h3>"
         "<ul>"
-        "<li>The left pane shows a <b>live packed-atlas preview</b>. "
-        "Use the <b>Atlas</b> selector to preview individual atlases "
-        "(the actual export always processes all).</li>"
-        "<li>The right pane lets you choose the <b>output folder</b>, <b>metadata format</b> "
-        "(transform), and <b>scale filter</b>.</li>"
-        "<li>Click <b>Export</b> to run the full pipeline; click <b>Cancel</b> to return.</li>"
+        "<li><i>Add &rsaquo; New Puppet</i> builds a puppet: drop sprites on a part to add them as "
+        "the sprites it can show.</li>"
+        "<li>Drag a part's pivot ring onto another part's marker to hang it there. Drag parts to move "
+        "or pull them; the round handle turns them.</li>"
+        "<li><b>Poses</b> (below the canvas) are frames you edit directly; <b>rest</b> is the pose "
+        "animations return to.</li>"
+        "<li><b>Animations</b> play poses one after another. Right-click a step for <i>New Frame</i>: "
+        "a pose of that animation only, so editing it changes no other animation. Turn on "
+        "<b>Onion skin</b> to see the steps before and after.</li>"
         "</ul>"
 
-        "<p>See <i>Help &rarr; Hotkeys</i> for all keyboard shortcuts.</p>"
+        "<h3>7 &mdash; Saving</h3>"
+        "<p><i>File &rarr; Save As</i> creates a project folder holding <tt>project.spart.json</tt> "
+        "and, if you choose, a copy of the images. <i>File &rarr; Open Project</i> (Ctrl+O) opens it "
+        "again; <i>Open ZIP Project</i> opens one packed in a ZIP. The project is also autosaved every "
+        "5 minutes (the status bar shows when), and offered back after a crash.</p>"
+
+        "<h3>8 &mdash; Exportation Workspace</h3>"
+        "<ul>"
+        "<li>The left side previews each atlas as it will be packed; pick one with <b>Atlas</b>.</li>"
+        "<li>On the right, choose the <b>output folder</b>, the <b>format</b> (the engine or file "
+        "format of the metadata) and the <b>scale filter</b>, then click <b>Export</b>.</li>"
+        "<li><i>File &rarr; Export</i> (Ctrl+E) exports again with the same settings.</li>"
+        "</ul>"
+
+        "<p>Settings (colors, profiles, CLI tools, sync with the source folder) are in the "
+        "<i>Settings</i> menu. See <i>Help &rarr; Hotkeys</i> for every keyboard shortcut.</p>"
     );
 
     QDialog dlg(this);
@@ -1111,6 +1103,15 @@ void MainWindow::onShowHotkeys() {
     row(tr("Copy Markers"), standardKeys(QKeySequence::Copy));
     row(tr("Paste Markers"), standardKeys(QKeySequence::Paste));
     row(tr("Delete Selected Marker / Vertex"), standardKeys(QKeySequence::Delete));
+    endSection();
+
+    beginSection(tr("Puppets"));
+    row(tr("Rename Puppet, Part or Variant"), keys(QKeySequence(Qt::Key_F2)));
+    row(tr("Remove Puppet, Part, Variant, Pose or Step"), standardKeys(QKeySequence::Delete));
+    row(tr("Move Selected Part 1 px / 10 px"), tr("Arrow Keys") + QStringLiteral(" / ") + tr("Shift+Arrow Keys"));
+    row(tr("Move an Attached Part's Joint"), tr("Shift+Drag"));
+    row(tr("Cancel Attaching"), keys(QKeySequence(Qt::Key_Escape)));
+    row(tr("Previous / Next Animation Step"), tr("Left / Right"));
     endSection();
 
     beginSection(tr("Animation Playback"));

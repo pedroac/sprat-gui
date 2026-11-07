@@ -395,7 +395,7 @@ void PuppetTests::testProjectPayloadKeepsPuppets() {
     QVERIFY(!PuppetTextCodec::write({puppet}).contains(QStringLiteral("chin")));
     // A frame of an animation is written as a plain pose; whose it is stays in the project.
     PuppetEditing::addAnimationPose(puppet, 0, puppet.poses.first().settings);
-    QVERIFY(PuppetTextCodec::write({puppet}).contains(QStringLiteral("pose \"fuss 1\"\n")));
+    QVERIFY(PuppetTextCodec::write({puppet}).contains(QStringLiteral("pose \"fuss frame 1\"\n")));
 
     AtlasEntry atlas;
     atlas.id = QStringLiteral("main");
@@ -802,15 +802,15 @@ void PuppetTests::testAnimationPosesBelongToTheirAnimation() {
 
     // A frame of "talk": named after it, listed for its steps but not for another animation's.
     const QString frame = PuppetEditing::addAnimationPose(puppet, 0, lie.settings);
-    QCOMPARE(frame, QStringLiteral("talk 1"));
+    QCOMPARE(frame, QStringLiteral("talk frame 1"));
     QCOMPARE(puppet.poses.last().owner, QStringLiteral("talk"));
     QCOMPARE(PuppetEditing::sharedPoseCount(puppet), 1);
-    QCOMPARE(PuppetEditing::posesFor(puppet, 0), (QStringList{"lie", "talk 1"}));
+    QCOMPARE(PuppetEditing::posesFor(puppet, 0), (QStringList{"lie", "talk frame 1"}));
     QCOMPARE(PuppetEditing::posesFor(puppet, 1), QStringList{"lie"});
 
     // Editing a step that plays a shared pose edits a copy only that step plays.
     QCOMPARE(PuppetEditing::ownStepPose(puppet, 0, 0), 2);
-    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("talk 2"));
+    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("talk frame 2"));
     QCOMPARE(puppet.sequences[1].steps[0].pose, QStringLiteral("lie"));
     QVERIFY(puppet.poses[0] == lie);
     QCOMPARE(PuppetEditing::ownStepPose(puppet, 0, 0), 2);  // already its own: no other copy
@@ -819,38 +819,38 @@ void PuppetTests::testAnimationPosesBelongToTheirAnimation() {
     // Shared poses stay first; frames no step plays go.
     puppet.poses.move(0, 2);
     PuppetEditing::keepAnimationPosesLast(puppet);
-    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "talk 1", "talk 2"}));
+    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "talk frame 1", "talk frame 2"}));
     PuppetEditing::removeUnusedAnimationPoses(puppet);
-    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "talk 2"}));
+    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "talk frame 2"}));
 
     // Duplicating a frame copies its pose; duplicating a shared step doesn't.
     PuppetEditing::duplicateStep(puppet, 0, 0);
-    QCOMPARE(puppet.sequences[0].steps[1].pose, QStringLiteral("talk 1"));
+    QCOMPARE(puppet.sequences[0].steps[1].pose, QStringLiteral("talk frame 1"));
     PuppetEditing::duplicateStep(puppet, 1, 0);
     QCOMPARE(puppet.sequences[1].steps[1].pose, QStringLiteral("lie"));
 
     // A pose saved to the Poses tab goes after the shared ones and belongs to none.
     QCOMPARE(PuppetEditing::addSharedCopy(puppet, 1, QStringLiteral("whisper")), 1);
-    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "talk 2", "talk 1"}));
+    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "talk frame 2", "talk frame 1"}));
     QVERIFY(puppet.poses[1].owner.isEmpty());
 
     // Renaming the animation renames its frames; one the user named keeps its name.
     puppet.poses[3].name = QStringLiteral("shout");
     puppet.sequences[0].steps[1].pose = QStringLiteral("shout");
     PuppetEditing::renameSequence(puppet, 0, QStringLiteral("chat"));
-    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "chat 2", "shout"}));
-    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("chat 2"));
+    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "chat frame 2", "shout"}));
+    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("chat frame 2"));
     QCOMPARE(puppet.poses[3].owner, QStringLiteral("chat"));
 
     // A copied animation plays copies of its frames.
     QCOMPARE(PuppetEditing::duplicateSequence(puppet, 0), 1);
     QCOMPARE(puppet.sequences[1].name, QStringLiteral("chat 2"));
-    QCOMPARE(puppet.sequences[1].steps[0].pose, QStringLiteral("chat 2 1"));
+    QCOMPARE(puppet.sequences[1].steps[0].pose, QStringLiteral("chat 2 frame 1"));
     QCOMPARE(puppet.poses.last().owner, QStringLiteral("chat 2"));
 
     // Removing an animation removes its frames, and only those.
     PuppetEditing::removeSequence(puppet, 0);
-    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "chat 2 1", "chat 2 2"}));
+    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "chat 2 frame 1", "chat 2 frame 2"}));
 }
 
 void PuppetTests::testSequencesTweenPosesOverTheirFrames() {

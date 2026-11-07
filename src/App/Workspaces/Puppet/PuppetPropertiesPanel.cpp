@@ -92,8 +92,8 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         addNameRows(form, page, m_partName, m_partNameProblem);
         m_shownVariant = new QComboBox(page);
         m_shownVariant->setObjectName(QStringLiteral("partShownVariant"));
-        m_shownVariant->setToolTip(tr("The variant the part shows in the selected pose. At rest, parts "
-                                      "show their first (★) variant"));
+        m_shownVariant->setToolTip(tr("The variant (★) the part shows in the selected pose or frame. "
+                                      "At rest, parts show their first variant"));
         form->addRow(tr("Shows:"), m_shownVariant);
         connect(m_shownVariant, &QComboBox::currentIndexChanged, this, [this](int index) {
             if (index >= 0) emit shownVariantChanged(m_shownVariant->itemData(index).toInt());
@@ -154,7 +154,7 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         m_variantThumbnail->setMinimumHeight(THUMBNAIL_SIZE);
         pageLayout->addWidget(m_variantThumbnail);
 
-        m_restLabel = new QLabel(tr("★ Rest variant: the one the rest pose shows. To change it, select rest "
+        m_restLabel = new QLabel(tr("Rest variant: the one the rest pose shows. To change it, select rest "
                                     "below the canvas and pick another in the part's Shows."), page);
         m_restLabel->setWordWrap(true);
         pageLayout->addWidget(m_restLabel);
@@ -274,7 +274,8 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
         m_shownVariant->clear();
         // By name, as in the tree; each item holds the variant's index.
         for (const int v : placement.variantOrder)
-            m_shownVariant->addItem(v == 0 ? QStringLiteral("★ %1").arg(placement.variants[v]) : placement.variants[v], v);
+            m_shownVariant->addItem(v == placement.variant ? QStringLiteral("★ %1").arg(placement.variants[v])
+                                                           : placement.variants[v], v);
         m_shownVariant->setCurrentIndex(m_shownVariant->findData(placement.variant));
         m_shownVariant->setEnabled(placement.posing);
         m_partForm->setRowVisible(m_shownVariant, placement.variants.size() > 1);

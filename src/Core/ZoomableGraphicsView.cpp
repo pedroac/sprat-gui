@@ -1,4 +1,5 @@
 #include "ZoomableGraphicsView.h"
+#include <QPainter>
 #include "AppConstants.h"
 #include <QScrollBar>
 #include <QApplication>
@@ -274,4 +275,24 @@ void ZoomableGraphicsView::resizeEvent(QResizeEvent* event) {
         initialFit();
     }
 #endif
+}
+
+void ZoomableGraphicsView::setEmptyText(const QString& text) {
+    if (text == m_emptyText) return;
+    m_emptyText = text;
+    viewport()->update();
+}
+
+void ZoomableGraphicsView::drawForeground(QPainter* painter, const QRectF& rect) {
+    QGraphicsView::drawForeground(painter, rect);
+    if (m_emptyText.isEmpty()) return;
+    painter->save();
+    painter->resetTransform();
+    // Light on the dark workspace colour, readable on a checkerboard too thanks to the shadow.
+    const QRect area = viewport()->rect().adjusted(24, 0, -24, 0);
+    painter->setPen(QColor(0, 0, 0, 140));
+    painter->drawText(area.translated(1, 1), Qt::AlignCenter | Qt::TextWordWrap, m_emptyText);
+    painter->setPen(QColor(240, 240, 240));
+    painter->drawText(area, Qt::AlignCenter | Qt::TextWordWrap, m_emptyText);
+    painter->restore();
 }

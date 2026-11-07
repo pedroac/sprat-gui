@@ -1,4 +1,5 @@
 #include "ProjectController.h"
+#include <QSet>
 #include "ProjectSession.h"
 #include "ProjectFileLoader.h"
 #include "ArchiveExtractor.h"
@@ -497,13 +498,13 @@ QStringList ProjectController::copyFramesToSourceSubfolder(const QStringList& fr
     QDir originalRootDir(originalRootPath);
     QStringList result;
     result.reserve(frames.size());
+    const QString canonicalDst = QDir(subfolderPath).canonicalPath();
 
     for (const QString& path : frames) {
         const QFileInfo srcInfo(path);
         const QString canonicalSrc = srcInfo.canonicalFilePath();
         const QString absPath = canonicalSrc.isEmpty() ? srcInfo.absoluteFilePath() : canonicalSrc;
 
-        const QString canonicalDst = QDir(subfolderPath).canonicalPath();
         if (!canonicalDst.isEmpty() && absPath.startsWith(canonicalDst + QLatin1Char('/'))) {
             result.append(absPath);
             continue;
@@ -555,10 +556,17 @@ void ProjectController::syncFramePathsToNeutralAtlas(DropAction action)
     const int neutralIdx = m_session->neutralAtlasIndex();
     AtlasEntry& neutral = m_session->atlases[neutralIdx];
     if (action == DropAction::Replace) neutral.spritePaths.clear();
+    // Every atlas's sprites, gathered once: looking each frame up in every atlas made big
+    // imports quadratic (seconds for a few thousand sprites).
+    QSet<QString> inAtlases;
+    for (const AtlasEntry& atlas : m_session->atlases) {
+        for (const QString& sp : atlas.spritePaths) inAtlases.insert(QFileInfo(sp).absoluteFilePath());
+    }
     for (const QString& path : m_session->activeFramePaths) {
         const QString norm = QFileInfo(path).absoluteFilePath();
-        if (!m_session->atlasForSprite(norm))
-            neutral.spritePaths.append(norm);
+        if (inAtlases.contains(norm)) continue;
+        neutral.spritePaths.append(norm);
+        inAtlases.insert(norm);
     }
 }
 

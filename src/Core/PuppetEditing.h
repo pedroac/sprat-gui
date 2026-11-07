@@ -97,7 +97,7 @@ int sharedPoseCount(const Puppet& puppet);
 /// The poses a step of sequence @p sequenceIndex may play: the shared ones, then its own.
 QStringList posesFor(const Puppet& puppet, int sequenceIndex);
 /// Adds a pose of sequence @p sequenceIndex with @p settings, named after the sequence
-/// ("walk 1", "walk 2"...), after every other pose. Returns its name.
+/// ("walk frame 1", "walk frame 2"...), after every other pose. Returns its name.
 QString addAnimationPose(Puppet& puppet, int sequenceIndex, const QVector<PuppetPoseSetting>& settings);
 /// The index of the pose step @p stepIndex of sequence @p sequenceIndex plays, made the
 /// sequence's own first when it isn't: a copy of it, played by that step alone. -1 when the
@@ -108,7 +108,7 @@ int ownStepPose(Puppet& puppet, int sequenceIndex, int stepIndex);
 int addSharedCopy(Puppet& puppet, int poseIndex, const QString& name);
 /// Removes the animation poses that no step plays.
 void removeUnusedAnimationPoses(Puppet& puppet);
-/// Renames a sequence, with its poses: those named after it ("walk 1") are renamed after
+/// Renames a sequence, with its poses: those named after it ("walk frame 1") are renamed after
 /// the new name when that name is free.
 void renameSequence(Puppet& puppet, int sequenceIndex, const QString& name);
 /// Removes a sequence, with its poses.

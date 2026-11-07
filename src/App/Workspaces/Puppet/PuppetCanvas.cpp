@@ -1,4 +1,5 @@
 #include "PuppetCanvas.h"
+#include "AppSettings.h"
 
 #include <cmath>
 #include <QApplication>
@@ -85,6 +86,9 @@ PuppetCanvas::PuppetCanvas(QWidget* parent)
     , m_scene(new QGraphicsScene(this))
 {
     setScene(m_scene);
+    // The workspace grey the other canvases use (Settings changes it): light sprites and
+    // their edges show on it, unlike on white.
+    setBackgroundBrush(AppSettings().workspaceColor);
     setZoomRange(0.1, 16.0);
     setAlignment(Qt::AlignCenter);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
@@ -111,7 +115,10 @@ void PuppetCanvas::setOnionSkins(const QVector<OnionSkin>& skins) {
 
 void PuppetCanvas::clearPuppet() {
     showPuppet({}, {}, -1, std::nullopt);
+    // No puppet, no origin: the view is left for its empty text.
+    m_scene->clear();
 }
+
 
 void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
                               std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint) {
@@ -475,6 +482,7 @@ void PuppetCanvas::drawLabel(QPainter* painter, const QPointF& scenePos, const Q
 void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     ZoomableGraphicsView::drawForeground(painter, rect);
     const QColor highlight = palette().color(QPalette::Highlight);
+
     painter->setRenderHint(QPainter::Antialiasing, true);
 
     // What hangs from what: faint for every part, strong for the selected one.

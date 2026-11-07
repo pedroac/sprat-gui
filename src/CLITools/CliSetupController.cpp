@@ -1,4 +1,5 @@
 #include "CliSetupController.h"
+#include "MessageText.h"
 #include "CliToolInstaller.h"
 #include "CliToolsConfig.h"
 #include "CliToolsUi.h"
@@ -120,7 +121,7 @@ void CliSetupController::check() {
         if (!actualVersion.isEmpty() && actualVersion != requiredVersion) {
             MessageDialog::critical(m_dialogParent, tr("CLI Version Mismatch"),
                 tr("The embedded CLI version (%1) does not match the expected version (%2).\n\n"
-                   "The application may behave incorrectly. Please reinstall.")
+                   "The app may behave incorrectly. Reinstall sprat-gui to fix it.")
                 .arg(actualVersion, requiredVersion));
         }
 
@@ -135,9 +136,8 @@ void CliSetupController::check() {
         }
         if (!missingFolders.isEmpty()) {
             MessageDialog::warning(m_dialogParent, tr("Missing Required Files"),
-                tr("The following required resources were not found:\n\n%1\n\n"
-                   "Some features may not work correctly.")
-                .arg(missingFolders.join(QLatin1Char('\n'))));
+                tr("These required resources were not found, so some features may not work:\n\n%1")
+                .arg(MessageText::toolOutput(missingFolders.join(QLatin1Char('\n')), 20)));
         }
 
         m_cliReady = true;
@@ -237,7 +237,9 @@ void CliSetupController::showMissingCliDialog(const QStringList& missing) {
             QTimer::singleShot(0, this, &CliSetupController::check);
         } else {
             MessageDialog::warning(m_dialogParent, tr("Tools Not Found"),
-                tr("Some CLI tools were not found in the selected folder:\n%1")
+                tr("These CLI tools were not found in the selected folder: %1.\n\n"
+                   "sprat-gui can't work without them and will close. Start it again and choose the "
+                   "folder that holds all of them, or let it install them.")
                 .arg(stillMissing.join(", ")));
             emit statusMessageChanged(tr("CLI missing"));
             QApplication::quit();
@@ -268,31 +270,30 @@ void CliSetupController::showCliExecutionError(const QString& tool) {
                             "Try reinstalling the CLI tools.");
 #elif defined(Q_OS_LINUX)
     const QString hint = path.isEmpty()
-        ? tr("Check that the binary has execute permission and all shared libraries are present.\n"
-             "Try reinstalling the CLI tools.")
-        : tr("Check for missing shared libraries:\n"
+        ? tr("Check that the binary has execute permission and all shared libraries are present, "
+             "or reinstall the CLI tools.")
+        : tr("Check for missing shared libraries:\n\n"
              "  ldd \"%1\"\n\n"
-             "Verify execute permission:\n"
+             "Check that it can be run:\n\n"
              "  chmod +x \"%1\"\n\n"
-             "Try reinstalling the CLI tools if the problem persists.").arg(path);
+             "If it still fails, reinstall the CLI tools.").arg(path);
 #elif defined(Q_OS_MACOS)
     const QString hint = path.isEmpty()
-        ? tr("The binary may be blocked by Gatekeeper or have missing dylib dependencies.\n"
-             "Try reinstalling the CLI tools.")
-        : tr("The binary may be blocked by Gatekeeper. To remove the quarantine flag, run:\n"
+        ? tr("The binary may be blocked by Gatekeeper or miss dylib dependencies. "
+             "Reinstall the CLI tools.")
+        : tr("The binary may be blocked by Gatekeeper. To remove the quarantine flag, run:\n\n"
              "  xattr -d com.apple.quarantine \"%1\"\n\n"
-             "Check for missing dylib dependencies:\n"
+             "Check for missing dylib dependencies:\n\n"
              "  otool -L \"%1\"\n\n"
-             "Try reinstalling the CLI tools if the problem persists.").arg(path);
+             "If it still fails, reinstall the CLI tools.").arg(path);
 #else
     const QString hint = tr("Check that the binary has execute permission and all "
-                            "required runtime dependencies are installed.\n"
-                            "Try reinstalling the CLI tools.");
+                            "required runtime dependencies are installed, or reinstall the CLI tools.");
 #endif
 
     const QString msg = path.isEmpty()
         ? tr("'%1' was found but could not be executed.\n\n%2").arg(tool, hint)
-        : tr("'%1' was found at:\n  %2\n\nbut could not be executed.\n\n%3").arg(tool, path, hint);
+        : tr("'%1' was found but could not be run:\n\n  %2\n\n%3").arg(tool, path, hint);
 
     MessageDialog::critical(m_dialogParent, tr("CLI Execution Failed"), msg);
 }
@@ -361,9 +362,8 @@ void CliSetupController::onVersionCheckFinished() {
     }
     if (!missingFolders.isEmpty()) {
         MessageDialog::warning(m_dialogParent, tr("Missing Required Files"),
-            tr("The following required resources were not found:\n\n%1\n\n"
-               "Some features may not work correctly.")
-            .arg(missingFolders.join(QLatin1Char('\n'))));
+            tr("These required resources were not found, so some features may not work:\n\n%1")
+            .arg(MessageText::toolOutput(missingFolders.join(QLatin1Char('\n')), 20)));
     }
 
     m_cliReady = true;

@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppIcons.h"
 #include "AnimationPreviewPanel.h"
 #include "TimelineEditorPanel.h"
 #include "TimelineListWidget.h"
@@ -52,7 +53,9 @@
 #include <QPushButton>
 #include <QFile>
 #include <QFileDialog>
+#include <QDateTime>
 #include <QFileInfo>
+#include <QLocale>
 #include <QSet>
 #include <QDoubleSpinBox>
 #include <QImage>
@@ -215,7 +218,9 @@ void MainWindow::loadAutosavedProject() {
         return;
     }
 
-    m_statusLabel->setText(tr("Loading autosaved project"));
+    m_statusLabel->setText(tr("Loading project autosaved at %1")
+                               .arg(QLocale().toString(QFileInfo(getAutosaveFilePath()).lastModified(),
+                                                       QLocale::ShortFormat)));
     cacheLayoutOutputFromPayload(root);
     // Clear selection state when loading autosaved project to avoid stale pointers
     m_session->selectedSprite.reset();
@@ -239,7 +244,7 @@ void MainWindow::loadAutosavedProject() {
     if (sourceMode == "list" && !framePaths.isEmpty()) {
         m_session->activeFramePaths = framePaths;
         if (!ensureFrameListInput()) {
-            MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore autosaved frame list; falling back to folder source."));
+            MessageDialog::warning(this, tr("Load Failed"), tr("The autosaved sprite selection couldn't be restored, so every image in the source folder is used instead."));
             m_session->layoutSourcePath = QDir(folder).absolutePath();
             m_session->layoutSourceIsList = false;
             m_session->removeFrameListFile();
@@ -669,7 +674,7 @@ bool MainWindow::onSaveAsClicked() {
         dlg.setMinimumWidth(420);
 
         auto* iconLabel = new QLabel(&dlg);
-        iconLabel->setPixmap(QApplication::style()->standardIcon(QStyle::SP_MessageBoxQuestion).pixmap(64, 64));
+        iconLabel->setPixmap(AppIcons::icon(QStringLiteral("dialog-question")).pixmap(64, 64));
         iconLabel->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
         iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
@@ -932,7 +937,9 @@ void MainWindow::autosaveProject() {
         payload[QStringLiteral("autosave_project_dir")] = projectDir;
     QString error;
     if (AutosaveProjectStore::save(getAutosaveFilePath(), payload, error)) {
-        m_statusLabel->setText(tr("Autosaved project"));
+        // With when, in the user's format: the message stays until the next one.
+        m_statusLabel->setText(tr("Autosaved project at %1")
+                                   .arg(QLocale().toString(QDateTime::currentDateTime(), QLocale::ShortFormat)));
     } else {
         m_statusLabel->setText(error);
     }
@@ -1054,7 +1061,7 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
         QString extractError;
         if (!ArchiveExtractor::extractToDirectory(path, tempPath, extractError)) {
             setLoading(false);
-            MessageDialog::warning(this, tr("Load Failed"), tr("Could not extract ZIP: %1").arg(extractError));
+            MessageDialog::warning(this, tr("Load Failed"), tr("The ZIP couldn't be extracted.\n\n%1").arg(extractError));
             return;
         }
         projectDir = tempPath;
@@ -1162,7 +1169,7 @@ void MainWindow::processProjectLoadResult(const ProjectController::ProjectLoadRe
             if (sourceMode == "list" && !framePaths.isEmpty()) {
                 m_session->activeFramePaths = framePaths;
                 if (!ensureFrameListInput()) {
-                    MessageDialog::warning(this, tr("Load Failed"), tr("Could not restore saved frame list; falling back to folder source."));
+                    MessageDialog::warning(this, tr("Load Failed"), tr("The project's sprite selection couldn't be restored, so every image in the source folder is used instead."));
                     m_session->layoutSourcePath = QDir(folder).absolutePath();
                     m_session->layoutSourceIsList = false;
                     m_session->removeFrameListFile();
@@ -1270,7 +1277,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
     if (imageDirectories.isEmpty()) {
         setLoading(false);
         const QString errorMsg = !result.error.isEmpty()
-            ? tr("Could not extract ZIP: %1").arg(result.error)
+            ? tr("The ZIP couldn't be extracted.\n\n%1").arg(result.error)
             : tr("Could not extract ZIP or no image folders found.");
         MessageDialog::warning(this, tr("Load Failed"), errorMsg);
         m_projectController->registerFailedSource(zipPath, errorMsg);
@@ -1429,7 +1436,7 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
 
     if (!ensureFrameListInput()) {
         setLoading(false);
-        MessageDialog::warning(this, tr("Load Failed"), tr("Could not create temporary frame list from ZIP selection."));
+        MessageDialog::warning(this, tr("Load Failed"), tr("Couldn't save the list of the ZIP's sprites to the temporary folder.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
     updateManualFrameLabel();
@@ -1806,6 +1813,11 @@ void MainWindow::syncNewSpritesToProjectFolder(const QString& projectDir) {
 void MainWindow::applyWorkspaceLayout(IWorkspace* ws)
 {
     auto* atlasSplitter = m_atlasWorkspace ? m_atlasWorkspace->atlasSplitter() : nullptr;
+    // The dock workspaces hide the central pages before showing their dock: shown together for
+    // a moment, their minimum heights add up and Qt grows the window (and never shrinks it back),
+    // which can push it past a laptop screen. Without a project, updateMainContentView() shows
+    // the welcome page again.
+    if ((ws == m_atlasWorkspace || ws == m_frameAnimWorkspace) && m_mainStack) m_mainStack->hide();
     if (ws == m_atlasWorkspace) {
         // AtlasWorkspace::leave() already saved splitter H sizes; restore to Horizontal here
         if (atlasSplitter) atlasSplitter->setOrientation(Qt::Horizontal);

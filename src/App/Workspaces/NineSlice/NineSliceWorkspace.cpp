@@ -1,4 +1,5 @@
 #include "NineSliceWorkspace.h"
+#include "AppIcons.h"
 #include "NavigatorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "NineSliceEditorCanvas.h"
@@ -98,12 +99,12 @@ void NineSliceWorkspace::setupUi()
     m_navigatorStack->addWidget(m_emptyState);
     leftLayout->addWidget(m_navigatorStack, 1);
 
-    m_addBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder),
+    m_addBtn = new QPushButton(AppIcons::icon(QStringLiteral("add")),
                                tr("Add"), leftWidget);
     m_addBtn->setObjectName(QStringLiteral("nineSliceAddButton"));
     m_addBtn->setToolTip(tr("Pick sprites to nine-slice"));
     m_addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_removeBtn = new QPushButton(QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
+    m_removeBtn = new QPushButton(AppIcons::icon(QStringLiteral("exclude")),
                                   tr("Remove"), leftWidget);
     m_removeBtn->setObjectName(QStringLiteral("nineSliceRemoveButton"));
     m_removeBtn->setToolTip(tr("Stop nine-slicing the selected sprites (Delete). Their insets are kept "
@@ -154,29 +155,31 @@ void NineSliceWorkspace::setupUi()
         row->addWidget(m_zoomSpin);
 
         m_widthSpin = new QSpinBox(this);
+        m_widthSpin->setObjectName(QStringLiteral("nineSliceWidth"));
         m_widthSpin->setRange(1, 4096);
         m_widthSpin->setSuffix(QStringLiteral(" px"));
         row->addWidget(new QLabel(tr("W:")));
         row->addWidget(m_widthSpin);
 
         m_heightSpin = new QSpinBox(this);
+        m_heightSpin->setObjectName(QStringLiteral("nineSliceHeight"));
         m_heightSpin->setRange(1, 4096);
         m_heightSpin->setSuffix(QStringLiteral(" px"));
         row->addWidget(new QLabel(tr("H:")));
         row->addWidget(m_heightSpin);
 
-        m_linesCheck = new QPushButton(QIcon(QStringLiteral(":/icons/slice-lines.svg")), tr("Lines"), this);
+        m_linesCheck = new QPushButton(AppIcons::icon(QStringLiteral("slice-lines")), tr("Lines"), this);
         m_linesCheck->setCheckable(true);
         m_linesCheck->setChecked(true);
         m_linesCheck->setToolTip(tr("Show or hide the nine-slice guide lines"));
         row->addWidget(m_linesCheck);
 
-        m_gridCheck = new QPushButton(QIcon(QStringLiteral(":/icons/grid.svg")), tr("Grid"), this);
+        m_gridCheck = new QPushButton(AppIcons::icon(QStringLiteral("grid")), tr("Grid"), this);
         m_gridCheck->setCheckable(true);
         m_gridCheck->setToolTip(tr("Show a pixel grid overlay on the canvas"));
         row->addWidget(m_gridCheck);
 
-        m_colorizeCheck = new QPushButton(QIcon(QStringLiteral(":/icons/colorize.svg")), tr("Colorize"), this);
+        m_colorizeCheck = new QPushButton(AppIcons::icon(QStringLiteral("colorize")), tr("Colorize"), this);
         m_colorizeCheck->setCheckable(true);
         m_colorizeCheck->setChecked(true);
         m_colorizeCheck->setToolTip(tr("Show colored region hints (corners, edges, center)"));
@@ -206,15 +209,15 @@ void NineSliceWorkspace::setupUi()
     m_rightSpin->setObjectName(QStringLiteral("nineSliceRightInset"));
     m_bottomSpin->setObjectName(QStringLiteral("nineSliceBottomInset"));
     m_hModeCombo = new QComboBox;
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-h.svg")), QStringLiteral("stretch"));
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-h.svg")),  QStringLiteral("repeat"));
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-h.svg")),  QStringLiteral("mirror"));
-    m_hModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-h.svg")),   QStringLiteral("fixed"));
+    m_hModeCombo->addItem(AppIcons::icon(QStringLiteral("stretch-h")), QStringLiteral("stretch"));
+    m_hModeCombo->addItem(AppIcons::icon(QStringLiteral("repeat-h")),  QStringLiteral("repeat"));
+    m_hModeCombo->addItem(AppIcons::icon(QStringLiteral("mirror-h")),  QStringLiteral("mirror"));
+    m_hModeCombo->addItem(AppIcons::icon(QStringLiteral("fixed-h")),   QStringLiteral("fixed"));
     m_vModeCombo = new QComboBox;
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/stretch-v.svg")), QStringLiteral("stretch"));
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/repeat-v.svg")),  QStringLiteral("repeat"));
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/mirror-v.svg")),  QStringLiteral("mirror"));
-    m_vModeCombo->addItem(QIcon(QStringLiteral(":/icons/fixed-v.svg")),   QStringLiteral("fixed"));
+    m_vModeCombo->addItem(AppIcons::icon(QStringLiteral("stretch-v")), QStringLiteral("stretch"));
+    m_vModeCombo->addItem(AppIcons::icon(QStringLiteral("repeat-v")),  QStringLiteral("repeat"));
+    m_vModeCombo->addItem(AppIcons::icon(QStringLiteral("mirror-v")),  QStringLiteral("mirror"));
+    m_vModeCombo->addItem(AppIcons::icon(QStringLiteral("fixed-v")),   QStringLiteral("fixed"));
     {
         auto* sep = new QFrame;
         sep->setFrameShape(QFrame::VLine);
@@ -439,15 +442,22 @@ void NineSliceWorkspace::showSprite(const QString& path)
     }
     m_removeBtn->setEnabled(true);
     m_currentSpritePath = sprite->path;
+    m_canvas->setEmptyText(QString());
     loadSprite(sprite->path);
+    updateFixedDimensions();
 }
 
 void NineSliceWorkspace::clearSpriteView()
 {
     m_currentSpritePath.clear();
     m_configGroup->setEnabled(false);
+    // Nothing to size without a sprite.
+    m_widthSpin->setEnabled(false);
+    m_heightSpin->setEnabled(false);
     m_canvas->setReadOnly(false);
     m_canvas->clearSprite();
+    m_canvas->setEmptyText(m_navigatorPanel->firstSpriteItem() ? tr("Select a sprite on the left")
+                                                               : tr("Add sprites that stretch, such as panels and buttons"));
 }
 
 void NineSliceWorkspace::setNineSliced(const QStringList& paths, bool nineSliced, const QString& nextPath)

@@ -1291,20 +1291,20 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     // A new frame after "nod" is the animation's own pose, starting as a copy of it.
     std::unique_ptr<QMenu> menu(track->createContextMenu(0));
     triggerMenuItem(menu.get(), QStringLiteral("New Frame After"));
-    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk frame 1 2/2"}));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("New Frame"));
     QCOMPARE(doll.puppet().poses.last().owner, QStringLiteral("walk"));
-    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk 1"), QStringLiteral("head")), std::optional<int>(20));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk frame 1"), QStringLiteral("head")), std::optional<int>(20));
     // The Poses tab lists only shared poses; steps of another animation can't play it.
     QCOMPARE(workspace.poseStrip()->count(), 3);
     std::unique_ptr<QMenu> walkMenu(track->createContextMenu(-1));
-    QCOMPARE(submenuItems(walkMenu.get(), QStringLiteral("Add Pose")), (QStringList{"rest", "nod", "smile", "walk 1"}));
+    QCOMPARE(submenuItems(walkMenu.get(), QStringLiteral("Add Pose")), (QStringList{"rest", "nod", "smile", "walk frame 1"}));
 
     // Stopped on the new frame, the canvas edits it, and only it.
     QCOMPARE(workspace.selectedStep(), 1);
     QVERIFY(workspace.editingStep());
     workspace.setPartAngle(1, 45);
-    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk 1"), QStringLiteral("head")), std::optional<int>(45));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk frame 1"), QStringLiteral("head")), std::optional<int>(45));
     QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("nod"), QStringLiteral("head")), std::optional<int>(20));
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(45));
 
@@ -1318,17 +1318,17 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     // A step playing a shared pose gets its own copy when edited: "talk" still nods by 20°.
     workspace.selectStep(0);
     workspace.setPartAngle(1, 30);
-    QCOMPARE(stepRows(doll), (QStringList{"walk 2 2/2", "walk 1 2/2"}));
-    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk 2"), QStringLiteral("head")), std::optional<int>(30));
+    QCOMPARE(stepRows(doll), (QStringList{"walk frame 2 2/2", "walk frame 1 2/2"}));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk frame 2"), QStringLiteral("head")), std::optional<int>(30));
     QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("nod"), QStringLiteral("head")), std::optional<int>(20));
     QCOMPARE(stepRows(doll, 1), QStringList{"nod 2/2"});
-    QVERIFY(workspace.findChild<QLabel*>(QStringLiteral("puppetStepNote"))->text().contains(QStringLiteral("walk 2")));
+    QVERIFY(workspace.findChild<QLabel*>(QStringLiteral("puppetStepNote"))->text().contains(QStringLiteral("walk frame 2")));
     // More turns of that step go on the copy; undoing them puts "nod" back.
     workspace.setPartAngle(1, 35);
     QCOMPARE(doll.puppet().poses.size(), 5);
     doll.project.undoStack.undo();
     doll.project.undoStack.undo();
-    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk frame 1 2/2"}));
     QCOMPARE(doll.puppet().poses.size(), 4);
 
     // Mid-way to a pose, the canvas only plays.
@@ -1340,13 +1340,13 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     // Saved as a pose, a frame is copied to the Poses tab.
     QVERIFY(!workspace.savePoseFromStep(1, QStringLiteral("nod")).isEmpty());  // taken
     QCOMPARE(workspace.savePoseFromStep(1, QStringLiteral("look up")), QString());
-    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "nod", "smile", "look up", "walk 1"}));
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "nod", "smile", "look up", "walk frame 1"}));
     QCOMPARE(workspace.poseStrip()->count(), 4);
 
     // Renaming the animation renames its frames; removing the frame's step removes it.
     workspace.findChild<QListWidget*>(QStringLiteral("puppetAnimations"))->item(0)->setText(QStringLiteral("stroll"));
     QCoreApplication::processEvents();
-    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "stroll 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "stroll frame 1 2/2"}));
     workspace.removeStep(1);
     QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "nod", "smile", "look up"}));
 }
@@ -1569,9 +1569,9 @@ void PuppetWorkspaceTests::testRestPoseVariantIsTheRestVariant() {
     QCOMPARE(doll.puppet().poses[1].settings[0].variant, QStringLiteral("head-smiling"));
     QCOMPARE(puppetVariantName(doll.puppet().parts[1].variants[0]), QStringLiteral("head"));
 
-    // Picked on Rest, it becomes the rest variant: first, starred in the tree.
+    // Picked on Rest, it becomes the rest variant: first.
     workspace.selectPose(0);
-    QCOMPARE(shows->currentIndex(), 0);  // the starred rest variant
+    QCOMPARE(shows->currentIndex(), 0);  // the rest variant, starred as Rest shows it
     shows->setCurrentIndex(1);
     QCOMPARE(doll.puppet().poses[0].settings[1].variant, QStringLiteral("head-smiling"));
     QCOMPARE(puppetVariantName(doll.puppet().parts[1].variants[0]), QStringLiteral("head-smiling"));
@@ -1596,6 +1596,15 @@ void PuppetWorkspaceTests::testRemovingAPartSelectsItsNeighbour() {
     QCOMPARE(doll.puppet().parts.size(), 2);
     QCOMPARE(doll.puppet().attachments.size(), 1);
     QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
+}
+
+/// Whether a tree row shows the star (unstarred rows have a blank icon, to keep names aligned).
+bool starred(QTreeWidgetItem* item) {
+    const QImage image = item->icon(0).pixmap(16, 16).toImage();
+    for (int y = 0; y < image.height(); ++y)
+        for (int x = 0; x < image.width(); ++x)
+            if (qAlpha(image.pixel(x, y)) > 0) return true;
+    return false;
 }
 
 void PuppetWorkspaceTests::testShowingAVariantInAPoseFromTheTree() {
@@ -1630,7 +1639,27 @@ void PuppetWorkspaceTests::testShowingAVariantInAPoseFromTheTree() {
     QCOMPARE(doll.puppet().poses[1].settings[0].angle, std::optional<int>(20));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Show Variant"));
     QCOMPARE(variantItem(1, 1)->text(1), QStringLiteral("sprite · shown"));
+    // The star is on the variant shown, here and in the panel's Shows.
+    QVERIFY(!starred(variantItem(1, 0)));
+    QVERIFY(starred(variantItem(1, 1)));
+    workspace.select({0, 1, -1});
+    auto* showsList = workspace.findChild<QComboBox*>(QStringLiteral("partShownVariant"));
+    QCOMPARE(showsList->itemText(0), QStringLiteral("head"));
+    QCOMPARE(showsList->itemText(1), QStringLiteral("★ head-smiling"));
+    // An animation frame playing "smile": its variant is starred while it is shown.
     doll.project.undoStack.undo();
+    doll.project.session.activeAtlas().puppets.first().sequences = {
+        {QStringLiteral("grin"), 8, AnimationLoopMode::Loop, {{QStringLiteral("smile"), 1, 1, false}}}};
+    workspace.refresh();
+    workspace.bottomTabs()->setCurrentIndex(1);
+    workspace.selectStep(0);
+    QVERIFY(!starred(variantItem(1, 0)));
+    QVERIFY(starred(variantItem(1, 1)));
+    workspace.bottomTabs()->setCurrentIndex(0);
+    QVERIFY(starred(variantItem(1, 0)));
+    QVERIFY(!starred(variantItem(1, 1)));
+    doll.project.session.activeAtlas().puppets.first().sequences.clear();
+    workspace.refresh();
 
     // Double-clicking a variant does the same.
     emit workspace.tree()->itemDoubleClicked(variantItem(1, 1), 0);

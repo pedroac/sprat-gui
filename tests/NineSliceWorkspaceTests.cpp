@@ -164,6 +164,11 @@ void NineSliceWorkspaceTests::testOnlyNineSlicedSpritesAreListed() {
     QVERIFY(!navigator->findSpriteItem(project.sprites[2]->path));
     QVERIFY(!showsEmptyState(workspace));
     QCOMPARE(workspace.canvas()->sourceSize(), QSize(30, 30));
+    QVERIFY(workspace.canvas()->emptyText().isEmpty());
+    QVERIFY(workspace.findChild<QSpinBox*>(QStringLiteral("nineSliceWidth"))->isEnabled());
+    // Thumbnails are decoded off the UI thread, and set on the row when ready.
+    QTreeWidgetItem* row = navigator->findSpriteItem(project.sprites[0]->path);
+    QTRY_VERIFY_WITH_TIMEOUT(!row->icon(0).isNull(), 5000);
 }
 
 void NineSliceWorkspaceTests::testEmptyStateWithoutNineSlicedSprites() {
@@ -176,6 +181,10 @@ void NineSliceWorkspaceTests::testEmptyStateWithoutNineSlicedSprites() {
     QVERIFY(showsEmptyState(workspace));
     QVERIFY(!workspace.navigatorPanel()->firstSpriteItem());
     QVERIFY(workspace.canvas()->sourceSize().isEmpty());
+    // The canvas says what to do, and there is nothing to size.
+    QVERIFY(!workspace.canvas()->emptyText().isEmpty());
+    QVERIFY(!workspace.findChild<QSpinBox*>(QStringLiteral("nineSliceWidth"))->isEnabled());
+    QVERIFY(!workspace.findChild<QSpinBox*>(QStringLiteral("nineSliceHeight"))->isEnabled());
     auto* removeButton = workspace.findChild<QPushButton*>(QStringLiteral("nineSliceRemoveButton"));
     QVERIFY(removeButton);
     QVERIFY(!removeButton->isEnabled());

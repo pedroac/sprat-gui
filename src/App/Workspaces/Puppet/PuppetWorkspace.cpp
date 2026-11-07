@@ -1,4 +1,5 @@
 #include "PuppetWorkspace.h"
+#include "AppIcons.h"
 #include "MessageDialog.h"
 #include "ProjectSession.h"
 #include "PuppetCanvas.h"
@@ -60,8 +61,8 @@ constexpr int DEFAULT_STEP_HOLD = 4;
 constexpr int NAME_COLUMN = 0;
 constexpr int DETAIL_COLUMN = 1;
 
-/// A star icon for the rest variant, drawn from the font so it needs no resource.
-QIcon restVariantIcon(const QPalette& palette) {
+/// A star icon for the variant a part shows, drawn from the font so it needs no resource.
+QIcon shownVariantIcon(const QPalette& palette) {
     QPixmap pixmap(16, 16);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
@@ -122,7 +123,7 @@ void PuppetWorkspace::setupUi() {
     m_tree = new PuppetTreeWidget(left);
     m_tree->setObjectName(QStringLiteral("puppetTree"));
     m_tree->setColumnCount(2);
-    m_tree->setHeaderLabels({tr("Name"), tr("Placement")});
+    m_tree->setHeaderLabels({tr("Name"), tr("Details")});
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(NAME_COLUMN, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(DETAIL_COLUMN, QHeaderView::ResizeToContents);
@@ -149,7 +150,7 @@ void PuppetWorkspace::setupUi() {
     m_addSpritesAction = new QAction(tr("Add Sprites..."), this);
     m_addSpritesAction->setToolTip(tr("Pick sprites the selected part can show"));
     connect(m_addSpritesAction, &QAction::triggered, this, &PuppetWorkspace::pickSpriteVariants);
-    m_removeAction = new QAction(QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton),
+    m_removeAction = new QAction(AppIcons::icon(QStringLiteral("delete")),
                                  tr("Remove"), this);
     m_removeAction->setShortcut(QKeySequence::Delete);
     m_removeAction->setShortcutContext(Qt::WidgetShortcut);
@@ -166,7 +167,7 @@ void PuppetWorkspace::setupUi() {
     m_addButton = new QToolButton(left);
     m_addButton->setObjectName(QStringLiteral("puppetAddButton"));
     m_addButton->setText(tr("Add"));
-    m_addButton->setIcon(QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder));
+    m_addButton->setIcon(AppIcons::icon(QStringLiteral("add")));
     m_addButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_addButton->setPopupMode(QToolButton::InstantPopup);
     m_addButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -255,7 +256,7 @@ void PuppetWorkspace::setupUi() {
         auto* posesLayout = new QVBoxLayout(posesPage);
         posesLayout->setContentsMargins(4, 4, 4, 4);
         auto* row = new QHBoxLayout;
-        m_newPoseButton = new QPushButton(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add Pose"), middle);
+        m_newPoseButton = new QPushButton(AppIcons::icon(QStringLiteral("add")), tr("Add Pose"), middle);
         m_newPoseButton->setObjectName(QStringLiteral("puppetNewPose"));
         m_newPoseButton->setToolTip(tr("Add a pose after the selected frame. It sets no part until you change one. "
                                        "Right-click a frame for more"));
@@ -569,8 +570,12 @@ void PuppetWorkspace::rebuildTree() {
     m_rebuilding = true;
     m_tree->clear();
     const QVector<Puppet>& all = puppets();
-    const QIcon restIcon = restVariantIcon(palette());
-    const QIcon warningIcon = QApplication::style()->standardIcon(QStyle::SP_MessageBoxWarning);
+    const QIcon shownIcon = shownVariantIcon(palette());
+    // Unstarred variants get a blank icon as wide, so the names line up.
+    QPixmap blank(16, 16);
+    blank.fill(Qt::transparent);
+    const QIcon blankIcon(blank);
+    const QIcon warningIcon = AppIcons::icon(QStringLiteral("warning"));
     const PuppetSpriteLookup lookup = spriteLookup();
     const Qt::ItemFlags baseFlags = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable;
 
@@ -586,12 +591,14 @@ void PuppetWorkspace::rebuildTree() {
         PuppetTreeWidget::setSelectionOf(puppetItem, {p, -1, -1});
 
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(puppet, lookup);
-        // The variants the selected pose shows, marked on the selected puppet.
+        // The variants the canvas shows (the edited pose or frame, or the animation where its
+        // playhead is) are starred on the selected puppet; other puppets show their rest variants.
         const int edited = p == m_selection.puppet ? editedPose() : -1;
         const bool posing = edited >= 0;
-        QVector<int> shownVariants;
-        if (posing) {
-            for (const PuppetPartState& state : shownStates(puppet)) shownVariants.append(state.variant);
+        QVector<int> shownVariants(puppet.parts.size(), 0);
+        if (p == m_selection.puppet) {
+            const QVector<PuppetPartState> states = shownStates(puppet);
+            for (int i = 0; i < states.size() && i < shownVariants.size(); ++i) shownVariants[i] = states[i].variant;
         }
         for (int i = 0; i < puppet.parts.size(); ++i) {
             const PuppetPart& part = puppet.parts[i];
@@ -620,7 +627,7 @@ void PuppetWorkspace::rebuildTree() {
                 variantItem->setText(NAME_COLUMN, puppetVariantName(variant));
                 const QString kind = variant.kind == PuppetVariant::Kind::Animation ? tr("animation") : tr("sprite");
                 // Only worth marking when there is a choice.
-                if (part.variants.size() > 1 && v == shownVariants.value(i, -1)) {
+                if (posing && part.variants.size() > 1 && v == shownVariants.value(i, -1)) {
                     variantItem->setText(DETAIL_COLUMN, tr("%1 · shown").arg(kind));
                     variantItem->setToolTip(DETAIL_COLUMN, tr("Pose \"%1\" shows it").arg(puppet.poses[edited].name));
                     QFont shownFont = variantItem->font(NAME_COLUMN);
@@ -634,7 +641,7 @@ void PuppetWorkspace::rebuildTree() {
                     variantItem->setIcon(NAME_COLUMN, warningIcon);
                     variantItem->setToolTip(NAME_COLUMN, tr("%1 isn't in this atlas").arg(describeSource(variant)));
                 } else {
-                    if (v == 0) variantItem->setIcon(NAME_COLUMN, restIcon);
+                    variantItem->setIcon(NAME_COLUMN, v == shownVariants.value(i, 0) ? shownIcon : blankIcon);
                     variantItem->setToolTip(NAME_COLUMN, v == 0 ? tr("%1 (rest variant)").arg(describeSource(variant))
                                                                 : describeSource(variant));
                 }
@@ -652,10 +659,13 @@ void PuppetWorkspace::rebuildTree() {
 void PuppetWorkspace::updateCanvas() {
     const Puppet* puppet = selectedPuppet();
     if (!puppet) {
+        // With no puppets, the tree's own empty state says how to start.
+        m_canvas->setEmptyText(puppets().isEmpty() ? QString() : tr("Select a puppet on the left"));
         m_canvas->clearPuppet();
         m_fittedPuppet.clear();
         return;
     }
+    m_canvas->setEmptyText(QString());
     // Another puppet starts at rest.
     const QString puppetKey = m_session->activeAtlas().id + QLatin1Char('/') + puppet->name;
     if (puppetKey != m_posedPuppet) {
@@ -683,7 +693,9 @@ void PuppetWorkspace::updateCanvas() {
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
         drawn.attached = puppetParentAttachment(*puppet, part.name) != nullptr;
         drawn.joint = placements[i].pivot;
-        drawn.included = editedPose() < 0 || inPose.contains(i);
+        // Only the Poses tab fades the parts a pose leaves alone: in an animation, faint
+        // parts would be mistaken for the onion skin.
+        drawn.included = m_animating || editedPose() < 0 || inPose.contains(i);
         // The variant the pose shows (the rest variant unless it picks another).
         const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants[states[i].variant]);
         drawn.image = imageOf(sprite);
@@ -986,7 +998,7 @@ void PuppetWorkspace::renameSelected(const QString& name) {
         text = tr("Rename Puppet");
     }
     if (!problem.isEmpty()) {
-        MessageDialog::warning(this, tr("Can't rename"), problem);
+        MessageDialog::warning(this, tr("Can't Rename"), problem);
         refresh();  // puts the old name back in the tree
         return;
     }
@@ -1430,7 +1442,7 @@ void PuppetWorkspace::updatePoseButtons() {
     m_newPoseButton->setEnabled(puppet != nullptr);
     m_duplicatePoseButton->setEnabled(posing);
     m_removePoseButton->setEnabled(posing && !rest);
-    m_poseStatus->setText(rest ? tr("Rest: the pose animations go back to. Moving a part placed by position moves the rig")
+    m_poseStatus->setText(rest ? tr("Rest pose: animations return to it. Moving a positioned part here moves the rig")
                                : QString());
 }
 
@@ -1554,6 +1566,10 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
 
     // Left: the animations, ticked to play along with the selected one.
     auto* listColumn = new QVBoxLayout;
+    auto* listCaption = new QLabel(tr("Tick to play along"), page);
+    listCaption->setForegroundRole(QPalette::PlaceholderText);
+    listCaption->setToolTip(tr("Ticked animations play with the selected one, as a game would combine them"));
+    listColumn->addWidget(listCaption);
     m_sequenceList = new QListWidget(page);
     m_sequenceList->setObjectName(QStringLiteral("puppetAnimations"));
     m_sequenceList->setFixedWidth(SEQUENCE_LIST_WIDTH);
@@ -1563,7 +1579,7 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
                                   "as a game would combine them"));
     listColumn->addWidget(m_sequenceList, 1);
     auto* listButtons = new QHBoxLayout;
-    m_addSequenceButton = new QPushButton(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add"), page);
+    m_addSequenceButton = new QPushButton(AppIcons::icon(QStringLiteral("add")), tr("Add"), page);
     m_addSequenceButton->setObjectName(QStringLiteral("puppetAddAnimation"));
     m_addSequenceButton->setToolTip(tr("Add an animation after the selected one"));
     m_removeSequenceButton = new QPushButton(tr("Delete"), page);
@@ -1579,7 +1595,7 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
     m_playButton = new QToolButton(page);
     m_playButton->setObjectName(QStringLiteral("puppetPlay"));
     m_playButton->setCheckable(true);
-    m_playButton->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    m_playButton->setIcon(AppIcons::icon(QStringLiteral("play")));
     m_playButton->setToolTip(tr("Play the animation on the canvas"));
     header->addWidget(m_playButton);
     m_sequenceFps = new QSpinBox(page);
@@ -1687,7 +1703,7 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
         const int row = item ? m_sequenceList->row(item) : -1;
         auto* menu = new QMenu(this);
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        menu->addAction(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add Animation"), this,
+        menu->addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Animation"), this,
                         [this, row]() { addSequence(row >= 0 ? row + 1 : int(selectedPuppet()->sequences.size())); });
         if (row >= 0) {
             menu->addAction(tr("Duplicate"), this, [this, row]() { duplicateSequence(row); });
@@ -1925,7 +1941,7 @@ void PuppetWorkspace::askSavePoseFromStep(int stepIndex) {
         if (!accepted) return;
         const QString problem = savePoseFromStep(stepIndex, name);
         if (problem.isEmpty()) return;
-        MessageDialog::warning(this, tr("Can't save the pose"), problem);
+        MessageDialog::warning(this, tr("Can't Save the Pose"), problem);
     }
 }
 
@@ -1975,7 +1991,7 @@ void PuppetWorkspace::setPlaying(bool playing) {
     }
     const QSignalBlocker blocker(m_playButton);
     m_playButton->setChecked(playing);
-    m_playButton->setIcon(style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+    m_playButton->setIcon(AppIcons::icon(playing ? QStringLiteral("pause") : QStringLiteral("play")));
 }
 
 void PuppetWorkspace::advancePlayback() {

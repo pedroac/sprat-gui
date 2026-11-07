@@ -171,9 +171,9 @@ void MainWindow::updateManualFrameLabel() {
         return;
     }
     if (m_session->activeFramePaths.isEmpty()) {
-        m_folderLabel->setText(tr("Folder: none"));
+        m_folderLabel->setText(tr("No sprites"));
     } else {
-        m_folderLabel->setText(QString(tr("Frames: %1 (manual selection)")).arg(m_session->activeFramePaths.size()));
+        m_folderLabel->setText(tr("%n sprite(s)", nullptr, int(m_session->activeFramePaths.size())));
     }
 }
 
@@ -222,7 +222,7 @@ void MainWindow::onCanvasAddFramesRequested() {
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
         m_session->activeFramePaths = oldFramePaths;
-        MessageDialog::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Add Frames"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
     // Canvas action - rebuild immediately with loading UI
@@ -275,7 +275,7 @@ void MainWindow::onAddFramesRequested() {
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
         m_session->activeFramePaths = oldFramePaths;
-        MessageDialog::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Add Frames"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
     updateManualFrameLabel();
@@ -503,7 +503,7 @@ void MainWindow::onCanvasRemoveFramesRequested(const QStringList& paths) {
             m_session->selectedSprites.clear();
             m_session->selectedSprite.reset();
             m_statusLabel->setText(tr("No frames loaded"));
-            m_folderLabel->setText(tr("Folder: none"));
+            m_folderLabel->setText(tr("No sprites"));
             m_session->cachedLayoutOutput.clear();
             m_session->cachedLayoutScale = 1.0;
             updateMainContentView();

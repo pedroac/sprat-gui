@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppIcons.h"
 #include "LayoutCanvas.h"
 #include "LayoutOrchestrator.h"
 #include "AtlasesManagementWorkspace.h"
@@ -266,10 +267,10 @@ void MainWindow::onEditAliases() {
 
     auto* btnRow   = new QHBoxLayout();
     auto* style_ = QApplication::style();
-    auto* addBtn   = new QPushButton(style_->standardIcon(QStyle::SP_FileDialogNewFolder), "", &dlg);
+    auto* addBtn   = new QPushButton(AppIcons::icon(QStringLiteral("add")), "", &dlg);
     addBtn->setToolTip(tr("Add alias"));
     addBtn->setFixedSize(24, 24);
-    auto* removeBtn = new QPushButton(style_->standardIcon(QStyle::SP_DialogDiscardButton), "", &dlg);
+    auto* removeBtn = new QPushButton(AppIcons::icon(QStringLiteral("delete")), "", &dlg);
     removeBtn->setToolTip(tr("Remove selected alias"));
     removeBtn->setFixedSize(24, 24);
     removeBtn->setEnabled(false);

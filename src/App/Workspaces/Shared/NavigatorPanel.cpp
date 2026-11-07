@@ -1,4 +1,5 @@
 #include "NavigatorPanel.h"
+#include "AppIcons.h"
 #include "NavigatorTreeWidget.h"
 #include "ProjectSession.h"
 #include "SpriteTreeUtils.h"
@@ -9,7 +10,14 @@
 #include <QDir>
 #include <QPainter>
 #include <QRegularExpression>
+#include <QDateTime>
+#include <QSet>
+#include <QSignalBlocker>
+#include <functional>
 #include <QFileInfo>
+#include <QFutureWatcher>
+#include <QImageReader>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,6 +31,106 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+
+namespace {
+/// Sprite rows' thumbnails are this many pixels a side.
+constexpr int THUMBNAIL_SIZE = 20;
+
+struct CachedThumbnail {
+    QDateTime modified;
+    QImage image;  ///< Null for a file that isn't an image (it gets no icon)
+};
+
+struct LoadedThumbnail {
+    QString path;
+    QDateTime modified;
+    QImage image;
+};
+
+/// Thumbnails by sprite path, shared by every sprite tree (each picker and workspace), so a
+/// sprite is decoded once while its file is unchanged. Images, not pixmaps: they outlive
+/// QApplication safely.
+QHash<QString, CachedThumbnail>& thumbnailCache() {
+    static QHash<QString, CachedThumbnail> cache;
+    return cache;
+}
+
+/// Decodes thumbnails off the UI thread for every sprite tree. Trees rebuild several times
+/// during an import: a path already being decoded isn't decoded again, and every tree gets
+/// each batch as it is ready (ThumbnailLoader::ready).
+class ThumbnailLoader : public QObject {
+public:
+    static ThumbnailLoader* instance() {
+        static ThumbnailLoader* loader = new ThumbnailLoader(qApp);
+        return loader;
+    }
+
+    void load(const QStringList& paths) {
+        QStringList wanted;
+        for (const QString& path : paths) {
+            if (m_loading.contains(path)) continue;
+            m_loading.insert(path);
+            wanted.append(path);
+        }
+        if (wanted.isEmpty()) return;
+#ifdef Q_OS_WASM
+        // QtConcurrent may not run without pthreads (see LayoutRunner): decode here, once the
+        // tree that asked is built.
+        QMetaObject::invokeMethod(this, [this, wanted]() { deliver(decode(wanted)); }, Qt::QueuedConnection);
+#else
+        auto* watcher = new QFutureWatcher<QVector<LoadedThumbnail>>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher]() {
+            deliver(watcher->result());
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run([wanted]() { return decode(wanted); }));
+#endif
+    }
+
+    /// Calls @p callback with each batch of thumbnails, until @p owner is destroyed.
+    void listen(QObject* owner, std::function<void(const QHash<QString, QImage>&)> callback) {
+        m_listeners.append({owner, std::move(callback)});
+        connect(owner, &QObject::destroyed, this, [this, owner]() {
+            m_listeners.removeIf([owner](const auto& listener) { return listener.first == owner; });
+        });
+    }
+
+private:
+    using QObject::QObject;
+
+    static QVector<LoadedThumbnail> decode(const QStringList& paths) {
+        QVector<LoadedThumbnail> loaded;
+        loaded.reserve(paths.size());
+        for (const QString& path : paths) {
+            QImage image = QImageReader(path).read();
+            if (!image.isNull())
+                image = image.scaled(THUMBNAIL_SIZE, THUMBNAIL_SIZE, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            loaded.append({path, QFileInfo(path).lastModified(), image});
+        }
+        return loaded;
+    }
+
+    void deliver(const QVector<LoadedThumbnail>& loaded) {
+        QHash<QString, QImage> images;
+        for (const LoadedThumbnail& thumbnail : loaded) {
+            m_loading.remove(thumbnail.path);
+            thumbnailCache().insert(thumbnail.path, {thumbnail.modified, thumbnail.image});
+            images.insert(thumbnail.path, thumbnail.image);
+        }
+        for (const auto& [owner, callback] : m_listeners) callback(images);
+    }
+
+    QSet<QString> m_loading;
+    QVector<QPair<QObject*, std::function<void(const QHash<QString, QImage>&)>>> m_listeners;
+};
+
+/// The cached thumbnail of @p path, or nullptr when it isn't cached or its file changed since.
+const QImage* cachedThumbnail(const QString& path) {
+    const auto it = thumbnailCache().constFind(path);
+    if (it == thumbnailCache().constEnd() || it->modified != QFileInfo(path).lastModified()) return nullptr;
+    return &it->image;
+}
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Helper: recursively propagate tristate check state bottom-up for folder nodes.
@@ -77,6 +185,9 @@ static QString globToRegex(const QString& glob)
 NavigatorPanel::NavigatorPanel(QWidget* parent)
     : QWidget(parent)
 {
+    ThumbnailLoader::instance()->listen(this, [this](const QHash<QString, QImage>& thumbnails) {
+        applyLoadedThumbnails(thumbnails);
+    });
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);
@@ -142,17 +253,17 @@ NavigatorPanel::NavigatorPanel(QWidget* parent)
 
     // Add Source button — hidden by default; shown in Sprites workspace
     m_addSourceBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon),
+        AppIcons::icon(QStringLiteral("add")),
         tr("Add Source"), this);
     m_addSourceBtn->setVisible(false);
     layout->addWidget(m_addSourceBtn);
 
     connect(m_addSourceBtn, &QPushButton::clicked, this, [this]() {
         QMenu* menu = new QMenu(this);
-        auto* folderAction  = menu->addAction(tr("Folder..."));
-        auto* imageAction   = menu->addAction(tr("Image..."));
-        auto* archiveAction = menu->addAction(tr("Archive..."));
-        auto* urlAction     = menu->addAction(tr("URL..."));
+        auto* folderAction  = menu->addAction(AppIcons::icon(QStringLiteral("folder-add")), tr("Folder..."));
+        auto* imageAction   = menu->addAction(AppIcons::icon(QStringLiteral("image-add")), tr("Image..."));
+        auto* archiveAction = menu->addAction(AppIcons::icon(QStringLiteral("archive")), tr("Archive..."));
+        auto* urlAction     = menu->addAction(AppIcons::icon(QStringLiteral("globe-add")), tr("URL..."));
         QAction* chosen = menu->exec(
             m_addSourceBtn->mapToGlobal(QPoint(0, m_addSourceBtn->height())));
         if      (chosen == folderAction)  emit addSourceFolderRequested();
@@ -503,8 +614,8 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         return;
     }
 
-    const QIcon folderIcon    = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
-    const QIcon animGroupIcon = QApplication::style()->standardIcon(QStyle::SP_DirLinkIcon);
+    const QIcon folderIcon    = AppIcons::icon(QStringLiteral("folder"));
+    const QIcon animGroupIcon = AppIcons::icon(QStringLiteral("folder-virtual"));
 
     auto makeGroupNode = [&](QTreeWidgetItem* parent, const QString& text) -> QTreeWidgetItem* {
         auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
@@ -566,6 +677,8 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
     QMap<QString, SpritePtr> spriteByPath;
     for (const SpritePtr& sp : allSprites)
         spriteByPath[sp->path] = sp;
+    QStringList pendingThumbnails;  // not cached yet: decoded off the UI thread below
+    QSet<QString> pendingSet;
 
     auto makeLeafCb = [&](QTreeWidgetItem* parent, const QString& path, const QString& leafName) {
         auto* leaf = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_spriteTree);
@@ -576,33 +689,11 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         }
         const SpritePtr sp = spriteByPath.value(path);
         leaf->setData(0, Qt::UserRole, QVariant::fromValue(sp));
-        auto it = m_iconCache.find(path);
-        if (it == m_iconCache.end()) {
-            QPixmap pix(path);
-            QIcon icon;
-            if (!pix.isNull())
-                icon = QIcon(pix.scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            it = m_iconCache.insert(path, icon);
-        }
-        if (!it.value().isNull()) {
-            QIcon displayIcon = it.value();
-            if (m_badgeCallback && sp) {
-                // Always allocate [badge | gap | thumbnail] so all items align.
-                constexpr int badgeSize = 12;
-                constexpr int gap       = 2;
-                constexpr int thumbSize = 20;
-                QPixmap combined(badgeSize + gap + thumbSize, thumbSize);
-                combined.fill(Qt::transparent);
-                QPainter painter(&combined);
-                const QIcon badge = m_badgeCallback(sp);
-                if (!badge.isNull()) {
-                    const int badgeY = (thumbSize - badgeSize) / 2;
-                    painter.drawPixmap(0, badgeY, badge.pixmap(badgeSize, badgeSize));
-                }
-                painter.drawPixmap(badgeSize + gap, 0, it.value().pixmap(thumbSize, thumbSize));
-                displayIcon = QIcon(combined);
-            }
-            leaf->setIcon(0, displayIcon);
+        if (const QImage* thumbnail = cachedThumbnail(path)) {
+            if (!thumbnail->isNull()) applyThumbnail(leaf, QIcon(QPixmap::fromImage(*thumbnail)));
+        } else if (!pendingSet.contains(path)) {
+            pendingSet.insert(path);
+            pendingThumbnails.append(path);
         }
     };
 
@@ -718,27 +809,27 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
             QString typeLabel;
             switch (src.type) {
             case SourceType::Folder:
-                sourceIcon = QIcon(":/icons/directory.svg");
+                sourceIcon = AppIcons::icon(QStringLiteral("folder"));
                 typeLabel = tr("Folder");
                 break;
             case SourceType::SingleImage:
                 sourceIcon = src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
-                    ? QIcon(":/icons/file-gif.svg")
-                    : QIcon(":/icons/image.svg");
+                    ? AppIcons::icon(QStringLiteral("image-animated"))
+                    : AppIcons::icon(QStringLiteral("image"));
                 typeLabel = tr("Image");
                 break;
             case SourceType::Archive:
-                sourceIcon = QIcon(":/icons/package-compressed.svg");
+                sourceIcon = AppIcons::icon(QStringLiteral("archive"));
                 typeLabel = tr("Archive");
                 break;
             case SourceType::Url:
-                sourceIcon = QIcon(":/icons/internet.svg");
+                sourceIcon = AppIcons::icon(QStringLiteral("globe"));
                 typeLabel = tr("URL");
                 break;
             }
 
             if (src.hasError) {
-                sourceNode->setIcon(0, QIcon(":/icons/error.svg"));
+                sourceNode->setIcon(0, AppIcons::icon(QStringLiteral("error")));
                 sourceNode->setToolTip(0, tr("Failed to load — right-click to retry\n%1: %2")
                     .arg(typeLabel, src.originalPath));
                 // Add a child item showing the error detail
@@ -811,7 +902,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
 
                 auto* trashNode = new QTreeWidgetItem(sourceNode);
                 trashNode->setText(0, tr("Excluded (%1)").arg(N));
-                trashNode->setIcon(0, QApplication::style()->standardIcon(QStyle::SP_TrashIcon));
+                trashNode->setIcon(0, AppIcons::icon(QStringLiteral("delete")));
                 {
                     QFont tf = trashNode->font(0);
                     tf.setItalic(true);
@@ -938,4 +1029,44 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
 
     if (hadItems)
         m_spriteTree->verticalScrollBar()->setValue(scrollPos);
+    if (!pendingThumbnails.isEmpty()) loadThumbnailsAsync(pendingThumbnails);
+}
+
+void NavigatorPanel::applyThumbnail(QTreeWidgetItem* leaf, const QIcon& thumbnail)
+{
+    const auto sp = leaf->data(0, Qt::UserRole).value<SpritePtr>();
+    if (!m_badgeCallback || !sp) {
+        leaf->setIcon(0, thumbnail);
+        return;
+    }
+    // Always allocate [badge | gap | thumbnail] so all items align.
+    constexpr int badgeSize = 12;
+    constexpr int gap       = 2;
+    QPixmap combined(badgeSize + gap + THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+    combined.fill(Qt::transparent);
+    QPainter painter(&combined);
+    const QIcon badge = m_badgeCallback(sp);
+    if (!badge.isNull()) {
+        const int badgeY = (THUMBNAIL_SIZE - badgeSize) / 2;
+        painter.drawPixmap(0, badgeY, badge.pixmap(badgeSize, badgeSize));
+    }
+    painter.drawPixmap(badgeSize + gap, 0, thumbnail.pixmap(THUMBNAIL_SIZE, THUMBNAIL_SIZE));
+    leaf->setIcon(0, QIcon(combined));
+}
+
+void NavigatorPanel::loadThumbnailsAsync(const QStringList& paths)
+{
+    ThumbnailLoader::instance()->load(paths);
+}
+
+void NavigatorPanel::applyLoadedThumbnails(const QHash<QString, QImage>& thumbnails)
+{
+    // An icon change is an itemChanged, which the tree's users handle as a check change.
+    const QSignalBlocker blocker(m_spriteTree);
+    for (QTreeWidgetItemIterator it(m_spriteTree); *it; ++it) {
+        const auto sp = (*it)->data(0, Qt::UserRole).value<SpritePtr>();
+        if (!sp) continue;
+        const auto image = thumbnails.constFind(sp->path);
+        if (image != thumbnails.constEnd() && !image->isNull()) applyThumbnail(*it, QIcon(QPixmap::fromImage(*image)));
+    }
 }

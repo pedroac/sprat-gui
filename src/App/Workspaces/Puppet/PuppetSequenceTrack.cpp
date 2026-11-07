@@ -1,4 +1,5 @@
 #include "PuppetSequenceTrack.h"
+#include "AppIcons.h"
 
 #include <algorithm>
 #include <QContextMenuEvent>
@@ -225,7 +226,7 @@ void PuppetSequenceTrack::keyPressEvent(QKeyEvent* event) {
 
 QMenu* PuppetSequenceTrack::posesMenu(const QString& title, int stepIndex, QWidget* parent) {
     auto* menu = new QMenu(title, parent);
-    menu->setIcon(QIcon(QStringLiteral(":/icons/add-ellipse.svg")));
+    menu->setIcon(AppIcons::icon(QStringLiteral("add")));
     for (const QString& pose : m_poseNames)
         menu->addAction(pose, this, [this, stepIndex, pose]() { emit addRequested(stepIndex, pose); });
     menu->setEnabled(!m_poseNames.isEmpty());
@@ -234,7 +235,7 @@ QMenu* PuppetSequenceTrack::posesMenu(const QString& title, int stepIndex, QWidg
 
 QMenu* PuppetSequenceTrack::createContextMenu(int step) {
     auto* menu = new QMenu(this);
-    const QIcon add(QStringLiteral(":/icons/add-ellipse.svg"));
+    const QIcon add = AppIcons::icon(QStringLiteral("add"));
     if (step < 0) {
         const int last = int(m_blocks.size()) - 1;
         menu->addAction(add, tr("New Frame"), this, [this, last]() { emit newFrameRequested(last + 1, last); });
