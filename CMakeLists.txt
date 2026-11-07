@@ -785,6 +785,7 @@ if(BUILD_TESTING)
         tests/NineSliceWorkspaceTests.cpp
         tests/PuppetTests.cpp
         tests/PuppetWorkspaceTests.cpp
+        tests/SpriteEditorTests.cpp
         assets/icons.qrc
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
         src/App/Workspaces/Puppet/PuppetWorkspace.cpp

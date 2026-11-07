@@ -625,8 +625,23 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         }
     }
 
-    // A click on empty space positions the selected handle there: the selected
-    // marker (centred on the click) or, with no marker selected, the pivot.
+    // With a marker selected, clicking the pivot's crosshair selects the pivot, where it is.
+    if (!m_lockToActiveHandle && !m_selectedMarkerName.isEmpty()
+        && distSq(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)) < hitThresholdSq) {
+        m_selectedMarkerName.clear();
+        emit markerSelected("");
+        m_pivotBeforeDrag = QPoint(activeSprite->pivotX, activeSprite->pivotY);
+        m_pivotDragFloat  = QPointF(activeSprite->pivotX, activeSprite->pivotY);
+        m_draggingPivot   = true;
+        setCursor(Qt::SizeAllCursor);
+        m_selectedVertexIndex = -1;
+        update();
+        event->accept();
+        return;
+    }
+
+    // A click elsewhere positions the selected handle there: the selected marker (centred on
+    // the click) or, with no marker selected, the pivot.
     if (NamedPoint* p = m_selectedMarkerName.isEmpty() ? nullptr : getNamedPoint(m_selectedMarkerName)) {
         QPointF anchor(p->x, p->y);
         if (p->kind == MarkerKind::Rectangle) {

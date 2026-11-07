@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Messages lost their paragraph breaks and ran together as one block, and text in angle brackets from sprat-cli (such as `<stdin>`) disappeared from them
 - Switching to the Sprites or Frame Animation workspace no longer makes the window taller (it could grow past a laptop screen and hide the status bar)
-- Sprites: clicking empty space on the sprite preview now moves the selected marker there (centred on the click) instead of moving the pivot and deselecting the marker
+- Sprites: clicking empty space on the sprite preview now moves the selected marker there (centred on the click) instead of moving the pivot and deselecting the marker; clicking the pivot's crosshair selects the pivot without moving it
 - Sprites: a marker created in the Markers dialog is selected when the dialog closes, so the next click on the preview positions it
 - Projects with several atlases keep the pivots, markers, names and nine-slice insets of sprites in atlases other than the selected one. They used to be lost on save, and when switching to another atlas after opening a project
 - Exporting several atlases writes each atlas's own markers and animations. The first atlas used to get the selected atlas's animations, and the others got no markers or animations

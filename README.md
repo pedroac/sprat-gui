@@ -215,7 +215,7 @@ The default workspace for importing assets, managing the sprite tree, and editin
 
 - **Selected Frame Editor**
   - Click any sprite in the tree to open its editor on the right; with nothing selected, the canvas says so.
-  - Place and adjust **pivots** (origin/anchor points) and **markers** (named points for collision zones, spawn origins, etc.) directly on the frame image.
+  - Place and adjust **pivots** (origin/anchor points) and **markers** (named points for collision zones, spawn origins, etc.) directly on the frame image. With the pivot selected, clicking the image places it there; with a marker selected, clicking elsewhere on the image moves the marker there (centred on the click), and clicking the pivot's crosshair selects the pivot. A marker added in the Markers window becomes the selected one.
   - **Onion Skinning**: displays semi-transparent ghost overlays of neighbouring frames so you can align pivots and markers consistently across a sequence.
   - **Flipbook Mode**: keeps the pivot visually stationary while you step between frames, making it easier to spot drift across an animation.
   - See [UI workflow](#ui-workflow) for configuration options (opacity, zoom-on-frame-change, flipbook scope).

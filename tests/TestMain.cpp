@@ -11,6 +11,7 @@
 #include "NineSliceWorkspaceTests.h"
 #include "PuppetTests.h"
 #include "PuppetWorkspaceTests.h"
+#include "SpriteEditorTests.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -47,6 +48,9 @@ int main(int argc, char** argv) {
 
     PuppetWorkspaceTests puppetWorkspaceTests;
     runTest(&puppetWorkspaceTests);
+
+    SpriteEditorTests spriteEditorTests;
+    runTest(&spriteEditorTests);
 
     return status;
 }
