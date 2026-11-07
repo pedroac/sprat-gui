@@ -32,6 +32,7 @@ private slots:
     void testClickingAPartOutOfThePose();
     void testPosingMovesPositionedPartsInThePose();
     void testPoseStripRenamesReordersAndRemoves();
+    void testPoseStripContextMenuWorksLikeTheFrameList();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();

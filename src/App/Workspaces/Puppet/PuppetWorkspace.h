@@ -90,10 +90,10 @@ public:
     // one undo step, and a part it changes joins the pose.
     /// Shows frame @p poseIndex: -1 for Rest, else a pose.
     void selectPose(int poseIndex);
-    /// Adds an empty pose after the selected frame, and selects it.
-    void newPose();
-    /// Adds a copy of the selected pose after it, and selects it.
-    void duplicatePose();
+    /// Adds an empty pose at index @p poseIndex, and selects it.
+    void addPose(int poseIndex);
+    /// Adds a copy of pose @p poseIndex after it, and selects it.
+    void duplicatePose(int poseIndex);
     void removePose(int poseIndex);
     void renamePose(int poseIndex, const QString& name);
     void movePose(int from, int to);

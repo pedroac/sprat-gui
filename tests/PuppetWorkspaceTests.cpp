@@ -17,6 +17,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QMenu>
 #include <QMimeData>
 #include <QLineEdit>
 #include <QListWidget>
@@ -955,6 +956,74 @@ void PuppetWorkspaceTests::testPoseStripRenamesReordersAndRemoves() {
     QCOMPARE(frameNames(strip), (QStringList{"Rest", "smile"}));
     doll.project.undoStack.undo();
     QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"smile", "yes"}));
+}
+
+namespace {
+/// The texts of @p menu's actions, separators as "-", disabled ones in brackets.
+QStringList menuItems(QMenu* menu) {
+    QStringList items;
+    for (QAction* action : menu->actions())
+        items.append(action->isSeparator() ? QStringLiteral("-")
+                     : action->isEnabled() ? action->text()
+                                           : QStringLiteral("[%1]").arg(action->text()));
+    return items;
+}
+
+/// Triggers the action called @p text in frame @p frame's context menu.
+void triggerFrameAction(PuppetPoseStrip* strip, int frame, const QString& text) {
+    std::unique_ptr<QMenu> menu(strip->createContextMenu(frame));
+    for (QAction* action : menu->actions()) {
+        if (action->text() == text) {
+            action->trigger();
+            return;
+        }
+    }
+    QFAIL(qPrintable(QStringLiteral("No \"%1\" for frame %2").arg(text).arg(frame)));
+}
+}  // namespace
+
+void PuppetWorkspaceTests::testPoseStripContextMenuWorksLikeTheFrameList() {
+    Doll doll;
+    addDollPoses(doll);
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    PuppetPoseStrip* strip = workspace.poseStrip();
+
+    // The same actions as an animation's frames; nothing goes before Rest.
+    std::unique_ptr<QMenu> poseMenu(strip->createContextMenu(0));
+    QCOMPARE(menuItems(poseMenu.get()), (QStringList{"Add Pose Before", "Add Pose After", "-", "[Move to the left]",
+                                                     "Move to the right", "Duplicate", "-", "Delete"}));
+    std::unique_ptr<QMenu> lastMenu(strip->createContextMenu(1));
+    QVERIFY(menuItems(lastMenu.get()).contains(QStringLiteral("[Move to the right]")));
+    std::unique_ptr<QMenu> restMenu(strip->createContextMenu(-1));
+    QCOMPARE(menuItems(restMenu.get()), QStringList{"Add Pose After"});
+    std::unique_ptr<QMenu> emptyMenu(strip->createContextMenu(-2));
+    QCOMPARE(menuItems(emptyMenu.get()), QStringList{"Add Pose"});
+
+    triggerFrameAction(strip, 0, QStringLiteral("Add Pose Before"));
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose", "nod", "smile"}));
+    QCOMPARE(workspace.selectedPose(), 0);
+    triggerFrameAction(strip, -1, QStringLiteral("Add Pose After"));
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "pose", "nod", "smile"}));
+    triggerFrameAction(strip, 2, QStringLiteral("Move to the left"));  // nod
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "nod", "pose", "smile"}));
+    triggerFrameAction(strip, 1, QStringLiteral("Move to the right"));  // nod again
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "pose", "nod", "smile"}));
+    triggerFrameAction(strip, 2, QStringLiteral("Duplicate"));
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "pose", "nod", "nod 2", "smile"}));
+    QCOMPARE(doll.puppet().poses[3].settings, doll.puppet().poses[2].settings);
+    QCOMPARE(workspace.selectedPose(), 3);
+    triggerFrameAction(strip, 0, QStringLiteral("Delete"));
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose", "nod", "nod 2", "smile"}));
+    triggerFrameAction(strip, -2, QStringLiteral("Add Pose"));
+    QCOMPARE(frameNames(strip).last(), QStringLiteral("pose 2"));
+
+    // Backspace deletes the selected pose, as Delete does.
+    workspace.selectPose(0);
+    strip->setFocus();
+    QTest::keyClick(strip, Qt::Key_Backspace);
+    QCOMPARE(frameNames(strip), (QStringList{"Rest", "nod", "nod 2", "smile", "pose 2"}));
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Remove Pose"));
 }
 
 void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {

@@ -227,15 +227,16 @@ void PuppetWorkspace::setupUi() {
     {
         // The poses, one frame each after Rest (the rig), like an animation's frames.
         auto* row = new QHBoxLayout;
-        m_newPoseButton = new QPushButton(tr("New Pose"), middle);
+        m_newPoseButton = new QPushButton(QIcon(QStringLiteral(":/icons/add-ellipse.svg")), tr("Add Pose"), middle);
         m_newPoseButton->setObjectName(QStringLiteral("puppetNewPose"));
-        m_newPoseButton->setToolTip(tr("Add a pose after the selected frame. It sets no part until you change one"));
+        m_newPoseButton->setToolTip(tr("Add a pose after the selected frame. It sets no part until you change one. "
+                                       "Right-click a frame for more"));
         m_duplicatePoseButton = new QPushButton(tr("Duplicate"), middle);
         m_duplicatePoseButton->setObjectName(QStringLiteral("puppetDuplicatePose"));
         m_duplicatePoseButton->setToolTip(tr("Add a copy of the selected pose after it"));
-        m_removePoseButton = new QPushButton(tr("Remove"), middle);
+        m_removePoseButton = new QPushButton(tr("Delete"), middle);
         m_removePoseButton->setObjectName(QStringLiteral("puppetRemovePose"));
-        m_removePoseButton->setToolTip(tr("Remove the selected pose (Delete in the strip)"));
+        m_removePoseButton->setToolTip(tr("Delete the selected pose (Delete in the strip)"));
         m_poseStatus = new QLabel(middle);
         m_poseStatus->setObjectName(QStringLiteral("puppetPoseStatus"));
         m_poseStatus->setForegroundRole(QPalette::PlaceholderText);
@@ -247,8 +248,10 @@ void PuppetWorkspace::setupUi() {
         m_poseStrip = new PuppetPoseStrip(middle);
         m_poseStrip->setObjectName(QStringLiteral("puppetPoseStrip"));
         middleLayout->addWidget(m_poseStrip);
-        connect(m_newPoseButton, &QPushButton::clicked, this, &PuppetWorkspace::newPose);
-        connect(m_duplicatePoseButton, &QPushButton::clicked, this, &PuppetWorkspace::duplicatePose);
+        connect(m_newPoseButton, &QPushButton::clicked, this, [this]() { addPose(m_pose + 1); });
+        connect(m_duplicatePoseButton, &QPushButton::clicked, this, [this]() { duplicatePose(m_pose); });
+        connect(m_poseStrip, &PuppetPoseStrip::addRequested, this, &PuppetWorkspace::addPose);
+        connect(m_poseStrip, &PuppetPoseStrip::duplicateRequested, this, &PuppetWorkspace::duplicatePose);
         connect(m_removePoseButton, &QPushButton::clicked, this, [this]() { removePose(m_pose); });
         connect(m_poseStrip, &PuppetPoseStrip::frameSelected, this, &PuppetWorkspace::selectPose);
         connect(m_poseStrip, &PuppetPoseStrip::renameRequested, this, &PuppetWorkspace::renamePose);
@@ -1221,28 +1224,28 @@ void PuppetWorkspace::selectPose(int poseIndex) {
     updatePoseButtons();
 }
 
-void PuppetWorkspace::newPose() {
+void PuppetWorkspace::addPose(int poseIndex) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet) return;
     QVector<Puppet> after = puppets();
     Puppet& posed = after[m_selection.puppet];
     PuppetPose pose;
     pose.name = PuppetEditing::uniqueName(tr("pose"), PuppetEditing::poseNames(posed));
-    const int index = m_pose >= 0 ? m_pose + 1 : posed.poses.size();
+    const int index = qBound(0, poseIndex, int(posed.poses.size()));
     posed.poses.insert(index, pose);
     pushEdit(tr("New Pose"), after, m_selection);
     selectPose(index);
     updatePoseStrip();
 }
 
-void PuppetWorkspace::duplicatePose() {
+void PuppetWorkspace::duplicatePose(int poseIndex) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || m_pose < 0 || m_pose >= puppet->poses.size()) return;
+    if (!puppet || poseIndex < 0 || poseIndex >= puppet->poses.size()) return;
     QVector<Puppet> after = puppets();
     Puppet& posed = after[m_selection.puppet];
-    PuppetPose copy = posed.poses[m_pose];
+    PuppetPose copy = posed.poses[poseIndex];
     copy.name = PuppetEditing::uniqueName(copy.name, PuppetEditing::poseNames(posed));
-    const int index = m_pose + 1;
+    const int index = poseIndex + 1;
     posed.poses.insert(index, copy);
     pushEdit(tr("Duplicate Pose"), after, m_selection);
     selectPose(index);

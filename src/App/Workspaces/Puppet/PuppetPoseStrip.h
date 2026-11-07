@@ -4,14 +4,17 @@
 #include <QStringList>
 #include <QVector>
 
+class QMenu;
+
 /**
  * @brief The Puppet workspace's film strip: a thumbnail of the rest pose ("Rest", always
  *        first) and of each of the puppet's poses, in order.
  *
- * It only shows them and asks for changes: clicking a frame emits frameSelected (-1 for
- * Rest), double-clicking a pose renames it in place (renameRequested), dragging a pose
- * reorders it (moveRequested) and Delete asks to remove it. PuppetWorkspace applies them
- * and calls showFrames() again.
+ * It only shows them and asks for changes, like an animation's frame list: clicking a frame
+ * emits frameSelected (-1 for Rest), double-clicking a pose renames it in place, dragging a
+ * pose reorders it, Delete or Backspace removes it, and the context menu adds poses before or
+ * after one, moves, duplicates and deletes them. PuppetWorkspace applies the changes and
+ * calls showFrames() again.
  */
 class PuppetPoseStrip : public QListWidget {
     Q_OBJECT
@@ -27,16 +30,23 @@ public:
                     int selected);
     /// The selected frame: -1 for Rest (or nothing), else a pose index.
     int selectedFrame() const;
+    /// The context menu for frame @p frame: -1 for Rest, -2 for empty space. The caller owns it.
+    QMenu* createContextMenu(int frame);
 
 signals:
     void frameSelected(int poseIndex);
     void renameRequested(int poseIndex, const QString& name);
+    /// Move pose @p from to index @p to (its index afterwards).
     void moveRequested(int from, int to);
     void removeRequested(int poseIndex);
+    /// Add an empty pose at index @p poseIndex.
+    void addRequested(int poseIndex);
+    void duplicateRequested(int poseIndex);
 
 protected:
     void dropEvent(QDropEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
     QSize sizeHint() const override;
 
 private:

@@ -1,6 +1,8 @@
 #include "PuppetPoseStrip.h"
 
+#include <QContextMenuEvent>
 #include <QDropEvent>
+#include <QMenu>
 #include <QKeyEvent>
 #include <QScrollBar>
 
@@ -79,12 +81,45 @@ void PuppetPoseStrip::dropEvent(QDropEvent* event) {
 }
 
 void PuppetPoseStrip::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Delete && state() != QAbstractItemView::EditingState && selectedFrame() >= 0) {
+    const bool erase = event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace;
+    if (erase && state() != QAbstractItemView::EditingState && selectedFrame() >= 0) {
         emit removeRequested(selectedFrame());
         event->accept();
         return;
     }
     QListWidget::keyPressEvent(event);
+}
+
+QMenu* PuppetPoseStrip::createContextMenu(int frame) {
+    auto* menu = new QMenu(this);
+    const QIcon add(QStringLiteral(":/icons/add-ellipse.svg"));
+    const int poses = m_names.size();
+    if (frame < -1) {
+        menu->addAction(add, tr("Add Pose"), this, [this, poses]() { emit addRequested(poses); });
+        return menu;
+    }
+    // Nothing goes before Rest: it is the rig the poses start from.
+    if (frame >= 0) menu->addAction(add, tr("Add Pose Before"), this, [this, frame]() { emit addRequested(frame); });
+    menu->addAction(add, tr("Add Pose After"), this, [this, frame]() { emit addRequested(frame + 1); });
+    if (frame < 0) return menu;
+    menu->addSeparator();
+    QAction* left = menu->addAction(tr("Move to the left"), this, [this, frame]() { emit moveRequested(frame, frame - 1); });
+    left->setEnabled(frame > 0);
+    QAction* right = menu->addAction(tr("Move to the right"), this, [this, frame]() { emit moveRequested(frame, frame + 1); });
+    right->setEnabled(frame < poses - 1);
+    menu->addAction(tr("Duplicate"), this, [this, frame]() { emit duplicateRequested(frame); });
+    menu->addSeparator();
+    menu->addAction(tr("Delete"), this, [this, frame]() { emit removeRequested(frame); });
+    return menu;
+}
+
+void PuppetPoseStrip::contextMenuEvent(QContextMenuEvent* event) {
+    QListWidgetItem* item = itemAt(event->pos());
+    if (item) setCurrentItem(item);  // selects the frame, as a click would
+    QMenu* menu = createContextMenu(item ? poseOf(item) : -2);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(event->globalPos());
+    event->accept();
 }
 
 int PuppetPoseStrip::poseOf(const QListWidgetItem* item) {
