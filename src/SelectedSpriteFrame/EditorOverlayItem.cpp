@@ -625,8 +625,24 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         }
     }
 
-    // Drag the pivot only when pivot is the active handle (or lock is off).
-    if (!m_lockToActiveHandle || m_selectedMarkerName.isEmpty()) {
+    // With a marker selected, clicking the pivot's crosshair selects the pivot, where it is.
+    if (!m_lockToActiveHandle && !m_selectedMarkerName.isEmpty()
+        && distSq(pos, QPointF(activeSprite->pivotX, activeSprite->pivotY)) < hitThresholdSq) {
+        m_selectedMarkerName.clear();
+        emit markerSelected("");
+        m_pivotBeforeDrag = QPoint(activeSprite->pivotX, activeSprite->pivotY);
+        m_pivotDragFloat  = QPointF(activeSprite->pivotX, activeSprite->pivotY);
+        m_draggingPivot   = true;
+        setCursor(Qt::SizeAllCursor);
+        m_selectedVertexIndex = -1;
+        update();
+        event->accept();
+        return;
+    }
+
+    // Clicking elsewhere on the sprite places the pivot there, only while the pivot is the
+    // selected handle: with a marker selected, it neither moves the pivot nor selects it.
+    if (m_selectedMarkerName.isEmpty()) {
         if (!m_sprites.isEmpty())
             m_pivotBeforeDrag = QPoint(m_sprites.last()->pivotX, m_sprites.last()->pivotY);
         m_pivotDragFloat = pos;

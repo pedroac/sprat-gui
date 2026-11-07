@@ -747,7 +747,9 @@ if(BUILD_TESTING)
         tests/ImageDiscoveryTests.cpp
         tests/ProjectSessionTests.cpp
         tests/NineSliceWorkspaceTests.cpp
+        tests/SpriteEditorTests.cpp
         assets/icons.qrc
+        src/SelectedSpriteFrame/EditorOverlayItem.cpp
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
         src/App/Workspaces/Shared/SpritePickerDialog.cpp
@@ -783,6 +785,7 @@ if(BUILD_TESTING)
         src/App/Workspaces
         src/App/Workspaces/NineSlice
         src/App/Workspaces/Shared
+        src/SelectedSpriteFrame
         src/Animation
         src/Animation/Test
         src/Animation/Timelines

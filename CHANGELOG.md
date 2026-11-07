@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
 
 ### Fixed
+- Sprites workspace: clicking the sprite with a marker selected no longer moves the pivot there and selects it instead; it changes nothing. A marker added in the Markers window becomes the selected one
 - Projects with several atlases keep the pivots, markers, names and nine-slice insets of sprites in atlases other than the selected one. They used to be lost on save, and when switching to another atlas after opening a project
 - Exporting several atlases writes each atlas's own markers and animations. The first atlas used to get the selected atlas's animations, and the others got no markers or animations
 - Save (Ctrl+S) on a project opened from a ZIP updates the ZIP, instead of writing a project file and `sprites/` folder next to it
