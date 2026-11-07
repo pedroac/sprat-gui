@@ -1,4 +1,5 @@
 #include "PuppetPoseStrip.h"
+#include "PuppetModels.h"
 
 #include <QContextMenuEvent>
 #include <QDropEvent>
@@ -7,7 +8,7 @@
 #include <QScrollBar>
 
 namespace {
-/// The pose index of an item; Rest has none.
+/// The pose index of an item.
 constexpr int POSE_ROLE = Qt::UserRole;
 /// Room around a thumbnail for its name.
 constexpr int FRAME_MARGIN = 28;
@@ -29,7 +30,7 @@ PuppetPoseStrip::PuppetPoseStrip(QWidget* parent) : QListWidget(parent) {
     setFixedHeight(sizeHint().height());
 
     connect(this, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (!m_rebuilding && row >= 0) emit frameSelected(row - 1);
+        if (!m_rebuilding && row >= 0) emit frameSelected(row);
     });
     connect(this, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
         const int pose = poseOf(item);
@@ -46,22 +47,22 @@ QSize PuppetPoseStrip::sizeHint() const {
                  THUMBNAIL_SIZE + FRAME_MARGIN + horizontalScrollBar()->sizeHint().height() + 2 * frameWidth() + 4);
 }
 
-void PuppetPoseStrip::showFrames(const QPixmap& rest, const QStringList& poseNames,
-                                 const QVector<QPixmap>& thumbnails, int selected) {
+void PuppetPoseStrip::showFrames(const QStringList& poseNames, const QVector<QPixmap>& thumbnails, int selected) {
     m_rebuilding = true;
     m_names = poseNames;
     clear();
-    auto* restItem = new QListWidgetItem(QIcon(rest), tr("Rest"), this);
-    restItem->setData(POSE_ROLE, -1);
-    restItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-    restItem->setToolTip(tr("The rig as it stands: what poses start from"));
     for (int i = 0; i < poseNames.size(); ++i) {
         auto* item = new QListWidgetItem(QIcon(thumbnails.value(i)), poseNames[i], this);
         item->setData(POSE_ROLE, i);
-        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsDragEnabled);
-        item->setToolTip(tr("Double-click to rename, drag to reorder"));
+        if (isRest(i)) {
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            item->setToolTip(tr("The pose animations go back to. It can't be renamed, moved or deleted"));
+        } else {
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable | Qt::ItemIsDragEnabled);
+            item->setToolTip(tr("Double-click to rename, drag to reorder"));
+        }
     }
-    setCurrentRow(qBound(-1, selected, int(poseNames.size()) - 1) + 1);
+    setCurrentRow(qBound(-1, selected, int(poseNames.size()) - 1));
     if (currentItem()) scrollToItem(currentItem());
     m_rebuilding = false;
 }
@@ -77,12 +78,12 @@ void PuppetPoseStrip::dropEvent(QDropEvent* event) {
     const int to = over ? poseOf(over) : int(m_names.size()) - 1;
     event->setDropAction(Qt::IgnoreAction);
     event->accept();
-    if (from >= 0 && to >= 0 && from != to) emit moveRequested(from, to);
+    if (from >= 0 && to >= 0 && from != to && !isRest(from) && !isRest(to)) emit moveRequested(from, to);
 }
 
 void PuppetPoseStrip::keyPressEvent(QKeyEvent* event) {
     const bool erase = event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace;
-    if (erase && state() != QAbstractItemView::EditingState && selectedFrame() >= 0) {
+    if (erase && state() != QAbstractItemView::EditingState && selectedFrame() >= 0 && !isRest(selectedFrame())) {
         emit removeRequested(selectedFrame());
         event->accept();
         return;
@@ -94,29 +95,31 @@ QMenu* PuppetPoseStrip::createContextMenu(int frame) {
     auto* menu = new QMenu(this);
     const QIcon add(QStringLiteral(":/icons/add-ellipse.svg"));
     const int poses = m_names.size();
-    if (frame < -1) {
+    if (frame < 0) {
         menu->addAction(add, tr("Add Pose"), this, [this, poses]() { emit addRequested(poses); });
         return menu;
     }
-    // Nothing goes before Rest: it is the rig the poses start from.
-    if (frame >= 0) menu->addAction(add, tr("Add Pose Before"), this, [this, frame]() { emit addRequested(frame); });
+    // Rest stays first and can't go.
+    const bool rest = isRest(frame);
+    QAction* before = menu->addAction(add, tr("Add Pose Before"), this, [this, frame]() { emit addRequested(frame); });
+    before->setEnabled(!rest);
     menu->addAction(add, tr("Add Pose After"), this, [this, frame]() { emit addRequested(frame + 1); });
-    if (frame < 0) return menu;
     menu->addSeparator();
     QAction* left = menu->addAction(tr("Move to the left"), this, [this, frame]() { emit moveRequested(frame, frame - 1); });
-    left->setEnabled(frame > 0);
+    left->setEnabled(!rest && frame > 0 && !isRest(frame - 1));
     QAction* right = menu->addAction(tr("Move to the right"), this, [this, frame]() { emit moveRequested(frame, frame + 1); });
-    right->setEnabled(frame < poses - 1);
+    right->setEnabled(!rest && frame < poses - 1);
     menu->addAction(tr("Duplicate"), this, [this, frame]() { emit duplicateRequested(frame); });
     menu->addSeparator();
-    menu->addAction(tr("Delete"), this, [this, frame]() { emit removeRequested(frame); });
+    QAction* remove = menu->addAction(tr("Delete"), this, [this, frame]() { emit removeRequested(frame); });
+    remove->setEnabled(!rest);
     return menu;
 }
 
 void PuppetPoseStrip::contextMenuEvent(QContextMenuEvent* event) {
     QListWidgetItem* item = itemAt(event->pos());
     if (item) setCurrentItem(item);  // selects the frame, as a click would
-    QMenu* menu = createContextMenu(item ? poseOf(item) : -2);
+    QMenu* menu = createContextMenu(item ? poseOf(item) : -1);
     menu->setAttribute(Qt::WA_DeleteOnClose);
     menu->popup(event->globalPos());
     event->accept();
@@ -124,4 +127,8 @@ void PuppetPoseStrip::contextMenuEvent(QContextMenuEvent* event) {
 
 int PuppetPoseStrip::poseOf(const QListWidgetItem* item) {
     return item ? item->data(POSE_ROLE).toInt() : -1;
+}
+
+bool PuppetPoseStrip::isRest(int poseIndex) const {
+    return poseIndex >= 0 && poseIndex < m_names.size() && m_names[poseIndex] == PUPPET_REST_POSE;
 }

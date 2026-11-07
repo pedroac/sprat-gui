@@ -41,5 +41,7 @@ private slots:
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();
     void testReorderingPartsAndVariants();
+    void testRestPoseVariantIsTheRestVariant();
+    void testShowingAVariantInAPoseFromTheTree();
     void testRemovingAPartSelectsItsNeighbour();
 };

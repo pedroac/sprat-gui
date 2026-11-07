@@ -197,12 +197,18 @@ void PuppetCanvas::resizeEvent(QResizeEvent* event) {
     // transform are still the old ones.
     const QSize oldViewport = event->oldSize();
     const bool keepCenter = isZoomManual() && oldViewport.isValid() && !oldViewport.isEmpty();
-    const QPointF center = mapToScene(QRect(QPoint(), oldViewport).center());
+    const QPoint scroll(horizontalScrollBar()->value(), verticalScrollBar()->value());
+    const bool sameView = m_keptCenter && m_keptCenter->scroll == scroll && m_keptCenter->zoom == zoom();
+    const QPointF center = sameView ? m_keptCenter->center : mapToScene(QRect(QPoint(), oldViewport).center());
     ZoomableGraphicsView::resizeEvent(event);
-    if (!keepCenter) return;
+    if (!keepCenter) {
+        m_keptCenter.reset();
+        return;
+    }
     // A bigger view may show past the scene rect, which the alignment would re-center.
     updateSceneRect();
     centerOn(center);
+    m_keptCenter = KeptCenter{center, QPoint(horizontalScrollBar()->value(), verticalScrollBar()->value()), zoom()};
 }
 
 int PuppetCanvas::partAt(const QPoint& viewPos) const {

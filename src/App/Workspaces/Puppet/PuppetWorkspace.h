@@ -18,6 +18,7 @@ class ProjectSession;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QMenu;
 class QListWidget;
 class QPushButton;
 class QSpinBox;
@@ -73,7 +74,7 @@ public:
     void addSpriteVariants(const QStringList& spritePaths);
     void removeSelected();
     void renameSelected(const QString& name);
-    /// Moves the selected part or variant to @p to among its siblings.
+    /// Moves the selected part to @p to in the draw order. Variants are listed by name, not moved.
     void moveSelected(int to);
     /// Sets the selected part's position. Edits with the same @p mergeKey in a row are one
     /// undo step; an empty key merges the panel's edits of this part.
@@ -112,6 +113,11 @@ public:
     void pullPart(int partIndex, const QPointF& grip, const QPointF& target, const QString& mergeKey = QString());
     /// Has part @p partIndex show its variant @p variantIndex in the selected pose.
     void setPartVariant(int partIndex, int variantIndex);
+    /// Shows @p variant (a tree selection) in the selected pose, as the tree's double-click and
+    /// Show in Pose do, and keeps it selected. On Rest it becomes the rest variant.
+    void showVariantInPose(const PuppetSelection& variant);
+    /// The tree's context menu for the selected item. The caller owns it.
+    QMenu* createContextMenu();
     /// Adds part @p partIndex to the selected pose (as it is shown) or leaves it out.
     void setPartInPose(int partIndex, bool included);
     int selectedPose() const { return m_pose; }

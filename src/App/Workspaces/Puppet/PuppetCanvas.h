@@ -73,7 +73,7 @@ public:
     void showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
                     std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint = std::nullopt);
     /// Whether a pose is shown: only then do the turn handle, pulling and moving joints work.
-    /// At rest (the rig), dragging a part placed by position still moves it.
+    /// Without one, dragging a part placed by position still moves it.
     void setPosing(bool posing);
     /// Off while an animation plays: clicks still select parts, but nothing moves or attaches.
     void setEditable(bool editable);
@@ -144,6 +144,15 @@ private:
     void updateSceneRect();
 
     QGraphicsScene* m_scene = nullptr;
+    /// The scene point the last resize kept in the middle, with the scroll position and zoom
+    /// it left: the next resize starts from it while they are unchanged, so the view doesn't
+    /// creep by a rounded pixel per resize.
+    struct KeptCenter {
+        QPointF center;
+        QPoint scroll;
+        double zoom = 0;
+    };
+    std::optional<KeptCenter> m_keptCenter;
     QRectF m_puppetBounds;  ///< The parts and the origin, with a margin: what a fit shows
     QVector<Part> m_parts;  ///< As last shown
     QVector<Bone> m_bones;

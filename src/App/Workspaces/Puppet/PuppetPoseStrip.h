@@ -7,14 +7,14 @@
 class QMenu;
 
 /**
- * @brief The Puppet workspace's film strip: a thumbnail of the rest pose ("Rest", always
- *        first) and of each of the puppet's poses, in order.
+ * @brief The Puppet workspace's film strip: a thumbnail of each of the puppet's poses, in
+ *        order, the Rest pose first.
  *
  * It only shows them and asks for changes, like an animation's frame list: clicking a frame
- * emits frameSelected (-1 for Rest), double-clicking a pose renames it in place, dragging a
- * pose reorders it, Delete or Backspace removes it, and the context menu adds poses before or
- * after one, moves, duplicates and deletes them. PuppetWorkspace applies the changes and
- * calls showFrames() again.
+ * emits frameSelected, double-clicking a pose renames it in place, dragging a pose reorders
+ * it, Delete or Backspace removes it, and the context menu adds poses before or after one,
+ * moves, duplicates and deletes them. The Rest pose (the first frame) can only be duplicated
+ * or have poses added after it. PuppetWorkspace applies the changes and calls showFrames() again.
  */
 class PuppetPoseStrip : public QListWidget {
     Q_OBJECT
@@ -25,13 +25,12 @@ public:
     explicit PuppetPoseStrip(QWidget* parent = nullptr);
 
 
-    /// Shows the rest pose and the poses (names and thumbnails, in order), with frame
-    /// @p selected selected: -1 for Rest.
-    void showFrames(const QPixmap& rest, const QStringList& poseNames, const QVector<QPixmap>& thumbnails,
-                    int selected);
-    /// The selected frame: -1 for Rest (or nothing), else a pose index.
+    /// Shows the poses (names and thumbnails, in order, the Rest pose first), with pose
+    /// @p selected selected (-1 for none).
+    void showFrames(const QStringList& poseNames, const QVector<QPixmap>& thumbnails, int selected);
+    /// The selected pose index, or -1 for none.
     int selectedFrame() const;
-    /// The context menu for frame @p frame: -1 for Rest, -2 for empty space. The caller owns it.
+    /// The context menu for pose @p frame, or -1 for empty space. The caller owns it.
     QMenu* createContextMenu(int frame);
 
 signals:
@@ -51,8 +50,10 @@ protected:
     QSize sizeHint() const override;
 
 private:
-    /// The pose index of @p item: -1 for Rest.
+    /// The pose index of @p item, or -1 for none.
     static int poseOf(const QListWidgetItem* item);
+    /// Whether pose @p poseIndex is the Rest pose, which stays first and can't go.
+    bool isRest(int poseIndex) const;
 
     bool m_rebuilding = false;
     QStringList m_names;  ///< As shown, to put a refused rename back

@@ -57,10 +57,12 @@ public:
         QVector<MarkerChoice> childMarkers;
         /// The angle it is tried at: from its parent, or around its pivot. Not saved.
         int angle = 0;
-        /// A pose is shown: Angle and Shows edit it. At rest (the rig) they are off.
+        /// A pose is shown: Angle and Shows edit it. Otherwise (an animation playing) they are off.
         bool posing = false;
-        /// Its variants' names, and the one the shown pose has it show.
+        /// Its variants' names, the order to list them in (indexes, by name), and the one the
+        /// shown pose has it show.
         QStringList variants;
+        QVector<int> variantOrder;
         int variant = 0;
         /// Its sprites' markers (not "pivot"), and those it neither shows nor offers for joints.
         QStringList markers;
@@ -96,7 +98,6 @@ signals:
     void shownVariantChanged(int variantIndex);
     /// The markers the part should neither show nor offer for joints.
     void hiddenMarkersChanged(const QStringList& hiddenMarkers);
-    void makeRestVariantRequested();
 
 private:
     /// Adds a "Name:" row, and under it a row for the name's problem (hidden when there is none).
@@ -147,5 +148,4 @@ private:
     QLabel* m_variantSource = nullptr;
     QLabel* m_variantThumbnail = nullptr;
     QLabel* m_restLabel = nullptr;
-    QPushButton* m_makeRestButton = nullptr;
 };

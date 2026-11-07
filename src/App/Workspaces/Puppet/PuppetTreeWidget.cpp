@@ -8,11 +8,9 @@ constexpr int PUPPET_ROLE = Qt::UserRole;
 constexpr int PART_ROLE = Qt::UserRole + 1;
 constexpr int VARIANT_ROLE = Qt::UserRole + 2;
 
-/// Whether @p a and @p b are rows of the same level under the same row.
-bool siblings(const PuppetSelection& a, const PuppetSelection& b) {
-    if (a.puppet != b.puppet) return false;
-    if (a.variant >= 0) return b.variant >= 0 && a.part == b.part;
-    return a.part >= 0 && b.part >= 0 && b.variant < 0;
+/// Whether @p a and @p b are parts of the same puppet.
+bool siblingParts(const PuppetSelection& a, const PuppetSelection& b) {
+    return a.puppet == b.puppet && a.part >= 0 && b.part >= 0 && a.variant < 0 && b.variant < 0;
 }
 }  // namespace
 
@@ -40,22 +38,20 @@ void PuppetTreeWidget::setSelectionOf(QTreeWidgetItem* item, const PuppetSelecti
 int PuppetTreeWidget::dropIndex(const QPoint& pos) const {
     const PuppetSelection moved = selectionOf(currentItem());
     const QTreeWidgetItem* target = itemAt(pos);
-    if (!target || moved.part < 0) return -1;
+    // Only parts move: variants are listed by name.
+    if (!target || moved.part < 0 || moved.variant >= 0) return -1;
     const PuppetSelection over = selectionOf(target);
-    const bool movingVariant = moved.variant >= 0;
-    const int from = movingVariant ? moved.variant : moved.part;
+    const int from = moved.part;
 
     int to = -1;
-    if (siblings(moved, over)) {
-        const int overIndex = movingVariant ? over.variant : over.part;
+    if (siblingParts(moved, over)) {
         // On the row's upper half, or above it: before it; otherwise after it.
         const QRect rect = visualItemRect(target);
         const bool before = dropIndicatorPosition() == AboveItem
             || (dropIndicatorPosition() == OnItem && pos.y() < rect.center().y());
-        to = before ? overIndex : overIndex + 1;
-    } else if (over.puppet == moved.puppet && (movingVariant ? (over.part == moved.part && over.variant < 0)
-                                                             : over.part < 0)) {
-        to = 0;  // on the parent row: first
+        to = before ? over.part : over.part + 1;
+    } else if (over.puppet == moved.puppet && over.part < 0) {
+        to = 0;  // on the puppet's row: first
     } else {
         return -1;
     }

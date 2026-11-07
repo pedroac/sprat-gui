@@ -3,6 +3,7 @@
 #include "MarkerUtils.h"
 #include "NineSliceInsets.h"
 #include "PathSafety.h"
+#include "PuppetEditing.h"
 #include "ResolutionUtils.h"
 
 #include <QDateTime>
@@ -1115,6 +1116,8 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             atlas.timelines = parseTimelines(aObj["timelines"].toArray(), DEFAULT_ANIMATION_FPS);
             for (const auto& pVal : aObj["puppets"].toArray()) {
                 atlas.puppets.append(puppetFromJson(pVal.toObject(), spDir));
+                // Projects from before the Rest pose get one.
+                PuppetEditing::keepRestPose(atlas.puppets.last());
             }
 
             out.atlases.append(atlas);

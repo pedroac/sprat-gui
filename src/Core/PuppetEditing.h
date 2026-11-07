@@ -43,8 +43,9 @@ void movePart(Puppet& puppet, int from, int to);
 void setVariantName(Puppet& puppet, int partIndex, int variantIndex, const QString& name);
 /// Removes a variant; poses that showed it keep the part's current variant instead.
 void removeVariant(Puppet& puppet, int partIndex, int variantIndex);
-/// Moves a variant; the first is the rest variant. @p to is its index afterwards.
-void moveVariant(Puppet& puppet, int partIndex, int from, int to);
+/// The part's variant indexes in the order the editor lists them: by name, numbers in
+/// order ("walk2" before "walk10"), whatever order they are stored in.
+QVector<int> variantsByName(const PuppetPart& part);
 
 /// The parts that hang from part @p partIndex, directly or through others, by their
 /// parent attachments. A part can't be attached to any of them: that would make a loop.
@@ -63,12 +64,23 @@ void detachPart(Puppet& puppet, int partIndex, const QPoint& position);
 void setAttachmentLimits(Puppet& puppet, int partIndex, int leeway, std::optional<int> angleMin,
                          std::optional<int> angleMax);
 
-/// Renames a pose, and the sequence steps that play it.
+/// Renames a pose, and the sequence steps that play it. The Rest pose keeps its name.
 void renamePose(Puppet& puppet, int poseIndex, const QString& name);
-/// Removes a pose, and the sequence steps that play it.
+/// Removes a pose, and the sequence steps that play it. The Rest pose stays.
 void removePose(Puppet& puppet, int poseIndex);
-/// Moves a pose in the list; @p to is its index afterwards.
+/// Moves a pose in the list; @p to is its index afterwards. The Rest pose stays first.
 void movePose(Puppet& puppet, int from, int to);
+
+/// What the Rest pose sets for part @p partIndex when it starts out: the part as the rig
+/// has it (rest variant, angle 0, and offset 0 or its position), so playing Rest after other
+/// poses puts it back.
+PuppetPoseSetting restSetting(const Puppet& puppet, int partIndex);
+/// Keeps the puppet's Rest pose (see PUPPET_REST_POSE) first, adding it, setting every part,
+/// when it has none. Parts that @p before didn't have join it, and it keeps up with the rig:
+/// a position only for a part placed by position (the rig's), an offset only for an attached one,
+/// and the variant it shows is the part's first, the rest variant: a variant Rest picks (since
+/// @p before) moves first, otherwise Rest follows the first.
+void keepRestPose(Puppet& puppet, const Puppet* before = nullptr);
 /// Moves a sequence, or a step within sequence @p sequenceIndex; @p to is its index afterwards.
 void moveSequence(Puppet& puppet, int from, int to);
 void moveStep(Puppet& puppet, int sequenceIndex, int from, int to);

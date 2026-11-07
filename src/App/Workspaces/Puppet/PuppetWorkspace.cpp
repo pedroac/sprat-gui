@@ -247,7 +247,7 @@ void PuppetWorkspace::setupUi() {
     m_bottomTabs->setDrawBase(true);
     middleLayout->addWidget(m_bottomTabs);
     {
-        // The poses, one frame each after Rest (the rig), like an animation's frames.
+        // The poses, one frame each, Rest first, like an animation's frames.
         auto* posesPage = new QWidget(middle);
         auto* posesLayout = new QVBoxLayout(posesPage);
         posesLayout->setContentsMargins(4, 4, 4, 4);
@@ -294,6 +294,7 @@ void PuppetWorkspace::setupUi() {
         fitBottomTabs();
         m_animating = tab == ANIMATIONS_TAB;
         if (!m_animating) setPlaying(false);
+        rebuildTree();
         updateCanvas();
         updateProperties();
     });
@@ -372,7 +373,6 @@ void PuppetWorkspace::setupUi() {
             [this](const QPoint& position) { movePositionedPart(m_selection.part, position); });
     connect(m_properties, &PuppetPropertiesPanel::shownVariantChanged, this,
             [this](int variant) { setPartVariant(m_selection.part, variant); });
-    connect(m_properties, &PuppetPropertiesPanel::makeRestVariantRequested, this, [this]() { moveSelected(0); });
     connect(m_properties, &PuppetPropertiesPanel::attachRequested, this,
             [this](const QString& parent, const QString& parentMarker, const QString& childMarker) {
         const Puppet* puppet = selectedPuppet();
@@ -420,6 +420,12 @@ void PuppetWorkspace::setupUi() {
         moveSelected(to);
     });
     connect(m_tree, &QWidget::customContextMenuRequested, this, &PuppetWorkspace::showContextMenu);
+    connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
+        const PuppetSelection clicked = PuppetTreeWidget::selectionOf(item);
+        if (clicked.variant < 0) return;
+        // Showing it rebuilds the tree, so it waits until Qt is done with the clicked item.
+        QMetaObject::invokeMethod(this, [this, clicked]() { showVariantInPose(clicked); }, Qt::QueuedConnection);
+    });
 
     updateButtons();
 }
@@ -446,6 +452,11 @@ void PuppetWorkspace::refreshSprites() {
 }
 
 void PuppetWorkspace::refresh() {
+    // Puppets put in the session some other way than an edit or a project load get their
+    // Rest pose here, as a load would give them.
+    if (m_session) {
+        for (Puppet& puppet : m_session->activeAtlas().puppets) PuppetEditing::keepRestPose(puppet);
+    }
     m_selection = clampedSelection(puppets(), m_selection);
     rebuildTree();
     updateCanvas();
@@ -570,6 +581,12 @@ void PuppetWorkspace::rebuildTree() {
         PuppetTreeWidget::setSelectionOf(puppetItem, {p, -1, -1});
 
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(puppet, lookup);
+        // The variants the selected pose shows, marked on the selected puppet.
+        const bool posing = p == m_selection.puppet && m_pose >= 0 && m_pose < puppet.poses.size() && !m_animating;
+        QVector<int> shownVariants;
+        if (posing) {
+            for (const PuppetPartState& state : shownStates(puppet)) shownVariants.append(state.variant);
+        }
         for (int i = 0; i < puppet.parts.size(); ++i) {
             const PuppetPart& part = puppet.parts[i];
             auto* partItem = new QTreeWidgetItem(puppetItem);
@@ -591,12 +608,22 @@ void PuppetWorkspace::rebuildTree() {
             partItem->setFlags(baseFlags | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
             PuppetTreeWidget::setSelectionOf(partItem, {p, i, -1});
 
-            for (int v = 0; v < part.variants.size(); ++v) {
+            for (const int v : PuppetEditing::variantsByName(part)) {
                 const PuppetVariant& variant = part.variants[v];
                 auto* variantItem = new QTreeWidgetItem(partItem);
                 variantItem->setText(NAME_COLUMN, puppetVariantName(variant));
-                variantItem->setText(DETAIL_COLUMN, variant.kind == PuppetVariant::Kind::Animation
-                                                        ? tr("animation") : tr("sprite"));
+                const QString kind = variant.kind == PuppetVariant::Kind::Animation ? tr("animation") : tr("sprite");
+                // Only worth marking when there is a choice.
+                if (part.variants.size() > 1 && v == shownVariants.value(i, -1)) {
+                    variantItem->setText(DETAIL_COLUMN, tr("%1 · shown").arg(kind));
+                    variantItem->setToolTip(DETAIL_COLUMN, tr("Pose \"%1\" shows it").arg(puppet.poses[m_pose].name));
+                    QFont shownFont = variantItem->font(NAME_COLUMN);
+                    shownFont.setBold(true);
+                    variantItem->setFont(NAME_COLUMN, shownFont);
+                } else {
+                    variantItem->setText(DETAIL_COLUMN, kind);
+                    if (posing) variantItem->setToolTip(DETAIL_COLUMN, tr("Double-click to show it in the selected pose"));
+                }
                 if (!spriteFor(variant)) {
                     variantItem->setIcon(NAME_COLUMN, warningIcon);
                     variantItem->setToolTip(NAME_COLUMN, tr("%1 isn't in this atlas").arg(describeSource(variant)));
@@ -605,7 +632,7 @@ void PuppetWorkspace::rebuildTree() {
                     variantItem->setToolTip(NAME_COLUMN, v == 0 ? tr("%1 (rest variant)").arg(describeSource(variant))
                                                                 : describeSource(variant));
                 }
-                variantItem->setFlags(baseFlags | Qt::ItemIsDragEnabled);
+                variantItem->setFlags(baseFlags);
                 PuppetTreeWidget::setSelectionOf(variantItem, {p, i, v});
             }
         }
@@ -627,7 +654,7 @@ void PuppetWorkspace::updateCanvas() {
     const QString puppetKey = m_session->activeAtlas().id + QLatin1Char('/') + puppet->name;
     if (puppetKey != m_posedPuppet) {
         m_posedPuppet = puppetKey;
-        m_pose = -1;
+        m_pose = puppet->poses.isEmpty() ? -1 : 0;  // the Rest pose
         m_sequence = -1;
         m_step = -1;
         m_playFrame = 0;
@@ -714,6 +741,7 @@ void PuppetWorkspace::updateProperties() {
         // While posing, a positioned part's place is the pose's.
         if (part.position && m_pose >= 0) placement.position = shownPosition(*puppet, i);
         placement.variants = PuppetEditing::variantNames(part);
+        placement.variantOrder = PuppetEditing::variantsByName(part);
         if (const PuppetAttachment* joint = puppetParentAttachment(*puppet, part.name)) {
             placement.parent = joint->parent;
             placement.parentMarker = joint->parentMarker;
@@ -775,16 +803,26 @@ void PuppetWorkspace::updateButtons() {
 
 void PuppetWorkspace::showContextMenu(const QPoint& pos) {
     if (QTreeWidgetItem* item = m_tree->itemAt(pos)) m_tree->setCurrentItem(item);
-    auto* menu = new QMenu(this);
+    QMenu* menu = createContextMenu();
     menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(m_tree->viewport()->mapToGlobal(pos));
+}
+
+QMenu* PuppetWorkspace::createContextMenu() {
+    auto* menu = new QMenu(this);
     menu->addAction(m_addPuppetAction);
     if (m_selection.puppet >= 0) menu->addAction(m_addPartAction);
     if (m_selection.part >= 0) menu->addAction(m_addSpritesAction);
     if (m_selection.puppet >= 0) {
         menu->addSeparator();
         if (m_selection.variant >= 0) {
-            QAction* rest = menu->addAction(tr("Make Rest Variant"), this, [this]() { moveSelected(0); });
-            rest->setEnabled(m_selection.variant > 0);
+            const Puppet& puppet = puppets()[m_selection.puppet];
+            const bool posing = m_pose >= 0 && m_pose < puppet.poses.size() && !m_animating;
+            const PuppetSelection variant = m_selection;
+            QAction* show = menu->addAction(posing ? tr("Show in Pose \"%1\"").arg(puppet.poses[m_pose].name)
+                                                   : tr("Show in Pose"),
+                                            this, [this, variant]() { showVariantInPose(variant); });
+            show->setEnabled(posing && shownStates(puppet)[variant.part].variant != variant.variant);
         } else if (m_selection.part >= 0) {
             const int count = puppets()[m_selection.puppet].parts.size();
             const int part = m_selection.part;
@@ -797,7 +835,7 @@ void PuppetWorkspace::showContextMenu(const QPoint& pos) {
         menu->addAction(m_renameAction);
         menu->addAction(m_removeAction);
     }
-    menu->popup(m_tree->viewport()->mapToGlobal(pos));
+    return menu;
 }
 
 void PuppetWorkspace::select(const PuppetSelection& selection) {
@@ -817,8 +855,17 @@ void PuppetWorkspace::select(const PuppetSelection& selection) {
 void PuppetWorkspace::pushEdit(const QString& text, const QVector<Puppet>& after,
                                const PuppetSelection& selectionAfter, const QString& mergeKey) {
     if (!m_session || !m_undoStack) return;
+    // Every puppet keeps its Rest pose, setting new parts too and keeping up with the rig.
+    QVector<Puppet> kept = after;
+    for (Puppet& puppet : kept) {
+        const Puppet* before = nullptr;
+        for (const Puppet& candidate : puppets()) {
+            if (candidate.name == puppet.name) before = &candidate;
+        }
+        PuppetEditing::keepRestPose(puppet, before);
+    }
     m_undoStack->push(new PuppetsEditCommand(
-        text, m_session->activeAtlas().id, puppets(), after, m_selection, selectionAfter,
+        text, m_session->activeAtlas().id, puppets(), kept, m_selection, selectionAfter,
         [this](const QString& atlasId, const QVector<Puppet>& puppets, const PuppetSelection& selection) {
             applyPuppets(atlasId, puppets, selection);
         },
@@ -940,18 +987,12 @@ void PuppetWorkspace::renameSelected(const QString& name) {
 }
 
 void PuppetWorkspace::moveSelected(int to) {
-    if (!selectedPuppet() || m_selection.part < 0) return;
+    if (!selectedPuppet() || m_selection.part < 0 || m_selection.variant >= 0) return;
     QVector<Puppet> after = puppets();
     const PuppetSelection s = m_selection;
-    if (s.variant >= 0) {
-        PuppetEditing::moveVariant(after[s.puppet], s.part, s.variant, to);
-        if (after == puppets()) return;
-        pushEdit(to == 0 ? tr("Make Rest Variant") : tr("Move Variant"), after, {s.puppet, s.part, to});
-    } else {
-        PuppetEditing::movePart(after[s.puppet], s.part, to);
-        if (after == puppets()) return;
-        pushEdit(tr("Change Draw Order"), after, {s.puppet, to, -1});
-    }
+    PuppetEditing::movePart(after[s.puppet], s.part, to);
+    if (after == puppets()) return;
+    pushEdit(tr("Change Draw Order"), after, {s.puppet, to, -1});
 }
 
 void PuppetWorkspace::setSelectedPartPosition(const QPoint& position, const QString& mergeKey) {
@@ -1220,6 +1261,19 @@ void PuppetWorkspace::setPartVariant(int partIndex, int variantIndex) {
     });
 }
 
+void PuppetWorkspace::showVariantInPose(const PuppetSelection& variant) {
+    m_selection = variant;
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_animating || m_pose < 0 || m_pose >= puppet->poses.size() || variant.part < 0
+        || variant.part >= puppet->parts.size() || variant.variant < 0
+        || variant.variant >= puppet->parts[variant.part].variants.size()) return;
+    const QString name = puppetVariantName(puppet->parts[variant.part].variants[variant.variant]);
+    setPartVariant(variant.part, variant.variant);
+    // On Rest it became the rest variant, the first: keep it selected wherever it went.
+    const int now = PuppetEditing::variantNames(selectedPuppet()->parts[variant.part]).indexOf(name);
+    select({variant.puppet, variant.part, now});
+}
+
 void PuppetWorkspace::setPartInPose(int partIndex, bool included) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
@@ -1236,7 +1290,8 @@ void PuppetWorkspace::setPartInPose(int partIndex, bool included) {
 void PuppetWorkspace::movePositionedPart(int partIndex, const QPoint& position, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || !puppet->parts[partIndex].position) return;
-    if (m_pose < 0) {
+    // The Rest pose places a positioned part where the rig does, so moving it there moves the rig.
+    if (m_pose < 0 || puppetIsRestPose(*puppet, m_pose)) {
         if (partIndex == m_selection.part) setSelectedPartPosition(position, mergeKey);
         return;
     }
@@ -1267,8 +1322,9 @@ void PuppetWorkspace::selectPose(int poseIndex) {
     m_pose = poseIndex >= 0 && poseIndex < puppet->poses.size() ? poseIndex : -1;
     if (m_poseStrip->selectedFrame() != m_pose || !m_poseStrip->currentItem()) {
         const QSignalBlocker blocker(m_poseStrip);
-        m_poseStrip->setCurrentRow(m_pose + 1);
+        m_poseStrip->setCurrentRow(m_pose);
     }
+    rebuildTree();  // marks the variants the pose shows
     updateCanvas();
     updateProperties();
     updatePoseParts();
@@ -1282,7 +1338,9 @@ void PuppetWorkspace::addPose(int poseIndex) {
     Puppet& posed = after[m_selection.puppet];
     PuppetPose pose;
     pose.name = PuppetEditing::uniqueName(tr("pose"), PuppetEditing::poseNames(posed));
-    const int index = qBound(0, poseIndex, int(posed.poses.size()));
+    // Nothing goes before Rest.
+    const int first = puppetIsRestPose(posed, 0) ? 1 : 0;
+    const int index = qBound(first, poseIndex, int(posed.poses.size()));
     posed.poses.insert(index, pose);
     pushEdit(tr("New Pose"), after, m_selection);
     selectPose(index);
@@ -1306,6 +1364,10 @@ void PuppetWorkspace::duplicatePose(int poseIndex) {
 void PuppetWorkspace::removePose(int poseIndex) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || poseIndex < 0 || poseIndex >= puppet->poses.size()) return;
+    if (puppetIsRestPose(*puppet, poseIndex)) {
+        m_poseStatus->setText(tr("The Rest pose can't be deleted: animations go back to it"));
+        return;
+    }
     QVector<Puppet> after = puppets();
     PuppetEditing::removePose(after[m_selection.puppet], poseIndex);
     pushEdit(tr("Remove Pose"), after, m_selection);
@@ -1340,13 +1402,13 @@ void PuppetWorkspace::movePose(int from, int to) {
 
 void PuppetWorkspace::updatePoseButtons() {
     const Puppet* puppet = selectedPuppet();
-    const bool posing = puppet && m_pose >= 0;
+    const bool posing = puppet && m_pose >= 0 && m_pose < puppet->poses.size();
+    const bool rest = posing && puppetIsRestPose(*puppet, m_pose);
     m_newPoseButton->setEnabled(puppet != nullptr);
     m_duplicatePoseButton->setEnabled(posing);
-    m_removePoseButton->setEnabled(posing);
-    m_poseStatus->setText(!puppet ? QString()
-                          : posing ? QString()
-                                   : tr("Rest: the rig. Select or add a pose to turn parts"));
+    m_removePoseButton->setEnabled(posing && !rest);
+    m_poseStatus->setText(rest ? tr("Rest: the pose animations go back to. Moving a part placed by position moves the rig")
+                               : QString());
 }
 
 void PuppetWorkspace::updatePoseParts() {
@@ -1392,7 +1454,7 @@ void PuppetWorkspace::updatePoseStrip() {
     const Puppet* puppet = selectedPuppet();
     if (!puppet) {
         m_pose = -1;
-        m_poseStrip->showFrames({}, {}, {}, -1);
+        m_poseStrip->showFrames({}, {}, -1);
         m_poseStrip->setEnabled(false);
         m_poseThumbnails.clear();
         updatePoseButtons();
@@ -1401,7 +1463,7 @@ void PuppetWorkspace::updatePoseStrip() {
         return;
     }
     m_poseStrip->setEnabled(true);
-    if (m_pose >= puppet->poses.size()) m_pose = -1;
+    if (m_pose < 0 || m_pose >= puppet->poses.size()) m_pose = puppet->poses.isEmpty() ? -1 : 0;
     // One frame for all, so the thumbnails compare: what every pose and the rest pose cover.
     QVector<QVector<PuppetPartState>> poseStates;
     for (const PuppetPose& pose : puppet->poses) poseStates.append(PuppetPosing::statesOf(*puppet, pose));
@@ -1420,7 +1482,7 @@ void PuppetWorkspace::updatePoseStrip() {
     QVector<QPixmap> thumbnails;
     for (const QVector<PuppetPartState>& states : poseStates) thumbnails.append(renderThumbnail(*puppet, states, frame));
     m_poseThumbnails = thumbnails;
-    m_poseStrip->showFrames(renderThumbnail(*puppet, {}, frame), PuppetEditing::poseNames(*puppet), thumbnails, m_pose);
+    m_poseStrip->showFrames(PuppetEditing::poseNames(*puppet), thumbnails, m_pose);
     updatePoseButtons();
     updatePoseParts();
     updateSequences();

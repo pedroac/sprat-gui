@@ -5,9 +5,9 @@
 /**
  * @brief The Puppet workspace's tree: puppet › part › variant, parts in draw order.
  *
- * Dragging a part or a variant only reorders it among its siblings; the tree is rebuilt from
- * the model afterwards, so a drop asks for the move rather than moving rows itself. Renaming a
- * row (F2) asks for the rename the same way.
+ * Variants are listed by name. Dragging a part only reorders it among its siblings; the tree
+ * is rebuilt from the model afterwards, so a drop asks for the move rather than moving rows
+ * itself. Renaming a row (F2) asks for the rename the same way.
  */
 class PuppetTreeWidget : public QTreeWidget {
     Q_OBJECT
@@ -20,7 +20,7 @@ public:
     static void setSelectionOf(QTreeWidgetItem* item, const PuppetSelection& selection);
 
 signals:
-    /// Move the part or variant @p moved so it ends up at index @p to among its siblings.
+    /// Move the part @p moved so it ends up at index @p to among its siblings.
     void moveRequested(const PuppetSelection& moved, int to);
 
 protected:

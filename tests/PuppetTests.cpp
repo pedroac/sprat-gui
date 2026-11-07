@@ -419,7 +419,12 @@ void PuppetTests::testProjectPayloadKeepsPuppets() {
     }
     QVERIFY(loaded);
     QCOMPARE(loaded->puppets.size(), 1);
-    QVERIFY(loaded->puppets.first() == puppet);
+    // A puppet saved without a Rest pose gets one, first, setting every part.
+    Puppet withRest = puppet;
+    PuppetEditing::keepRestPose(withRest);
+    QCOMPARE(withRest.poses.first().name, PUPPET_REST_POSE);
+    QCOMPARE(withRest.poses.first().settings.size(), puppet.parts.size());
+    QVERIFY(loaded->puppets.first() == withRest);
 }
 
 namespace {
@@ -463,6 +468,72 @@ void PuppetTests::testEditingChecksNames() {
     QVERIFY(variantNameProblem(nose, 0, "").isEmpty());
 }
 
+void PuppetTests::testRestPoseStaysFirstAndFollowsTheRig() {
+    using namespace PuppetEditing;
+    Puppet puppet = faceWithNose();
+
+    // Added first, setting every part as the rig has it.
+    keepRestPose(puppet);
+    QCOMPARE(poseNames(puppet), (QStringList{"rest", "lie"}));
+    const QVector<PuppetPoseSetting>& rest = puppet.poses.first().settings;
+    QCOMPARE(rest.size(), 2);
+    QCOMPARE(rest[0].part, QString("face"));
+    QCOMPARE(rest[0].variant, QString("face"));
+    QCOMPARE(rest[0].angle, std::optional<int>(0));
+    QCOMPARE(rest[0].position, std::optional<QPoint>(QPoint(0, -40)));
+    QVERIFY(!rest[0].offset);
+    QCOMPARE(rest[1].variant, QString("short"));
+    QCOMPARE(rest[1].offset, std::optional<QPoint>(QPoint(0, 0)));
+    QVERIFY(!rest[1].position);
+    QVERIFY(puppetIsRestPose(puppet, 0));
+    QVERIFY(!puppetIsRestPose(puppet, 1));
+
+    // It can't be renamed, removed or moved, and stays first.
+    QVERIFY(!poseNameProblem(puppet, 0, "idle").isEmpty());
+    QVERIFY(poseNameProblem(puppet, 0, "rest").isEmpty());
+    QVERIFY(!poseNameProblem(puppet, 1, "rest").isEmpty());
+    Puppet edited = puppet;
+    renamePose(edited, 0, "idle");
+    removePose(edited, 0);
+    movePose(edited, 0, 1);
+    movePose(edited, 1, 0);
+    QVERIFY(edited == puppet);
+    edited.poses.move(0, 1);
+    keepRestPose(edited);
+    QVERIFY(edited == puppet);
+
+    // A new part joins it; the rig's positions are kept, and a part attached since loses its.
+    const Puppet before = puppet;
+    puppet.parts.append({"hat", {}, QPoint(5, -60)});
+    puppet.parts[0].position = QPoint(0, -50);
+    keepRestPose(puppet, &before);
+    QCOMPARE(puppet.poses.first().settings.size(), 3);
+    QCOMPARE(puppet.poses.first().settings[0].position, std::optional<QPoint>(QPoint(0, -50)));
+    QCOMPARE(puppet.poses.first().settings[2].part, QString("hat"));
+    QCOMPARE(puppet.poses.first().settings[2].position, std::optional<QPoint>(QPoint(5, -60)));
+    attachPart(puppet, 2, 0, "nose", "pivot");
+    keepRestPose(puppet);
+    QVERIFY(!puppet.poses.first().settings[2].position);
+    QCOMPARE(puppet.poses.first().settings[2].angle, std::optional<int>(0));
+
+    // A Rest pose read with another variant makes that one the rest variant.
+    Puppet read = faceWithNose();
+    PuppetPoseSetting longNose;
+    longNose.part = "nose";
+    longNose.variant = "nose-long";
+    read.poses.prepend({PUPPET_REST_POSE, {longNose}});
+    keepRestPose(read);
+    QCOMPARE(variantNames(read.parts[1]), (QStringList{"nose-long", "short"}));
+    QCOMPARE(read.poses.first().settings[0].variant, QString("nose-long"));
+
+    // A part left out of it on purpose stays out after other edits.
+    puppet.poses.first().settings.removeAt(1);
+    const Puppet withoutNose = puppet;
+    renamePart(puppet, 0, "head");
+    keepRestPose(puppet, &withoutNose);
+    QCOMPARE(puppet.poses.first().settings.size(), 2);
+}
+
 void PuppetTests::testRenamingAPartRenamesItsJointsAndPoses() {
     Puppet puppet = faceWithNose();
     PuppetEditing::renamePart(puppet, 0, "head");
@@ -503,9 +574,13 @@ void PuppetTests::testNamingVariants() {
     PuppetEditing::setVariantName(puppet, 1, 0, "");
     QCOMPARE(puppetVariantName(puppet.parts[1].variants[0]), QString("nose-short"));
 
-    PuppetEditing::moveVariant(puppet, 1, 1, 0);
-    QCOMPARE(puppetVariantName(puppet.parts[1].variants[0]), QString("nose-long"));
+    // Listed by name, numbers in order, whatever the stored order.
+    PuppetPart walk{"legs", {{PuppetVariant::Kind::Sprite, "/p/walk10.png", {}, false},
+                             {PuppetVariant::Kind::Sprite, "/p/Walk2.png", {}, false},
+                             {PuppetVariant::Kind::Animation, "arm", {}, false}}, std::nullopt};
+    QCOMPARE(PuppetEditing::variantsByName(walk), (QVector<int>{2, 1, 0}));
 
+    puppet.parts[1].variants.move(1, 0);
     PuppetEditing::removeVariant(puppet, 1, 0);
     QCOMPARE(puppet.parts[1].variants.size(), 1);
     // The pose keeps turning the nose, with whatever variant it shows.

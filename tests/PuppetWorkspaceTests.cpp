@@ -101,6 +101,7 @@ struct Doll {
         doll.parts = {bodyPart, headPart};
         doll.attachments = {{QStringLiteral("head"), QStringLiteral("pivot"), QStringLiteral("body"),
                              QStringLiteral("neck")}};
+        PuppetEditing::keepRestPose(doll);
         project.session.activeAtlas().puppets = {doll};
     }
 
@@ -318,7 +319,7 @@ void PuppetWorkspaceTests::testNewPuppetDialogPartsMenu() {
 }
 
 namespace {
-/// The doll with two poses: "nod" turns the head 20°, "smile" shows the smiling head.
+/// The doll with Rest and two poses: "nod" turns the head 20°, "smile" shows the smiling head.
 void addDollPoses(Doll& doll) {
     PuppetPoseSetting nod;
     nod.part = QStringLiteral("head");
@@ -326,8 +327,9 @@ void addDollPoses(Doll& doll) {
     PuppetPoseSetting smile;
     smile.part = QStringLiteral("head");
     smile.variant = QStringLiteral("head-smiling");
-    doll.project.session.activeAtlas().puppets.first().poses = {{QStringLiteral("nod"), {nod}},
-                                                                {QStringLiteral("smile"), {smile}}};
+    Puppet& puppet = doll.project.session.activeAtlas().puppets.first();
+    puppet.poses = {{QStringLiteral("nod"), {nod}}, {QStringLiteral("smile"), {smile}}};
+    PuppetEditing::keepRestPose(puppet);
 }
 
 /// Adds an empty pose with the strip's New Pose button; it is then the selected frame.
@@ -343,7 +345,7 @@ qreal partOpacity(PuppetCanvas* canvas, int index) {
     return -1;
 }
 
-/// The strip's frame names, "Rest" first.
+/// The strip's frame names, "rest" first.
 QStringList frameNames(PuppetPoseStrip* strip) {
     QStringList names;
     for (int i = 0; i < strip->count(); ++i) names.append(strip->item(i)->text());
@@ -417,15 +419,17 @@ void PuppetWorkspaceTests::testDraggingAPartMovesIt() {
     doll.project.undoStack.undo();
     QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(12, 5)));
 
-    // The head is placed by its attachment: dragging it selects it but doesn't move it.
+    // The head is placed by its attachment: dragging it pulls it in the Rest pose, the rig stays.
     const Puppet beforeHeadDrag = doll.puppet();
     const QPoint head = canvas->mapFromScene(QPointF(12, -41));
     QTest::mousePress(viewport, Qt::LeftButton, {}, head);
     QTest::mouseMove(viewport, head + QPoint(20, 0));
     QTest::mouseRelease(viewport, Qt::LeftButton, {}, head + QPoint(20, 0));
     QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
-    QVERIFY(doll.puppet() == beforeHeadDrag);
-    QCOMPARE(doll.project.undoStack.index(), 1);
+    QCOMPARE(doll.puppet().parts, beforeHeadDrag.parts);
+    QCOMPARE(doll.puppet().attachments, beforeHeadDrag.attachments);
+    QVERIFY(doll.puppet().poses.first().settings[1].angle != std::optional<int>(0));
+    QCOMPARE(doll.project.undoStack.index(), 2);
 }
 
 void PuppetWorkspaceTests::testArrowKeysNudgeTheSelectedPart() {
@@ -643,27 +647,35 @@ void PuppetWorkspaceTests::testTurningAPartEditsTheSelectedPose() {
     workspace.select({0, 1, -1});
     const Puppet rig = doll.puppet();
 
-    // Rest is the rig: dragging the attached head doesn't turn it.
-    dragOnCanvas(workspace.canvas(), QPointF(0, -50), QPointF(12, -38));
-    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
-    QCOMPARE(doll.project.undoStack.count(), 0);
-    QVERIFY(!workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->isEnabled());
-
-    // In a pose, from above the joint to its right: a quarter turn clockwise, saved in the pose.
-    startPose(workspace);
+    // Rest is a pose like the others: from above the joint to its right, a quarter turn
+    // clockwise, saved in the Rest pose and not in the rig.
+    QVERIFY(workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->isEnabled());
     dragOnCanvas(workspace.canvas(), QPointF(0, -50), QPointF(12, -38));
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(90));
     QCOMPARE(doll.puppet().parts, rig.parts);
     QCOMPARE(doll.puppet().attachments, rig.attachments);
-    QCOMPARE(doll.puppet().poses[0].settings.size(), 1);
-    QCOMPARE(doll.puppet().poses[0].settings[0].part, QStringLiteral("head"));
-    QCOMPARE(doll.puppet().poses[0].settings[0].angle, std::optional<int>(90));
+    QCOMPARE(doll.puppet().poses[0].name, PUPPET_REST_POSE);
+    QCOMPARE(doll.puppet().poses[0].settings[1].angle, std::optional<int>(90));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+    doll.project.undoStack.undo();
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
+
+    // In a new pose, the same turn is saved in that pose, which sets only the head.
+    startPose(workspace);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
+    dragOnCanvas(workspace.canvas(), QPointF(0, -50), QPointF(12, -38));
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(90));
+    QCOMPARE(doll.puppet().parts, rig.parts);
+    QCOMPARE(doll.puppet().attachments, rig.attachments);
+    QCOMPARE(doll.puppet().poses[1].settings.size(), 1);
+    QCOMPARE(doll.puppet().poses[1].settings[0].part, QStringLiteral("head"));
+    QCOMPARE(doll.puppet().poses[1].settings[0].angle, std::optional<int>(90));
     QCOMPARE(doll.project.undoStack.count(), 2);  // the new pose, then the whole drag
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Pull Part"));
 
     doll.project.undoStack.undo();
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
-    QVERIFY(doll.puppet().poses[0].settings.isEmpty());
+    QVERIFY(doll.puppet().poses[1].settings.isEmpty());
 }
 
 void PuppetWorkspaceTests::testTurningStopsAtTheAngleLimits() {
@@ -696,7 +708,7 @@ void PuppetWorkspaceTests::testDriftingStaysWithinTheLeeway() {
     QTest::mouseRelease(canvas->viewport(), Qt::LeftButton, Qt::ShiftModifier, start + QPoint(10, 0));
     // 10 px asked, 2 px allowed from the neck, a point marker.
     QCOMPARE(drawnParts(canvas)[1], turnedHead(0, QPointF(2, -38)));
-    QCOMPARE(doll.puppet().poses[0].settings[0].offset, std::optional<QPoint>(QPoint(2, 0)));
+    QCOMPARE(doll.puppet().poses[1].settings[0].offset, std::optional<QPoint>(QPoint(2, 0)));
     QCOMPARE(doll.project.undoStack.count(), 2);
 }
 
@@ -709,9 +721,11 @@ void PuppetWorkspaceTests::testTurningAPositionedPartByItsHandle() {
     auto* angle = workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"));
     QVERIFY(angle);
 
-    // At Rest there's no handle: the same drag, starting on the body, moves the rig's body.
-    dragOnCanvas(workspace.canvas(), QPointF(0, -36), QPointF(36, 0));
+    // At Rest, dragging the body (away from its handle) moves the rig's body, and the Rest
+    // pose places it there too.
+    dragOnCanvas(workspace.canvas(), QPointF(0, -20), QPointF(36, 16));
     QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(36, 36)));
+    QCOMPARE(doll.puppet().poses[0].settings[0].position, std::optional<QPoint>(QPoint(36, 36)));
     doll.project.undoStack.undo();
     QVERIFY(doll.puppet() == rig);
 
@@ -729,7 +743,7 @@ void PuppetWorkspaceTests::testTurningAPositionedPartByItsHandle() {
     // Dragging the body itself moves it, in the pose.
     dragOnCanvas(workspace.canvas(), QPointF(20, 0), QPointF(20, 15));
     QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(0, 0)));
-    QCOMPARE(doll.puppet().poses[0].settings[0].position, std::optional<QPoint>(QPoint(0, 15)));
+    QCOMPARE(doll.puppet().poses[1].settings[0].position, std::optional<QPoint>(QPoint(0, 15)));
     QCOMPARE(angle->value(), 90);
 }
 
@@ -765,7 +779,7 @@ void PuppetWorkspaceTests::testPullingAHandTurnsTheArm() {
     QCOMPARE(project.undoStack.count(), 2);
     QCOMPARE(project.session.activeAtlas().puppets.first().parts, puppet.parts);
     // The pose sets what the pull turned, and only that: the body, placed by position, stays.
-    for (const PuppetPoseSetting& setting : project.session.activeAtlas().puppets.first().poses[0].settings)
+    for (const PuppetPoseSetting& setting : project.session.activeAtlas().puppets.first().poses[1].settings)
         QVERIFY(setting.part != QStringLiteral("body"));
 
     // The upper arm turned: its Angle field says so.
@@ -852,14 +866,19 @@ void PuppetWorkspaceTests::testNewPoseSetsOnlyThePartsChanged() {
     Doll doll;
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
     showAtFullSize(workspace);
-    QCOMPARE(frameNames(workspace.poseStrip()), QStringList{"Rest"});
-    QVERIFY(!workspace.findChild<QPushButton*>(QStringLiteral("puppetDuplicatePose"))->isEnabled());
+    // Rest is shown first, and sets every part; it can be duplicated but not removed.
+    QCOMPARE(frameNames(workspace.poseStrip()), QStringList{"rest"});
+    QCOMPARE(workspace.selectedPose(), 0);
+    QCOMPARE(workspace.poseParts()->item(0)->checkState(), Qt::Checked);
+    QCOMPARE(workspace.poseParts()->item(1)->checkState(), Qt::Checked);
+    QVERIFY(workspace.findChild<QPushButton*>(QStringLiteral("puppetDuplicatePose"))->isEnabled());
+    QVERIFY(!workspace.findChild<QPushButton*>(QStringLiteral("puppetRemovePose"))->isEnabled());
 
     // A new pose sets nothing: every part is faint, and unticked under the tree.
     startPose(workspace);
-    QCOMPARE(frameNames(workspace.poseStrip()), (QStringList{"Rest", "pose"}));
-    QCOMPARE(workspace.selectedPose(), 0);
-    QVERIFY(doll.puppet().poses[0].settings.isEmpty());
+    QCOMPARE(frameNames(workspace.poseStrip()), (QStringList{"rest", "pose"}));
+    QCOMPARE(workspace.selectedPose(), 1);
+    QVERIFY(doll.puppet().poses[1].settings.isEmpty());
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("New Pose"));
     QListWidget* parts = workspace.poseParts();
     QCOMPARE(parts->count(), 2);
@@ -869,9 +888,9 @@ void PuppetWorkspaceTests::testNewPoseSetsOnlyThePartsChanged() {
     // Turning the head adds it to the pose; the body stays out of it.
     workspace.select({0, 1, -1});
     workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->setValue(30);
-    QCOMPARE(doll.puppet().poses[0].settings.size(), 1);
-    QCOMPARE(doll.puppet().poses[0].settings[0].part, QStringLiteral("head"));
-    QCOMPARE(doll.puppet().poses[0].settings[0].angle, std::optional<int>(30));
+    QCOMPARE(doll.puppet().poses[1].settings.size(), 1);
+    QCOMPARE(doll.puppet().poses[1].settings[0].part, QStringLiteral("head"));
+    QCOMPARE(doll.puppet().poses[1].settings[0].angle, std::optional<int>(30));
     QCOMPARE(parts->item(1)->checkState(), Qt::Checked);
     QCOMPARE(parts->item(1)->text(), QStringLiteral("head · 30°"));
     QCOMPARE(parts->item(0)->checkState(), Qt::Unchecked);
@@ -880,9 +899,9 @@ void PuppetWorkspaceTests::testNewPoseSetsOnlyThePartsChanged() {
 
     // The next pose goes after the selected one, with its own name.
     startPose(workspace);
-    QCOMPARE(frameNames(workspace.poseStrip()), (QStringList{"Rest", "pose", "pose 2"}));
+    QCOMPARE(frameNames(workspace.poseStrip()), (QStringList{"rest", "pose", "pose 2"}));
     doll.project.undoStack.undo();
-    QCOMPARE(doll.puppet().poses.size(), 1);
+    QCOMPARE(doll.puppet().poses.size(), 2);
 }
 
 void PuppetWorkspaceTests::testSelectingAPoseShowsIt() {
@@ -892,19 +911,19 @@ void PuppetWorkspaceTests::testSelectingAPoseShowsIt() {
     showAtFullSize(workspace);
     workspace.select({0, 1, -1});
     PuppetPoseStrip* strip = workspace.poseStrip();
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "nod", "smile"}));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "nod", "smile"}));
     auto* angle = workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"));
     auto* shows = workspace.findChild<QComboBox*>(QStringLiteral("partShownVariant"));
 
     strip->setCurrentRow(1);
-    QCOMPARE(workspace.selectedPose(), 0);
+    QCOMPARE(workspace.selectedPose(), 1);
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(20));
     QCOMPARE(angle->value(), 20);
     strip->setCurrentRow(2);
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
     QCOMPARE(shows->currentIndex(), 1);  // head-smiling
     strip->setCurrentRow(0);
-    QCOMPARE(workspace.selectedPose(), -1);
+    QCOMPARE(workspace.selectedPose(), 0);
     QCOMPARE(shows->currentIndex(), 0);
     QCOMPARE(doll.project.undoStack.count(), 0);
 }
@@ -914,7 +933,7 @@ void PuppetWorkspaceTests::testTickingPartsInAndOutOfThePose() {
     addDollPoses(doll);
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
     showAtFullSize(workspace);
-    workspace.selectPose(0);  // "nod" sets the head only
+    workspace.selectPose(1);  // "nod" sets the head only
     QListWidget* parts = workspace.poseParts();
     QCOMPARE(parts->item(0)->checkState(), Qt::Unchecked);
     QCOMPARE(parts->item(1)->checkState(), Qt::Checked);
@@ -922,21 +941,30 @@ void PuppetWorkspaceTests::testTickingPartsInAndOutOfThePose() {
     // Unticking the head leaves it out: it goes back to rest in this pose.
     parts->item(1)->setCheckState(Qt::Unchecked);
     QCoreApplication::processEvents();
-    QVERIFY(doll.puppet().poses[0].settings.isEmpty());
+    QVERIFY(doll.puppet().poses[1].settings.isEmpty());
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Remove Part from Pose"));
 
     // Ticking the body sets it as it stands: at its rest angle.
     workspace.poseParts()->item(0)->setCheckState(Qt::Checked);
     QCoreApplication::processEvents();
-    QCOMPARE(doll.puppet().poses[0].settings.size(), 1);
-    QCOMPARE(doll.puppet().poses[0].settings[0].part, QStringLiteral("body"));
-    QCOMPARE(doll.puppet().poses[0].settings[0].angle, std::optional<int>(0));
+    QCOMPARE(doll.puppet().poses[1].settings.size(), 1);
+    QCOMPARE(doll.puppet().poses[1].settings[0].part, QStringLiteral("body"));
+    QCOMPARE(doll.puppet().poses[1].settings[0].angle, std::optional<int>(0));
     QCOMPARE(partOpacity(workspace.canvas(), 0), 1.0);
 
     doll.project.undoStack.undo();
     doll.project.undoStack.undo();
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(20));
+
+    // The Rest pose's parts are ticked in and out the same way.
+    workspace.selectPose(0);
+    QCOMPARE(workspace.poseParts()->item(1)->checkState(), Qt::Checked);
+    workspace.poseParts()->item(1)->setCheckState(Qt::Unchecked);
+    QCoreApplication::processEvents();
+    QCOMPARE(doll.puppet().poses[0].settings.size(), 1);
+    QCOMPARE(doll.puppet().poses[0].settings[0].part, QStringLiteral("body"));
+    QVERIFY(partOpacity(workspace.canvas(), 1) < 1);
 }
 
 void PuppetWorkspaceTests::testClickingAPartOutOfThePose() {
@@ -954,7 +982,7 @@ void PuppetWorkspaceTests::testClickingAPartOutOfThePose() {
     const QRect row = parts->visualItemRect(parts->item(1));
     QTest::mouseClick(parts->viewport(), Qt::LeftButton, {}, QPoint(row.left() + row.height() / 2, row.center().y()));
     QCoreApplication::processEvents();
-    QVERIFY(doll.puppet().poses[0].settings.isEmpty());
+    QVERIFY(doll.puppet().poses[1].settings.isEmpty());
     QCOMPARE(parts->item(1)->checkState(), Qt::Unchecked);
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
     QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
@@ -965,23 +993,24 @@ void PuppetWorkspaceTests::testPosingMovesPositionedPartsInThePose() {
     addDollPoses(doll);
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
     showAtFullSize(workspace);
-    workspace.selectPose(0);
+    workspace.selectPose(1);
 
     // In a pose, dragging the body moves it in the pose, not in the rig.
     dragOnCanvas(workspace.canvas(), QPointF(0, -20), QPointF(20, -20));
     QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(0, 0)));
     QCOMPARE(drawnParts(workspace.canvas())[0], QRectF(10, -40, 20, 40));
     QCOMPARE(workspace.findChild<QSpinBox*>(QStringLiteral("partPositionX"))->value(), 20);
-    const PuppetPose& nod = doll.puppet().poses[0];
+    const PuppetPose& nod = doll.puppet().poses[1];
     QCOMPARE(nod.settings.size(), 2);
     QCOMPARE(nod.settings[0].position, std::optional<QPoint>(QPoint(20, 0)));
     QCOMPARE(nod.settings[1].angle, std::optional<int>(20));
     QCOMPARE(doll.project.undoStack.count(), 1);
 
-    // At Rest, it moves the rig again.
-    workspace.selectPose(-1);
+    // At Rest, it moves the rig again, and the Rest pose with it.
+    workspace.selectPose(0);
     dragOnCanvas(workspace.canvas(), QPointF(0, -20), QPointF(0, -5));
     QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(0, 15)));
+    QCOMPARE(doll.puppet().poses[0].settings[0].position, std::optional<QPoint>(QPoint(0, 15)));
 }
 
 void PuppetWorkspaceTests::testPoseStripRenamesReordersAndRemoves() {
@@ -994,34 +1023,44 @@ void PuppetWorkspaceTests::testPoseStripRenamesReordersAndRemoves() {
     // Renaming in place; a taken name is put back.
     strip->item(1)->setText(QStringLiteral("smile"));
     QCoreApplication::processEvents();
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "nod", "smile"}));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "nod", "smile"}));
     QVERIFY(!workspace.findChild<QLabel*>(QStringLiteral("puppetPoseStatus"))->text().isEmpty());
     strip->item(1)->setText(QStringLiteral("yes"));
     QCoreApplication::processEvents();
-    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"yes", "smile"}));
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "yes", "smile"}));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Rename Pose"));
+    // Rest can't be renamed: it isn't editable in place, and a rename is refused.
+    QVERIFY(!(strip->item(0)->flags() & Qt::ItemIsEditable));
+    emit strip->renameRequested(0, QStringLiteral("idle"));
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()).first(), PUPPET_REST_POSE);
 
-    // Reordering keeps the moved pose selected.
-    workspace.selectPose(0);
-    emit strip->moveRequested(0, 1);
-    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"smile", "yes"}));
-    QCOMPARE(workspace.selectedPose(), 1);
+    // Reordering keeps the moved pose selected; Rest stays first.
+    workspace.selectPose(1);
+    emit strip->moveRequested(1, 2);
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "smile", "yes"}));
+    QCOMPARE(workspace.selectedPose(), 2);
+    emit strip->moveRequested(2, 0);
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "smile", "yes"}));
 
     // Duplicating copies the selected pose after it.
     workspace.findChild<QPushButton*>(QStringLiteral("puppetDuplicatePose"))->click();
-    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"smile", "yes", "yes 2"}));
-    QCOMPARE(doll.puppet().poses[2].settings, doll.puppet().poses[1].settings);
-    QCOMPARE(workspace.selectedPose(), 2);
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "smile", "yes", "yes 2"}));
+    QCOMPARE(doll.puppet().poses[3].settings, doll.puppet().poses[2].settings);
+    QCOMPARE(workspace.selectedPose(), 3);
     doll.project.undoStack.undo();
-    workspace.selectPose(1);
+    workspace.selectPose(2);
 
     // Removing selects the frame before it.
     workspace.findChild<QPushButton*>(QStringLiteral("puppetRemovePose"))->click();
-    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), QStringList{"smile"});
-    QCOMPARE(workspace.selectedPose(), 0);
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "smile"}));
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "smile"}));
+    QCOMPARE(workspace.selectedPose(), 1);
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "smile"}));
     doll.project.undoStack.undo();
-    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"smile", "yes"}));
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "smile", "yes"}));
+
+    // Rest can't be removed.
+    emit strip->removeRequested(0);
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "smile", "yes"}));
 }
 
 namespace {
@@ -1045,41 +1084,49 @@ void PuppetWorkspaceTests::testPoseStripContextMenuWorksLikeTheFrameList() {
     showAtFullSize(workspace);
     PuppetPoseStrip* strip = workspace.poseStrip();
 
-    // The same actions as an animation's frames; nothing goes before Rest.
-    std::unique_ptr<QMenu> poseMenu(strip->createContextMenu(0));
+    // The same actions as an animation's frames; Rest stays first and can't go.
+    std::unique_ptr<QMenu> poseMenu(strip->createContextMenu(1));
     QCOMPARE(menuItems(poseMenu.get()), (QStringList{"Add Pose Before", "Add Pose After", "-", "[Move to the left]",
                                                      "Move to the right", "Duplicate", "-", "Delete"}));
-    std::unique_ptr<QMenu> lastMenu(strip->createContextMenu(1));
+    std::unique_ptr<QMenu> lastMenu(strip->createContextMenu(2));
     QVERIFY(menuItems(lastMenu.get()).contains(QStringLiteral("[Move to the right]")));
-    std::unique_ptr<QMenu> restMenu(strip->createContextMenu(-1));
-    QCOMPARE(menuItems(restMenu.get()), QStringList{"Add Pose After"});
-    std::unique_ptr<QMenu> emptyMenu(strip->createContextMenu(-2));
+    std::unique_ptr<QMenu> restMenu(strip->createContextMenu(0));
+    QCOMPARE(menuItems(restMenu.get()), (QStringList{"[Add Pose Before]", "Add Pose After", "-", "[Move to the left]",
+                                                     "[Move to the right]", "Duplicate", "-", "[Delete]"}));
+    std::unique_ptr<QMenu> emptyMenu(strip->createContextMenu(-1));
     QCOMPARE(menuItems(emptyMenu.get()), QStringList{"Add Pose"});
 
-    triggerFrameAction(strip, 0, QStringLiteral("Add Pose Before"));
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose", "nod", "smile"}));
-    QCOMPARE(workspace.selectedPose(), 0);
-    triggerFrameAction(strip, -1, QStringLiteral("Add Pose After"));
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "pose", "nod", "smile"}));
-    triggerFrameAction(strip, 2, QStringLiteral("Move to the left"));  // nod
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "nod", "pose", "smile"}));
-    triggerFrameAction(strip, 1, QStringLiteral("Move to the right"));  // nod again
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "pose", "nod", "smile"}));
-    triggerFrameAction(strip, 2, QStringLiteral("Duplicate"));
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose 2", "pose", "nod", "nod 2", "smile"}));
-    QCOMPARE(doll.puppet().poses[3].settings, doll.puppet().poses[2].settings);
-    QCOMPARE(workspace.selectedPose(), 3);
-    triggerFrameAction(strip, 0, QStringLiteral("Delete"));
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "pose", "nod", "nod 2", "smile"}));
-    triggerFrameAction(strip, -2, QStringLiteral("Add Pose"));
+    triggerFrameAction(strip, 1, QStringLiteral("Add Pose Before"));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "pose", "nod", "smile"}));
+    QCOMPARE(workspace.selectedPose(), 1);
+    triggerFrameAction(strip, 0, QStringLiteral("Add Pose After"));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "pose 2", "pose", "nod", "smile"}));
+    triggerFrameAction(strip, 3, QStringLiteral("Move to the left"));  // nod
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "pose 2", "nod", "pose", "smile"}));
+    triggerFrameAction(strip, 2, QStringLiteral("Move to the right"));  // nod again
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "pose 2", "pose", "nod", "smile"}));
+    triggerFrameAction(strip, 3, QStringLiteral("Duplicate"));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "pose 2", "pose", "nod", "nod 2", "smile"}));
+    QCOMPARE(doll.puppet().poses[4].settings, doll.puppet().poses[3].settings);
+    QCOMPARE(workspace.selectedPose(), 4);
+    triggerFrameAction(strip, 1, QStringLiteral("Delete"));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "pose", "nod", "nod 2", "smile"}));
+    triggerFrameAction(strip, -1, QStringLiteral("Add Pose"));
     QCOMPARE(frameNames(strip).last(), QStringLiteral("pose 2"));
+    triggerFrameAction(strip, 0, QStringLiteral("Duplicate"));
+    QCOMPARE(frameNames(strip)[1], QStringLiteral("rest 2"));
+    QCOMPARE(doll.puppet().poses[1].settings, doll.puppet().poses[0].settings);
+    doll.project.undoStack.undo();
 
-    // Backspace deletes the selected pose, as Delete does.
-    workspace.selectPose(0);
+    // Backspace deletes the selected pose, as Delete does, but not Rest.
+    workspace.selectPose(1);
     strip->setFocus();
     QTest::keyClick(strip, Qt::Key_Backspace);
-    QCOMPARE(frameNames(strip), (QStringList{"Rest", "nod", "nod 2", "smile", "pose 2"}));
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "nod", "nod 2", "smile", "pose 2"}));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Remove Pose"));
+    workspace.selectPose(0);
+    QTest::keyClick(strip, Qt::Key_Backspace);
+    QCOMPARE(frameNames(strip), (QStringList{"rest", "nod", "nod 2", "smile", "pose 2"}));
 }
 
 namespace {
@@ -1146,7 +1193,12 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
     workspace.findChild<QSpinBox*>(QStringLiteral("puppetStepHold"))->setValue(0);
     workspace.findChild<QSpinBox*>(QStringLiteral("puppetStepIn"))->setValue(0);
     QCOMPARE(stepRows(doll)[1], QStringLiteral("smile 0/1 step"));
-    workspace.findChild<QComboBox*>(QStringLiteral("puppetStepPose"))->setCurrentIndex(0);
+    // Rest is a pose a step can go back to.
+    auto* stepPose = workspace.findChild<QComboBox*>(QStringLiteral("puppetStepPose"));
+    QCOMPARE(stepPose->itemText(0), PUPPET_REST_POSE);
+    stepPose->setCurrentIndex(0);
+    QCOMPARE(stepRows(doll)[1], QStringLiteral("rest 0/1 step"));
+    stepPose->setCurrentIndex(1);
     QCOMPARE(stepRows(doll)[1], QStringLiteral("nod 0/1 step"));
 
     // Move, duplicate and delete, as frames.
@@ -1284,11 +1336,14 @@ void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {
     QCOMPARE(angle->value(), -45);
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(-45));
 
-    // Rest shows the rig, whatever the poses do.
-    workspace.selectPose(-1);
+    // Rest shows its own angle, and the field turns the part in it.
+    workspace.selectPose(0);
     QCOMPARE(angle->value(), 0);
-    QVERIFY(!angle->isEnabled());
+    QVERIFY(angle->isEnabled());
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
+    angle->setValue(10);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(10));
+    QCOMPARE(doll.puppet().poses[0].settings[1].angle, std::optional<int>(10));
 }
 
 void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {
@@ -1371,12 +1426,39 @@ void PuppetWorkspaceTests::testReorderingPartsAndVariants() {
     QCOMPARE(drawnParts(workspace.canvas()),
              (QVector<QRectF>{QRectF(-8, -54, 16, 16), QRectF(-10, -40, 20, 40)}));
 
-    // Dropping a variant on its part's row makes it the first, the rest variant.
-    emit workspace.tree()->moveRequested({0, 0, 1}, 0);
-    QCOMPARE(puppetVariantName(doll.puppet().parts[0].variants[0]), QStringLiteral("head-smiling"));
-    QCOMPARE(workspace.selection(), (PuppetSelection{0, 0, 0}));
+    // Variants are listed by name: they aren't moved.
+    workspace.select({0, 0, 1});
+    workspace.moveSelected(0);
+    QCOMPARE(puppetVariantName(doll.puppet().parts[0].variants[0]), QStringLiteral("head"));
+    QCOMPARE(doll.project.undoStack.count(), 1);
+    QVERIFY(!(workspace.tree()->currentItem()->flags() & Qt::ItemIsDragEnabled));
+}
+
+void PuppetWorkspaceTests::testRestPoseVariantIsTheRestVariant() {
+    Doll doll;
+    addDollPoses(doll);
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+    auto* shows = workspace.findChild<QComboBox*>(QStringLiteral("partShownVariant"));
+    QVERIFY(shows);
+
+    // Picking a variant on another pose sets it there only.
+    workspace.selectPose(1);
+    shows->setCurrentIndex(1);
+    QCOMPARE(doll.puppet().poses[1].settings[0].variant, QStringLiteral("head-smiling"));
+    QCOMPARE(puppetVariantName(doll.puppet().parts[1].variants[0]), QStringLiteral("head"));
+
+    // Picked on Rest, it becomes the rest variant: first, starred in the tree.
+    workspace.selectPose(0);
+    QCOMPARE(shows->currentIndex(), 0);  // the starred rest variant
+    shows->setCurrentIndex(1);
+    QCOMPARE(doll.puppet().poses[0].settings[1].variant, QStringLiteral("head-smiling"));
+    QCOMPARE(puppetVariantName(doll.puppet().parts[1].variants[0]), QStringLiteral("head-smiling"));
     QCOMPARE(doll.project.undoStack.count(), 2);
-    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Make Rest Variant"));
+    doll.project.undoStack.undo();
+    QCOMPARE(puppetVariantName(doll.puppet().parts[1].variants[0]), QStringLiteral("head"));
+    QCOMPARE(doll.puppet().poses[0].settings[1].variant, QStringLiteral("head"));
 }
 
 void PuppetWorkspaceTests::testRemovingAPartSelectsItsNeighbour() {
@@ -1394,4 +1476,66 @@ void PuppetWorkspaceTests::testRemovingAPartSelectsItsNeighbour() {
     QCOMPARE(doll.puppet().parts.size(), 2);
     QCOMPARE(doll.puppet().attachments.size(), 1);
     QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
+}
+
+void PuppetWorkspaceTests::testShowingAVariantInAPoseFromTheTree() {
+    Doll doll;
+    addDollPoses(doll);
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.selectPose(1);  // "nod" leaves the head's variant alone
+    const auto variantItem = [&workspace](int part, int variant) {
+        for (QTreeWidgetItemIterator it(workspace.tree()); *it; ++it) {
+            if (PuppetTreeWidget::selectionOf(*it) == PuppetSelection{0, part, variant}) return *it;
+        }
+        return static_cast<QTreeWidgetItem*>(nullptr);
+    };
+    // The tree marks the variant the pose shows.
+    QCOMPARE(variantItem(1, 0)->text(1), QStringLiteral("sprite · shown"));
+    QCOMPARE(variantItem(1, 1)->text(1), QStringLiteral("sprite"));
+
+    // Right-click a variant: Show in Pose, off for the one already shown.
+    workspace.select({0, 1, 0});
+    std::unique_ptr<QMenu> shownMenu(workspace.createContextMenu());
+    QVERIFY(menuItems(shownMenu.get()).contains(QStringLiteral("[Show in Pose \"nod\"]")));
+    workspace.select({0, 1, 1});
+    std::unique_ptr<QMenu> menu(workspace.createContextMenu());
+    QAction* show = nullptr;
+    for (QAction* action : menu->actions()) {
+        if (action->text() == QStringLiteral("Show in Pose \"nod\"")) show = action;
+    }
+    QVERIFY(show && show->isEnabled());
+    show->trigger();
+    QCOMPARE(doll.puppet().poses[1].settings[0].variant, QStringLiteral("head-smiling"));
+    QCOMPARE(doll.puppet().poses[1].settings[0].angle, std::optional<int>(20));
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Show Variant"));
+    QCOMPARE(variantItem(1, 1)->text(1), QStringLiteral("sprite · shown"));
+    doll.project.undoStack.undo();
+
+    // Double-clicking a variant does the same.
+    emit workspace.tree()->itemDoubleClicked(variantItem(1, 1), 0);
+    QCoreApplication::processEvents();
+    QCOMPARE(doll.puppet().poses[1].settings[0].variant, QStringLiteral("head-smiling"));
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, 1}));
+
+    // On Rest, it becomes the rest variant, first, and stays selected.
+    workspace.selectPose(0);
+    emit workspace.tree()->itemDoubleClicked(variantItem(1, 1), 0);
+    QCoreApplication::processEvents();
+    QCOMPARE(puppetVariantName(doll.puppet().parts[1].variants[0]), QStringLiteral("head-smiling"));
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, 0}));
+    QCOMPARE(variantItem(1, 0)->text(1), QStringLiteral("sprite · shown"));
+    // The tree still lists the variants by name, and the panel's Shows too.
+    QCOMPARE(treeRows(workspace.tree()).mid(4), (QStringList{"    head | sprite", "    head-smiling | sprite · shown"}));
+    workspace.select({0, 1, -1});
+    auto* shows = workspace.findChild<QComboBox*>(QStringLiteral("partShownVariant"));
+    QCOMPARE(shows->itemText(0), QStringLiteral("head"));
+    QCOMPARE(shows->itemText(1), QStringLiteral("★ head-smiling"));
+    QCOMPARE(shows->currentIndex(), 1);
+
+    // While an animation plays, the tree doesn't change poses.
+    workspace.bottomTabs()->setCurrentIndex(1);
+    workspace.select({0, 1, 1});
+    std::unique_ptr<QMenu> playingMenu(workspace.createContextMenu());
+    QVERIFY(menuItems(playingMenu.get()).contains(QStringLiteral("[Show in Pose]")));
 }

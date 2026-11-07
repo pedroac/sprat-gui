@@ -78,6 +78,11 @@ struct PuppetPose {
     bool operator==(const PuppetPose&) const = default;
 };
 
+/// The name of every puppet's Rest pose: a pose like the others, kept first, that can't be
+/// removed, renamed or moved. It is exported as a plain `pose`, so animations can play it;
+/// sprat-cli's own rest (first variants, angle 0, offset 0) is still what poses start from.
+inline const QString PUPPET_REST_POSE = QStringLiteral("rest");
+
 /// One step of a sequence: reach a pose in `in` frames, then hold it `hold` frames.
 struct PuppetSequenceStep {
     QString pose;
@@ -128,6 +133,11 @@ inline QString puppetVariantName(const PuppetVariant& variant) {
     if (!variant.name.isEmpty()) return variant.name;
     if (variant.kind == PuppetVariant::Kind::Animation || variant.byIndex) return variant.source;
     return puppetSpriteName(variant.source);
+}
+
+/// Whether pose @p poseIndex is the puppet's Rest pose.
+inline bool puppetIsRestPose(const Puppet& puppet, int poseIndex) {
+    return poseIndex >= 0 && poseIndex < puppet.poses.size() && puppet.poses[poseIndex].name == PUPPET_REST_POSE;
 }
 
 /// The part named @p name, or nullptr.

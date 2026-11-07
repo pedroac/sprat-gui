@@ -1,6 +1,8 @@
 #include "PuppetEditing.h"
 
 #include <algorithm>
+#include <numeric>
+#include <QCollator>
 #include <QCoreApplication>
 
 namespace {
@@ -94,6 +96,8 @@ QString partNameProblem(const Puppet& puppet, int index, const QString& name) {
 }
 
 QString poseNameProblem(const Puppet& puppet, int index, const QString& name) {
+    if (puppetIsRestPose(puppet, index) && name != PUPPET_REST_POSE)
+        return trPEd("The Rest pose keeps its name: animations play it as \"%1\".").arg(PUPPET_REST_POSE);
     if (name.trimmed().isEmpty()) return trPEd("A pose needs a name.");
     if (takenByOther(poseNames(puppet), index, name))
         return trPEd("Puppet \"%1\" already has a pose called \"%2\".").arg(puppet.name, name);
@@ -121,7 +125,7 @@ void moveStep(Puppet& puppet, int sequenceIndex, int from, int to) {
 }
 
 void renamePose(Puppet& puppet, int poseIndex, const QString& name) {
-    if (poseIndex < 0 || poseIndex >= puppet.poses.size()) return;
+    if (poseIndex < 0 || poseIndex >= puppet.poses.size() || puppetIsRestPose(puppet, poseIndex)) return;
     const QString old = puppet.poses[poseIndex].name;
     puppet.poses[poseIndex].name = name;
     for (PuppetSequence& sequence : puppet.sequences) {
@@ -132,7 +136,7 @@ void renamePose(Puppet& puppet, int poseIndex, const QString& name) {
 }
 
 void removePose(Puppet& puppet, int poseIndex) {
-    if (poseIndex < 0 || poseIndex >= puppet.poses.size()) return;
+    if (poseIndex < 0 || poseIndex >= puppet.poses.size() || puppetIsRestPose(puppet, poseIndex)) return;
     const QString name = puppet.poses[poseIndex].name;
     puppet.poses.removeAt(poseIndex);
     for (PuppetSequence& sequence : puppet.sequences) {
@@ -143,7 +147,80 @@ void removePose(Puppet& puppet, int poseIndex) {
 void movePose(Puppet& puppet, int from, int to) {
     const int count = puppet.poses.size();
     if (from < 0 || from >= count || to < 0 || to >= count || from == to) return;
+    if (puppetIsRestPose(puppet, from) || puppetIsRestPose(puppet, to)) return;
     puppet.poses.move(from, to);
+}
+
+PuppetPoseSetting restSetting(const Puppet& puppet, int partIndex) {
+    PuppetPoseSetting setting;
+    if (!validPart(puppet, partIndex)) return setting;
+    const PuppetPart& part = puppet.parts[partIndex];
+    setting.part = part.name;
+    if (!part.variants.isEmpty()) setting.variant = puppetVariantName(part.variants.first());
+    setting.angle = 0;
+    if (puppetParentAttachment(puppet, part.name)) setting.offset = QPoint(0, 0);
+    else if (part.position) setting.position = *part.position;
+    return setting;
+}
+
+void keepRestPose(Puppet& puppet, const Puppet* before) {
+    int rest = poseNames(puppet).indexOf(PUPPET_REST_POSE);
+    if (rest < 0) {
+        PuppetPose pose;
+        pose.name = PUPPET_REST_POSE;
+        for (int i = 0; i < puppet.parts.size(); ++i) pose.settings.append(restSetting(puppet, i));
+        puppet.poses.insert(0, pose);
+        return;
+    }
+    if (rest > 0) puppet.poses.move(rest, 0);
+    PuppetPose& pose = puppet.poses.first();
+    const QStringList names = partNames(puppet);
+    if (before && puppet.parts.size() > before->parts.size()) {
+        const QStringList had = partNames(*before);
+        for (int i = 0; i < puppet.parts.size(); ++i) {
+            const bool set = std::any_of(pose.settings.cbegin(), pose.settings.cend(),
+                [&names, i](const PuppetPoseSetting& setting) { return setting.part == names[i]; });
+            if (!had.contains(names[i]) && !set) pose.settings.append(restSetting(puppet, i));
+        }
+        std::stable_sort(pose.settings.begin(), pose.settings.end(),
+            [&names](const PuppetPoseSetting& a, const PuppetPoseSetting& b) {
+                return names.indexOf(a.part) < names.indexOf(b.part);
+            });
+    }
+    const PuppetPose* restBefore = nullptr;
+    if (before) {
+        for (const PuppetPose& candidate : before->poses) {
+            if (candidate.name == PUPPET_REST_POSE) restBefore = &candidate;
+        }
+    }
+    for (PuppetPoseSetting& setting : pose.settings) {
+        const int partIndex = names.indexOf(setting.part);
+        if (partIndex < 0) continue;
+        PuppetPart& variantsOf = puppet.parts[partIndex];
+        // The variant Rest shows is the rest variant, the first one, as sprat-cli has it. Rest
+        // picking another moves that one first; the variants reordered moves Rest to the new first.
+        const QStringList variants = variantNames(variantsOf);
+        if (!variants.isEmpty()) {
+            const int shown = variants.indexOf(setting.variant);
+            bool restPicked = shown > 0;
+            if (restPicked && restBefore) {
+                for (const PuppetPoseSetting& old : restBefore->settings) {
+                    if (old.part == setting.part && old.variant == setting.variant) restPicked = false;
+                }
+            }
+            if (restPicked) variantsOf.variants.move(shown, 0);
+            else setting.variant = variants.first();
+        }
+        const PuppetPart* part = &variantsOf;
+        if (puppetParentAttachment(puppet, part->name)) {
+            setting.position.reset();
+        } else {
+            setting.offset.reset();
+            if (setting.position && part->position) setting.position = *part->position;
+        }
+        // A pose line must set something.
+        if (setting.variant.isEmpty() && !setting.angle && !setting.offset && !setting.position) setting.angle = 0;
+    }
 }
 
 QString variantNameProblem(const PuppetPart& part, int index, const QString& name) {
@@ -222,9 +299,16 @@ void removeVariant(Puppet& puppet, int partIndex, int variantIndex) {
     }
 }
 
-void moveVariant(Puppet& puppet, int partIndex, int from, int to) {
-    if (!validVariant(puppet, partIndex, from) || !validVariant(puppet, partIndex, to) || from == to) return;
-    puppet.parts[partIndex].variants.move(from, to);
+QVector<int> variantsByName(const PuppetPart& part) {
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    const QStringList names = variantNames(part);
+    QVector<int> order(names.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(),
+                     [&](int a, int b) { return collator.compare(names[a], names[b]) < 0; });
+    return order;
 }
 
 QSet<int> partsHangingFrom(const Puppet& puppet, int partIndex) {

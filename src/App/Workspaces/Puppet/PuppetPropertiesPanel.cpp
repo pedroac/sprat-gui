@@ -96,7 +96,7 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
                                       "show their first (★) variant"));
         form->addRow(tr("Shows:"), m_shownVariant);
         connect(m_shownVariant, &QComboBox::currentIndexChanged, this, [this](int index) {
-            if (index >= 0) emit shownVariantChanged(index);
+            if (index >= 0) emit shownVariantChanged(m_shownVariant->itemData(index).toInt());
         });
         m_partName->setObjectName(QStringLiteral("partNameEdit"));
 
@@ -154,13 +154,10 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         m_variantThumbnail->setMinimumHeight(THUMBNAIL_SIZE);
         pageLayout->addWidget(m_variantThumbnail);
 
-        m_restLabel = new QLabel(tr("★ Rest variant: the part shows it unless a pose picks another."), page);
+        m_restLabel = new QLabel(tr("★ Rest variant: the one the rest pose shows. To change it, select rest "
+                                    "below the canvas and pick another in the part's Shows."), page);
         m_restLabel->setWordWrap(true);
         pageLayout->addWidget(m_restLabel);
-        m_makeRestButton = new QPushButton(tr("Make Rest Variant"), page);
-        m_makeRestButton->setToolTip(tr("Move this variant first, so the part shows it at rest"));
-        connect(m_makeRestButton, &QPushButton::clicked, this, &PuppetPropertiesPanel::makeRestVariantRequested);
-        pageLayout->addWidget(m_makeRestButton, 0, Qt::AlignLeft);
         pageLayout->addStretch();
         m_pages->addWidget(page);
     }
@@ -271,13 +268,14 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     m_angle->setToolTip(placement.posing
         ? tr("Turns the part in the selected pose, clockwise: from its parent when attached, around its "
              "pivot when placed by position")
-        : tr("Rest is the rig: select or add a pose below the canvas to turn parts"));
+        : tr("Select a pose below the canvas to turn parts"));
     {
         const QSignalBlocker blockVariant(m_shownVariant);
         m_shownVariant->clear();
-        for (int v = 0; v < placement.variants.size(); ++v)
-            m_shownVariant->addItem(v == 0 ? QStringLiteral("★ %1").arg(placement.variants[v]) : placement.variants[v]);
-        m_shownVariant->setCurrentIndex(placement.variant);
+        // By name, as in the tree; each item holds the variant's index.
+        for (const int v : placement.variantOrder)
+            m_shownVariant->addItem(v == 0 ? QStringLiteral("★ %1").arg(placement.variants[v]) : placement.variants[v], v);
+        m_shownVariant->setCurrentIndex(m_shownVariant->findData(placement.variant));
         m_shownVariant->setEnabled(placement.posing);
         m_partForm->setRowVisible(m_shownVariant, placement.variants.size() > 1);
     }
@@ -490,6 +488,5 @@ void PuppetPropertiesPanel::showVariant(const QString& explicitName, const QStri
         m_variantThumbnail->setPixmap(scaled);
     }
     m_restLabel->setVisible(isRest);
-    m_makeRestButton->setVisible(!isRest);
     m_pages->setCurrentIndex(3);
 }
