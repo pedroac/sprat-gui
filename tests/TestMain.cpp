@@ -9,6 +9,7 @@
 #include "ImageDiscoveryTests.h"
 #include "ProjectSessionTests.h"
 #include "NineSliceWorkspaceTests.h"
+#include "SpriteEditorTests.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -39,6 +40,9 @@ int main(int argc, char** argv) {
 
     NineSliceWorkspaceTests nineSliceWorkspaceTests;
     runTest(&nineSliceWorkspaceTests);
+
+    SpriteEditorTests spriteEditorTests;
+    runTest(&spriteEditorTests);
 
     return status;
 }

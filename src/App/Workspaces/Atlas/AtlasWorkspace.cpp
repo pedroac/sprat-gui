@@ -2,6 +2,7 @@
 // Implements the Atlas (Sprites) workspace widget.
 
 #include "AtlasWorkspace.h"
+#include "MarkerUtils.h"
 #include "LayoutCanvas.h"
 #include "NavigatorPanel.h"
 #include "NavigatorTreeWidget.h"
@@ -1224,5 +1225,13 @@ void AtlasWorkspace::onPointsConfigClicked() {
             m_session->selectedSprite, oldPoints, newPoints,
             [this]() { refreshMarkerDisplay(); },
             std::move(coTargets)));
+    }
+
+    // The marker just created is the one to edit next: select it, as picking it would.
+    const QString added = addedMarkerName(oldPoints, newPoints);
+    auto* combo = m_spriteEditorPanel->handleCombo();
+    if (!added.isEmpty() && combo) {
+        const int index = combo->findText(added);
+        if (index > 0) combo->setCurrentIndex(index);
     }
 }
