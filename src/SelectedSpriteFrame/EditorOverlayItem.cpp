@@ -640,9 +640,30 @@ void EditorOverlayItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         return;
     }
 
-    // Clicking elsewhere on the sprite places the pivot there, only while the pivot is the
-    // selected handle: with a marker selected, it neither moves the pivot nor selects it.
-    if (m_selectedMarkerName.isEmpty()) {
+    // A click elsewhere positions the selected handle there: the selected marker (centred on
+    // the click) or, with no marker selected, the pivot.
+    if (NamedPoint* p = m_selectedMarkerName.isEmpty() ? nullptr : getNamedPoint(m_selectedMarkerName)) {
+        QPointF anchor(p->x, p->y);
+        if (p->kind == MarkerKind::Rectangle) {
+            anchor = QRectF(p->x, p->y, p->w, p->h).center();
+        } else if (p->kind == MarkerKind::Polygon && !p->polygonPoints.isEmpty()) {
+            anchor = QPolygonF(QPolygon(p->polygonPoints)).boundingRect().center();
+        }
+        m_dragMode = (p->kind == MarkerKind::Polygon) ? PolyMove : ((p->kind == MarkerKind::Rectangle) ? RectMove : Point);
+        m_dragOriginalPos = QPoint(p->x, p->y);
+        m_dragOriginalPoly = p->polygonPoints;
+        m_markerDragFloatPoly.resize(p->polygonPoints.size());
+        m_markerDragFloatRect = QRectF(p->x, p->y, p->w, p->h);
+        m_dragTargetName = p->name;
+        m_dragStartPos = anchor;
+        m_selectedVertexIndex = -1;
+        setCursor(Qt::SizeAllCursor);
+        mouseMoveEvent(event);
+        event->accept();
+        return;
+    }
+
+    if (!m_lockToActiveHandle || m_selectedMarkerName.isEmpty()) {
         if (!m_sprites.isEmpty())
             m_pivotBeforeDrag = QPoint(m_sprites.last()->pivotX, m_sprites.last()->pivotY);
         m_pivotDragFloat = pos;

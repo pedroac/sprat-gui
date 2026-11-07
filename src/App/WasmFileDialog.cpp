@@ -395,7 +395,7 @@ EM_JS(void, sprat_install_drop_handlers, (), {
         overlay.appendChild(title);
         if (!supportsDirectoryDrop) {
             var note = document.createElement('div');
-            note.textContent = 'Folder drop not supported in this browser. Use Load Images Folder.';
+            note.textContent = 'Folder drop not supported in this browser. Use File > Add Source Folder.';
             note.style.fontSize = '14px';
             note.style.marginTop = '8px';
             note.style.opacity = '0.8';

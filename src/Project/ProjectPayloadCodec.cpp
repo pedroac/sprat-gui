@@ -3,6 +3,7 @@
 #include "MarkerUtils.h"
 #include "NineSliceInsets.h"
 #include "PathSafety.h"
+#include "PuppetEditing.h"
 #include "ResolutionUtils.h"
 
 #include <QDateTime>
@@ -12,6 +13,9 @@
 #include <QStandardPaths>
 #include <QColor>
 #include <QUuid>
+
+#include <functional>
+#include <optional>
 
 namespace {
 QJsonArray toJsonArray(const QVector<int>& values) {
@@ -75,6 +79,176 @@ AnimationTimeline timelineFromJson(const QJsonObject& tObj, int defaultFps) {
     return t;
 }
 
+QJsonArray pointToJson(const QPoint& point) {
+    return QJsonArray{point.x(), point.y()};
+}
+
+std::optional<QPoint> pointFromJson(const QJsonValue& value) {
+    const QJsonArray arr = value.toArray();
+    if (arr.size() != 2) return std::nullopt;
+    return QPoint(arr[0].toInt(), arr[1].toInt());
+}
+
+// Sprite paths turn relative for portable saves, like the atlas's sprite paths. A sprite a
+// puppets file named by name or index isn't a path, so it is never rewritten.
+QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const QString&)>& portablePath) {
+    QJsonObject pObj;
+    pObj["name"] = puppet.name;
+    QJsonArray partsArr;
+    for (const PuppetPart& part : puppet.parts) {
+        QJsonObject partObj;
+        partObj["name"] = part.name;
+        if (part.position) partObj["at"] = pointToJson(*part.position);
+        QJsonArray variantsArr;
+        for (const PuppetVariant& variant : part.variants) {
+            QJsonObject vObj;
+            const bool isSprite = variant.kind == PuppetVariant::Kind::Sprite;
+            vObj["kind"] = isSprite ? QStringLiteral("sprite") : QStringLiteral("animation");
+            const bool isPath = isSprite && !variant.byIndex && QDir::isAbsolutePath(variant.source);
+            const QString stored = isPath ? portablePath(variant.source) : variant.source;
+            vObj["source"] = stored;
+            if (isPath && QDir::isRelativePath(stored)) vObj["relative"] = true;
+            if (variant.byIndex) vObj["by_index"] = true;
+            if (!variant.name.isEmpty()) vObj["name"] = variant.name;
+            variantsArr.append(vObj);
+        }
+        partObj["variants"] = variantsArr;
+        if (!part.hiddenMarkers.isEmpty()) partObj["hidden_markers"] = QJsonArray::fromStringList(part.hiddenMarkers);
+        partsArr.append(partObj);
+    }
+    pObj["parts"] = partsArr;
+
+    QJsonArray attachmentsArr;
+    for (const PuppetAttachment& a : puppet.attachments) {
+        QJsonObject aObj;
+        aObj["child"] = a.child;
+        aObj["child_marker"] = a.childMarker;
+        aObj["parent"] = a.parent;
+        aObj["parent_marker"] = a.parentMarker;
+        if (a.leeway != 0) aObj["leeway"] = a.leeway;
+        if (a.angleMin && a.angleMax) {
+            aObj["angle_min"] = *a.angleMin;
+            aObj["angle_max"] = *a.angleMax;
+        }
+        attachmentsArr.append(aObj);
+    }
+    pObj["attachments"] = attachmentsArr;
+
+    QJsonArray posesArr;
+    for (const PuppetPose& pose : puppet.poses) {
+        QJsonObject poseObj;
+        poseObj["name"] = pose.name;
+        if (!pose.owner.isEmpty()) poseObj["animation"] = pose.owner;
+        QJsonArray settingsArr;
+        for (const PuppetPoseSetting& s : pose.settings) {
+            QJsonObject sObj;
+            sObj["part"] = s.part;
+            if (!s.variant.isEmpty()) sObj["variant"] = s.variant;
+            if (s.angle) sObj["angle"] = *s.angle;
+            if (s.offset) sObj["offset"] = pointToJson(*s.offset);
+            if (s.position) sObj["at"] = pointToJson(*s.position);
+            settingsArr.append(sObj);
+        }
+        poseObj["parts"] = settingsArr;
+        posesArr.append(poseObj);
+    }
+    pObj["poses"] = posesArr;
+
+    QJsonArray sequencesArr;
+    for (const PuppetSequence& sequence : puppet.sequences) {
+        QJsonObject seqObj;
+        seqObj["name"] = sequence.name;
+        seqObj["fps"] = sequence.fps;
+        if (sequence.loopMode != AnimationLoopMode::Loop) seqObj["loop"] = animationLoopModeName(sequence.loopMode);
+        QJsonArray stepsArr;
+        for (const PuppetSequenceStep& step : sequence.steps) {
+            QJsonObject stepObj;
+            stepObj["pose"] = step.pose;
+            if (step.in != 0) stepObj["in"] = step.in;
+            if (step.hold != 0) stepObj["hold"] = step.hold;
+            if (step.snap) stepObj["ease"] = QStringLiteral("step");
+            stepsArr.append(stepObj);
+        }
+        seqObj["steps"] = stepsArr;
+        sequencesArr.append(seqObj);
+    }
+    pObj["sequences"] = sequencesArr;
+    return pObj;
+}
+
+Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
+    Puppet puppet;
+    puppet.name = pObj["name"].toString();
+    for (const auto& partVal : pObj["parts"].toArray()) {
+        const QJsonObject partObj = partVal.toObject();
+        PuppetPart part;
+        part.name = partObj["name"].toString();
+        part.position = pointFromJson(partObj["at"]);
+        for (const auto& marker : partObj["hidden_markers"].toArray()) part.hiddenMarkers.append(marker.toString());
+        for (const auto& vVal : partObj["variants"].toArray()) {
+            const QJsonObject vObj = vVal.toObject();
+            PuppetVariant variant;
+            variant.kind = vObj["kind"].toString() == QLatin1String("animation")
+                ? PuppetVariant::Kind::Animation : PuppetVariant::Kind::Sprite;
+            variant.source = vObj["source"].toString();
+            if (vObj["relative"].toBool(false)) variant.source = spriteDir.filePath(variant.source);
+            variant.byIndex = vObj["by_index"].toBool(false);
+            variant.name = vObj["name"].toString();
+            part.variants.append(variant);
+        }
+        puppet.parts.append(part);
+    }
+    for (const auto& aVal : pObj["attachments"].toArray()) {
+        const QJsonObject aObj = aVal.toObject();
+        PuppetAttachment a;
+        a.child = aObj["child"].toString();
+        a.childMarker = aObj["child_marker"].toString();
+        a.parent = aObj["parent"].toString();
+        a.parentMarker = aObj["parent_marker"].toString();
+        a.leeway = qMax(0, aObj["leeway"].toInt(0));
+        if (aObj.contains("angle_min") && aObj.contains("angle_max")) {
+            a.angleMin = aObj["angle_min"].toInt();
+            a.angleMax = aObj["angle_max"].toInt();
+        }
+        puppet.attachments.append(a);
+    }
+    for (const auto& poseVal : pObj["poses"].toArray()) {
+        const QJsonObject poseObj = poseVal.toObject();
+        PuppetPose pose;
+        pose.name = poseObj["name"].toString();
+        pose.owner = poseObj["animation"].toString();
+        for (const auto& sVal : poseObj["parts"].toArray()) {
+            const QJsonObject sObj = sVal.toObject();
+            PuppetPoseSetting s;
+            s.part = sObj["part"].toString();
+            s.variant = sObj["variant"].toString();
+            if (sObj.contains("angle")) s.angle = sObj["angle"].toInt();
+            s.offset = pointFromJson(sObj["offset"]);
+            s.position = pointFromJson(sObj["at"]);
+            pose.settings.append(s);
+        }
+        puppet.poses.append(pose);
+    }
+    for (const auto& seqVal : pObj["sequences"].toArray()) {
+        const QJsonObject seqObj = seqVal.toObject();
+        PuppetSequence sequence;
+        sequence.name = seqObj["name"].toString();
+        sequence.fps = sanitizedAnimationFps(seqObj["fps"].toInt(DEFAULT_ANIMATION_FPS));
+        sequence.loopMode = animationLoopModeFromName(seqObj["loop"].toString()).value_or(AnimationLoopMode::Loop);
+        for (const auto& stepVal : seqObj["steps"].toArray()) {
+            const QJsonObject stepObj = stepVal.toObject();
+            PuppetSequenceStep step;
+            step.pose = stepObj["pose"].toString();
+            step.in = qBound(0, stepObj["in"].toInt(0), PUPPET_MAX_STEP_FRAMES);
+            step.hold = qBound(0, stepObj["hold"].toInt(0), PUPPET_MAX_STEP_FRAMES);
+            step.snap = stepObj["ease"].toString() == QLatin1String("step");
+            sequence.steps.append(step);
+        }
+        puppet.sequences.append(sequence);
+    }
+    return puppet;
+}
+
 bool isValidCliPath(const QString& path) {
     if (path.isEmpty()) {
         return true; // Empty path is allowed (use default)
@@ -92,7 +266,7 @@ bool isValidCliPath(const QString& path) {
 
 QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
     QJsonObject root;
-    root["schema_version"] = 5;
+    root["schema_version"] = 6;
     root["written_by"] = QStringLiteral("sprat-gui");
     root["written_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
 
@@ -271,6 +445,19 @@ QJsonObject ProjectPayloadCodec::build(const ProjectPayloadBuildInput& input) {
                 atArr.append(timelineToJson(t));
             }
             aObj["timelines"] = atArr;
+
+            if (!atlas.puppets.isEmpty()) {
+                const auto portablePath = [&](const QString& path) {
+                    if (!input.portablePaths || spBase.isEmpty()) return path;
+                    const QString rel = spBaseDir.relativeFilePath(path);
+                    return rel.startsWith("..") ? path : rel;
+                };
+                QJsonArray puppetsArr;
+                for (const Puppet& puppet : atlas.puppets) {
+                    puppetsArr.append(puppetToJson(puppet, portablePath));
+                }
+                aObj["puppets"] = puppetsArr;
+            }
 
             atlasesArr.append(aObj);
         }
@@ -929,6 +1116,12 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
             }
 
             atlas.timelines = parseTimelines(aObj["timelines"].toArray(), DEFAULT_ANIMATION_FPS);
+            for (const auto& pVal : aObj["puppets"].toArray()) {
+                atlas.puppets.append(puppetFromJson(pVal.toObject(), spDir));
+                // Projects from before the Rest pose get one.
+                PuppetEditing::keepRestPose(atlas.puppets.last());
+                PuppetEditing::keepAnimationPosesLast(atlas.puppets.last());
+            }
 
             out.atlases.append(atlas);
         }

@@ -2,7 +2,9 @@
 /// Settings and profiles: opening the settings dialog on a section, applying settings, and the configured layout profiles.
 
 #include "MainWindow.h"
+#include "MessageText.h"
 #include "NineSliceWorkspace.h"
+#include "PuppetWorkspace.h"
 #include "AnimationPreviewPanel.h"
 #include "ExportWorkspace.h"
 #include "FrameAnimationWorkspace.h"
@@ -116,7 +118,8 @@ QVector<SpratProfile> MainWindow::configuredProfiles() {
     const QVector<SpratProfile> profiles = SpratProfilesConfig::loadProfileDefinitions(&error);
     if (!error.isEmpty()) {
         m_statusLabel->setText(tr("Invalid profiles configuration"));
-        MessageDialog::warning(this, tr("Profiles"), tr("Could not load profiles configuration:\n%1").arg(error));
+        MessageDialog::warning(this, tr("Profiles"), MessageText::withToolOutput(tr("The profiles configuration couldn't be loaded, so no layout profiles are available:"), error)
+                                   + QStringLiteral("\n\n") + tr("Fix or remove the file named above, then restart sprat-gui."));
     }
     return profiles;
 }
@@ -324,6 +327,9 @@ void MainWindow::applySettings() {
     }
     if (m_nineSliceWorkspace) {
         m_nineSliceWorkspace->setSettings(m_settings);
+    }
+    if (m_puppetWorkspace) {
+        m_puppetWorkspace->canvas()->setBackgroundBrush(m_settings.workspaceColor);
     }
     auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
     auto* spriteTree = navigatorPanel ? navigatorPanel->tree() : nullptr;

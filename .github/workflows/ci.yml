@@ -182,7 +182,7 @@ jobs:
           cp build/spratprofiles.cfg AppDir/usr/bin/
           cp -r build/transforms AppDir/usr/bin/
           cp deploy/linux/sprat-gui.desktop AppDir/usr/share/applications/
-          cp assets/icons/layout-svgrepo-com.svg AppDir/usr/share/icons/hicolor/scalable/apps/sprat-gui.svg
+          cp deploy/linux/sprat-gui.svg AppDir/usr/share/icons/hicolor/scalable/apps/sprat-gui.svg
           APPIMAGE_EXTRACT_AND_RUN=1 \
             ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \

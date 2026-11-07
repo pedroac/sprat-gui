@@ -3,13 +3,17 @@
 #include "models.h"
 #include "ArchiveExtractor.h"
 #include "PathSafety.h"
+#include "MessageText.h"
 #include "Undo/TrashBin.h"
+#include "EditorOverlayItem.h"
 
 #include <archive.h>
 #include <archive_entry.h>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 
 void CoreTests::testMarkerKindConversions() {
     QCOMPARE(markerKindToString(MarkerKind::Point), QString("point"));
@@ -236,4 +240,85 @@ void CoreTests::testTrashBinMoveFolderKeepsExistingTarget() {
     QVERIFY(TrashBin::moveFolder(from, moved));
     QVERIFY(!QDir(from).exists());
     QVERIFY(QDir(QDir(moved).filePath("sub")).exists());
+}
+
+namespace {
+void clickOverlay(QGraphicsScene& scene, EditorOverlayItem* overlay, const QPointF& pos) {
+    for (auto type : {QEvent::GraphicsSceneMousePress, QEvent::GraphicsSceneMouseRelease}) {
+        QGraphicsSceneMouseEvent event(type);
+        event.setButton(Qt::LeftButton);
+        event.setButtons(type == QEvent::GraphicsSceneMousePress ? Qt::LeftButton : Qt::NoButton);
+        event.setPos(pos);
+        event.setScenePos(pos);
+        scene.sendEvent(overlay, &event);
+    }
+}
+}
+
+void CoreTests::testClickOnEmptySpacePositionsSelectedMarker() {
+    auto sprite = std::make_shared<Sprite>();
+    sprite->pivotX = 5;
+    sprite->pivotY = 5;
+    NamedPoint hand;
+    hand.name = "hand";
+    hand.x = 10;
+    hand.y = 10;
+    NamedPoint box;
+    box.name = "box";
+    box.kind = MarkerKind::Rectangle;
+    box.x = 60;
+    box.y = 60;
+    box.w = 10;
+    box.h = 20;
+    sprite->points = {hand, box};
+
+    QGraphicsScene scene;
+    auto* overlay = new EditorOverlayItem;
+    scene.addItem(overlay);
+    overlay->setSceneSize(QSize(100, 100));
+    overlay->setSprites({sprite});
+    QSignalSpy finished(overlay, &EditorOverlayItem::markerDragFinished);
+
+    overlay->setSelectedMarker("hand");
+    clickOverlay(scene, overlay, QPointF(40, 30));
+    QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
+    QCOMPARE(QPoint(sprite->pivotX, sprite->pivotY), QPoint(5, 5));
+    QCOMPARE(overlay->selectedMarkerName(), QString("hand"));
+    QCOMPARE(finished.count(), 1);
+
+    // A rectangle is centred on the click.
+    overlay->setSelectedMarker("box");
+    clickOverlay(scene, overlay, QPointF(20, 80));
+    QCOMPARE(QRect(sprite->points[1].x, sprite->points[1].y, sprite->points[1].w, sprite->points[1].h),
+             QRect(15, 70, 10, 20));
+    QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
+
+    // With no marker selected, the click places the pivot.
+    overlay->setSelectedMarker(QString());
+    clickOverlay(scene, overlay, QPointF(90, 10));
+    QCOMPARE(QPoint(sprite->pivotX, sprite->pivotY), QPoint(90, 10));
+    QCOMPARE(QPoint(sprite->points[0].x, sprite->points[0].y), QPoint(40, 30));
+}
+
+void CoreTests::testMessagesShowParagraphsAndToolOutput() {
+    // A blank line starts a paragraph; a single line break stays a line break.
+    QCOMPARE(MessageText::toHtml(QStringLiteral("Layout failed.\n\nCheck the profile.\nThen retry.")),
+             QStringLiteral("<qt><p>Layout failed.</p><p>Check the profile.<br>Then retry.</p></qt>"));
+    // Tool output is its own block, fixed-width, and escaped: "<stdin>" stays visible.
+    const QString message = MessageText::withToolOutput(QStringLiteral("spratlayout said:"),
+                                                        QStringLiteral("error: <stdin> line 3\n\n  bad & wrong\n"));
+    QCOMPARE(message, QStringLiteral("spratlayout said:\n\n  error: <stdin> line 3\n  bad & wrong"));
+    QCOMPARE(MessageText::toHtml(message),
+             QStringLiteral("<qt><p>spratlayout said:</p>"
+                            "<p style=\"font-family: monospace; white-space: pre-wrap;\">"
+                            "error: &lt;stdin&gt; line 3<br>bad &amp; wrong</p></qt>"));
+    // No output: just the message. Long output is cut, saying how much was left out.
+    QCOMPARE(MessageText::withToolOutput(QStringLiteral("Failed."), QStringLiteral("  \n")), QStringLiteral("Failed."));
+    QStringList many;
+    for (int i = 1; i <= 15; ++i) many.append(QStringLiteral("line %1").arg(i));
+    const QStringList cut = MessageText::toolOutput(many.join(QLatin1Char('\n')), 12).split(QLatin1Char('\n'));
+    QCOMPARE(cut.size(), 13);
+    QCOMPARE(cut.last(), QStringLiteral("  … 3 more line(s)"));
+    // Rich text already made stays as it is.
+    QCOMPARE(MessageText::toHtml(QStringLiteral("<qt><b>x</b></qt>")), QStringLiteral("<qt><b>x</b></qt>"));
 }

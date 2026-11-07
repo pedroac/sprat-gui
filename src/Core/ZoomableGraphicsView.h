@@ -58,6 +58,13 @@ public:
      */
     void setZoomRange(double min, double max);
 
+    /**
+     * @brief Text shown in the middle of the view, whatever the zoom: what to do while it
+     *        has nothing to show ("Select a sprite on the left"). Empty shows nothing.
+     */
+    void setEmptyText(const QString& text);
+    QString emptyText() const { return m_emptyText; }
+
 signals:
     /**
      * @brief Emitted when the zoom level changes.
@@ -74,6 +81,8 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
+    /// Draws the empty text; subclasses drawing their own foreground call it first.
+    void drawForeground(QPainter* painter, const QRectF& rect) override;
 
     bool m_isZoomManual = false;
     bool m_isPanning = false;
@@ -89,4 +98,5 @@ protected:
     bool m_inResize = false;
     double m_pendingRestoreZoom = -1.0;
     QPointF m_pendingRestoreCenter;
+    QString m_emptyText;
 };

@@ -1,4 +1,5 @@
 #include "ExportDiffDialog.h"
+#include "AppIcons.h"
 #include "AtlasOutputFolder.h"
 
 #include <QVBoxLayout>
@@ -181,9 +182,9 @@ ExportDiffDialog::ExportDiffDialog(const QVector<DiffEntry>& entries, QWidget* p
     tree->setHeaderHidden(true);
     tree->setRootIsDecorated(true);
 
-    const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
-    const QIcon fileIcon   = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
-    const QIcon warnIcon   = QApplication::style()->standardIcon(QStyle::SP_MessageBoxWarning);
+    const QIcon folderIcon = AppIcons::icon(QStringLiteral("folder"));
+    const QIcon fileIcon   = AppIcons::icon(QStringLiteral("file"));
+    const QIcon warnIcon   = AppIcons::icon(QStringLiteral("warning"));
 
     auto* newItem  = new QTreeWidgetItem(tree, QStringList{tr("New")});
     auto* overItem = new QTreeWidgetItem(tree, QStringList{tr("Will overwrite")});

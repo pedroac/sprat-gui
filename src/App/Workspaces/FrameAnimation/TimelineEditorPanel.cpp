@@ -1,4 +1,5 @@
 #include "TimelineEditorPanel.h"
+#include "AppIcons.h"
 #include "AnimationModels.h"
 #include "ProjectSession.h"
 #include "TimelineTreeWidget.h"
@@ -186,7 +187,7 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     addLayout->addWidget(m_timelineCreateEdit);
 
     m_addBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_FileDialogNewFolder), "", m_listArea);
+        AppIcons::icon(QStringLiteral("add")), tr("Add"), m_listArea);
     m_addBtn->setToolTip(tr("Add a timeline and pick its sprites"));
     addLayout->addWidget(m_addBtn);
     listLayout->addLayout(addLayout);
@@ -269,7 +270,7 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     m_timelineFpsSpin->setAccessibleName(tr("Timeline FPS"));
     nameLayout->addWidget(m_timelineFpsSpin);
     m_removeBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_DialogDiscardButton), "",
+        AppIcons::icon(QStringLiteral("delete")), "",
         m_selectedTimelineGroup);
     m_removeBtn->setToolTip(tr("Remove timeline"));
     nameLayout->addWidget(m_removeBtn);
@@ -488,7 +489,7 @@ void TimelineEditorPanel::refreshTimelineList()
             m_session->activeAtlas().timelines[b].name, Qt::CaseInsensitive) < 0;
     });
 
-    const QIcon folderIcon = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
+    const QIcon folderIcon = AppIcons::icon(QStringLiteral("folder"));
 
     auto findOrCreateFolderPath = [&](const QStringList& parts) -> QTreeWidgetItem* {
         QTreeWidgetItem* current = nullptr;
@@ -553,7 +554,7 @@ void TimelineEditorPanel::refreshTimelineList()
         QTreeWidgetItem* item = parent
             ? new QTreeWidgetItem(parent)
             : new QTreeWidgetItem(m_timelineList);
-        item->setIcon(1, timeline.aliasOf.isEmpty() ? icon : QIcon(":/icons/link.svg"));
+        item->setIcon(1, timeline.aliasOf.isEmpty() ? icon : AppIcons::icon(QStringLiteral("link")));
         item->setText(2, leafName);
         item->setText(3, QString::number(displayFrames->size()));
         item->setTextAlignment(3, Qt::AlignCenter | Qt::AlignVCenter);
@@ -1157,7 +1158,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
                         for (const auto& other : m_session->activeAtlas().timelines) {
                             if (other.name == newName && !other.name.startsWith(oldPrefix)) {
                                 MessageDialog::warning(this, tr("Ungroup"),
-                                    tr("Cannot ungroup: \"%1\" would conflict with an existing timeline.").arg(newName));
+                                    tr("Can't ungroup: a timeline is already called \"%1\". Rename it first.").arg(newName));
                                 return;
                             }
                         }
@@ -1228,7 +1229,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
                     for (const auto& other : m_session->activeAtlas().timelines) {
                         if (other.name == newName && !other.name.startsWith(oldPrefix)) {
                             MessageDialog::warning(this, tr("Remove Group"),
-                                tr("Cannot dissolve: \"%1\" would conflict with an existing timeline.").arg(newName));
+                                tr("Can't remove the group: a timeline is already called \"%1\". Rename it first.").arg(newName));
                             return;
                         }
                     }
@@ -1256,7 +1257,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
         menu.addSeparator();
 
-        menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline Into Group"), this, [this, folderPath, refreshAndSelectLambda]() {
+        menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Timeline Into Group"), this, [this, folderPath, refreshAndSelectLambda]() {
             bool ok = false;
             const QString suggested = folderPath + "/";
             const QString name = QInputDialog::getText(this, tr("Add Timeline Into Group"),
@@ -1271,7 +1272,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
             addTimelineWithPickedSprites(trimmed);
         });
-        menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create Timelines..."), this,
+        menu.addAction(AppIcons::icon(QStringLiteral("auto-create")), tr("Auto-create Timelines..."), this,
                        &TimelineEditorPanel::autoCreateTimelinesFromGroups);
 
         hasItems = true;
@@ -1280,7 +1281,7 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
         const int idx = item->data(0, Qt::UserRole).toInt();
         m_timelineList->setCurrentItem(item);
 
-        menu.addAction(QIcon(":/icons/remove.svg"), tr("Remove Timeline"), this, [this, idx, refreshAndSelectLambda]() {
+        menu.addAction(AppIcons::icon(QStringLiteral("delete")), tr("Remove Timeline"), this, [this, idx, refreshAndSelectLambda]() {
             if (idx < 0 || idx >= m_session->activeAtlas().timelines.size()) return;
             const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
             const int oldSel = m_session->selectedTimelineIndex;
@@ -1302,17 +1303,17 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
             refreshAndSelectLambda();
         });
 
-        menu.addAction(QIcon(":/icons/link.svg"), tr("Create Alias"), this, &TimelineEditorPanel::onTimelineCreateAlias);
+        menu.addAction(AppIcons::icon(QStringLiteral("link")), tr("Create Alias"), this, &TimelineEditorPanel::onTimelineCreateAlias);
         menu.addSeparator();
-        menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline..."), this, &TimelineEditorPanel::onTimelineAddClicked);
-        menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create Timelines..."), this,
+        menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Timeline..."), this, &TimelineEditorPanel::onTimelineAddClicked);
+        menu.addAction(AppIcons::icon(QStringLiteral("auto-create")), tr("Auto-create Timelines..."), this,
                        &TimelineEditorPanel::autoCreateTimelinesFromGroups);
         hasItems = true;
     }
 
     if (hasChecked) {
         if (hasItems) menu.addSeparator();
-        menu.addAction(QIcon(":/icons/remove.svg"), tr("Remove Selected"), this, [this, checkedIndices, refreshAndSelectLambda]() {
+        menu.addAction(AppIcons::icon(QStringLiteral("delete")), tr("Remove Selected"), this, [this, checkedIndices, refreshAndSelectLambda]() {
             const QVector<AnimationTimeline> oldTimelines = m_session->activeAtlas().timelines;
             const int oldSel = m_session->selectedTimelineIndex;
 
@@ -1344,8 +1345,8 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
     if (!item && !hasChecked) {
         QMenu emptyMenu(this);
-        emptyMenu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Timeline..."), this, &TimelineEditorPanel::onTimelineAddClicked);
-        emptyMenu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create Timelines..."), this,
+        emptyMenu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Timeline..."), this, &TimelineEditorPanel::onTimelineAddClicked);
+        emptyMenu.addAction(AppIcons::icon(QStringLiteral("auto-create")), tr("Auto-create Timelines..."), this,
                             &TimelineEditorPanel::autoCreateTimelinesFromGroups);
         emptyMenu.exec(m_timelineList->mapToGlobal(pos));
         return;
@@ -1463,7 +1464,7 @@ void TimelineEditorPanel::onTimelineTreeDropCompleted(int draggedIndex,
                 for (const auto& other : m_session->activeAtlas().timelines) {
                     if (other.name == newName && !other.name.startsWith(oldPrefix)) {
                         MessageDialog::warning(this, tr("Move Timeline"),
-                            tr("Cannot move: \"%1\" would conflict with an existing timeline.").arg(newName));
+                            tr("Can't move it: a timeline is already called \"%1\". Rename it first.").arg(newName));
                         return;
                     }
                 }

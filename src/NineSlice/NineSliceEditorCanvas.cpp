@@ -284,8 +284,8 @@ NineSliceEditorCanvas::NineSliceEditorCanvas(QWidget* parent)
     connect(m_cornerHandle, &ResizeHandleItem::dragged, this, [this](int w, int h) { resizeTo(w,                    h                   ); });
 
     // Handle icons
-    m_dragHandleRenderer   = new QSvgRenderer(QStringLiteral(":/icons/drag-handle.svg"), this);
-    m_resizeHandleRenderer = new QSvgRenderer(QStringLiteral(":/icons/resize-handle.svg"), this);
+    m_dragHandleRenderer   = new QSvgRenderer(QStringLiteral(":/canvas/drag-handle.svg"), this);
+    m_resizeHandleRenderer = new QSvgRenderer(QStringLiteral(":/canvas/resize-handle.svg"), this);
     m_rightHandle ->setIconRenderer(m_dragHandleRenderer);
     m_bottomHandle->setIconRenderer(m_dragHandleRenderer, /*rotate=*/true);
     m_cornerHandle->setIconRenderer(m_resizeHandleRenderer);
@@ -784,6 +784,7 @@ void NineSliceEditorCanvas::setReadOnly(bool ro)
 
 void NineSliceEditorCanvas::drawForeground(QPainter* painter, const QRectF& rect)
 {
+    ZoomableGraphicsView::drawForeground(painter, rect);
     if (m_readOnly)
         painter->fillRect(rect, QColor(0, 0, 0, 70));
 }

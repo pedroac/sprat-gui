@@ -1,4 +1,6 @@
 #include "MessageDialog.h"
+#include "MessageText.h"
+#include "AppIcons.h"
 
 #include <QApplication>
 #include <QDialog>
@@ -11,6 +13,19 @@
 #include <QSizePolicy>
 #include <QStyle>
 #include <QVBoxLayout>
+
+namespace {
+/// The app's own icon for a message's kind, in the style of the rest of the app.
+QIcon dialogIcon(QStyle::StandardPixmap kind) {
+    switch (kind) {
+    case QStyle::SP_MessageBoxWarning: return AppIcons::icon(QStringLiteral("warning"));
+    case QStyle::SP_MessageBoxCritical: return AppIcons::icon(QStringLiteral("error"));
+    case QStyle::SP_MessageBoxQuestion: return AppIcons::icon(QStringLiteral("dialog-question"));
+    case QStyle::SP_MessageBoxInformation: return AppIcons::icon(QStringLiteral("dialog-info"));
+    default: return QApplication::style()->standardIcon(kind);
+    }
+}
+}  // namespace
 
 void MessageDialog::information(QWidget* parent, const QString& title, const QString& text, const QString& windowTitle) {
     exec(parent, QStyle::SP_MessageBoxInformation, title, text, windowTitle, QMessageBox::Ok, QMessageBox::Ok);
@@ -80,11 +95,12 @@ int MessageDialog::execCustom(
     dlg.setMinimumWidth(400);
 
     auto* iconLabel = new QLabel(&dlg);
-    iconLabel->setPixmap(QApplication::style()->standardIcon(iconType).pixmap(64, 64));
+    iconLabel->setPixmap(dialogIcon(iconType).pixmap(64, 64));
     iconLabel->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
     iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
     auto* titleLabel = new QLabel(title, &dlg);
+    titleLabel->setTextFormat(Qt::PlainText);
     titleLabel->setWordWrap(true);
     titleLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     QFont boldFont = titleLabel->font();
@@ -92,7 +108,7 @@ int MessageDialog::execCustom(
     boldFont.setPointSize(boldFont.pointSize() + 2);
     titleLabel->setFont(boldFont);
 
-    auto* textLabel = new QLabel(text, &dlg);
+    auto* textLabel = new QLabel(MessageText::toHtml(text), &dlg);
     textLabel->setWordWrap(true);
     textLabel->setTextFormat(Qt::RichText);
     textLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
@@ -166,11 +182,12 @@ QMessageBox::StandardButton MessageDialog::exec(
     dlg.setMinimumWidth(400);
 
     auto* iconLabel = new QLabel(&dlg);
-    iconLabel->setPixmap(QApplication::style()->standardIcon(iconType).pixmap(64, 64));
+    iconLabel->setPixmap(dialogIcon(iconType).pixmap(64, 64));
     iconLabel->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
     iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
     auto* titleLabel = new QLabel(title, &dlg);
+    titleLabel->setTextFormat(Qt::PlainText);
     titleLabel->setWordWrap(true);
     titleLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     QFont boldFont = titleLabel->font();
@@ -178,7 +195,7 @@ QMessageBox::StandardButton MessageDialog::exec(
     boldFont.setPointSize(boldFont.pointSize() + 2);
     titleLabel->setFont(boldFont);
 
-    auto* textLabel = new QLabel(text, &dlg);
+    auto* textLabel = new QLabel(MessageText::toHtml(text), &dlg);
     textLabel->setWordWrap(true);
     textLabel->setTextFormat(Qt::RichText); // Allow basic formatting in text if needed
     textLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);

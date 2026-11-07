@@ -1,4 +1,5 @@
 #include "SettingsDialog.h"
+#include "AppIcons.h"
 #include <QDir>
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -149,7 +150,7 @@ void SettingsDialog::setupUi() {
     spritesheetForm->addRow(tr("Sync Mode:"), m_syncModeCombo);
 
     m_syncNowBtn = new QPushButton(tr("Sync Now"), this);
-    m_syncNowBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_BrowserReload));
+    m_syncNowBtn->setIcon(AppIcons::icon(QStringLiteral("sync")));
     m_syncNowBtn->setEnabled(m_settings.syncMode != SyncMode::None);
     connect(m_syncNowBtn, &QPushButton::clicked, this, &SettingsDialog::onSyncNowClicked);
     spritesheetForm->addRow("", m_syncNowBtn);
@@ -392,7 +393,7 @@ void SettingsDialog::setupUi() {
     m_exportDefaultFolderEdit->setPlaceholderText(tr("Not set"));
     m_exportDefaultFolderEdit->setToolTip(tr("Default output folder for new exports"));
     auto* exportFolderBtn = new QPushButton(tr("Browse..."), this);
-    exportFolderBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon));
+    exportFolderBtn->setIcon(AppIcons::icon(QStringLiteral("folder-open")));
     connect(exportFolderBtn, &QPushButton::clicked, this, [this]() {
         const QString current = m_exportDefaultFolderEdit->text();
         const QString dir = QFileDialog::getExistingDirectory(
@@ -566,7 +567,7 @@ void SettingsDialog::setupUi() {
     m_cliBaseDirEdit = new QLineEdit(m_cliPaths.baseDir, this);
     m_cliBaseDirEdit->setReadOnly(true);
     m_cliBaseDirBtn = new QPushButton(tr("Change..."), this);
-    m_cliBaseDirBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon));
+    m_cliBaseDirBtn->setIcon(AppIcons::icon(QStringLiteral("folder-open")));
     connect(m_cliBaseDirBtn, &QPushButton::clicked, this, &SettingsDialog::pickCliBaseDir);
     baseDirLayout->addWidget(m_cliBaseDirEdit);
     baseDirLayout->addWidget(m_cliBaseDirBtn);
@@ -586,7 +587,7 @@ void SettingsDialog::setupUi() {
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     QPushButton* resetBtn = buttons->addButton(tr("Reset"), QDialogButtonBox::ResetRole);
-    resetBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DialogResetButton));
+    resetBtn->setIcon(AppIcons::icon(QStringLiteral("reset")));
 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);

@@ -1,4 +1,5 @@
 #include "TimelineListWidget.h"
+#include "AppIcons.h"
 #include <QDragEnterEvent>
 #include <QMimeData>
 #include <QKeyEvent>
@@ -211,7 +212,7 @@ void TimelineListWidget::onCustomContextMenuRequested(const QPoint& pos) {
     QListWidgetItem* item = itemAt(pos);
     if (!item) {
         QMenu menu(this);
-        menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames..."), this,
+        menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Frames..."), this,
                        [this]() { emit addFramesRequested(count()); });
         menu.exec(mapToGlobal(pos));
         return;
@@ -220,9 +221,9 @@ void TimelineListWidget::onCustomContextMenuRequested(const QPoint& pos) {
     int idx = row(item);
     QMenu menu(this);
 
-    menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames Before..."), this,
+    menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Frames Before..."), this,
                    [this, idx]() { emit addFramesRequested(idx); });
-    menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames After..."), this,
+    menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Frames After..."), this,
                    [this, idx]() { emit addFramesRequested(idx + 1); });
     menu.addSeparator();
 

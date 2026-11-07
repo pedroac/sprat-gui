@@ -6,7 +6,7 @@ class SpriteEditorTests : public QObject {
     Q_OBJECT
 
 private slots:
-    void testClickingTheSpriteKeepsTheSelectedMarker();
+    void testClickingTheSpriteMovesTheSelectedMarker();
     void testClickingTheSpritePlacesTheSelectedPivot();
     void testTheMarkerAddedLastIsFound();
 };

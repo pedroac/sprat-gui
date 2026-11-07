@@ -1,9 +1,11 @@
 #include "ProjectSaveService.h"
+#include "MessageText.h"
 #include "PathSafety.h"
 #include "AnimationModels.h"
 #include "MarkerUtils.h"
 #include "ResolutionUtils.h"
 #include "ArchiveExtractor.h"
+#include "CliTextFormat.h"
 #include "LayoutArguments.h"
 #include "NineSliceInsets.h"
 
@@ -35,24 +37,13 @@ namespace {
         return QCoreApplication::translate("ProjectSaveService", text);
     }
 
-    /// Returns true when the output format expects rotated sprites turned counter-clockwise.
-    /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
-    /// `text` as a quoted string of sprat-cli's text formats: quotes and
-    /// backslashes are escaped, and line breaks, which can't be represented
-    /// (each record is one line), become spaces.
-    QString cliQuoted(QString text) {
-        text.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
-        text.replace(QLatin1Char('"'), QLatin1String("\\\""));
-        text.replace(QLatin1Char('\r'), QLatin1Char(' '));
-        text.replace(QLatin1Char('\n'), QLatin1Char(' '));
-        return QLatin1Char('"') + text + QLatin1Char('"');
-    }
-
     bool isMarkerKind(const QString& kind) {
         return kind == QLatin1String("point") || kind == QLatin1String("circle")
             || kind == QLatin1String("rectangle") || kind == QLatin1String("polygon");
     }
 
+    /// Returns true when the output format expects rotated sprites turned counter-clockwise.
+    /// spratconvert refuses to write libGDX atlases from a clockwise (default) layout.
     bool transformRequiresCcwRotation(const QString& transform) {
         return transform.trimmed().compare(QLatin1String("libgdx"), Qt::CaseInsensitive) == 0;
     }
@@ -421,7 +412,7 @@ bool ProjectSaveService::save(
     if (!framePaths.isEmpty()) {
         saveFrameList.setFileTemplate(QDir::temp().filePath("sprat-gui-save-frames-XXXXXX.txt"));
         if (!saveFrameList.open()) {
-            error = trPS("Could not create temporary frame list for save.");
+            error = trPS("Couldn't save the sprite list to the temporary folder. Check that the disk isn't full, then export again.");
             return false;
         }
         QTextStream out(&saveFrameList);
@@ -456,7 +447,8 @@ bool ProjectSaveService::save(
         }
         if (!ok) {
             const QString stderrText = QString::fromUtf8(stderrData).trimmed();
-            error = stderrText.isEmpty() ? trPS("Command failed: %1").arg(step) : stderrText;
+            // What failed, then what the tool said, as a block of its own.
+            error = stderrText.isEmpty() ? step : MessageText::withToolOutput(step, stderrText);
         }
         return ok;
     };
@@ -547,7 +539,7 @@ bool ProjectSaveService::save(
                         layoutArgs.removeAll("--trim-transparent");
                         continue;
                     }
-                    error = QString(trPS("Layout generation failed for profile '%1'")).arg(profileName);
+                    // error is the step and spratlayout's message (runProcess).
                     return false;
                 }
                 layoutSuccess = true;
@@ -622,11 +614,7 @@ bool ProjectSaveService::save(
                      "profile '%1' was saved as a regular PNG.").arg(profileName), -1});
         }
         if (!packSuccess) {
-            const QString packDetails = error;
-            error = packStep;
-            if (!packDetails.isEmpty()) {
-                error += QStringLiteral("\n\n") + packDetails;
-            }
+            if (error.isEmpty()) error = packStep;
             return false;
         }
         const bool isMultipack = layoutData.contains("multipack true") || layoutData.count("atlas ") > 1;
@@ -779,14 +767,22 @@ bool ProjectSaveService::save(
         combinedInput.append(markersContent.toUtf8());
         if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
         combinedInput.append(animContent.toUtf8());
+        // spratconvert reads puppets from the layout stream when --puppets isn't given.
+        if (!config.puppetsText.isEmpty()) {
+            if (!combinedInput.endsWith('\n')) combinedInput.append('\n');
+            combinedInput.append(config.puppetsText.toUtf8());
+        }
 
         if (config.transform == kLayoutTextTransform) {
             struct RawFile { QString name; QByteArray data; };
-            const RawFile rawFiles[] = {
+            QVector<RawFile> rawFiles = {
                 { QStringLiteral("layout.txt"),     layoutData              },
                 { QStringLiteral("markers.txt"),    markersContent.toUtf8() },
                 { QStringLiteral("animations.txt"), animContent.toUtf8()    },
             };
+            if (!config.puppetsText.isEmpty()) {
+                rawFiles.append({ QStringLiteral("puppets.txt"), config.puppetsText.toUtf8() });
+            }
             for (const auto& rf : rawFiles) {
                 QFile f(profileDir.filePath(rf.name));
                 if (!f.open(QIODevice::WriteOnly) || f.write(rf.data) < 0) {
@@ -822,12 +818,8 @@ bool ProjectSaveService::save(
 
             const QString convertStep = trPS("Format conversion failed for profile '%1'").arg(profileName);
             if (!runProcess(spratConvertBin, convArgs, convertStep, &combinedInput, nullptr)) {
-                // Keep the tool's message: transforms explain what to change (e.g. rotation direction).
-                const QString convertDetails = error;
-                error = convertStep;
-                if (!convertDetails.isEmpty()) {
-                    error += QStringLiteral("\n\n") + convertDetails;
-                }
+                // error keeps the tool's message: transforms explain what to change (e.g.
+                // rotation direction).
                 return false;
             }
             if (callbacks.logEntry)

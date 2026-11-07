@@ -1,4 +1,5 @@
 #include "ExportWorkspace.h"
+#include "AppIcons.h"
 #include "IAtlasViewport.h"
 #include "ZoomableGraphicsView.h"
 #include "CliToolsConfig.h"
@@ -386,14 +387,10 @@ void ExportWorkspace::setupUi() {
     // Button row immediately below the overrides group
     auto* buttonRow = new QHBoxLayout();
     buttonRow->addStretch();
-    auto* cancelBtn = new QPushButton(tr("Cancel"), rightWidget);
-    cancelBtn->setIcon(style()->standardIcon(QStyle::SP_DialogCancelButton));
     m_exportBtn = new QPushButton(tr("Export"), rightWidget);
-    m_exportBtn->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+    m_exportBtn->setIcon(AppIcons::icon(QStringLiteral("save")));
     m_exportBtn->setDefault(true);
-    connect(cancelBtn, &QPushButton::clicked, this, &ExportWorkspace::cancelled);
     connect(m_exportBtn, &QPushButton::clicked, this, &ExportWorkspace::onExportClicked);
-    buttonRow->addWidget(cancelBtn);
     buttonRow->addWidget(m_exportBtn);
     rightLayout->addLayout(buttonRow);
 
@@ -416,7 +413,7 @@ void ExportWorkspace::setupUi() {
     logLayout->addWidget(m_logTree);
 
     m_logRevealBtn = new QPushButton(
-        style()->standardIcon(QStyle::SP_DirOpenIcon), tr("Reveal in Files"), m_logGroup);
+        AppIcons::icon(QStringLiteral("folder-open")), tr("Reveal in Files"), m_logGroup);
     m_logRevealBtn->setEnabled(false);
     connect(m_logRevealBtn, &QPushButton::clicked, this, [this]() {
         if (m_logDestination.isEmpty()) return;
@@ -821,12 +818,12 @@ SaveConfig ExportWorkspace::getConfig() const {
 
 void ExportWorkspace::onExportClicked() {
     if (m_outputPathEdit && m_outputPathEdit->text().trimmed().isEmpty()) {
-        MessageDialog::warning(this, tr("Missing output folder"),
+        MessageDialog::warning(this, tr("Missing Output Folder"),
                                tr("Select an output folder before exporting."));
         return;
     }
     if (m_profileCombo->count() == 0) {
-        MessageDialog::warning(this, tr("Missing profile"),
+        MessageDialog::warning(this, tr("Missing Profile"),
                                tr("No profiles configured. Add at least one profile to export."));
         return;
     }

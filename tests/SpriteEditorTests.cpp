@@ -44,15 +44,17 @@ struct Editor {
 
 }  // namespace
 
-void SpriteEditorTests::testClickingTheSpriteKeepsTheSelectedMarker() {
+void SpriteEditorTests::testClickingTheSpriteMovesTheSelectedMarker() {
     Editor editor;
     editor.overlay->setSelectedMarker(QStringLiteral("point 1"));
     QSignalSpy selected(editor.overlay, &EditorOverlayItem::markerSelected);
     QSignalSpy pivot(editor.overlay, &EditorOverlayItem::pivotChanged);
 
-    // Away from every marker and the pivot: nothing changes.
+    // Away from every marker and the pivot: the selected marker goes there, still selected,
+    // and the pivot stays.
     editor.clickAt(QPointF(32, 32));
     QCOMPARE(editor.overlay->selectedMarkerName(), QStringLiteral("point 1"));
+    QCOMPARE(QPoint(editor.sprite->points[0].x, editor.sprite->points[0].y), QPoint(32, 32));
     QCOMPARE(QPoint(editor.sprite->pivotX, editor.sprite->pivotY), QPoint(20, 20));
     QVERIFY(selected.isEmpty());
     QVERIFY(pivot.isEmpty());

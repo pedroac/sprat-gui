@@ -27,6 +27,7 @@ private slots:
     void testNineSliceInsetsAreExportedAndFitted();
     void testProjectTextCantInjectCliRecords();
     void testAnimationLoopModesAreExported();
+    void testPuppetsAreExported();
     void testExportNeverDeletesOutsideDestination();
 
 private:
@@ -38,7 +39,8 @@ private:
 
     ExportRun exportSprites(const QString& spritesDir, const QString& destination,
                             const QString& transform, const SpratProfile& profile,
-                            const QJsonObject& projectPayload = QJsonObject()) const;
+                            const QJsonObject& projectPayload = QJsonObject(),
+                            const QString& puppetsText = QString()) const;
     QString toolPath(const QString& toolName) const;
 
     QTemporaryDir m_root;

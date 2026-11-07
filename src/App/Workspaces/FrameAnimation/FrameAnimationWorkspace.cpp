@@ -1,4 +1,5 @@
 #include "FrameAnimationWorkspace.h"
+#include "AppIcons.h"
 #include "NavigatorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "AnimationPreviewPanel.h"
@@ -205,7 +206,7 @@ void FrameAnimationWorkspace::onAnimPrevClicked()
         return;
     }
     if (m_animPanel->playPauseButton()) {
-        static const QIcon kPlay = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
+        static const QIcon kPlay = AppIcons::icon(QStringLiteral("play"));
         m_animPanel->playPauseButton()->setIcon(kPlay);
     }
     refreshAnimationTest();
@@ -225,8 +226,8 @@ void FrameAnimationWorkspace::onAnimPlayPauseClicked()
         m_animPlaying,
         m_animTimer);
     if (m_animPanel->playPauseButton()) {
-        static const QIcon kPlay  = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
-        static const QIcon kPause = QApplication::style()->standardIcon(QStyle::SP_MediaPause);
+        static const QIcon kPlay  = AppIcons::icon(QStringLiteral("play"));
+        static const QIcon kPause = AppIcons::icon(QStringLiteral("pause"));
         m_animPanel->playPauseButton()->setIcon(m_animPlaying ? kPause : kPlay);
     }
     if (m_animPlaying && !wasPlaying) {
@@ -252,7 +253,7 @@ void FrameAnimationWorkspace::onAnimNextClicked()
         return;
     }
     if (m_animPanel->playPauseButton()) {
-        static const QIcon kPlay = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
+        static const QIcon kPlay = AppIcons::icon(QStringLiteral("play"));
         m_animPanel->playPauseButton()->setIcon(kPlay);
     }
     refreshAnimationTest();
@@ -322,8 +323,8 @@ void FrameAnimationWorkspace::refreshAnimationTest()
     // Update play/pause button icon
     auto* playPauseBtn = m_animPanel->playPauseButton();
     if (playPauseBtn) {
-        static const QIcon kPlayIcon = QApplication::style()->standardIcon(QStyle::SP_MediaPlay);
-        static const QIcon kPauseIcon = QApplication::style()->standardIcon(QStyle::SP_MediaPause);
+        static const QIcon kPlayIcon = AppIcons::icon(QStringLiteral("play"));
+        static const QIcon kPauseIcon = AppIcons::icon(QStringLiteral("pause"));
         playPauseBtn->setIcon(m_animPlaying ? kPauseIcon : kPlayIcon);
     }
 

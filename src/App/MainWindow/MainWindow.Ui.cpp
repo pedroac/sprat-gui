@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AppIcons.h"
 #include "AnimationPreviewPanel.h"
 #include "TimelineEditorPanel.h"
 #include "ExportWorkspace.h"
@@ -10,6 +11,8 @@
 #include "PackedAtlasView.h"
 #include "AtlasesManagementWorkspace.h"
 #include "NineSliceWorkspace.h"
+#include "PuppetWorkspace.h"
+#include "PuppetCanvas.h"
 #include "NineSliceEditorCanvas.h"
 #include "UndoCommands.h"
 #include "PathSafety.h"
@@ -94,7 +97,7 @@ void MainWindow::setupUi() {
     welcomeButtons->setSpacing(20);
 
     m_recentProjectBtn = new QPushButton(tr("Open Recent Project"), m_welcomePage);
-    m_recentProjectBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirOpenIcon));
+    m_recentProjectBtn->setIcon(AppIcons::icon(QStringLiteral("recent")));
     m_recentProjectBtn->setFixedSize(180, 50);
     m_recentProjectBtn->setStyleSheet("QPushButton { font-size: 14px; }");
     connect(m_recentProjectBtn, &QPushButton::clicked, this, &MainWindow::onOpenRecentProjectRequested);
@@ -104,7 +107,7 @@ void MainWindow::setupUi() {
     welcomeLayout->addSpacing(32);
 
     auto* welcomeDragIcon = new QLabel(m_welcomePage);
-    welcomeDragIcon->setPixmap(QIcon(":/icons/drag.svg").pixmap(40, 40));
+    welcomeDragIcon->setPixmap(AppIcons::icon(QStringLiteral("drop")).pixmap(40, 40));
     welcomeDragIcon->setAlignment(Qt::AlignCenter);
     welcomeDragIcon->setStyleSheet("");
     welcomeLayout->addWidget(welcomeDragIcon);
@@ -123,8 +126,6 @@ void MainWindow::setupUi() {
     m_mainStack->addWidget(m_exportWorkspace);  // page 1
     connect(m_exportWorkspace, &ExportWorkspace::exportRequested,
             this, &MainWindow::onExportWorkspaceRequested);
-    connect(m_exportWorkspace, &ExportWorkspace::cancelled,
-            this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
     m_packedAtlasView = new PackedAtlasView(this);
     m_packedAtlasView->hide();
@@ -424,6 +425,14 @@ void MainWindow::setupUi() {
     connect(m_nineSliceWorkspace, &NineSliceWorkspace::definitionsChanged,
             this, &MainWindow::markWorkspaceEdited);
 
+    // Page 5: Puppet Workspace
+    m_puppetWorkspace = new PuppetWorkspace(m_session, m_undoStack, this);
+    m_mainStack->addWidget(m_puppetWorkspace);  // page 4
+    connect(m_puppetWorkspace, &PuppetWorkspace::atlasSelected, this, [this](int atlasIndex) {
+        selectActiveAtlas(atlasIndex);
+        updateNavigatorAtlasCombo();  // the other workspaces show the same atlas
+    });
+
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
 
@@ -490,6 +499,10 @@ void MainWindow::setupUi() {
             this, &MainWindow::onRemoveSourceRequested);
     connect(m_atlasWorkspace, &AtlasWorkspace::retrySourceRequested,
             this, &MainWindow::onRetrySourceRequested);
+    connect(m_atlasWorkspace, &AtlasWorkspace::syncSourceRequested,
+            this, &MainWindow::onSyncSourceRequested);
+    connect(m_atlasWorkspace, &AtlasWorkspace::syncLayoutRequested,
+            this, &MainWindow::onSyncLayoutRequested);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceFolderRequested,
             this, &MainWindow::onLoadFolder);
     connect(m_atlasWorkspace->navigatorPanel(), &NavigatorPanel::addSourceImageRequested,
@@ -598,17 +611,17 @@ void MainWindow::setupUi() {
         logToolbar->addWidget(btn);
         return btn;
     };
-    m_logFilterCli   = makeFilterBtn(QIcon(":/icons/cli.svg"),     tr("Show CLI tool output"));
-    m_logFilterInfo  = makeFilterBtn(QIcon(":/icons/info.svg"),    tr("Show info messages"));
-    m_logFilterWarn  = makeFilterBtn(QIcon(":/icons/warning.svg"), tr("Show warnings"));
-    m_logFilterError = makeFilterBtn(QIcon(":/icons/error.svg"),   tr("Show errors"));
-    m_logFilterQt    = makeFilterBtn(QIcon(":/icons/qt.svg"),      tr("Show Qt messages"));
+    m_logFilterCli   = makeFilterBtn(AppIcons::icon(QStringLiteral("terminal")),     tr("Show CLI tool output"));
+    m_logFilterInfo  = makeFilterBtn(AppIcons::icon(QStringLiteral("info")),    tr("Show info messages"));
+    m_logFilterWarn  = makeFilterBtn(AppIcons::icon(QStringLiteral("warning")), tr("Show warnings"));
+    m_logFilterError = makeFilterBtn(AppIcons::icon(QStringLiteral("error")),   tr("Show errors"));
+    m_logFilterQt    = makeFilterBtn(AppIcons::icon(QStringLiteral("qt-messages")),      tr("Show Qt messages"));
 
     auto* diagSep = new QFrame(logPanel);
     diagSep->setFrameShape(QFrame::VLine);
     diagSep->setFrameShadow(QFrame::Sunken);
     logToolbar->addWidget(diagSep);
-    m_logFilterDiag = new QPushButton(QIcon(":/icons/diagnosis.svg"), QString(), logPanel);
+    m_logFilterDiag = new QPushButton(AppIcons::icon(QStringLiteral("diagnostics")), QString(), logPanel);
     m_logFilterDiag->setCheckable(true);
     m_logFilterDiag->setChecked(true);
     m_logFilterDiag->setToolTip(tr("Show CLI diagnostics"));
@@ -623,7 +636,7 @@ void MainWindow::setupUi() {
     logToolbar->addWidget(m_logFilterEdit, 1);
 
     auto* clearLogBtn = new QPushButton(
-        QApplication::style()->standardIcon(QStyle::SP_LineEditClearButton),
+        AppIcons::icon(QStringLiteral("clear")),
         tr("Clear"), logPanel);
     clearLogBtn->setToolTip(tr("Clear all log entries"));
     logToolbar->addWidget(clearLogBtn);
@@ -749,28 +762,32 @@ void MainWindow::setupUi() {
 
     // Not Alt+E: that is the Edit menu's mnemonic, and the clash disables both.
     m_exportationWorkspaceAction = addWorkspaceAction(
-        QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation"),
+        AppIcons::icon(QStringLiteral("export")), tr("Exportation"),
         QKeySequence(Qt::ALT | Qt::Key_X));
     connect(m_exportationWorkspaceAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
     m_atlasesManagementWorkspaceAction = addWorkspaceAction(
-        QIcon(":/icons/layout.svg"), tr("Atlases"), QKeySequence(Qt::ALT | Qt::Key_A));
+        AppIcons::icon(QStringLiteral("atlases")), tr("Atlases"), QKeySequence(Qt::ALT | Qt::Key_A));
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
     m_atlasWorkspaceAction = addWorkspaceAction(
-        QIcon(":/icons/scan.svg"), tr("Sprites"), QKeySequence(Qt::ALT | Qt::Key_S));
+        AppIcons::icon(QStringLiteral("sprite-edit")), tr("Sprites"), QKeySequence(Qt::ALT | Qt::Key_S));
     m_atlasWorkspaceAction->setChecked(true);
     connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
     m_nineSliceWorkspaceAction = addWorkspaceAction(
-        QIcon(":/icons/nine-slice.svg"), tr("Nine-Slice"), QKeySequence(Qt::ALT | Qt::Key_N));
+        AppIcons::icon(QStringLiteral("nine-slice")), tr("Nine-Slice"), QKeySequence(Qt::ALT | Qt::Key_N));
     connect(m_nineSliceWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_nineSliceWorkspace); });
 
     m_frameAnimWorkspaceAction = addWorkspaceAction(
-        QIcon(":/icons/film.svg"), tr("Frame Animation"), QKeySequence(Qt::ALT | Qt::Key_F));
+        AppIcons::icon(QStringLiteral("frame-animation")), tr("Frame Animation"), QKeySequence(Qt::ALT | Qt::Key_F));
     connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_frameAnimWorkspace); });
+
+    m_puppetWorkspaceAction = addWorkspaceAction(
+        AppIcons::icon(QStringLiteral("puppet")), tr("Puppets"), QKeySequence(Qt::ALT | Qt::Key_P));
+    connect(m_puppetWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_puppetWorkspace); });
 
     setupWorkspaceTabs();
 
@@ -794,16 +811,16 @@ void MainWindow::setupUi() {
 
     // Help menu (added last so it sits on the right)
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
-    QAction* quickStartAction = helpMenu->addAction(QIcon(":/icons/help.svg"), tr("Quick Start..."));
+    QAction* quickStartAction = helpMenu->addAction(AppIcons::icon(QStringLiteral("help")), tr("Quick Start..."));
     quickStartAction->setToolTip(tr("Learn the basic workflow"));
     connect(quickStartAction, &QAction::triggered, this, &MainWindow::onQuickStart);
 
-    QAction* hotkeysAction = helpMenu->addAction(QIcon(":/icons/keyboard.svg"), tr("Hotkeys..."));
+    QAction* hotkeysAction = helpMenu->addAction(AppIcons::icon(QStringLiteral("keyboard")), tr("Hotkeys..."));
     hotkeysAction->setToolTip(tr("View keyboard shortcuts"));
     connect(hotkeysAction, &QAction::triggered, this, &MainWindow::onShowHotkeys);
 
     helpMenu->addSeparator();
-    QAction* aboutAction = helpMenu->addAction(QIcon(":/icons/info.svg"), tr("About..."));
+    QAction* aboutAction = helpMenu->addAction(AppIcons::icon(QStringLiteral("info")), tr("About..."));
     aboutAction->setToolTip(tr("About Sprat"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::onAboutClicked);
 
@@ -839,36 +856,36 @@ void MainWindow::setupToolbar() {
     fileMenu->addSeparator();
 
     m_loadProjectAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogOpenButton), tr("Open Project..."));
+        AppIcons::icon(QStringLiteral("folder-open")), tr("Open Project..."));
     m_loadProjectAction->setShortcut(QKeySequence::Open);  // Ctrl+O
     m_loadProjectAction->setToolTip(tr("Open a project folder, the folder you saved the project to"));
     connect(m_loadProjectAction, &QAction::triggered, this, &MainWindow::onLoadProject);
 
 #ifndef Q_OS_WASM
-    m_loadZipProjectAction = fileMenu->addAction(tr("Open ZIP Project..."));
+    m_loadZipProjectAction = fileMenu->addAction(AppIcons::icon(QStringLiteral("folder-zip")), tr("Open ZIP Project..."));
     m_loadZipProjectAction->setToolTip(tr("Open a project packed in a ZIP file"));
     connect(m_loadZipProjectAction, &QAction::triggered, this, &MainWindow::onLoadZipProject);
 #endif
 
     m_loadAction = fileMenu->addAction(
-        QIcon(":/icons/directory.svg"), tr("Add Source Folder..."));
+        AppIcons::icon(QStringLiteral("folder-add")), tr("Add Source Folder..."));
     m_loadAction->setToolTip(tr("Add a source folder of sprite images to the current project"));
     connect(m_loadAction, &QAction::triggered, this, &MainWindow::onLoadFolder);
 
     m_addSourceFileAction = fileMenu->addAction(
-        QIcon(":/icons/image.svg"), tr("Add Source File..."));
+        AppIcons::icon(QStringLiteral("image-add")), tr("Add Source File..."));
     m_addSourceFileAction->setToolTip(
         tr("Add a source image or archive file such as PNG, GIF, ZIP, or TAR"));
     connect(m_addSourceFileAction, &QAction::triggered, this, &MainWindow::onAddSourceFile);
 
     m_addSourceUrlAction = fileMenu->addAction(
-        QIcon(":/icons/internet.svg"), tr("Add Source URL..."));
+        AppIcons::icon(QStringLiteral("globe-add")), tr("Add Source URL..."));
     m_addSourceUrlAction->setToolTip(tr("Download and add an image or archive from a URL"));
     connect(m_addSourceUrlAction, &QAction::triggered, this, &MainWindow::onLoadFromUrl);
 
     fileMenu->addSeparator();
     m_saveAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Save"));
+        AppIcons::icon(QStringLiteral("save")), tr("Save"));
     m_saveAction->setShortcut(QKeySequence::Save);      // Ctrl+S
     m_saveAction->setEnabled(false);
     m_saveAction->setToolTip(tr("Save project state to the current folder"));
@@ -876,7 +893,7 @@ void MainWindow::setupToolbar() {
 
 #ifndef Q_OS_WASM
     m_saveAsAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Save As..."));
+        AppIcons::icon(QStringLiteral("save-as")), tr("Save As..."));
     m_saveAsAction->setShortcut(QKeySequence::SaveAs);  // Ctrl+Shift+S
     m_saveAsAction->setEnabled(false);
     m_saveAsAction->setToolTip(tr("Save project state to a new folder"));
@@ -884,7 +901,7 @@ void MainWindow::setupToolbar() {
 #endif
 
     m_exportAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Export"));
+        AppIcons::icon(QStringLiteral("export")), tr("Export"));
     m_exportAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
     m_exportAction->setEnabled(false);
     m_exportAction->setToolTip(tr("Re-run the export pipeline to the last-used destination"));
@@ -893,15 +910,15 @@ void MainWindow::setupToolbar() {
 #ifndef Q_OS_WASM
     fileMenu->addSeparator();
     QAction* quitAction = fileMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogCloseButton), tr("Quit"));
+        AppIcons::icon(QStringLiteral("quit")), tr("Quit"));
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &MainWindow::close);
 #endif
 
     QMenu* editMenu = mainMenuBar->addMenu(tr("&Edit"));
     QAction* undoAction = editMenu->addAction(
-        style->standardIcon(QStyle::SP_ArrowBack), tr("&Undo"));
-    undoAction->setIcon(style->standardIcon(QStyle::SP_ArrowBack));
+        AppIcons::icon(QStringLiteral("undo")), tr("&Undo"));
+    undoAction->setIcon(AppIcons::icon(QStringLiteral("undo")));
     undoAction->setShortcut(QKeySequence::Undo);
     undoAction->setEnabled(m_undoStack->canUndo());
     connect(undoAction, &QAction::triggered, this, [this]() {
@@ -911,8 +928,8 @@ void MainWindow::setupToolbar() {
     connect(m_undoStack, &QUndoStack::canUndoChanged, undoAction, &QAction::setEnabled);
 
     QAction* redoAction = editMenu->addAction(
-        style->standardIcon(QStyle::SP_ArrowForward), tr("&Redo"));
-    redoAction->setIcon(style->standardIcon(QStyle::SP_ArrowForward));
+        AppIcons::icon(QStringLiteral("redo")), tr("&Redo"));
+    redoAction->setIcon(AppIcons::icon(QStringLiteral("redo")));
     redoAction->setShortcut(QKeySequence::Redo);
     redoAction->setEnabled(m_undoStack->canRedo());
     connect(redoAction, &QAction::triggered, this, [this]() {
@@ -923,44 +940,44 @@ void MainWindow::setupToolbar() {
 
     QMenu* settingsMenu = mainMenuBar->addMenu(tr("Settings"));
     QAction* spritesheetAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_FileDialogListView), tr("Atlas Sprites..."));
+        AppIcons::icon(QStringLiteral("sprites-stack")), tr("Atlas Sprites..."));
     spritesheetAction->setToolTip(tr("Open atlas sprites settings"));
     connect(spritesheetAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesheetClicked);
 
     QAction* spritesNavigatorAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_FileDialogContentsView), tr("Sprites Navigator..."));
+        AppIcons::icon(QStringLiteral("tree")), tr("Sprites Navigator..."));
     spritesNavigatorAction->setToolTip(tr("Open sprites navigator settings"));
     connect(spritesNavigatorAction, &QAction::triggered, this, &MainWindow::onSettingsSpritesNavigatorClicked);
 
     QAction* framesEditorAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Frames Editor..."));
+        AppIcons::icon(QStringLiteral("sprite-edit")), tr("Frames Editor..."));
     framesEditorAction->setToolTip(tr("Open frames editor settings"));
     connect(framesEditorAction, &QAction::triggered, this, &MainWindow::onSettingsFramesEditorClicked);
 
     QAction* atlasLayoutAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_DesktopIcon), tr("Atlas Layout..."));
+        AppIcons::icon(QStringLiteral("atlases")), tr("Atlas Layout..."));
     atlasLayoutAction->setToolTip(tr("Open atlas layout settings"));
     connect(atlasLayoutAction, &QAction::triggered, this, &MainWindow::onSettingsAtlasLayoutClicked);
 
     QAction* exportationAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_DialogSaveButton), tr("Exportation..."));
+        AppIcons::icon(QStringLiteral("export")), tr("Exportation..."));
     exportationAction->setToolTip(tr("Open exportation settings"));
     connect(exportationAction, &QAction::triggered, this, &MainWindow::onSettingsExportationClicked);
 
     QAction* nineSliceSettingsAction = settingsMenu->addAction(
-        QIcon(QStringLiteral(":/icons/nine-slice.svg")), tr("Nine-Slice..."));
+        AppIcons::icon(QStringLiteral("nine-slice")), tr("Nine-Slice..."));
     nineSliceSettingsAction->setToolTip(tr("Open nine-slice editor settings"));
     connect(nineSliceSettingsAction, &QAction::triggered, this, &MainWindow::onSettingsNineSliceClicked);
 
 #ifndef Q_OS_WASM
     QAction* cliToolsAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_ComputerIcon), tr("CLI Tools..."));
+        AppIcons::icon(QStringLiteral("terminal")), tr("CLI Tools..."));
     cliToolsAction->setToolTip(tr("Open CLI tools settings"));
     connect(cliToolsAction, &QAction::triggered, this, &MainWindow::onSettingsCliToolsClicked);
 #endif
 
     QAction* manageProfilesAction = settingsMenu->addAction(
-        style->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Manage Profiles..."));
+        AppIcons::icon(QStringLiteral("profiles")), tr("Manage Profiles..."));
     manageProfilesAction->setToolTip(tr("Create and edit layout profiles"));
     connect(manageProfilesAction, &QAction::triggered, this, &MainWindow::onManageProfiles);
 }
@@ -978,7 +995,7 @@ void MainWindow::setupStatusBarUi() {
     m_statusProgressBar->setAccessibleName(tr("Operation progress"));
     statusBar()->addPermanentWidget(m_statusProgressBar);
 
-    m_folderLabel = new QLabel(tr("Folder: none"), this);
+    m_folderLabel = new QLabel(tr("No sprites"), this);
     m_folderLabel->setContentsMargins(0, 0, 12, 0);
     statusBar()->addPermanentWidget(m_folderLabel);
 
@@ -1010,6 +1027,8 @@ void MainWindow::setupZoomShortcuts() {
             return (fw && m_exportWorkspace->isAncestorOf(fw)) ? fw : m_exportWorkspace;
         if (m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace)
             return (fw && m_nineSliceWorkspace->isAncestorOf(fw)) ? fw : m_nineSliceWorkspace;
+        if (m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace)
+            return (fw && m_puppetWorkspace->isAncestorOf(fw)) ? fw : m_puppetWorkspace;
         if (m_currentWorkspace == m_frameAnimWorkspace)
             return animCanvas;
         return canvas;
@@ -1044,6 +1063,10 @@ void MainWindow::setupZoomShortcuts() {
         if (!targetSpin && m_nineSliceWorkspace && m_currentWorkspace == m_nineSliceWorkspace
                 && (fw == m_nineSliceWorkspace || m_nineSliceWorkspace->isAncestorOf(fw))) {
             targetSpin = m_nineSliceWorkspace->zoomSpin();
+        }
+        if (!targetSpin && m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace
+                && (fw == m_puppetWorkspace || m_puppetWorkspace->isAncestorOf(fw))) {
+            targetSpin = m_puppetWorkspace->zoomSpin();
         }
         if (!targetSpin) {
             return;
@@ -1092,6 +1115,10 @@ void MainWindow::setupZoomShortcuts() {
             auto* nsCanvas = m_nineSliceWorkspace->canvas();
             if (fitToContent) { nsCanvas->setZoomManual(false); nsCanvas->initialFit(); }
             else              { nsCanvas->setZoomManual(true);  m_nineSliceWorkspace->zoomSpin()->setValue(100.0); }
+        } else if (m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace
+                   && (fw == m_puppetWorkspace || m_puppetWorkspace->isAncestorOf(fw))) {
+            if (fitToContent) m_puppetWorkspace->canvas()->fitPuppet();
+            else              m_puppetWorkspace->zoomSpin()->setValue(100.0);
         }
     };
 
@@ -1136,6 +1163,7 @@ void MainWindow::setupWorkspaceTabs() {
         {m_atlasWorkspace, m_atlasWorkspaceAction},
         {m_nineSliceWorkspace, m_nineSliceWorkspaceAction},
         {m_frameAnimWorkspace, m_frameAnimWorkspaceAction},
+        {m_puppetWorkspace, m_puppetWorkspaceAction},
         {m_exportWorkspace, m_exportationWorkspaceAction},
     };
     for (const auto& [workspace, action] : m_workspaceTabs) {
@@ -1214,12 +1242,13 @@ void MainWindow::updateUiState() {
     if (m_frameAnimWorkspaceAction)     m_frameAnimWorkspaceAction->setEnabled(viewEnabled);
     if (m_exportationWorkspaceAction)   m_exportationWorkspaceAction->setEnabled(viewEnabled);
     if (m_nineSliceWorkspaceAction)     m_nineSliceWorkspaceAction->setEnabled(viewEnabled);
+    if (m_puppetWorkspaceAction)        m_puppetWorkspaceAction->setEnabled(viewEnabled);
     updateWorkspaceTabs();
 
     // Toggle docks and welcome page based on project / sprite state.
     // Skip this block while any full-screen workspace is active.
     if (m_currentWorkspace == m_exportWorkspace || m_currentWorkspace == m_atlasesManagementWorkspace
-            || m_currentWorkspace == m_nineSliceWorkspace) return;
+            || m_currentWorkspace == m_nineSliceWorkspace || m_currentWorkspace == m_puppetWorkspace) return;
 
     const bool wantsAnim = (m_currentWorkspace == m_frameAnimWorkspace);
     if (hasModels) {
@@ -1250,7 +1279,7 @@ void MainWindow::updateMainContentView() {
     const bool hasProject = !projectFilePathUi.isEmpty();
 
     if (m_currentWorkspace != m_exportWorkspace && m_currentWorkspace != m_atlasesManagementWorkspace
-            && m_currentWorkspace != m_nineSliceWorkspace) {
+            && m_currentWorkspace != m_nineSliceWorkspace && m_currentWorkspace != m_puppetWorkspace) {
         m_mainStack->setVisible(!hasLayout && !hasProject);
         if (!hasLayout && !hasProject) {
             m_mainStack->setCurrentIndex(0);
@@ -1351,6 +1380,8 @@ void MainWindow::refreshSpriteTree() {
         // Also refresh the NineSlice workspace navigator so it stays in sync
         if (m_nineSliceWorkspace)
             m_nineSliceWorkspace->refreshSprites();
+        if (m_puppetWorkspace && m_currentWorkspace == m_puppetWorkspace)
+            m_puppetWorkspace->refreshSprites();
         return;
     }
 
@@ -1413,8 +1444,8 @@ void MainWindow::refreshSpriteTree() {
         return;
     }
 
-    const QIcon folderIcon    = QApplication::style()->standardIcon(QStyle::SP_DirIcon);
-    const QIcon animGroupIcon = QApplication::style()->standardIcon(QStyle::SP_DirLinkIcon);
+    const QIcon folderIcon    = AppIcons::icon(QStringLiteral("folder"));
+    const QIcon animGroupIcon = AppIcons::icon(QStringLiteral("folder-virtual"));
 
     auto makeGroupNode = [&](QTreeWidgetItem* parent, const QString& text) {
         auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(spriteTree);
@@ -1575,21 +1606,21 @@ void MainWindow::refreshSpriteTree() {
             QString typeLabel;
             switch (src.type) {
             case SourceType::Folder:
-                sourceIcon = QIcon(":/icons/directory.svg");
+                sourceIcon = AppIcons::icon(QStringLiteral("folder"));
                 typeLabel = tr("Folder");
                 break;
             case SourceType::SingleImage:
                 sourceIcon = src.originalPath.endsWith(".gif", Qt::CaseInsensitive)
-                    ? QIcon(":/icons/file-gif.svg")
-                    : QIcon(":/icons/image.svg");
+                    ? AppIcons::icon(QStringLiteral("image-animated"))
+                    : AppIcons::icon(QStringLiteral("image"));
                 typeLabel = tr("Image");
                 break;
             case SourceType::Archive:
-                sourceIcon = QIcon(":/icons/package-compressed.svg");
+                sourceIcon = AppIcons::icon(QStringLiteral("archive"));
                 typeLabel = tr("Archive");
                 break;
             case SourceType::Url:
-                sourceIcon = QIcon(":/icons/internet.svg");
+                sourceIcon = AppIcons::icon(QStringLiteral("globe"));
                 typeLabel = tr("URL");
                 break;
             }
@@ -1647,7 +1678,7 @@ void MainWindow::refreshSpriteTree() {
 
                 auto* trashNode = new QTreeWidgetItem(sourceNode);
                 trashNode->setText(0, tr("Excluded (%1)").arg(N));
-                trashNode->setIcon(0, QApplication::style()->standardIcon(QStyle::SP_TrashIcon));
+                trashNode->setIcon(0, AppIcons::icon(QStringLiteral("delete")));
                 {
                     QFont tf = trashNode->font(0);
                     tf.setItalic(true);
@@ -1778,7 +1809,9 @@ void MainWindow::onAboutClicked() {
           "zlib &mdash; ZIP compression<br>"
           "CMake &mdash; build system</p>"
         "<p><b>Icons</b><br>"
-          "SVG icons from <a href=\"https://www.svgrepo.com\">SVG Repo</a></p>"
+          "Adapted with AI (Claude, Anthropic) from the "
+          "<a href=\"https://www.svgrepo.com\">SVG Repo</a> icons the app used before, "
+          "redrawn in one style</p>"
     );
 }
 
@@ -1790,6 +1823,8 @@ void MainWindow::updateNavigatorAtlasCombo() {
     auto* timelinePanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
     if (timelinePanel)
         timelinePanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+    if (m_puppetWorkspace)
+        m_puppetWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
 }
 
 void MainWindow::selectActiveAtlas(int atlasIndex) {

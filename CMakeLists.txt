@@ -479,6 +479,21 @@ set(PROJECT_SOURCES
     src/App/Workspaces/AtlasesManagement/PackedAtlasView.cpp
     src/App/Workspaces/NineSlice/NineSliceWorkspace.h
     src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
+    src/App/Workspaces/Puppet/PuppetWorkspace.h
+    src/App/Workspaces/Puppet/PuppetWorkspace.cpp
+    src/App/Workspaces/Puppet/PuppetCanvas.h
+    src/App/Workspaces/Puppet/PuppetCanvas.cpp
+    src/App/Workspaces/Puppet/PuppetPropertiesPanel.h
+    src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
+    src/App/Workspaces/Puppet/NewPuppetDialog.h
+    src/App/Workspaces/Puppet/NewPuppetDialog.cpp
+    src/App/Workspaces/Puppet/PuppetPoseStrip.h
+    src/App/Workspaces/Puppet/PuppetPoseStrip.cpp
+    src/App/Workspaces/Puppet/PuppetSequenceTrack.h
+    src/App/Workspaces/Puppet/PuppetSequenceTrack.cpp
+    src/App/Workspaces/Puppet/PuppetTreeWidget.h
+    src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
+    src/App/MainWindow/Undo/PuppetCommands.h
     src/NineSlice/NineSliceEditorCanvas.h
     src/NineSlice/NineSliceInsets.h
     src/NineSlice/NineSliceEditorCanvas.cpp
@@ -492,6 +507,8 @@ set(PROJECT_SOURCES
     src/SpriteSheetLayout/LayoutParser.h
     src/Project/ProjectPayloadCodec.cpp
     src/Project/ProjectPayloadCodec.h
+    src/Project/PuppetTextCodec.cpp
+    src/Project/PuppetTextCodec.h
     src/Project/AutosaveProjectStore.cpp
     src/Project/AutosaveProjectStore.h
     src/Project/ProjectSession.cpp
@@ -547,6 +564,23 @@ set(PROJECT_SOURCES
     src/Core/ArchiveExtractor.cpp
     src/Core/ArchiveExtractor.h
     src/Core/models.h
+    src/Core/CliTextFormat.h
+    src/Core/NaturalOrder.h
+    src/Core/MessageText.cpp
+    src/Core/MessageText.h
+    src/Core/AppIcons.cpp
+    src/Core/AppIcons.h
+    src/Core/PuppetModels.h
+    src/Core/PuppetEvaluator.cpp
+    src/Core/PuppetEvaluator.h
+    src/Core/PuppetEditing.cpp
+    src/Core/PuppetEditing.h
+    src/Core/PuppetMotion.cpp
+    src/Core/PuppetMotion.h
+    src/Core/PuppetPosing.cpp
+    src/Core/PuppetPosing.h
+    src/Core/PuppetSequencing.cpp
+    src/Core/PuppetSequencing.h
     src/Core/ViewUtils.cpp
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
@@ -597,7 +631,9 @@ target_include_directories(sprat-gui PRIVATE
     src/App/Workspaces/Export
     src/App/Workspaces/FrameAnimation
     src/App/Workspaces/NineSlice
+    src/App/Workspaces/Puppet
     src/App/Workspaces/Shared
+    src/App/MainWindow/Undo
     src/NineSlice
     src/Animation
     src/Animation/Timelines
@@ -747,15 +783,27 @@ if(BUILD_TESTING)
         tests/ImageDiscoveryTests.cpp
         tests/ProjectSessionTests.cpp
         tests/NineSliceWorkspaceTests.cpp
+        tests/PuppetTests.cpp
+        tests/PuppetWorkspaceTests.cpp
         tests/SpriteEditorTests.cpp
         assets/icons.qrc
-        src/SelectedSpriteFrame/EditorOverlayItem.cpp
         src/App/Workspaces/NineSlice/NineSliceWorkspace.cpp
+        src/App/Workspaces/Puppet/PuppetWorkspace.cpp
+        src/App/Workspaces/Puppet/PuppetCanvas.cpp
+        src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
+        src/App/Workspaces/Puppet/NewPuppetDialog.cpp
+        src/App/Workspaces/Puppet/PuppetPoseStrip.cpp
+        src/App/Workspaces/Puppet/PuppetSequenceTrack.cpp
+        src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
+        src/Core/MessageDialog.cpp
+        src/Core/MessageText.cpp
+        src/Core/AppIcons.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
         src/App/Workspaces/Shared/SpritePickerDialog.cpp
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp
         src/App/MainWindow/SpritePreviewTooltip.cpp
         src/NineSlice/NineSliceEditorCanvas.cpp
+        src/SelectedSpriteFrame/EditorOverlayItem.cpp
         src/Core/SpriteTreeUtils.cpp
         src/Core/ViewUtils.cpp
         src/Core/ZoomableGraphicsView.cpp
@@ -766,6 +814,12 @@ if(BUILD_TESTING)
         src/Animation/Timelines/TimelineBuilder.cpp
         src/Animation/Timelines/TimelineGenerationService.cpp
         src/Project/ProjectPayloadCodec.cpp
+        src/Project/PuppetTextCodec.cpp
+        src/Core/PuppetEvaluator.cpp
+        src/Core/PuppetEditing.cpp
+        src/Core/PuppetMotion.cpp
+        src/Core/PuppetPosing.cpp
+        src/Core/PuppetSequencing.cpp
         src/Project/ProjectFileLoader.cpp
         src/Project/AutosaveProjectStore.cpp
         src/Project/ProjectSession.cpp
@@ -784,12 +838,14 @@ if(BUILD_TESTING)
         src/App/MainWindow
         src/App/Workspaces
         src/App/Workspaces/NineSlice
+        src/App/Workspaces/Puppet
         src/App/Workspaces/Shared
-        src/SelectedSpriteFrame
+        src/App/MainWindow/Undo
         src/Animation
         src/Animation/Test
         src/Animation/Timelines
         src/NineSlice
+        src/SelectedSpriteFrame
         src/Project
         src/Core
         src/SpriteSheetLayout
@@ -819,6 +875,8 @@ if(BUILD_TESTING AND SPRAT_E2E_TESTS AND NOT EMSCRIPTEN)
         tests/e2e/ExportPipelineTests.cpp
         tests/e2e/ExportPipelineTests.h
         src/Project/ProjectSaveService.cpp
+        src/Core/MessageText.cpp
+        src/Project/PuppetTextCodec.cpp
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
         src/CLITools/LayoutArguments.cpp

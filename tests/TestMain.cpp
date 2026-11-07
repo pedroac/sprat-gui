@@ -9,6 +9,8 @@
 #include "ImageDiscoveryTests.h"
 #include "ProjectSessionTests.h"
 #include "NineSliceWorkspaceTests.h"
+#include "PuppetTests.h"
+#include "PuppetWorkspaceTests.h"
 #include "SpriteEditorTests.h"
 
 int main(int argc, char** argv) {
@@ -40,6 +42,12 @@ int main(int argc, char** argv) {
 
     NineSliceWorkspaceTests nineSliceWorkspaceTests;
     runTest(&nineSliceWorkspaceTests);
+
+    PuppetTests puppetTests;
+    runTest(&puppetTests);
+
+    PuppetWorkspaceTests puppetWorkspaceTests;
+    runTest(&puppetWorkspaceTests);
 
     SpriteEditorTests spriteEditorTests;
     runTest(&spriteEditorTests);

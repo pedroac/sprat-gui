@@ -1,4 +1,5 @@
 #include "LayoutCanvas.h"
+#include "AppIcons.h"
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QApplication>
@@ -1038,7 +1039,7 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
     }
 
     QMenu menu(this);
-    QAction* addFramesAction = menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add Frames..."));
+    QAction* addFramesAction = menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Frames..."));
     connect(addFramesAction, &QAction::triggered, this, &LayoutCanvas::addFramesRequested);
 
     menu.addSeparator();
@@ -1050,7 +1051,7 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
         }
     }
 
-    QAction* removeFramesAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude Selected Frames"));
+    QAction* removeFramesAction = menu.addAction(AppIcons::icon(QStringLiteral("exclude")), tr("Exclude Selected Frames"));
     removeFramesAction->setEnabled(!selectedItems.isEmpty());
     connect(removeFramesAction, &QAction::triggered, this, [this, selectedItems]() {
         QStringList paths;
@@ -1064,18 +1065,18 @@ void LayoutCanvas::contextMenuEvent(QContextMenuEvent* event) {
     if (target) {
         menu.addSeparator();
         m_contextMenuTargetPath = target->getData()->path;
-        QAction* copyPathAction = menu.addAction(QIcon(":/icons/copy-2.svg"), tr("Copy Path"));
+        QAction* copyPathAction = menu.addAction(AppIcons::icon(QStringLiteral("copy-path")), tr("Copy Path"));
         connect(copyPathAction, &QAction::triggered, this, [this]() {
             QApplication::clipboard()->setText(m_contextMenuTargetPath);
         });
-        QAction* copyImageAction = menu.addAction(QIcon(":/icons/copy-2.svg"), tr("Copy Image"));
+        QAction* copyImageAction = menu.addAction(AppIcons::icon(QStringLiteral("copy-image")), tr("Copy Image"));
         connect(copyImageAction, &QAction::triggered, this, [this]() {
             QApplication::clipboard()->setImage(QImage(m_contextMenuTargetPath));
         });
     }
 
     menu.addSeparator();
-    QAction* splitAction = menu.addAction(QIcon(":/icons/split-cells.svg"), tr("Split Mode (S)"));
+    QAction* splitAction = menu.addAction(AppIcons::icon(QStringLiteral("split")), tr("Split Mode (S)"));
     splitAction->setCheckable(true);
     splitAction->setChecked(m_splitMode);
     splitAction->setToolTip(tr("Toggle split mode (S). Hold ALT to activate temporarily. "

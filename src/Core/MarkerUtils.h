@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MarkerModels.h"
+#include "AppIcons.h"
 #include <QIcon>
 #include <QSet>
 #include <QString>
@@ -8,10 +9,10 @@
 
 inline QIcon markerKindIcon(MarkerKind kind) {
     switch (kind) {
-    case MarkerKind::Circle:    return QIcon(":/icons/circle.svg");
-    case MarkerKind::Rectangle: return QIcon(":/icons/rectangle-wide.svg");
-    case MarkerKind::Polygon:   return QIcon(":/icons/polygon.svg");
-    default:                    return QIcon(":/icons/point-scan.svg");
+    case MarkerKind::Circle:    return AppIcons::icon(QStringLiteral("marker-circle"));
+    case MarkerKind::Rectangle: return AppIcons::icon(QStringLiteral("marker-rect"));
+    case MarkerKind::Polygon:   return AppIcons::icon(QStringLiteral("marker-polygon"));
+    default:                    return AppIcons::icon(QStringLiteral("marker-point"));
     }
 }
 

@@ -1,4 +1,5 @@
 #include "TimelineUi.h"
+#include "AppIcons.h"
 #include "MessageDialog.h"
 
 #include <QCoreApplication>
@@ -23,9 +24,9 @@ TimelineGenerationService::ConflictResolution TimelineUi::askTimelineConflictRes
         2, // Default to Ignore
         trTimelineUi("Timeline Already Exists"),
         {
-            style_->standardIcon(QStyle::SP_DialogSaveButton),
-            style_->standardIcon(QStyle::SP_DialogApplyButton),
-            style_->standardIcon(QStyle::SP_DialogCancelButton)
+            AppIcons::icon(QStringLiteral("replace")),
+            AppIcons::icon(QStringLiteral("merge")),
+            AppIcons::icon(QStringLiteral("skip"))
         }
     );
 

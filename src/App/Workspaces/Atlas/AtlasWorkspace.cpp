@@ -2,6 +2,7 @@
 // Implements the Atlas (Sprites) workspace widget.
 
 #include "AtlasWorkspace.h"
+#include "AppIcons.h"
 #include "MarkerUtils.h"
 #include "LayoutCanvas.h"
 #include "NavigatorPanel.h"
@@ -20,6 +21,7 @@
 #include "../../../Core/SpriteTreeUtils.h"
 #include "../../../Profiles/SpratProfilesConfig.h"
 
+#include <algorithm>
 #include <QIcon>
 #include <QVBoxLayout>
 #include <QSplitter>
@@ -257,7 +259,7 @@ void AtlasWorkspace::setupUi() {
     auto* emptyAtlasLayout = new QVBoxLayout(emptyAtlasWidget);
     emptyAtlasLayout->setAlignment(Qt::AlignCenter);
     auto* emptyAtlasIcon = new QLabel(emptyAtlasWidget);
-    emptyAtlasIcon->setPixmap(QIcon(":/icons/drag.svg").pixmap(48, 48));
+    emptyAtlasIcon->setPixmap(AppIcons::icon(QStringLiteral("drop")).pixmap(48, 48));
     emptyAtlasIcon->setAlignment(Qt::AlignCenter);
     auto* emptyAtlasLabel = new QLabel(tr("Drag and drop folder, files or URLs"), emptyAtlasWidget);
     emptyAtlasLabel->setAlignment(Qt::AlignCenter);
@@ -865,7 +867,7 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     if (clickedIsLeaf) {
         const auto sprite = clickedItem->data(0, Qt::UserRole).value<SpritePtr>();
         if (sprite && !sprite->path.isEmpty()) {
-            detectFramesAction = menu.addAction(QIcon(":/icons/scan.svg"), tr("Detect frames..."));
+            detectFramesAction = menu.addAction(AppIcons::icon(QStringLiteral("detect-frames")), tr("Detect frames..."));
             hadItems = true;
             addSep();
         }
@@ -877,15 +879,15 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     QAction* deleteSelectedAction = nullptr;
 
     if (clickedIsLeaf) {
-        deleteFrameAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude"));
+        deleteFrameAction = menu.addAction(AppIcons::icon(QStringLiteral("exclude")), tr("Exclude"));
         hadItems = true;
     }
     if (clickedIsGroup && !clickedIsSourceNode) {
-        deleteGroupAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude group"));
+        deleteGroupAction = menu.addAction(AppIcons::icon(QStringLiteral("exclude")), tr("Exclude group"));
         hadItems = true;
     }
     if (hasChecked) {
-        deleteSelectedAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Exclude selected"));
+        deleteSelectedAction = menu.addAction(AppIcons::icon(QStringLiteral("exclude")), tr("Exclude selected"));
         hadItems = true;
     }
 
@@ -894,7 +896,7 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     if (clickedIsGroup) {
         addSep();
         addFramesAction = menu.addAction(
-            QIcon(":/icons/add-ellipse.svg"), tr("Add frames into '%1'...").arg(clickedItem->text(0)));
+            AppIcons::icon(QStringLiteral("add")), tr("Add frames into '%1'...").arg(clickedItem->text(0)));
         hadItems = true;
     }
 
@@ -906,15 +908,15 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     if (clickedIsGroup || hasChecked) {
         addSep();
         if (clickedIsGroup && !clickedIsSourceNode) {
-            createTimelineFromGroupAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Create timeline from group"));
+            createTimelineFromGroupAction = menu.addAction(AppIcons::icon(QStringLiteral("timeline-add")), tr("Create timeline from group"));
             hadItems = true;
         }
         if (hasChecked) {
-            createTimelineFromSelectedAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Create timeline from selected frames"));
+            createTimelineFromSelectedAction = menu.addAction(AppIcons::icon(QStringLiteral("timeline-add")), tr("Create timeline from selected frames"));
             hadItems = true;
         }
         if (hasChecked && hasTimeline) {
-            addToTimelineAction = menu.addAction(QIcon(":/icons/add-ellipse.svg"), tr("Add selected to current timeline"));
+            addToTimelineAction = menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add selected to current timeline"));
             hadItems = true;
         }
     }
@@ -923,6 +925,8 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     QAction* autoCreateTimelinesAction = nullptr;
     QAction* removeSourceAction        = nullptr;
     QAction* retrySourceAction         = nullptr;
+    QAction* syncSourceAction          = nullptr;
+    QAction* syncLayoutAction          = nullptr;
     if (clickedIsSourceNode) {
         const int sourceIdx = clickedItem->data(0, Qt::UserRole + 1).toInt();
         const bool sourceHasError = m_session
@@ -931,15 +935,28 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
 
         addSep();
         if (!sourceHasError) {
-            autoCreateTimelinesAction = menu.addAction(QIcon(":/icons/bot-add.svg"), tr("Auto-create timelines"));
+            autoCreateTimelinesAction = menu.addAction(AppIcons::icon(QStringLiteral("auto-create")), tr("Auto-create timelines"));
             hadItems = true;
             menu.addSeparator();
+            syncSourceAction = menu.addAction(AppIcons::icon(QStringLiteral("sync-from-source")),
+                                              tr("Sync Source to Layout"));
+            syncSourceAction->setToolTip(tr("Bring the source's changes into the project, and find files it lost"));
+            syncLayoutAction = menu.addAction(AppIcons::icon(QStringLiteral("sync-to-source")),
+                                              tr("Sync Layout to Source..."));
+            const bool isUrl = m_session && sourceIdx >= 0 && sourceIdx < m_session->sources.size()
+                               && m_session->sources[sourceIdx].type == SourceType::Url;
+            syncLayoutAction->setEnabled(!isUrl);
+            syncLayoutAction->setToolTip(isUrl ? tr("A URL source can't be written to")
+                                               : tr("Write the project's sprites back into the original file or folder; "
+                                                    "you see what changes first"));
+            menu.setToolTipsVisible(true);
+            menu.addSeparator();
         } else {
-            retrySourceAction = menu.addAction(QIcon(":/icons/retry.svg"), tr("Retry"));
+            retrySourceAction = menu.addAction(AppIcons::icon(QStringLiteral("retry")), tr("Retry"));
             hadItems = true;
             menu.addSeparator();
         }
-        removeSourceAction = menu.addAction(QIcon(":/icons/remove.svg"), tr("Remove source"));
+        removeSourceAction = menu.addAction(AppIcons::icon(QStringLiteral("delete")), tr("Remove source"));
         hadItems = true;
     }
 
@@ -974,6 +991,12 @@ void AtlasWorkspace::onSpriteTreeContextMenu(const QPoint& pos) {
     else if (chosen == retrySourceAction && clickedItem) {
         const int sourceIdx = clickedItem->data(0, Qt::UserRole + 1).toInt();
         emit retrySourceRequested(sourceIdx);
+    }
+    else if (chosen == syncSourceAction && clickedItem) {
+        emit syncSourceRequested(clickedItem->data(0, Qt::UserRole + 1).toInt());
+    }
+    else if (chosen == syncLayoutAction && clickedItem) {
+        emit syncLayoutRequested(clickedItem->data(0, Qt::UserRole + 1).toInt());
     }
 }
 
@@ -1227,7 +1250,8 @@ void AtlasWorkspace::onPointsConfigClicked() {
             std::move(coTargets)));
     }
 
-    // The marker just created is the one to edit next: select it, as picking it would.
+    // The marker just created is the one to edit next (a click on the canvas positions it):
+    // select it, as picking it would.
     const QString added = addedMarkerName(oldPoints, newPoints);
     auto* combo = m_spriteEditorPanel->handleCombo();
     if (!added.isEmpty() && combo) {

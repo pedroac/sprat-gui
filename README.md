@@ -12,7 +12,8 @@ Use this app if you need to:
 4. Create animation timelines quickly from frame naming patterns.
 5. Preview and export animations (GIF/video) without manual scripting.
 6. Define nine-slice regions for scalable UI elements (buttons, panels).
-7. Save complete project state to a project folder, and open it again (also from a `.zip`).
+7. Build cutout puppets from sprites, pose them and animate the poses.
+8. Save complete project state to a project folder, and open it again (also from a `.zip`).
 
 If your workflow is already fully automated by scripts and CI, this may be unnecessary. If you need fast visual iteration for game/UI assets, this is likely useful.
 
@@ -42,7 +43,7 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
   Save and load full project state (layout options, markers, timelines). The app automatically performs a background autosave every 5 minutes to prevent data loss.
 
 - **Sources management**
-  Load sprites from folders, archives (ZIP/tar), single images (including animated GIFs), or URLs. Use **Sync Source to Layout** to re-import changes from the original file, or **Sync Layout to Source** to write the current pivot/marker state back to the source without leaving the app.
+  Load sprites from folders, archives (ZIP/tar), single images (including animated GIFs), or URLs. Right-click a source in the sprite tree to **Sync Source to Layout** (bring its changes into the project), **Sync Layout to Source** (write the project's sprites back into the original file), retry one that failed to load, or remove it.
 
 - **Project synchronization**
   Sync your project with the source folder manually or via live file system monitoring (Watch mode) to pick up new or changed assets automatically.
@@ -56,8 +57,11 @@ If your workflow is already fully automated by scripts and CI, this may be unnec
 - **Nine-slice editing**
   Mark individual sprites as nine-sliced and define left/top/right/bottom insets using an interactive canvas editor. Set horizontal and vertical fill modes (stretch, repeat, mirror) and preview the result at a configurable target size. Nine-slice definitions are saved in the project and exported with the atlas metadata.
 
+- **Puppets (cutout rigs)**
+  Build sprat-cli puppets from an atlas's sprites: parts drawn in order, each with the sprites it can show, hung from each other's markers. Pose them by turning and pulling parts, and play poses in animations, with frames of their own and onion skin. Puppets are saved in the project and exported for sprat-cli's `raw` format and in Layout text's `puppets.txt`.
+
 - **Visual customization**
-  Customize workspace and sprite frame background colors, toggle transparency checkerboard, and configure sprite border styles.
+  Customize workspace and sprite frame background colors, toggle transparency checkerboard, and configure sprite border styles. The icons follow the light or dark theme.
 
 ## Requirements
 
@@ -83,7 +87,7 @@ Place the `sprat-cli` repository beside this project (for example, at `../sprat-
 
 ## Manual frame editing
 
-Use the layout canvas context menu to manage individual frames without reloading an entire folder. Right-click an empty area, choose **Add Frames...**, and pick one or more image files. The GUI writes a temporary plaintext list that `spratlayout` already understands (the same list-file input described in the [`sprat-cli`](https://github.com/pedroac/sprat-cli) README) and runs the layout using that list, so you can mix files from anywhere on disk. Right-clicking a sprite exposes a **Remove Frame** action for the frame under the cursor; if that frame is referenced by existing timelines you are warned that timelines will drop those entries before removal proceeds.
+Use the layout canvas context menu (Atlases workspace, **Layout** view) to manage individual frames without reloading an entire folder. Right-click an empty area, choose **Add Frames...**, and pick one or more image files. The GUI writes a temporary plaintext list that `spratlayout` already understands (the same list-file input described in the [`sprat-cli`](https://github.com/pedroac/sprat-cli) README) and runs the layout using that list, so you can mix files from anywhere on disk. Right-click selected sprites for **Exclude Selected Frames**; if timelines use those frames, you are warned that the timelines will drop them first.
 
 ## Try Online
 
@@ -183,14 +187,13 @@ Run:
 
 ## Quick start
 
-1. Launch the app.
-2. Verify CLI tool paths in **Settings → CLI Tools** (the app prompts to install them if missing); optionally enable **Deduplicate identical sprites** in **Settings → Atlas Sprites**.
-3. Click **Load Images Folder** and select your frames directory.
-4. Adjust layout options (profile/padding/trim) and use **Manage Profiles** to configure per-profile output processing (GPU compression, artifact reduction).
-5. Select sprites to edit pivots/markers.
-6. Create timelines manually or generate from frame names.
-7. Test animation in the Animation panel.
-8. Save the project folder or export animation; output format (PNG vs. DDS) depends on active profile compression settings.
+1. Launch the app. If the sprat-cli tools are missing, it offers to install them (or set their folder in **Settings → CLI Tools**).
+2. Drop a folder of sprites on the window, or use **File → Add Source Folder...** (also **Add Source File...** for a sprite sheet or GIF, and **Add Source URL...**).
+3. In **Sprites** (`Alt+S`), click a sprite to name it and place its pivot and markers.
+4. In **Atlases** (`Alt+A`), split sprites into atlases if you need several, and pick their profiles; **Settings → Manage Profiles** sets each profile's packing, compression and artifact reduction.
+5. In **Frame Animation** (`Alt+F`), add timelines, or auto-create them from folders and frame names, and preview them.
+6. Optionally, mark stretchable UI sprites in **Nine-Slice** (`Alt+N`) and build puppets in **Puppets** (`Alt+P`).
+7. **File → Save As** saves the project folder; **Exportation** (`Alt+X`) writes the atlases and metadata for your engine.
 
 For a guided introduction, open **Help → Quick Start** inside the app. For a full list of keyboard shortcuts, open **Help → Hotkeys**.
 
@@ -201,25 +204,18 @@ The application is organized into dedicated workspaces, each focusing on a speci
 ### **Sprites Workspace** (`Alt+S`)
 The default workspace for importing assets, managing the sprite tree, and editing individual frame metadata (pivots and markers). Use this for the initial setup and fine-tuning of your sprites.
 
-- **Sprite Navigator**
-  - Switch from **Layout** to **Navigator** view (above the atlas canvas) to see a hierarchical tree of all sprites organized by folder.
-  - Check sprites individually or by folder; right-click for context actions or press `Delete` to remove selected sprites:
-    - Delete selected sprites.
-    - Add frames to a folder.
-    - Add checked sprites to the current timeline.
-    - Create a new timeline from selected sprites.
-    - Auto-create timelines from every sub-folder at once.
-    - Group or ungroup sprites (moves files into subfolders).
-  - When you switch back to Layout view, the atlas rebuilds if any changes were made while the Navigator was open.
-
-- **Atlas Layout**
-  - Adjust profile/padding/trim controls, zoom/scroll the canvas, and move the viewport with scrollbars or mouse drag. Clipboard cut/copy/paste works while managing frames.
-  - The atlas rebuilds automatically 1 second after you stop making changes.
-  - Search field at the top of the right panel filters sprites by name for quicker edits.
+- **Sprite tree** (left)
+  - Lists every source (folder, archive, image or URL) and its sprites, by folder; sprites with similar names are grouped. The search field above it filters sprites by name, and **Add Source** adds another source. Thumbnails load in the background, so large projects open quickly.
+  - Tick sprites individually or by folder; right-click for context actions, or press `Delete` to exclude the selected sprites:
+    - **Exclude** sprites, a group or the selection (they move to the source's Excluded node, from which they can be included again).
+    - **Detect frames...** in an image.
+    - Add frames into a folder.
+    - Create a timeline from a group or from the selected sprites, add the selected sprites to the current timeline, or **Auto-create timelines**.
+    - On a source: **Sync Source to Layout**, **Sync Layout to Source...**, **Retry** a source that failed to load, or **Remove source** (see [Sources management](#ui-workflow)).
 
 - **Selected Frame Editor**
-  - Click any sprite in the atlas or Navigator to open its editor in the right panel.
-  - Place and adjust **pivots** (origin/anchor points) and **markers** (named points for collision zones, spawn origins, etc.) directly on the frame image. With the pivot selected, clicking the image places it there; with a marker selected, clicking elsewhere changes nothing, so the marker stays selected. A marker you add becomes the selected one.
+  - Click any sprite in the tree to open its editor on the right; with nothing selected, the canvas says so.
+  - Place and adjust **pivots** (origin/anchor points) and **markers** (named points for collision zones, spawn origins, etc.) directly on the frame image. With the pivot selected, clicking the image places it there; with a marker selected, clicking elsewhere on the image moves the marker there (centred on the click), and clicking the pivot's crosshair selects the pivot. A marker added in the Markers window becomes the selected one.
   - **Onion Skinning**: displays semi-transparent ghost overlays of neighbouring frames so you can align pivots and markers consistently across a sequence.
   - **Flipbook Mode**: keeps the pivot visually stationary while you step between frames, making it easier to spot drift across an animation.
   - See [UI workflow](#ui-workflow) for configuration options (opacity, zoom-on-frame-change, flipbook scope).
@@ -227,13 +223,14 @@ The default workspace for importing assets, managing the sprite tree, and editin
 ![Sprites workspace](README_assets/sprites_workspace.png)
 
 ### **Atlases Workspace** (`Alt+A`)
-Advanced management for projects with multiple texture atlases. Drag and drop sprites between named atlases, manage per-atlas profiles, and organize large asset sets.
+Organizes sprites into atlases and shows how each one packs. Projects with a single atlas can leave everything in **Default**.
 
-- **Manage Atlases**: organize sprites across named atlases: add or remove atlases, rename them, and drag sprites from the sprite tree into a different atlas slot.
-- **Right-click actions**:
-  - Move checked sprites to an atlas.
-  - Create atlas from group/folder.
-  - Autocreate atlases from source subfolders.
+- **Atlases** (left): add, remove and rename atlases. **Excluded** holds the sprites left out of every atlas.
+- **Sprite tree** (middle): tick sprites (`Ctrl+Click`, or `Shift+Click` for a range) and drag them onto an atlas. Right-click:
+  - an atlas: move the ticked sprites to it;
+  - a folder or group: create an atlas from it, or move it to the atlas of the same name;
+  - a source: autocreate one atlas per subfolder.
+- **Right panel**: **Navigation** shows the tree, **Layout** the selected atlas packed (zoom with `Ctrl+Wheel`, pan with `Space+Drag`); the atlas's name, source resolution, packing statistics and the **Profiles** it is exported with. The layout rebuilds a second after you stop making changes.
 
 ![Atlases workspace](README_assets/atlases_workspace.png)
 
@@ -245,7 +242,8 @@ An interactive editor for defining nine-slice (nine-patch) configurations on ind
   - **Remove** (or `Delete`) stops nine-slicing the selected sprites. Their insets are kept, so adding a sprite again restores them.
 - **Right panel**:
   - **Insets** — L / T / R / B spinboxes (px) to set left, top, right, and bottom slice lines.
-  - **Fill modes** — separate horizontal (H) and vertical (V) combos: *stretch*, *repeat*, or *mirror*.
+  - **Fill modes** — separate horizontal (H) and vertical (V) combos: *stretch*, *repeat*, *mirror*, or *fixed* (keeps the sprite's size on that axis).
+  - With no sprite selected, the canvas says what to do and **W** / **H** are off.
   - **Zoom** — 10–1600 % zoom for the editor canvas.
   - **Target size** — W / H spinboxes (1–4096 px) to preview the nine-slice result at a given render size. Drag the right/bottom/corner handles on the canvas to resize interactively.
   - **Grid** — toggles a pixel grid overlay.
@@ -275,13 +273,36 @@ Focuses on timeline authoring and animation preview: the timeline list on the le
 
 ![Frame Animation workspace](README_assets/frame_animation_workspace.png)
 
+### **Puppet Workspace** (`Alt+P`)
+Builds sprat-cli puppets: cutout rigs whose parts each show one of their sprites, joined at markers. A puppet belongs to an atlas and uses its sprites; with several atlases, **Atlas** above the tree picks whose puppets are listed.
+
+- **Left panel**: the puppets tree, puppet › part › variant (a sprite the part can show).
+  - Parts are listed in draw order: the first is drawn at the back. The column next to a part says where it goes: `at X,Y` for a part placed by position, `↳ PARENT:MARKER` for one hanging from another part's marker.
+  - ★ marks the variant each part shows on the canvas: in the selected pose, the edited animation frame, or where the animation's playhead is (for other puppets, the rest variant). The rest variant, the first one, is the one the **rest** pose shows; to change it, select **rest** below the canvas and pick another variant; it moves first.
+  - To have the selected pose show a variant, double-click the variant in the tree, right-click it for **Show in Pose**, or pick it in the part's **Shows** (right panel). In bold with "· shown", the variant the selected pose shows (for parts with more than one).
+  - Drag a part to change the draw order, or right-click it for **Bring Forward** and **Send Backward**. A part's variants are listed by name (`walk2` before `walk10`), in the tree and in **Shows**.
+  - **Add** › **New Puppet** opens a window to name the puppet and build its parts: drag sprites (or a folder) from the list on the right onto a part to add them to it, or onto empty space to make one part showing them all, named after the folder or what the sprites' names share (`walk_01`, `walk_02` → `walk`); **Add Part** adds an empty one. Select several rows with `Ctrl`/`Shift`; right-click for **Rename Part**, **Delete Part** and **Exclude Sprites** (takes sprites out of their part); **Remove** or `Delete` does the same for the selection. **Create** adds the puppet as one undo step; **Cancel** changes nothing.
+  - **Add** › **New Part** (placed at the puppet's origin) or **Add Sprites...** (pick sprites from the atlas for the selected part). **Remove** (or `Delete`) removes the selected puppet, part or variant; removing a part also removes the attachments to and from it.
+  - Rename with `F2` or in the right panel. Names must be unique, as sprat-cli requires: puppets in the atlas, parts in their puppet, variants in their part.
+- **Canvas**: the selected puppet at rest. The large cross is the puppet's origin; the small one, in a ring, is the selected part's pivot. Lines show what hangs from what. Click a part to select it, and drag it to move it; parts hanging from it move along. The arrow keys move the selected part by one pixel (ten with `Shift`). A part hanging from another moves with that part, not on its own.
+- **Trying the joints**: any part can be turned: drag the round handle at the end of the selected part's angle line, or type its **Angle** in the right panel. An attached part turns around its joint, from its parent and within its turn limits (freely without them); a part placed by position turns freely around its pivot.
+- **Moving parts**: drag any part to move it. A part placed by position goes where you drop it: on **rest**, that is the rig's position; on another pose, the pose's. An attached part is pulled instead, so the point you hold follows the pointer, saved in the selected pose: its joint first slides within its parent's marker and leeway (a pupil in its eye socket), then it and the parts it hangs from turn within their limits, like moving a hand turns the forearm and the upper arm. `Shift`+drag an attached part to move its joint within its parent's marker and leeway. The selected part shows its turn range and where its joint may go.
+- **Poses**: the strip below the canvas holds the puppet's poses, as thumbnails sharing one framing so they compare, starting with **rest**. Click a frame to edit it: turning, pulling, moving parts placed by position and picking the variant a part **Shows** (right panel) change that pose at once, each drag one undo step. **rest** is a pose like the others, exported as `pose "rest"`, so an animation can go back to it: it starts out setting every part as the rig has it (rest variant, angle 0, joints on their markers, parts placed by position where the rig puts them), and new parts join it. It always comes first and can't be renamed, moved or deleted; moving a part placed by position on it moves the rig too. Engines still start from sprat-cli's own rest (first variants, angle 0) until they play a pose. The strip works like an animation's frame list: **Add Pose** adds an empty pose after the selected frame and **Duplicate** copies it; right-click a frame for **Add Pose Before**, **Add Pose After**, **Move to the left**, **Move to the right**, **Duplicate** and **Delete** (rest only takes poses after it). Double-click a pose to rename it, drag it to reorder; **Delete**, `Delete` or `Backspace` deletes it (and the sequence steps that play it).
+- **Animations**: the **Animations** tab below the canvas lists the puppet's animations (sprat-cli sequences): **Add**, **Delete**, double-click to rename, right-click to duplicate. The selected one shows its poses in order, each a block as wide as its frames: right-click it to **Add Pose** (on empty space, at the end), **Add Pose Before**/**After**, **Move to the left**/**right**, **Duplicate** and **Delete** (or `Delete`). Select a step to set its pose, **In** (frames to reach it), **Hold** (frames it stays) and ease (**Linear**, or **Step** to snap at the end); a step lasts a frame at least. The animation's **fps** and loop (**Loop**, **Once**, **Ping-pong**, **Once ping-pong**) sit next to **Play**. The canvas plays it: click a step to go where its pose arrives, drag on the steps to move the playhead. **Frames of its own**: right-click a step for **New Frame Before**/**After**: a new pose, a copy of that step's, that belongs to the animation (named after it, `walk frame 1`, `walk frame 2`...; renamed, duplicated and deleted with it, and gone once no step plays it). The Poses tab doesn't list them, and other animations can't add them. Stopped where a step's pose has arrived, the canvas edits that pose as the Poses tab does. A step playing a shared pose (one from the Poses tab, drawn with a dashed border) gets its own copy the first time you change it, so the shared pose and the animations that play it stay as they were; a note under the step says which it plays. **Save as Pose...** copies a step's pose to the Poses tab; double-clicking a step that plays a shared pose opens it there. **Onion skin** shows the steps before (red) and after (green) the edited one, faintly. Tick other animations in the list to play them along, as a game would combine them (the later one wins where two set the same part).
+- **What a pose sets**: under the puppet tree, the selected pose's parts are listed with what it sets (`head · 30°`). A pose sets only its ticked parts, and of those only what you changed, so poses combine as sprat-cli plays them: a "legs" pose and a "smile" pose together. Parts it leaves alone are faint on the canvas, at rest; changing one ticks it, unticking one leaves it out again.
+- **Markers**: every part's markers are drawn on the canvas, faintly, and the selected part's are labelled. The part's **Markers** list in the right panel sets which ones are shown and offered for joints (all of them to start with): untick the ones that are only for the game, such as hit boxes. This is saved in the project, not exported.
+- **Attaching parts**: drag the selected part's pivot ring. The markers it can hang from appear, labelled; drop on one to hang the part there (it snaps on), or drop elsewhere to place the part there by position. A part can't hang from itself or from the parts hanging from it. Markers are added to sprites in the Sprites workspace; every sprite also has a `pivot` marker, its pivot.
+- **Right panel**: the selected item's name; a variant's sprite and preview; and how a part is placed, **By position** (X, Y) or **Attached**: the part it hangs from, at which of its markers, by which of this part's markers (its pivot or a point marker), the **Leeway** its joint may drift when posed, and how far it may **Turn** from its parent. ⚠ marks a marker that some of the part's variants lack. Switching to **By position** keeps the part where it is. A ⚠ in the tree marks a part that can't be drawn (the panel says why) or a sprite that isn't in the atlas.
+
+Every change can be undone.
+
 ### **Exportation Workspace** (`Alt+X`)
 A full-screen preview and configuration area for final output. Preview exactly how your atlases will be packed and choose your metadata format before exporting to disk.
 
-- Click **Exportation** (toolbar) to open the export workspace, or use **Export** for a quick re-export to the last used output folder.
+- Click the **Exportation** tab to open it, or use **File → Export** (`Ctrl+E`) for a quick re-export to the last used output folder.
 - The left pane shows a live packed-atlas preview. Use the **Atlas** selector to preview individual atlases.
-- The right pane selects the output folder, metadata format (transform), and scale filter. Click **Export** to run the full pipeline.
-- 
+- The right pane selects the output folder, metadata format (transform), and scale filter. Click **Export** to run the full pipeline. To leave, click another workspace tab.
+
 ![Exportation workspace](README_assets/exportation_workspace.png)
 
 
@@ -310,7 +331,7 @@ A full-screen preview and configuration area for final output. Preview exactly h
   - **Global Deduplicate**: Enable deduplication in Settings using **Exact** (byte-for-byte identical) or **Perceptual** (visually similar) modes to create aliases for duplicate sprites during layout generation.
 
 - **Loading frame folders**
-  - Use the “Load Images Folder” toolbar action or drop a directory/ZIP/project file onto the window.
+  - Use **File → Add Source Folder...** or drop a directory/ZIP/project file onto the window.
   - When loading a ZIP with multiple image directories, the app prompts you to choose the folder to import.
 
 ![Load ZIP folder selector](README_assets/load_zip_folder_selector.png)
@@ -327,32 +348,36 @@ A full-screen preview and configuration area for final output. Preview exactly h
 ![Splitting](README_assets/splitting.png)
 
 - **Sources management**
-  - Open **Sources** (toolbar or menu) to view, rename, and manage all image sources in the project.
-  - Each row shows the source type (folder, archive, image, or URL), its path, and two sync actions:
-    - **Sync Source to Layout**: re-imports changes from the original file into the project. Disabled when no cached copy exists (e.g., folder sources used directly).
-    - **Sync Layout to Source**: writes the current sprite state back to the original file — repacks archives, re-renders PNG atlases, or re-exports GIFs. A confirmation dialog shows a diff (files added / updated / deleted) before writing. Disabled for URL sources.
+  - Each source (folder, archive, image or URL) is a top node of the sprite tree, with an icon for its type. Right-click it for:
+    - **Sync Source to Layout**: lays the source out again as it is now; files the project has but the source lost can be put back, and files missing from both can be looked for in another folder. For a ZIP or TAR, files added to or changed in the archive aren't extracted yet.
+    - **Sync Layout to Source...**: writes the current sprites back into the original file — repacks archives, re-renders PNG atlases, or re-exports GIFs. A confirmation shows what changes (files added / updated / deleted) before anything is written. Not available for URL sources.
+    - **Retry** a source that failed to load, or **Remove source**.
+  - **Settings → Atlas Sprites** keeps the project in step with the source folder: **Manual** (with **Sync Now**) or **Watch** (follows changes on disk).
   - If the original file has been moved or deleted, the app offers to recreate it from the cached copy, embed the live layout sprites into a new file, locate it from the filesystem, or remove the source entirely.
   - If individual files are missing inside an existing source, the app offers to restore them from the project cache or locate a replacement folder.
 
 - **Project save/load**
   - **Save As** creates a project folder holding `project.spart.json` and, if you choose, a copy of the source images in `sprites/`.
   - **File > Open Project** (Ctrl+O) opens that folder and resumes layout, timelines, and editor context. **File > Open ZIP Project** opens a project packed in a ZIP. You can also drop a project folder or ZIP on the window.
-  - **Autosave**: The application automatically saves a recovery snapshot of your project every 5 minutes. If the app is closed unexpectedly, it will offer to restore the autosaved state upon the next launch.
+  - **Autosave**: The application automatically saves a recovery snapshot of your project every 5 minutes, and the status bar says when it last did. If the app is closed unexpectedly, it will offer to restore the autosaved state upon the next launch.
+
+- **Messages**
+  - Errors and warnings put each idea in its own paragraph: what went wrong, what a sprat-cli tool said (in a fixed-width block, cut when long), and what to do.
+
 ## Keyboard and pointer controls
 
 ### **General Application**
 - `Ctrl + S`: Save project.
 - `Ctrl + Z`: Undo (layout changes, pivot/marker edits, project state, timelines, groups, source management).
-- `Ctrl + Y`: Redo.
+- `Ctrl + Y` (Windows) or `Ctrl + Shift + Z` (Linux, macOS): Redo.
+- `Ctrl + O`: Open project. `Ctrl + E`: Export again.
+- `Alt + A` / `Alt + S` / `Alt + N` / `Alt + F` / `Alt + P` / `Alt + X`: Atlases, Sprites, Nine-Slice, Frame Animation, Puppets and Exportation workspaces.
+- **Help → Hotkeys** lists every shortcut as your platform shows it (`⌘` on macOS).
 - `Ctrl + V`: Paste / import image from clipboard.
 - `Ctrl + +` / `Ctrl + =`: Zoom In.
 - `Ctrl + -`: Zoom Out.
 - `Ctrl + 1`: Reset zoom to 100%.
 - `Ctrl + 0`: Fit to screen.
-
-### **Atlas View**
-- `Alt+L`: Switch to **Layout** view.
-- `Alt+N`: Switch to **Navigator** view.
 
 ### **Navigator (Sprite Navigator)**
 - `Delete`: Remove/exclude selected sprites.
@@ -382,6 +407,17 @@ A full-screen preview and configuration area for final output. Preview exactly h
 - `Space + Drag` or `Middle Mouse Drag`: Pan canvas.
 - Drag a slice line: adjust the corresponding inset.
 - Drag the right/bottom/corner resize handle: change the target preview size.
+
+### **Puppet Workspace**
+- `F2`: Rename the selected puppet, part or variant.
+- `Delete`: Remove the selected puppet, part or variant.
+- Drag a part on the canvas: move it (one undo step per drag).
+- Drag the selected part's round handle: turn it. Drag an attached part: pull it, turning the parts it hangs from (`Shift`+drag: move its joint). Only on a pose frame; saved in that pose.
+- Drag the selected part's pivot ring: attach it to the marker you drop it on, or place it where you drop it. `Escape` cancels.
+- `Arrow Keys` on the canvas: move the selected part 1 px (`Shift`: 10 px).
+- `Delete` / `Backspace` in the pose strip or an animation's steps: delete the selected pose or step. `Left` / `Right` in the steps: select the previous or next step.
+- `Ctrl + Wheel`: Zoom canvas.
+- `Space + Drag` or `Middle Mouse Drag`: Pan canvas.
 
 ### **Animation Test Preview**
 - `Wheel`: Scroll preview viewport.
@@ -436,7 +472,8 @@ Generation behavior:
 - `src/Animation/Timelines/` — timeline building and operations
 - `src/Animation/Test/` — animation preview test operations
 - `src/NineSlice/` — nine-slice editor canvas and preview widget
-- `src/App/Workspaces/NineSlice/` — nine-slice workspace UI
+- `src/App/Workspaces/` — the workspaces' UI (Atlas, AtlasesManagement, NineSlice, FrameAnimation, Puppet, Export) and widgets they share
+- `assets/icons/` — the app's icons, one SVG each (see AGENTS.md for their style)
 - `src/Project/` — project load/save/payload/autosave
 - `src/CLITools/` — CLI discovery/config/install helpers
 - `src/Settings/` — settings dialog/coordinator
@@ -464,7 +501,7 @@ The web version shares most functionality with the desktop build. The following 
   `spratframes`, ImageMagick, and FFmpeg are not available in the browser environment. Use the desktop version for GIF/video export or automatic frame detection.
 
 - **File access via picker only**
-  The browser sandbox restricts direct filesystem access; use the **Load Images Folder** button or drag-and-drop files from your local machine.
+  The browser sandbox restricts direct filesystem access; use **File → Add Source Folder...** or drag-and-drop files from your local machine.
 
 ## Contributing
 
@@ -499,12 +536,14 @@ The web version shares most functionality with the desktop build. The following 
   Forks are encouraged (for example, a GTK+ frontend variant) as long as they clearly document compatibility and maintenance scope.
 
 - **AI-assisted work**
-  Development on this project has been assisted with Gemini and Claude Code; all changes are reviewed and manually adjusted since AI output is not perfect.
+  Development on this project has been assisted with Claude Code, Codex and Gemini; all changes are reviewed and manually adjusted since AI output is not perfect. The icons were adapted with AI (Claude) from the SVG Repo icons the app used before, redrawn in one style.
 
 ## Attribution
 
 - Screenshots using the [“Adventurer Girl – Free Sprite”](https://opengameart.org/content/adventurer-girl-free-sprite) pack by pzUGH from OpenGameArt, reused under the original license.
 - Core CLI tooling comes from the [`sprat-cli`](https://github.com/pedroac/sprat-cli) repository.
+- Icons adapted with AI (Claude, Anthropic) from icons first taken from [SVG Repo](https://www.svgrepo.com).
+- The smoke test's sample sprites (`tests/assets/streets_of_fight_files.zip`) are by Luis Zuno, redistributable per the license file in the archive.
 
 ## License
 

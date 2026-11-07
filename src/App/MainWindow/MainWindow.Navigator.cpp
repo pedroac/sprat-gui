@@ -360,7 +360,7 @@ void MainWindow::onNavigatorAddFrames(const QString& subfolder)
     m_statusLabel->setText(QString(tr("Adding %1 frame(s)...")).arg(added.size()));
     if (!ensureFrameListInput()) {
         m_session->activeFramePaths = oldFramePaths;
-        MessageDialog::warning(this, tr("Add Frames"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Add Frames"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
     updateManualFrameLabel();
@@ -555,7 +555,7 @@ void MainWindow::onNavigatorCreateGroup(const QStringList& paths, const QString&
     }
 
     if (!ensureFrameListInput()) {
-        MessageDialog::warning(this, tr("Create Group"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Create Group"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
 
@@ -599,7 +599,7 @@ void MainWindow::onNavigatorHideGroupOnly(QTreeWidgetItem* groupItem)
 
     if (!QDir(groupAbsPath).exists()) {
         MessageDialog::warning(this, tr("Hide Group"),
-            tr("\"%1\" is a virtual animation group and cannot be hidden separately.")
+            tr("\"%1\" groups sprites by their names; it isn't a folder, so it can't be hidden on its own.\n\nHide its sprites instead.")
                 .arg(groupItem->text(0)));
         return;
     }
@@ -719,7 +719,7 @@ void MainWindow::onNavigatorExcludeGroup(QTreeWidgetItem* groupItem)
     if (!ensureFrameListInput()) {
         for (const QString& rel : relPaths) src.excludedFiles.removeAll(rel);
         m_session->activeFramePaths = savedActivePaths;
-        MessageDialog::warning(this, tr("Hide"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Hide"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
     scheduleLayoutRebuild();
@@ -760,7 +760,7 @@ void MainWindow::onNavigatorReincludeFromSource(int sourceIdx, const QString& re
     if (!ensureFrameListInput()) {
         src.excludedFiles.append(relPath);
         m_session->activeFramePaths = savedActivePaths;
-        MessageDialog::warning(this, tr("Re-include"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Re-include"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
 
@@ -815,7 +815,7 @@ void MainWindow::onNavigatorReincludeAllFromSource(int sourceIdx)
     if (!ensureFrameListInput()) {
         src.excludedFiles = relPaths;
         m_session->activeFramePaths = savedActivePaths;
-        MessageDialog::warning(this, tr("Re-include"), tr("Could not create temporary frame list."));
+        MessageDialog::warning(this, tr("Re-include"), tr("Couldn't save the sprite list to the temporary folder, so nothing was changed.\n\nCheck that the disk isn't full, then try again."));
         return;
     }
 

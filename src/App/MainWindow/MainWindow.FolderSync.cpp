@@ -2,6 +2,7 @@
 /// Source folder watching and syncing: watcher events, manual and periodic sync, and keeping the sprites folder in step with the active frames.
 
 #include "MainWindow.h"
+#include "MessageText.h"
 #include "NineSliceWorkspace.h"
 #include "AnimationPreviewPanel.h"
 #include "ExportWorkspace.h"
@@ -217,7 +218,7 @@ void MainWindow::onSyncNowRequested() {
 
     if (m_session->sourceFolder.isEmpty()) {
         qWarning() << "[SyncNow] Source folder is empty!";
-        MessageDialog::information(this, tr("Sync"), tr("No source folder configured."));
+        MessageDialog::information(this, tr("Sync"), tr("This project has no source folder to sync from."));
         return;
     }
 
@@ -260,7 +261,7 @@ void MainWindow::performFolderSync() {
     // Merge changes into layout
     if (!FolderSyncService::mergeSyncResults(
             m_session->activeAtlas().layoutModels.first(), syncResult, m_session->sourceFolder)) {
-        MessageDialog::warning(this, tr("Sync Error"), tr("Failed to merge changes."));
+        MessageDialog::warning(this, tr("Sync Error"), tr("The source folder's changes couldn't be merged into the layout, so nothing was changed.\n\nTry syncing again."));
         return;
     }
     ensureUniqueSpriteNames(m_session->activeAtlas().layoutModels, m_session->sourceFolder);
@@ -322,26 +323,26 @@ void MainWindow::performManualSync() {
 
     if (!m_session) {
         qWarning() << "[Sync] Session is null";
-        MessageDialog::warning(this, tr("Sync Error"), tr("No session."));
+        MessageDialog::warning(this, tr("Sync Error"), tr("No project is open."));
         return;
     }
 
     if (m_session->activeAtlas().layoutModels.isEmpty()) {
         qWarning() << "[Sync] No layout models loaded";
-        MessageDialog::information(this, tr("Sync"), tr("No layout loaded."));
+        MessageDialog::information(this, tr("Sync"), tr("There are no sprites to sync yet."));
         return;
     }
 
     if (m_session->sourceFolder.isEmpty()) {
         qWarning() << "[Sync] Source folder is empty";
-        MessageDialog::information(this, tr("Sync"), tr("No sprites folder configured."));
+        MessageDialog::information(this, tr("Sync"), tr("This project has no source folder to sync from."));
         return;
     }
 
     QDir folderDir(m_session->sourceFolder);
     if (!folderDir.exists()) {
         qWarning() << "[Sync] Folder does not exist:" << m_session->sourceFolder;
-        MessageDialog::warning(this, tr("Sync Error"), tr("Sprites folder does not exist."));
+        MessageDialog::warning(this, tr("Sync Error"), tr("The source folder no longer exists:\n\n%1\n\nMove it back, or remove the source and add it again from its new place.").arg(MessageText::toolOutput(QDir::toNativeSeparators(m_session->sourceFolder))));
         return;
     }
 
@@ -708,7 +709,7 @@ void MainWindow::onSpritesDeleted(const QStringList& paths)
         m_session->selectedSprites.clear();
         m_session->selectedSprite.reset();
         m_statusLabel->setText(tr("No frames loaded"));
-        m_folderLabel->setText(tr("Folder: none"));
+        m_folderLabel->setText(tr("No sprites"));
         m_session->cachedLayoutOutput.clear();
         m_session->cachedLayoutScale = 1.0;
         updateMainContentView();

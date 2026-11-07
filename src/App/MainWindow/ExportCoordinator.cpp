@@ -1,5 +1,7 @@
 #include "ExportCoordinator.h"
+#include "MessageText.h"
 #include "ProjectPayloadCodec.h"
+#include "PuppetTextCodec.h"
 #include "AtlasOutputFolder.h"
 #include "ILayoutContext.h"
 #include "LayoutOrchestrator.h"
@@ -222,8 +224,11 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 ? projectPayload
                 : ProjectPayloadCodec::atlasExportPayload(projectPayload, allFramePaths,
                                                           atlasesToExport.first().timelines, currentFolder);
+            SaveConfig singleConfig = config;
+            if (!atlasesToExport.isEmpty())
+                singleConfig.puppetsText = PuppetTextCodec::write(atlasesToExport.first().puppets);
             result.success = ProjectSaveService::save(
-                config,
+                singleConfig,
                 layoutSourcePath,
                 allFramePaths,
                 sourceFolder,
@@ -261,6 +266,7 @@ bool ExportCoordinator::runExport(SaveConfig config) {
                 // Nest this atlas inside each profile folder rather than at the top level.
                 // ProjectSaveService writes to <outputPath>/<profile>/<atlasSubdir>/.
                 atlasConfig.atlasSubdir = effectiveAtlasOutputSubdir(atlas, rootExporterCount);
+                atlasConfig.puppetsText = PuppetTextCodec::write(atlas.puppets);
 
                 // Each atlas exports its own sprites' markers and its own animations.
                 const QJsonObject payload = ProjectPayloadCodec::atlasExportPayload(
@@ -429,7 +435,7 @@ void ExportCoordinator::handleExportResult(const ExportResult& result) {
 #ifdef Q_OS_WASM
         MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Download started."));
 #else
-        MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Project saved successfully to:\n") + result.savedDestination);
+        MessageDialog::information(m_cfg.parentWidget, tr("Saved"), tr("Saved to:\n\n%1").arg(MessageText::toolOutput(QDir::toNativeSeparators(result.savedDestination))));
 #endif
     } else {
         emitStatus(tr("Save failed"));
@@ -556,7 +562,7 @@ void ExportCoordinator::doRunPreviewPack() {
         if (!framePaths.isEmpty()) {
             frameListFile.setFileTemplate(
                 QDir::temp().filePath("sprat-preview-frames-XXXXXX.txt"));
-            if (!frameListFile.open()) return {{}, tr("Could not create temporary frame list"), {}, {}, -1, {}};
+            if (!frameListFile.open()) return {{}, tr("Couldn't save the sprite list to the temporary folder. Check that the disk isn't full."), {}, {}, -1, {}};
             {
                 QTextStream out(&frameListFile);
                 for (const QString& p : framePaths) out << p << "\n";

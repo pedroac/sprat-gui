@@ -73,6 +73,7 @@ class LayoutCanvas;
 class ExportWorkspace;
 class FrameAnimationWorkspace;
 class NineSliceWorkspace;
+class PuppetWorkspace;
 #include "ILayoutContext.h"
 #include "IWorkspace.h"
 #include "AtlasWorkspace.h"
@@ -948,6 +949,8 @@ private:
     QAction*        m_atlasesManagementWorkspaceAction = nullptr;
     NineSliceWorkspace* m_nineSliceWorkspace = nullptr;
     QAction*        m_nineSliceWorkspaceAction = nullptr;
+    PuppetWorkspace* m_puppetWorkspace = nullptr;
+    QAction*        m_puppetWorkspaceAction = nullptr;
     QToolBar*       m_workspaceToolBar = nullptr;
     QTabBar*        m_workspaceTabBar = nullptr;
     /// The workspace each tab shows, and the action that switches to it, by tab index

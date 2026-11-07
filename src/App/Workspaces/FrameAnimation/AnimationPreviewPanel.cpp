@@ -1,4 +1,5 @@
 #include "AnimationPreviewPanel.h"
+#include "AppIcons.h"
 #include "AnimationCanvas.h"
 
 #include <QApplication>
@@ -35,17 +36,17 @@ AnimationPreviewPanel::AnimationPreviewPanel(QWidget* parent)
     auto* controls = new QHBoxLayout();
     auto* style_   = QApplication::style();
 
-    m_prevBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaSkipBackward), "", this);
+    m_prevBtn = new QPushButton(AppIcons::icon(QStringLiteral("skip-back")), "", this);
     m_prevBtn->setToolTip(tr("Step to previous frame"));
     m_prevBtn->setAccessibleName(tr("Previous frame"));
     controls->addWidget(m_prevBtn);
 
-    m_playPauseBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaPlay), "", this);
+    m_playPauseBtn = new QPushButton(AppIcons::icon(QStringLiteral("play")), "", this);
     m_playPauseBtn->setToolTip(tr("Play or pause animation"));
     m_playPauseBtn->setAccessibleName(tr("Play or pause"));
     controls->addWidget(m_playPauseBtn);
 
-    m_nextBtn = new QPushButton(style_->standardIcon(QStyle::SP_MediaSkipForward), "", this);
+    m_nextBtn = new QPushButton(AppIcons::icon(QStringLiteral("skip-forward")), "", this);
     m_nextBtn->setToolTip(tr("Step to next frame"));
     m_nextBtn->setAccessibleName(tr("Next frame"));
     controls->addWidget(m_nextBtn);
@@ -57,7 +58,7 @@ AnimationPreviewPanel::AnimationPreviewPanel(QWidget* parent)
 
     m_overlayBtn = new QToolButton(this);
     m_overlayBtn->setText(tr("Markers"));
-    m_overlayBtn->setIcon(QIcon(":/icons/location.svg"));
+    m_overlayBtn->setIcon(AppIcons::icon(QStringLiteral("marker")));
     m_overlayBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_overlayBtn->setCheckable(true);
     m_overlayBtn->setToolTip(tr("Toggle pivot and marker overlay on animation preview"));
@@ -73,7 +74,7 @@ AnimationPreviewPanel::AnimationPreviewPanel(QWidget* parent)
 
     m_onionSkinBtn = new QToolButton(this);
     m_onionSkinBtn->setText(tr("Onion"));
-    m_onionSkinBtn->setIcon(QIcon(":/icons/animation.svg"));
+    m_onionSkinBtn->setIcon(AppIcons::icon(QStringLiteral("onion")));
     m_onionSkinBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_onionSkinBtn->setCheckable(true);
     m_onionSkinBtn->setChecked(false);

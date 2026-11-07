@@ -3,6 +3,8 @@
 #include <QAbstractItemView>
 #include <QHash>
 #include <QIcon>
+#include <QHash>
+#include <QImage>
 #include <QWidget>
 #include "ProjectModels.h"
 #include "SpriteModels.h"
@@ -131,6 +133,13 @@ private slots:
 
 private:
     void buildTree(const ProjectSession* session, bool showHidden, int atlasFilter);
+    /// Sets a sprite row's icon: its thumbnail, after its badge when there is a badge callback.
+    void applyThumbnail(QTreeWidgetItem* leaf, const QIcon& thumbnail);
+    /// Decodes the thumbnails of @p paths on a worker thread, then sets them on the rows
+    /// showing those sprites. Decoding thousands of images on the UI thread froze it.
+    void loadThumbnailsAsync(const QStringList& paths);
+    /// Sets the thumbnails of the rows showing @p thumbnails' sprites.
+    void applyLoadedThumbnails(const QHash<QString, QImage>& thumbnails);
 
     NavigatorTreeWidget* m_spriteTree        = nullptr;
     QLineEdit*           m_filterEdit        = nullptr;
@@ -142,7 +151,6 @@ private:
     QPushButton*         m_addSourceBtn      = nullptr;
     bool                 m_checkboxesEnabled = true;
     bool                 m_groupSimilar      = true;
-    QHash<QString, QIcon> m_iconCache;
     SpriteBadgeCallback  m_badgeCallback;
     SpriteFilter         m_spriteFilter;
 };

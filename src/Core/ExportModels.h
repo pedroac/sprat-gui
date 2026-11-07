@@ -24,6 +24,9 @@ struct SaveConfig {
     bool syncSprites = false;
     QString postExportCommand;
     QString atlasSubdir;
+    /// The exported atlas's puppets, as a puppets file without a root line (sprite paths are
+    /// the layout's). Empty when the atlas has none.
+    QString puppetsText;
 };
 
 struct ExportLogEntry {
