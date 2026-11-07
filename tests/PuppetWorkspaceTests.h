@@ -17,7 +17,7 @@ private slots:
     void testDraggingThePivotAwayDetaches();
     void testPanelAttachesAndDetaches();
     void testPanelSetsJointLimits();
-    void testTurningAnAttachedPartIsNotSaved();
+    void testTurningAPartEditsTheSelectedPose();
     void testTurningStopsAtTheAngleLimits();
     void testDriftingStaysWithinTheLeeway();
     void testTurningAPositionedPartByItsHandle();
@@ -26,6 +26,11 @@ private slots:
     void testHiddenMarkersAreNotOffered();
     void testMarkerListDoesNotSpreadThePanelRows();
     void testAngleFieldTurnsThePart();
+    void testNewPoseSetsOnlyThePartsChanged();
+    void testSelectingAPoseShowsIt();
+    void testTickingPartsInAndOutOfThePose();
+    void testPosingMovesPositionedPartsInThePose();
+    void testPoseStripRenamesReordersAndRemoves();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();

@@ -3,6 +3,7 @@
 #include "PuppetEditing.h"
 #include "PuppetEvaluator.h"
 #include "PuppetMotion.h"
+#include "PuppetPosing.h"
 #include "PuppetTextCodec.h"
 
 #include <QJsonArray>
@@ -658,6 +659,56 @@ void PuppetTests::testPullingAPartSlidesItsJointFirst() {
     // Without the markers, joints only turn.
     states = PuppetMotion::reach(puppet, {}, 1, QPointF(1, 1), QPointF(13, 8), lookup);
     QCOMPARE(states[1].offset, QPointF());
+}
+
+void PuppetTests::testPoseStatesComeFromWhatItSets() {
+    // face is placed by position at 0,-40; nose hangs from it, with variants "short" and "nose-long".
+    const Puppet puppet = faceWithNose();
+    PuppetPoseSetting moved;
+    moved.part = QStringLiteral("face");
+    moved.position = QPoint(5, -40);
+    PuppetPoseSetting turned;
+    turned.part = QStringLiteral("nose");
+    turned.angle = 10;
+    turned.offset = QPoint(1, 2);
+    turned.variant = QStringLiteral("nose-long");
+    PuppetPoseSetting unknown;  // a part the puppet doesn't have
+    unknown.part = QStringLiteral("tail");
+    unknown.angle = 5;
+    const QVector<PuppetPartState> states =
+        PuppetPosing::statesOf(puppet, {QStringLiteral("p"), {moved, turned, unknown}});
+    QCOMPARE(states.size(), 2);
+    QCOMPARE(states[0].position, std::optional<QPointF>(QPointF(5, -40)));
+    QCOMPARE(states[0].angle, 0.0);
+    QCOMPARE(states[1].angle, 10.0);
+    QCOMPARE(states[1].offset, QPointF(1, 2));
+    QCOMPARE(states[1].variant, 1);
+
+    // A variant the part doesn't have leaves the rest one; an empty pose is the rest pose.
+    turned.variant = QStringLiteral("nose-gone");
+    QCOMPARE(PuppetPosing::statesOf(puppet, {QStringLiteral("p"), {turned}})[1].variant, 0);
+    const QVector<PuppetPartState> rest = PuppetPosing::statesOf(puppet, {QStringLiteral("p"), {}});
+    QCOMPARE(rest[1].angle, 0.0);
+    QVERIFY(!rest[0].position);
+}
+
+void PuppetTests::testEditingPosesKeepsSequencesInStep() {
+    Puppet puppet = faceWithNose();
+    puppet.poses.append({QStringLiteral("truth"), {}});
+    puppet.sequences = {{QStringLiteral("talk"), 8, AnimationLoopMode::Loop,
+                         {{QStringLiteral("lie"), 2, 0, false}, {QStringLiteral("truth"), 2, 0, false}}}};
+    QVERIFY(!PuppetEditing::poseNameProblem(puppet, 0, QStringLiteral("truth")).isEmpty());
+    QVERIFY(!PuppetEditing::poseNameProblem(puppet, 0, QStringLiteral(" ")).isEmpty());
+    QVERIFY(PuppetEditing::poseNameProblem(puppet, 0, QStringLiteral("fib")).isEmpty());
+
+    PuppetEditing::renamePose(puppet, 0, QStringLiteral("fib"));
+    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("fib"));
+    PuppetEditing::movePose(puppet, 0, 1);
+    QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"truth", "fib"}));
+    PuppetEditing::removePose(puppet, 1);
+    QCOMPARE(PuppetEditing::poseNames(puppet), QStringList{"truth"});
+    QCOMPARE(puppet.sequences[0].steps.size(), 1);
+    QCOMPARE(puppet.sequences[0].steps[0].pose, QStringLiteral("truth"));
 }
 
 void PuppetTests::testJointsDriftWithinTheirMarkerAndLeeway() {

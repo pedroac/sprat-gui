@@ -179,8 +179,10 @@ listing the atlas's timelines, as the source for variants.
 4. **Attachments** (attach by dragging the pivot and in the panel, joint lines, leeway and angle
    limits: done after phase 2; still to do: marker shapes and arcs for the selected part, constraints): attach by drag and in the panel, attachment lines, marker shapes, leeway
    and angle arcs, constraints, positioned parts' `at:` handle; Problems panel; Import.
-5. **Later**: poses and sequences (the canvas already turns and drifts attached parts within
-   their limits, unsaved; a pose would store those turns and drifts) (how they appear in the workspace is still open), then
-   constraint solving while posing.
+5. **Poses**: done. A strip under the canvas holds Rest (the rig) and the poses; editing on a
+   pose frame changes that pose directly, and a list under the tree ticks the parts it sets
+   (others are faint), so poses combine.
+6. **Later**: sequences (on the strip: poses in order with `in`/`hold`), onion skin of the
+   previous pose, then constraint solving while posing.
 
 Each phase updates README.md (workspace section and hotkeys), CHANGELOG.md and AGENTS.md.

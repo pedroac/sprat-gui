@@ -90,6 +90,14 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         pageLayout->addWidget(makeTitle(tr("Part"), page));
         auto* form = new QFormLayout;
         addNameRows(form, page, m_partName, m_partNameProblem);
+        m_shownVariant = new QComboBox(page);
+        m_shownVariant->setObjectName(QStringLiteral("partShownVariant"));
+        m_shownVariant->setToolTip(tr("The variant the part shows in the selected pose. At rest, parts "
+                                      "show their first (★) variant"));
+        form->addRow(tr("Shows:"), m_shownVariant);
+        connect(m_shownVariant, &QComboBox::currentIndexChanged, this, [this](int index) {
+            if (index >= 0) emit shownVariantChanged(index);
+        });
         m_partName->setObjectName(QStringLiteral("partNameEdit"));
 
         // Rows hold widgets or plain layouts, never container widgets, so every label lines
@@ -259,6 +267,20 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     m_angleMax->setValue(limited ? *placement.angleMax : 45);
     updatePlacementRows();
     m_angle->setValue(placement.angle);
+    m_angle->setEnabled(placement.posing);
+    m_angle->setToolTip(placement.posing
+        ? tr("Turns the part in the selected pose, clockwise: from its parent when attached, around its "
+             "pivot when placed by position")
+        : tr("Rest is the rig: select or add a pose below the canvas to turn parts"));
+    {
+        const QSignalBlocker blockVariant(m_shownVariant);
+        m_shownVariant->clear();
+        for (int v = 0; v < placement.variants.size(); ++v)
+            m_shownVariant->addItem(v == 0 ? QStringLiteral("★ %1").arg(placement.variants[v]) : placement.variants[v]);
+        m_shownVariant->setCurrentIndex(placement.variant);
+        m_shownVariant->setEnabled(placement.posing);
+        m_partForm->setRowVisible(m_shownVariant, placement.variants.size() > 1);
+    }
     {
         const QSignalBlocker blockMarkers(m_markers);
         m_markers->clear();
@@ -340,8 +362,6 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     m_angle->setObjectName(QStringLiteral("partAngle"));
     m_angle->setSuffix(QStringLiteral("°"));
     m_angle->setKeyboardTracking(false);
-    m_angle->setToolTip(tr("Turns the part to try it, clockwise: from its parent when attached, around its "
-                           "pivot when placed by position. Not saved: Reset puts the puppet back at rest"));
     form->addRow(tr("Angle:"), m_angle);
     connect(m_angle, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::angleChanged);
 

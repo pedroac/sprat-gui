@@ -57,6 +57,11 @@ public:
         QVector<MarkerChoice> childMarkers;
         /// The angle it is tried at: from its parent, or around its pivot. Not saved.
         int angle = 0;
+        /// A pose is shown: Angle and Shows edit it. At rest (the rig) they are off.
+        bool posing = false;
+        /// Its variants' names, and the one the shown pose has it show.
+        QStringList variants;
+        int variant = 0;
         /// Its sprites' markers (not "pivot"), and those it neither shows nor offers for joints.
         QStringList markers;
         QStringList hiddenMarkers;
@@ -87,6 +92,8 @@ signals:
     void limitsChanged(int leeway, bool limited, int angleMin, int angleMax);
     /// Try the part at @p angle (not saved).
     void angleChanged(int angle);
+    /// Show variant @p variantIndex in the selected pose.
+    void shownVariantChanged(int variantIndex);
     /// The markers the part should neither show nor offer for joints.
     void hiddenMarkersChanged(const QStringList& hiddenMarkers);
     void makeRestVariantRequested();
@@ -131,6 +138,7 @@ private:
     QSpinBox* m_angleMax = nullptr;
     QSpinBox* m_angle = nullptr;
     QListWidget* m_markers = nullptr;
+    QComboBox* m_shownVariant = nullptr;
     Placement m_placement;  ///< As shown
     QLabel* m_partProblem = nullptr;
 

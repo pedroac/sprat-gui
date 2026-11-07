@@ -487,6 +487,8 @@ set(PROJECT_SOURCES
     src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
     src/App/Workspaces/Puppet/NewPuppetDialog.h
     src/App/Workspaces/Puppet/NewPuppetDialog.cpp
+    src/App/Workspaces/Puppet/PuppetPoseStrip.h
+    src/App/Workspaces/Puppet/PuppetPoseStrip.cpp
     src/App/Workspaces/Puppet/PuppetTreeWidget.h
     src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
     src/App/MainWindow/Undo/PuppetCommands.h
@@ -568,6 +570,8 @@ set(PROJECT_SOURCES
     src/Core/PuppetEditing.h
     src/Core/PuppetMotion.cpp
     src/Core/PuppetMotion.h
+    src/Core/PuppetPosing.cpp
+    src/Core/PuppetPosing.h
     src/Core/ViewUtils.cpp
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
@@ -778,6 +782,7 @@ if(BUILD_TESTING)
         src/App/Workspaces/Puppet/PuppetCanvas.cpp
         src/App/Workspaces/Puppet/PuppetPropertiesPanel.cpp
         src/App/Workspaces/Puppet/NewPuppetDialog.cpp
+        src/App/Workspaces/Puppet/PuppetPoseStrip.cpp
         src/App/Workspaces/Puppet/PuppetTreeWidget.cpp
         src/Core/MessageDialog.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
@@ -799,6 +804,7 @@ if(BUILD_TESTING)
         src/Core/PuppetEvaluator.cpp
         src/Core/PuppetEditing.cpp
         src/Core/PuppetMotion.cpp
+        src/Core/PuppetPosing.cpp
         src/Project/ProjectFileLoader.cpp
         src/Project/AutosaveProjectStore.cpp
         src/Project/ProjectSession.cpp

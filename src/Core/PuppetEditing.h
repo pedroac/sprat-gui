@@ -17,6 +17,7 @@ QString uniqueName(const QString& base, const QStringList& taken);
 
 QStringList puppetNames(const QVector<Puppet>& puppets);
 QStringList partNames(const Puppet& puppet);
+QStringList poseNames(const Puppet& puppet);
 /// The names the part's variants go by (see puppetVariantName()).
 QStringList variantNames(const PuppetPart& part);
 
@@ -24,6 +25,7 @@ QStringList variantNames(const PuppetPart& part);
 /// empty string when it can. Use index -1 for a new puppet.
 QString puppetNameProblem(const QVector<Puppet>& puppets, int index, const QString& name);
 QString partNameProblem(const Puppet& puppet, int index, const QString& name);
+QString poseNameProblem(const Puppet& puppet, int index, const QString& name);
 /// @p name is what the variant would go by: an empty name means the default name.
 QString variantNameProblem(const PuppetPart& part, int index, const QString& name);
 
@@ -58,6 +60,13 @@ void detachPart(Puppet& puppet, int partIndex, const QPoint& position);
 /// Sets how far an attached part's joint may drift and how far it may turn.
 void setAttachmentLimits(Puppet& puppet, int partIndex, int leeway, std::optional<int> angleMin,
                          std::optional<int> angleMax);
+
+/// Renames a pose, and the sequence steps that play it.
+void renamePose(Puppet& puppet, int poseIndex, const QString& name);
+/// Removes a pose, and the sequence steps that play it.
+void removePose(Puppet& puppet, int poseIndex);
+/// Moves a pose in the list; @p to is its index afterwards.
+void movePose(Puppet& puppet, int from, int to);
 
 /// Adds a sprite variant for each path the part doesn't show yet. A sprite whose name
 /// another variant already goes by gets a unique explicit name. Returns how many it added.

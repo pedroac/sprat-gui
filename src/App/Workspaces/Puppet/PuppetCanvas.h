@@ -43,6 +43,7 @@ public:
         bool attached = false;      ///< Hangs from another part: dragging it pulls it
         QPointF joint;              ///< Where it turns: its pivot or its joint
         bool attachTarget = false;  ///< The selected part may hang from it
+        bool included = true;       ///< Set by the pose shown; drawn faint when not
         QVector<Marker> markers;    ///< Drawn faintly (the selected part's labelled); targets when attaching
     };
 
@@ -71,6 +72,9 @@ public:
     /// with its pivot handle at @p selectedPivot.
     void showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
                     std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint = std::nullopt);
+    /// Whether a pose is shown: only then do the turn handle, pulling and moving joints work.
+    /// At rest (the rig), dragging a part placed by position still moves it.
+    void setPosing(bool posing);
     /// Shows only the origin cross.
     void clearPuppet();
     /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms
@@ -158,6 +162,7 @@ private:
     double m_turnTotal = 0;      ///< Degrees turned since the press, unwrapped
     std::optional<JointRange> m_selectedJoint;
 
+    bool m_posing = false;
     bool m_handlePressed = false;  ///< The left button went down on the pivot handle
     bool m_attaching = false;      ///< The pivot handle is being dragged
     QPointF m_attachPointer;       ///< Where it is, in scene coordinates

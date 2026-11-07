@@ -33,6 +33,8 @@ constexpr int MARKER_SNAP_DISTANCE = 12;
 constexpr qreal MARKER_DOT_RADIUS = 3.5;
 /// Screen radius of the selected part's turn range arc.
 constexpr qreal TURN_ARC_RADIUS = 36;
+/// Opacity of a part the shown pose doesn't set.
+constexpr qreal EXCLUDED_OPACITY = 0.35;
 /// Screen radius of the selected part's turn handle, at the end of its angle line.
 constexpr qreal TURN_HANDLE_RADIUS = 5;
 /// Degrees between the points of a drawn arc.
@@ -88,6 +90,10 @@ PuppetCanvas::PuppetCanvas(QWidget* parent)
     clearPuppet();
 }
 
+void PuppetCanvas::setPosing(bool posing) {
+    m_posing = posing;
+}
+
 void PuppetCanvas::clearPuppet() {
     showPuppet({}, {}, -1, std::nullopt);
 }
@@ -109,6 +115,8 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& b
         item->setTransformationMode(Qt::FastTransformation);
         item->setData(PART_INDEX_KEY, i);
         item->setZValue(i);
+        // A part the pose leaves alone shows faintly, at rest.
+        if (!part.included) item->setOpacity(EXCLUDED_OPACITY);
     }
     if (selectedPart >= 0 && selectedPart < parts.size() && parts[selectedPart].placed) {
         const Part& part = parts[selectedPart];
@@ -180,9 +188,17 @@ void PuppetCanvas::initialFit() {
 }
 
 void PuppetCanvas::resizeEvent(QResizeEvent* event) {
+    // The scene point in the middle of the view before the resize: the viewport has its new
+    // size already (the event carries the viewport's sizes), but the scroll bars and the
+    // transform are still the old ones.
+    const QSize oldViewport = event->oldSize();
+    const bool keepCenter = isZoomManual() && oldViewport.isValid() && !oldViewport.isEmpty();
+    const QPointF center = mapToScene(QRect(QPoint(), oldViewport).center());
     ZoomableGraphicsView::resizeEvent(event);
+    if (!keepCenter) return;
     // A bigger view may show past the scene rect, which the alignment would re-center.
-    if (isZoomManual()) updateSceneRect();
+    updateSceneRect();
+    centerOn(center);
 }
 
 int PuppetCanvas::partAt(const QPoint& viewPos) const {
@@ -214,7 +230,7 @@ bool PuppetCanvas::onPivotHandle(const QPoint& viewPos) const {
 }
 
 std::optional<QPointF> PuppetCanvas::turnHandle() const {
-    if (!m_selectedJoint || m_selectedPart < 0 || m_selectedPart >= m_parts.size()) return std::nullopt;
+    if (!m_posing || !m_selectedJoint || m_selectedPart < 0 || m_selectedPart >= m_parts.size()) return std::nullopt;
     const JointRange& range = *m_selectedJoint;
     return pointAt(range.point, range.restDirection + range.angle, TURN_ARC_RADIUS / qMax(0.01, zoom()));
 }
@@ -270,8 +286,8 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     // The handle turns any part; dragging a part moves it: a positioned one to a new place,
     // an attached one by pulling it (or, with Shift, by moving its joint).
     m_pressedPart = !onHandle && isMovable(part) ? part : -1;
-    m_pullPart = !onHandle && isAttached(part) && !shift ? part : -1;
-    m_turnPart = onHandle || (isAttached(part) && shift) ? part : -1;
+    m_pullPart = m_posing && !onHandle && isAttached(part) && !shift ? part : -1;
+    m_turnPart = onHandle || (m_posing && isAttached(part) && shift) ? part : -1;
     m_drift = !onHandle && shift;
     m_pulling = false;
     m_turning = false;
@@ -341,7 +357,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
         const Qt::CursorShape cursor = onPivotHandle(event->pos()) ? Qt::CrossCursor
             : onTurnHandle(event->pos())                            ? Qt::OpenHandCursor
             : isMovable(hovered)                                    ? Qt::SizeAllCursor
-            : isAttached(hovered)                                   ? Qt::SizeAllCursor
+            : isAttached(hovered) && m_posing                       ? Qt::SizeAllCursor
                                                                     : Qt::ArrowCursor;
         viewport()->setCursor(cursor);
     }
@@ -464,12 +480,14 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
         painter->setPen(nowPen);
         painter->drawLine(range.point, pointAt(range.point, range.restDirection + range.angle, radius));
         const QPointF handle = pointAt(range.point, range.restDirection + range.angle, radius);
-        const qreal handleRadius = TURN_HANDLE_RADIUS / qMax(0.01, zoom());
-        QPen handlePen(QColor(0, 0, 0, 160), 1);
-        handlePen.setCosmetic(true);
-        painter->setPen(handlePen);
-        painter->setBrush(highlight);
-        painter->drawEllipse(handle, handleRadius, handleRadius);
+        if (m_posing) {
+            const qreal handleRadius = TURN_HANDLE_RADIUS / qMax(0.01, zoom());
+            QPen handlePen(QColor(0, 0, 0, 160), 1);
+            handlePen.setCosmetic(true);
+            painter->setPen(handlePen);
+            painter->setBrush(highlight);
+            painter->drawEllipse(handle, handleRadius, handleRadius);
+        }
         if (std::lround(range.angle) != 0)
             drawLabel(painter, handle, QStringLiteral("%1°").arg(std::lround(range.angle)), highlight);
     }

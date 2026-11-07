@@ -25,4 +25,6 @@ private slots:
     void testJointsDriftWithinTheirMarkerAndLeeway();
     void testPullingAPartTurnsThePartsItHangsFrom();
     void testPullingAPartSlidesItsJointFirst();
+    void testPoseStatesComeFromWhatItSets();
+    void testEditingPosesKeepsSequencesInStep();
 };

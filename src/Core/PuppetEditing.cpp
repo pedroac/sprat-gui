@@ -61,6 +61,12 @@ QStringList partNames(const Puppet& puppet) {
     return names;
 }
 
+QStringList poseNames(const Puppet& puppet) {
+    QStringList names;
+    for (const PuppetPose& pose : puppet.poses) names.append(pose.name);
+    return names;
+}
+
 QStringList variantNames(const PuppetPart& part) {
     QStringList names;
     for (const PuppetVariant& variant : part.variants) names.append(puppetVariantName(variant));
@@ -79,6 +85,39 @@ QString partNameProblem(const Puppet& puppet, int index, const QString& name) {
     if (takenByOther(partNames(puppet), index, name))
         return trPEd("Puppet \"%1\" already has a part called \"%2\".").arg(puppet.name, name);
     return {};
+}
+
+QString poseNameProblem(const Puppet& puppet, int index, const QString& name) {
+    if (name.trimmed().isEmpty()) return trPEd("A pose needs a name.");
+    if (takenByOther(poseNames(puppet), index, name))
+        return trPEd("Puppet \"%1\" already has a pose called \"%2\".").arg(puppet.name, name);
+    return {};
+}
+
+void renamePose(Puppet& puppet, int poseIndex, const QString& name) {
+    if (poseIndex < 0 || poseIndex >= puppet.poses.size()) return;
+    const QString old = puppet.poses[poseIndex].name;
+    puppet.poses[poseIndex].name = name;
+    for (PuppetSequence& sequence : puppet.sequences) {
+        for (PuppetSequenceStep& step : sequence.steps) {
+            if (step.pose == old) step.pose = name;
+        }
+    }
+}
+
+void removePose(Puppet& puppet, int poseIndex) {
+    if (poseIndex < 0 || poseIndex >= puppet.poses.size()) return;
+    const QString name = puppet.poses[poseIndex].name;
+    puppet.poses.removeAt(poseIndex);
+    for (PuppetSequence& sequence : puppet.sequences) {
+        sequence.steps.removeIf([&name](const PuppetSequenceStep& step) { return step.pose == name; });
+    }
+}
+
+void movePose(Puppet& puppet, int from, int to) {
+    const int count = puppet.poses.size();
+    if (from < 0 || from >= count || to < 0 || to >= count || from == to) return;
+    puppet.poses.move(from, to);
 }
 
 QString variantNameProblem(const PuppetPart& part, int index, const QString& name) {

@@ -1,5 +1,7 @@
 #pragma once
+#include <functional>
 #include <QHash>
+#include <QSet>
 #include <QPixmap>
 #include <QWidget>
 #include "IWorkspace.h"
@@ -9,10 +11,13 @@
 #include "PuppetPropertiesPanel.h"
 #include "SpriteModels.h"
 
+class PuppetPoseStrip;
 class PuppetTreeWidget;
 class ProjectSession;
 class QComboBox;
 class QDoubleSpinBox;
+class QLabel;
+class QListWidget;
 class QPushButton;
 class QStackedWidget;
 class QToolButton;
@@ -80,18 +85,34 @@ public:
     /// Sets which of the selected part's markers are neither shown nor offered for joints.
     void setSelectedPartHiddenMarkers(const QStringList& hiddenMarkers);
 
-    // Trying the joints: turns and drifts shown on the canvas, never saved (a rig is its rest pose).
-    /// Turns part @p partIndex to @p angle: an attached part from its parent, within its
-    /// limits; a positioned part around its pivot.
-    void tryTurning(int partIndex, double angle);
+    // Poses: the film strip's frames are Rest (the rig, -1) and the puppet's poses. On a
+    // pose frame, turning, pulling, moving and picking variants edit that pose: each drag is
+    // one undo step, and a part it changes joins the pose.
+    /// Shows frame @p poseIndex: -1 for Rest, else a pose.
+    void selectPose(int poseIndex);
+    /// Adds an empty pose after the selected frame, and selects it.
+    void newPose();
+    /// Adds a copy of the selected pose after it, and selects it.
+    void duplicatePose();
+    void removePose(int poseIndex);
+    void renamePose(int poseIndex, const QString& name);
+    void movePose(int from, int to);
+    /// Turns part @p partIndex to @p angle in the selected pose: an attached part from its
+    /// parent, within its limits; a positioned part around its pivot.
+    void setPartAngle(int partIndex, double angle, const QString& mergeKey = QString());
     /// Moves attached part @p partIndex's joint @p sceneOffset from where the drag started,
-    /// within its parent marker and leeway.
-    void tryDrifting(int partIndex, const QPointF& sceneOffset);
+    /// within its parent marker and leeway, in the selected pose.
+    void driftPart(int partIndex, const QPointF& sceneOffset, const QString& mergeKey = QString());
     /// Pulls attached part @p partIndex by its point @p grip (in its sprite's pixels) towards
-    /// @p target (puppet space), turning it and the parts it hangs from within their limits.
-    void tryPulling(int partIndex, const QPointF& grip, const QPointF& target);
-    /// Puts every part back at rest.
-    void resetTriedPose();
+    /// @p target (puppet space), turning it and the parts it hangs from, in the selected pose.
+    void pullPart(int partIndex, const QPointF& grip, const QPointF& target, const QString& mergeKey = QString());
+    /// Has part @p partIndex show its variant @p variantIndex in the selected pose.
+    void setPartVariant(int partIndex, int variantIndex);
+    /// Adds part @p partIndex to the selected pose (as it is shown) or leaves it out.
+    void setPartInPose(int partIndex, bool included);
+    int selectedPose() const { return m_pose; }
+    PuppetPoseStrip* poseStrip() const { return m_poseStrip; }
+    QListWidget* poseParts() const { return m_poseParts; }
 
 signals:
     void atlasSelected(int atlasIndex);
@@ -126,9 +147,26 @@ private:
     /// The marker of its parent that part @p partIndex hangs from, in the parent's rest sprite.
     std::optional<NamedPoint> parentMarkerOf(const Puppet& puppet, int partIndex) const;
     /// @p angle within part @p partIndex's joint limits, or brought into a free turn.
-    int triedAngle(const Puppet& puppet, int partIndex, double angle) const;
-    /// The tried turns and drifts as evaluator states, within the joints' limits.
-    QVector<PuppetPartState> triedStates(const Puppet& puppet) const;
+    int limitedAngle(const Puppet& puppet, int partIndex, double angle) const;
+    /// Moves positioned part @p partIndex to @p position: in the selected pose, or at Rest in
+    /// the rig (one undo step per @p mergeKey).
+    void movePositionedPart(int partIndex, const QPoint& position, const QString& mergeKey = QString());
+    /// Where positioned part @p partIndex is shown: its place in the selected pose, or its `at:`.
+    QPoint shownPosition(const Puppet& puppet, int partIndex) const;
+    /// Applies @p change to the selected pose's settings as one undo step (merged by @p mergeKey).
+    void editPose(const QString& text, const QString& mergeKey,
+                  const std::function<void(const Puppet&, QVector<PuppetPoseSetting>&)>& change);
+    /// Rebuilds the film strip's thumbnails, all framed alike.
+    void updatePoseStrip();
+    void updatePoseButtons();
+    /// Lists the parts under the tree, ticked when the selected pose sets them.
+    void updatePoseParts();
+    QPixmap renderThumbnail(const Puppet& puppet, const QVector<PuppetPartState>& states, const QRectF& frame) const;
+    /// What the canvas shows: the selected pose on its own (rest elsewhere), within the joints'
+    /// limits, or the rest pose on Rest.
+    QVector<PuppetPartState> shownStates(const Puppet& puppet) const;
+    /// The parts the selected pose sets.
+    QSet<int> partsInPose(const Puppet& puppet) const;
     std::optional<PuppetCanvas::JointRange> jointRange(const Puppet& puppet,
                                                        const QVector<PuppetPartPlacement>& placements) const;
     QTreeWidgetItem* itemFor(const PuppetSelection& selection) const;
@@ -142,16 +180,18 @@ private:
     QPoint m_dragStartPosition;  ///< The dragged part's position when the drag started
     int m_dragCount = 0;         ///< Numbers drags, so each drag is its own undo step
 
-    /// A tried turn of a part, and drift of an attached one.
-    struct TriedJoint {
-        double angle = 0;
-        QPointF offset;
-    };
-    QHash<QString, TriedJoint> m_tried;  ///< By part name, for the shown puppet
-    QString m_triedPuppet;               ///< Atlas id and name of the puppet m_tried is for
-    TriedJoint m_turnStart;              ///< The turned part's, when the drag started
-    QPointF m_pullGrip;                  ///< Where the pulled part is held, in its sprite's pixels
-    QPushButton* m_resetPoseButton = nullptr;
+    /// The selected frame of the film strip: -1 for Rest, else a pose.
+    int m_pose = -1;
+    QString m_posedPuppet;       ///< Atlas id and name of the puppet m_pose is for
+    PuppetPartState m_turnStart;  ///< The turned part's, when the drag started
+    QPointF m_pullGrip;          ///< Where the pulled part is held, in its sprite's pixels
+    PuppetPoseStrip* m_poseStrip = nullptr;
+    QPushButton* m_newPoseButton = nullptr;
+    QPushButton* m_duplicatePoseButton = nullptr;
+    QPushButton* m_removePoseButton = nullptr;
+    QLabel* m_poseStatus = nullptr;
+    QLabel* m_posePartsTitle = nullptr;
+    QListWidget* m_poseParts = nullptr;
     mutable QHash<QString, QPixmap> m_images;  ///< By sprite path
     QHash<QString, SpritePtr> m_spritesByPath;  ///< The active atlas's laid-out sprites
     QHash<QString, SpritePtr> m_spritesByName;

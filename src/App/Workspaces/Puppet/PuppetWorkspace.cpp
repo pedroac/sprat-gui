@@ -5,6 +5,8 @@
 #include "NewPuppetDialog.h"
 #include "PuppetEditing.h"
 #include "PuppetMotion.h"
+#include "PuppetPoseStrip.h"
+#include "PuppetPosing.h"
 #include "PuppetPropertiesPanel.h"
 #include "PuppetTreeWidget.h"
 #include "SpritePickerDialog.h"
@@ -19,6 +21,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
@@ -34,6 +37,8 @@
 #include <QVBoxLayout>
 
 namespace {
+/// Most height of the selected pose's part list; it scrolls beyond that.
+constexpr int POSE_PARTS_HEIGHT = 160;
 
 constexpr int NAME_COLUMN = 0;
 constexpr int DETAIL_COLUMN = 1;
@@ -165,6 +170,25 @@ void PuppetWorkspace::setupUi() {
         row->addWidget(m_removeButton);
         leftLayout->addLayout(row);
     }
+    {
+        // The selected pose's parts: ticked when it sets them, so poses can be combined.
+        m_posePartsTitle = new QLabel(left);
+        m_posePartsTitle->setContentsMargins(4, 6, 4, 0);
+        leftLayout->addWidget(m_posePartsTitle);
+        m_poseParts = new QListWidget(left);
+        m_poseParts->setObjectName(QStringLiteral("puppetPoseParts"));
+        m_poseParts->setWordWrap(true);
+        m_poseParts->setMaximumHeight(POSE_PARTS_HEIGHT);
+        leftLayout->addWidget(m_poseParts);
+        connect(m_poseParts, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
+            const QVariant part = item->data(Qt::UserRole);
+            if (part.isValid()) setPartInPose(part.toInt(), item->checkState() == Qt::Checked);
+        }, Qt::QueuedConnection);  // the edit rebuilds the list, item included
+        connect(m_poseParts, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+            const QVariant part = item->data(Qt::UserRole);
+            if (part.isValid() && part.toInt() != m_selection.part) select({m_selection.puppet, part.toInt(), -1});
+        }, Qt::QueuedConnection);
+    }
     splitter->addWidget(left);
 
     // === Middle: zoom row and canvas ===
@@ -185,19 +209,43 @@ void PuppetWorkspace::setupUi() {
         fitButton->setToolTip(tr("Zoom to show the whole puppet"));
         row->addWidget(fitButton);
         row->addStretch();
-        m_resetPoseButton = new QPushButton(tr("Reset"), middle);
-        m_resetPoseButton->setObjectName(QStringLiteral("puppetResetPose"));
-        m_resetPoseButton->setToolTip(tr("Put every part back at rest. Turning attached parts on the canvas "
-                                         "tries their joints; it isn't saved, as a rig is its rest pose"));
-        m_resetPoseButton->setEnabled(false);
-        row->addWidget(m_resetPoseButton);
         middleLayout->addLayout(row);
         connect(fitButton, &QPushButton::clicked, this, [this]() { m_canvas->fitPuppet(); });
-        connect(m_resetPoseButton, &QPushButton::clicked, this, &PuppetWorkspace::resetTriedPose);
     }
     m_canvas = new PuppetCanvas(middle);
     m_canvas->setObjectName(QStringLiteral("puppetCanvas"));
     middleLayout->addWidget(m_canvas, 1);
+    {
+        // The poses, one frame each after Rest (the rig), like an animation's frames.
+        auto* row = new QHBoxLayout;
+        m_newPoseButton = new QPushButton(tr("New Pose"), middle);
+        m_newPoseButton->setObjectName(QStringLiteral("puppetNewPose"));
+        m_newPoseButton->setToolTip(tr("Add a pose after the selected frame. It sets no part until you change one"));
+        m_duplicatePoseButton = new QPushButton(tr("Duplicate"), middle);
+        m_duplicatePoseButton->setObjectName(QStringLiteral("puppetDuplicatePose"));
+        m_duplicatePoseButton->setToolTip(tr("Add a copy of the selected pose after it"));
+        m_removePoseButton = new QPushButton(tr("Remove"), middle);
+        m_removePoseButton->setObjectName(QStringLiteral("puppetRemovePose"));
+        m_removePoseButton->setToolTip(tr("Remove the selected pose (Delete in the strip)"));
+        m_poseStatus = new QLabel(middle);
+        m_poseStatus->setObjectName(QStringLiteral("puppetPoseStatus"));
+        m_poseStatus->setForegroundRole(QPalette::PlaceholderText);
+        row->addWidget(m_newPoseButton);
+        row->addWidget(m_duplicatePoseButton);
+        row->addWidget(m_removePoseButton);
+        row->addWidget(m_poseStatus, 1);
+        middleLayout->addLayout(row);
+        m_poseStrip = new PuppetPoseStrip(middle);
+        m_poseStrip->setObjectName(QStringLiteral("puppetPoseStrip"));
+        middleLayout->addWidget(m_poseStrip);
+        connect(m_newPoseButton, &QPushButton::clicked, this, &PuppetWorkspace::newPose);
+        connect(m_duplicatePoseButton, &QPushButton::clicked, this, &PuppetWorkspace::duplicatePose);
+        connect(m_removePoseButton, &QPushButton::clicked, this, [this]() { removePose(m_pose); });
+        connect(m_poseStrip, &PuppetPoseStrip::frameSelected, this, &PuppetWorkspace::selectPose);
+        connect(m_poseStrip, &PuppetPoseStrip::renameRequested, this, &PuppetWorkspace::renamePose);
+        connect(m_poseStrip, &PuppetPoseStrip::moveRequested, this, &PuppetWorkspace::movePose);
+        connect(m_poseStrip, &PuppetPoseStrip::removeRequested, this, &PuppetWorkspace::removePose);
+    }
     splitter->addWidget(middle);
     connect(m_zoomSpin, &QDoubleSpinBox::valueChanged, this, [this](double percent) {
         m_canvas->setZoomManual(true);
@@ -215,12 +263,12 @@ void PuppetWorkspace::setupUi() {
     connect(m_canvas, &PuppetCanvas::partDragStarted, this, [this](int part) {
         const Puppet* puppet = selectedPuppet();
         if (!puppet || part < 0 || part >= puppet->parts.size()) return;
-        m_dragStartPosition = puppet->parts[part].position.value_or(QPoint());
+        m_dragStartPosition = shownPosition(*puppet, part);
         ++m_dragCount;
     });
     connect(m_canvas, &PuppetCanvas::partDragged, this, [this](int part, const QPoint& offset) {
         if (part != m_selection.part) return;
-        setSelectedPartPosition(m_dragStartPosition + offset, QStringLiteral("drag %1").arg(m_dragCount));
+        movePositionedPart(part, m_dragStartPosition + offset, QStringLiteral("drag %1").arg(m_dragCount));
     });
     connect(m_canvas, &PuppetCanvas::attachRequested, this, [this](int part, int parent, const QString& marker) {
         const Puppet* puppet = selectedPuppet();
@@ -236,30 +284,32 @@ void PuppetWorkspace::setupUi() {
     connect(m_canvas, &PuppetCanvas::partTurnStarted, this, [this](int part, bool) {
         const Puppet* puppet = selectedPuppet();
         if (!puppet || part < 0 || part >= puppet->parts.size()) return;
-        m_turnStart = m_tried.value(puppet->parts[part].name);
+        m_turnStart = shownStates(*puppet)[part];
+        ++m_dragCount;
     });
     connect(m_canvas, &PuppetCanvas::partTurned, this, [this](int part, double degrees) {
-        tryTurning(part, m_turnStart.angle + degrees);
+        setPartAngle(part, m_turnStart.angle + degrees, QStringLiteral("turn %1").arg(m_dragCount));
     });
     connect(m_canvas, &PuppetCanvas::partPullStarted, this, [this](int part, const QPointF& scenePos) {
         const Puppet* puppet = selectedPuppet();
         if (!puppet || part < 0 || part >= puppet->parts.size()) return;
         const QVector<PuppetPartPlacement> placements =
-            PuppetEvaluator::evaluate(*puppet, triedStates(*puppet), spriteLookup());
+            PuppetEvaluator::evaluate(*puppet, shownStates(*puppet), spriteLookup());
         // Held by that point of its sprite, which then follows the pointer.
         m_pullGrip = placements[part].transform.inverted().map(scenePos);
+        ++m_dragCount;
     });
     connect(m_canvas, &PuppetCanvas::partPulled, this, [this](int part, const QPointF& scenePos) {
-        tryPulling(part, m_pullGrip, scenePos);
+        pullPart(part, m_pullGrip, scenePos, QStringLiteral("pull %1").arg(m_dragCount));
     });
     connect(m_canvas, &PuppetCanvas::partDrifted, this, [this](int part, const QPointF& offset) {
-        tryDrifting(part, offset);
+        driftPart(part, offset, QStringLiteral("turn %1").arg(m_dragCount));
     });
     connect(m_canvas, &PuppetCanvas::partNudged, this, [this](int part, const QPoint& offset) {
         const Puppet* puppet = selectedPuppet();
         if (!puppet || part != m_selection.part || !puppet->parts[part].position) return;
-        setSelectedPartPosition(*puppet->parts[part].position + offset,
-                                QStringLiteral("nudge %1 %2").arg(m_selection.puppet).arg(part));
+        movePositionedPart(part, shownPosition(*puppet, part) + offset,
+                           QStringLiteral("nudge %1 %2").arg(m_selection.puppet).arg(part));
     });
 
     // === Right: properties ===
@@ -268,7 +318,9 @@ void PuppetWorkspace::setupUi() {
     splitter->addWidget(m_properties);
     connect(m_properties, &PuppetPropertiesPanel::renameRequested, this, &PuppetWorkspace::renameSelected);
     connect(m_properties, &PuppetPropertiesPanel::positionChanged, this,
-            [this](const QPoint& position) { setSelectedPartPosition(position); });
+            [this](const QPoint& position) { movePositionedPart(m_selection.part, position); });
+    connect(m_properties, &PuppetPropertiesPanel::shownVariantChanged, this,
+            [this](int variant) { setPartVariant(m_selection.part, variant); });
     connect(m_properties, &PuppetPropertiesPanel::makeRestVariantRequested, this, [this]() { moveSelected(0); });
     connect(m_properties, &PuppetPropertiesPanel::attachRequested, this,
             [this](const QString& parent, const QString& parentMarker, const QString& childMarker) {
@@ -280,7 +332,8 @@ void PuppetWorkspace::setupUi() {
     connect(m_properties, &PuppetPropertiesPanel::hiddenMarkersChanged, this,
             &PuppetWorkspace::setSelectedPartHiddenMarkers);
     connect(m_properties, &PuppetPropertiesPanel::angleChanged, this, [this](int angle) {
-        tryTurning(m_selection.part, angle);
+        setPartAngle(m_selection.part, angle,
+                     QStringLiteral("angle %1 %2 %3").arg(m_selection.puppet).arg(m_pose).arg(m_selection.part));
     });
     connect(m_properties, &PuppetPropertiesPanel::limitsChanged, this,
             [this](int leeway, bool limited, int angleMin, int angleMax) {
@@ -299,6 +352,7 @@ void PuppetWorkspace::setupUi() {
         updateCanvas();
         updateProperties();
         updateButtons();
+        updatePoseParts();
     });
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
         if (m_rebuilding || column != NAME_COLUMN) return;
@@ -341,6 +395,7 @@ void PuppetWorkspace::refresh() {
     updateCanvas();
     updateProperties();
     updateButtons();
+    updatePoseStrip();
 }
 
 void PuppetWorkspace::updateAtlasCombo(const QVector<AtlasEntry>& atlases, int activeIndex) {
@@ -514,12 +569,14 @@ void PuppetWorkspace::updateCanvas() {
     }
     // Another puppet starts at rest.
     const QString puppetKey = m_session->activeAtlas().id + QLatin1Char('/') + puppet->name;
-    if (puppetKey != m_triedPuppet) {
-        m_triedPuppet = puppetKey;
-        m_tried.clear();
+    if (puppetKey != m_posedPuppet) {
+        m_posedPuppet = puppetKey;
+        m_pose = -1;
+        updatePoseStrip();
     }
-    const QVector<PuppetPartPlacement> placements =
-        PuppetEvaluator::evaluate(*puppet, triedStates(*puppet), spriteLookup());
+    const QVector<PuppetPartState> states = shownStates(*puppet);
+    const QSet<int> inPose = partsInPose(*puppet);
+    const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(*puppet, states, spriteLookup());
     QVector<PuppetCanvas::Part> parts;
     parts.reserve(puppet->parts.size());
     for (int i = 0; i < puppet->parts.size(); ++i) {
@@ -532,7 +589,9 @@ void PuppetWorkspace::updateCanvas() {
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
         drawn.attached = puppetParentAttachment(*puppet, part.name) != nullptr;
         drawn.joint = placements[i].pivot;
-        const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants.first());
+        drawn.included = m_pose < 0 || inPose.contains(i);
+        // The variant the pose shows (the rest variant unless it picks another).
+        const SpritePtr sprite = part.variants.isEmpty() ? nullptr : spriteFor(part.variants[states[i].variant]);
         drawn.image = imageOf(sprite);
         if (sprite) {
             bool hasPivotMarker = false;
@@ -559,8 +618,9 @@ void PuppetWorkspace::updateCanvas() {
     std::optional<QPointF> pivot;
     if (selectedPart >= 0 && selectedPart < placements.size() && placements[selectedPart].placed)
         pivot = placements[selectedPart].pivot;
+    m_canvas->setPosing(m_pose >= 0);
     m_canvas->showPuppet(parts, bones, selectedPart, pivot, jointRange(*puppet, placements));
-    m_resetPoseButton->setEnabled(!m_tried.isEmpty());
+    updatePoseButtons();
 
     // Fit when another puppet is shown, not after every edit of this one.
     const QString fitKey = m_session->activeAtlas().id + QLatin1Char('/') + QString::number(m_selection.puppet);
@@ -588,6 +648,9 @@ void PuppetWorkspace::updateProperties() {
     if (m_selection.variant < 0) {
         PuppetPropertiesPanel::Placement placement;
         placement.position = part.position;
+        // While posing, a positioned part's place is the pose's.
+        if (part.position && m_pose >= 0) placement.position = shownPosition(*puppet, i);
+        placement.variants = PuppetEditing::variantNames(part);
         if (const PuppetAttachment* joint = puppetParentAttachment(*puppet, part.name)) {
             placement.parent = joint->parent;
             placement.parentMarker = joint->parentMarker;
@@ -616,7 +679,10 @@ void PuppetWorkspace::updateProperties() {
             if (marker.name != PIVOT_MARKER) placement.markers.append(marker.name);
         }
         placement.hiddenMarkers = part.hiddenMarkers;
-        placement.angle = int(std::lround(triedStates(*puppet)[i].angle));
+        const PuppetPartState shown = shownStates(*puppet)[i];
+        placement.posing = m_pose >= 0;
+        placement.angle = int(std::lround(shown.angle));
+        placement.variant = shown.variant;
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
         m_properties->showPart(part.name, placement, placements[i].problem,
                                [this, p, i](const QString& name) {
@@ -682,6 +748,7 @@ void PuppetWorkspace::select(const PuppetSelection& selection) {
     updateCanvas();
     updateProperties();
     updateButtons();
+    updatePoseParts();
 }
 
 void PuppetWorkspace::pushEdit(const QString& text, const QVector<Puppet>& after,
@@ -934,21 +1001,36 @@ std::optional<NamedPoint> PuppetWorkspace::parentMarkerOf(const Puppet& puppet, 
     return pivot;
 }
 
-QVector<PuppetPartState> PuppetWorkspace::triedStates(const Puppet& puppet) const {
-    QVector<PuppetPartState> states(puppet.parts.size());
+QVector<PuppetPartState> PuppetWorkspace::shownStates(const Puppet& puppet) const {
+    if (m_pose < 0 || m_pose >= puppet.poses.size()) return QVector<PuppetPartState>(puppet.parts.size());
+    QVector<PuppetPartState> states = PuppetPosing::statesOf(puppet, puppet.poses[m_pose]);
     for (int i = 0; i < puppet.parts.size(); ++i) {
-        const auto it = m_tried.constFind(puppet.parts[i].name);
-        if (it == m_tried.constEnd()) continue;
         // The rig may have changed since: keep within its limits as they are now.
-        states[i].angle = triedAngle(puppet, i, it->angle);
+        states[i].angle = limitedAngle(puppet, i, states[i].angle);
         const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
-        // A positioned part turns around its pivot; only an attached one drifts.
-        if (!joint) continue;
-        const std::optional<NamedPoint> marker = parentMarkerOf(puppet, i);
-        states[i].offset = marker ? QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, it->offset))
+        const std::optional<NamedPoint> marker = joint ? parentMarkerOf(puppet, i) : std::nullopt;
+        states[i].offset = marker ? QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, states[i].offset))
                                   : QPointF();
+        // Only a part placed by position goes elsewhere in a pose.
+        if (joint || !puppet.parts[i].position) states[i].position.reset();
     }
     return states;
+}
+
+int PuppetWorkspace::limitedAngle(const Puppet& puppet, int partIndex, double angle) const {
+    const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[partIndex].name);
+    return joint ? PuppetMotion::clampAngle(*joint, angle) : PuppetMotion::freeAngle(angle);
+}
+
+QSet<int> PuppetWorkspace::partsInPose(const Puppet& puppet) const {
+    QSet<int> parts;
+    if (m_pose < 0 || m_pose >= puppet.poses.size()) return parts;
+    const QStringList names = PuppetEditing::partNames(puppet);
+    for (const PuppetPoseSetting& setting : puppet.poses[m_pose].settings) {
+        const int index = names.indexOf(setting.part);
+        if (index >= 0) parts.insert(index);
+    }
+    return parts;
 }
 
 std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet& puppet,
@@ -964,7 +1046,7 @@ std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet
     PuppetCanvas::JointRange range;
     range.attached = joint != nullptr;
     range.point = placements[i].pivot;
-    range.angle = triedStates(puppet)[i].angle;
+    range.angle = shownStates(puppet)[i].angle;
     if (joint) {
         range.angleMin = joint->angleMin;
         range.angleMax = joint->angleMax;
@@ -981,21 +1063,47 @@ std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet
     return range;
 }
 
-void PuppetWorkspace::tryTurning(int partIndex, double angle) {
+void PuppetWorkspace::editPose(const QString& text, const QString& mergeKey,
+                               const std::function<void(const Puppet&, QVector<PuppetPoseSetting>&)>& change) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_pose < 0 || m_pose >= puppet->poses.size()) return;
+    QVector<Puppet> after = puppets();
+    QVector<PuppetPoseSetting>& settings = after[m_selection.puppet].poses[m_pose].settings;
+    change(*puppet, settings);
+    // Kept in part order, as the pose's lines are written.
+    const QStringList names = PuppetEditing::partNames(*puppet);
+    std::stable_sort(settings.begin(), settings.end(), [&names](const PuppetPoseSetting& a, const PuppetPoseSetting& b) {
+        return names.indexOf(a.part) < names.indexOf(b.part);
+    });
+    if (after == puppets()) return;
+    pushEdit(text, after, m_selection, mergeKey);
+}
+
+namespace {
+/// The setting of part @p name in @p settings, added when the pose doesn't set it yet.
+PuppetPoseSetting& settingFor(QVector<PuppetPoseSetting>& settings, const QString& name) {
+    for (PuppetPoseSetting& setting : settings) {
+        if (setting.part == name) return setting;
+    }
+    PuppetPoseSetting setting;
+    setting.part = name;
+    settings.append(setting);
+    return settings.last();
+}
+}  // namespace
+
+void PuppetWorkspace::setPartAngle(int partIndex, double angle, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
-    const int tried = triedAngle(*puppet, partIndex, angle);
-    m_tried[puppet->parts[partIndex].name].angle = tried;
-    updateCanvas();
-    if (partIndex == m_selection.part) m_properties->setAngle(tried);
+    const int limited = limitedAngle(*puppet, partIndex, angle);
+    const QString name = puppet->parts[partIndex].name;
+    editPose(tr("Turn Part"), mergeKey, [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, name).angle = limited;
+    });
+    if (partIndex == m_selection.part) m_properties->setAngle(limited);
 }
 
-int PuppetWorkspace::triedAngle(const Puppet& puppet, int partIndex, double angle) const {
-    const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[partIndex].name);
-    return joint ? PuppetMotion::clampAngle(*joint, angle) : PuppetMotion::freeAngle(angle);
-}
-
-void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
+void PuppetWorkspace::driftPart(int partIndex, const QPointF& sceneOffset, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
     const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[partIndex].name);
@@ -1004,12 +1112,77 @@ void PuppetWorkspace::tryDrifting(int partIndex, const QPointF& sceneOffset) {
     if (!marker || parent < 0) return;
     // The offset is in the parent's sprite pixels, so it turns with the parent.
     const QVector<PuppetPartPlacement> placements =
-        PuppetEvaluator::evaluate(*puppet, triedStates(*puppet), spriteLookup());
+        PuppetEvaluator::evaluate(*puppet, shownStates(*puppet), spriteLookup());
     const QTransform toParent = placements[parent].transform.inverted();
     const QPointF delta = toParent.map(sceneOffset) - toParent.map(QPointF(0, 0));
-    m_tried[puppet->parts[partIndex].name].offset =
-        QPointF(PuppetMotion::clampOffset(*marker, joint->leeway, m_turnStart.offset + delta));
-    updateCanvas();
+    const QPoint offset = PuppetMotion::clampOffset(*marker, joint->leeway, m_turnStart.offset + delta);
+    const QString name = puppet->parts[partIndex].name;
+    editPose(tr("Move Joint"), mergeKey, [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, name).offset = offset;
+    });
+}
+
+void PuppetWorkspace::pullPart(int partIndex, const QPointF& grip, const QPointF& target, const QString& mergeKey) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const QVector<PuppetPartState> before = shownStates(*puppet);
+    const QVector<PuppetPartState> after = PuppetMotion::reach(
+        *puppet, before, partIndex, grip, target, spriteLookup(),
+        [this, puppet](int part) { return parentMarkerOf(*puppet, part); });
+    editPose(tr("Pull Part"), mergeKey, [&](const Puppet& posed, QVector<PuppetPoseSetting>& settings) {
+        // Only what the pull changed joins the pose.
+        for (int i = 0; i < posed.parts.size(); ++i) {
+            if (after[i].angle != before[i].angle)
+                settingFor(settings, posed.parts[i].name).angle = int(std::lround(after[i].angle));
+            if (after[i].offset != before[i].offset)
+                settingFor(settings, posed.parts[i].name).offset =
+                    QPoint(int(std::lround(after[i].offset.x())), int(std::lround(after[i].offset.y())));
+        }
+    });
+}
+
+void PuppetWorkspace::setPartVariant(int partIndex, int variantIndex) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const PuppetPart& part = puppet->parts[partIndex];
+    if (variantIndex < 0 || variantIndex >= part.variants.size()) return;
+    const QString variant = puppetVariantName(part.variants[variantIndex]);
+    editPose(tr("Show Variant"), QString(), [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, part.name).variant = variant;
+    });
+}
+
+void PuppetWorkspace::setPartInPose(int partIndex, bool included) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const QString name = puppet->parts[partIndex].name;
+    const PuppetPartState shown = shownStates(*puppet)[partIndex];
+    editPose(included ? tr("Add Part to Pose") : tr("Remove Part from Pose"), QString(),
+             [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settings.removeIf([&name](const PuppetPoseSetting& setting) { return setting.part == name; });
+        // A pose line must set something: a part added as it is sets its angle (its rest one).
+        if (included) settingFor(settings, name).angle = int(std::lround(shown.angle));
+    });
+}
+
+void PuppetWorkspace::movePositionedPart(int partIndex, const QPoint& position, const QString& mergeKey) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || !puppet->parts[partIndex].position) return;
+    if (m_pose < 0) {
+        if (partIndex == m_selection.part) setSelectedPartPosition(position, mergeKey);
+        return;
+    }
+    const QString name = puppet->parts[partIndex].name;
+    editPose(tr("Move Part"), mergeKey, [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, name).position = position;
+    });
+}
+
+QPoint PuppetWorkspace::shownPosition(const Puppet& puppet, int partIndex) const {
+    const PuppetPartState state = shownStates(puppet)[partIndex];
+    if (state.position)
+        return QPoint(int(std::lround(state.position->x())), int(std::lround(state.position->y())));
+    return puppet.parts[partIndex].position.value_or(QPoint());
 }
 
 void PuppetWorkspace::setSelectedPartHiddenMarkers(const QStringList& hiddenMarkers) {
@@ -1020,23 +1193,187 @@ void PuppetWorkspace::setSelectedPartHiddenMarkers(const QStringList& hiddenMark
     pushEdit(tr("Show Markers"), after, m_selection);
 }
 
-void PuppetWorkspace::tryPulling(int partIndex, const QPointF& grip, const QPointF& target) {
+void PuppetWorkspace::selectPose(int poseIndex) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
-    const QVector<PuppetPartState> before = triedStates(*puppet);
-    const QVector<PuppetPartState> after = PuppetMotion::reach(
-        *puppet, before, partIndex, grip, target, spriteLookup(),
-        [this, puppet](int part) { return parentMarkerOf(*puppet, part); });
-    for (int i = 0; i < puppet->parts.size(); ++i) {
-        if (after[i].angle != before[i].angle) m_tried[puppet->parts[i].name].angle = after[i].angle;
-        if (after[i].offset != before[i].offset) m_tried[puppet->parts[i].name].offset = after[i].offset;
+    if (!puppet) return;
+    m_pose = poseIndex >= 0 && poseIndex < puppet->poses.size() ? poseIndex : -1;
+    if (m_poseStrip->selectedFrame() != m_pose || !m_poseStrip->currentItem()) {
+        const QSignalBlocker blocker(m_poseStrip);
+        m_poseStrip->setCurrentRow(m_pose + 1);
     }
     updateCanvas();
-    if (m_selection.part >= 0) m_properties->setAngle(int(std::lround(after[m_selection.part].angle)));
+    updateProperties();
+    updatePoseParts();
+    updatePoseButtons();
 }
 
-void PuppetWorkspace::resetTriedPose() {
-    m_tried.clear();
-    updateCanvas();
-    m_properties->setAngle(0);
+void PuppetWorkspace::newPose() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet) return;
+    QVector<Puppet> after = puppets();
+    Puppet& posed = after[m_selection.puppet];
+    PuppetPose pose;
+    pose.name = PuppetEditing::uniqueName(tr("pose"), PuppetEditing::poseNames(posed));
+    const int index = m_pose >= 0 ? m_pose + 1 : posed.poses.size();
+    posed.poses.insert(index, pose);
+    pushEdit(tr("New Pose"), after, m_selection);
+    selectPose(index);
+    updatePoseStrip();
 }
+
+void PuppetWorkspace::duplicatePose() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_pose < 0 || m_pose >= puppet->poses.size()) return;
+    QVector<Puppet> after = puppets();
+    Puppet& posed = after[m_selection.puppet];
+    PuppetPose copy = posed.poses[m_pose];
+    copy.name = PuppetEditing::uniqueName(copy.name, PuppetEditing::poseNames(posed));
+    const int index = m_pose + 1;
+    posed.poses.insert(index, copy);
+    pushEdit(tr("Duplicate Pose"), after, m_selection);
+    selectPose(index);
+    updatePoseStrip();
+}
+
+void PuppetWorkspace::removePose(int poseIndex) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || poseIndex < 0 || poseIndex >= puppet->poses.size()) return;
+    QVector<Puppet> after = puppets();
+    PuppetEditing::removePose(after[m_selection.puppet], poseIndex);
+    pushEdit(tr("Remove Pose"), after, m_selection);
+    // The frame before it is shown instead.
+    selectPose(poseIndex - 1);
+    updatePoseStrip();
+}
+
+void PuppetWorkspace::renamePose(int poseIndex, const QString& name) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || poseIndex < 0 || poseIndex >= puppet->poses.size()) return;
+    const QString problem = PuppetEditing::poseNameProblem(*puppet, poseIndex, name);
+    if (!problem.isEmpty()) {
+        updatePoseStrip();  // puts the name back
+        m_poseStatus->setText(problem);
+        return;
+    }
+    QVector<Puppet> after = puppets();
+    PuppetEditing::renamePose(after[m_selection.puppet], poseIndex, name);
+    pushEdit(tr("Rename Pose"), after, m_selection);
+}
+
+void PuppetWorkspace::movePose(int from, int to) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet) return;
+    QVector<Puppet> after = puppets();
+    PuppetEditing::movePose(after[m_selection.puppet], from, to);
+    if (after == puppets()) return;
+    if (m_pose == from) m_pose = to;
+    pushEdit(tr("Move Pose"), after, m_selection);
+}
+
+void PuppetWorkspace::updatePoseButtons() {
+    const Puppet* puppet = selectedPuppet();
+    const bool posing = puppet && m_pose >= 0;
+    m_newPoseButton->setEnabled(puppet != nullptr);
+    m_duplicatePoseButton->setEnabled(posing);
+    m_removePoseButton->setEnabled(posing);
+    m_poseStatus->setText(!puppet ? QString()
+                          : posing ? QString()
+                                   : tr("Rest: the rig. Select or add a pose to turn parts"));
+}
+
+void PuppetWorkspace::updatePoseParts() {
+    const Puppet* puppet = selectedPuppet();
+    const bool posing = puppet && m_pose >= 0 && m_pose < puppet->poses.size();
+    m_posePartsTitle->setText(posing ? tr("<b>Pose \"%1\"</b>").arg(puppet->poses[m_pose].name.toHtmlEscaped())
+                                     : tr("<b>Pose</b>"));
+    const QSignalBlocker blocker(m_poseParts);
+    m_poseParts->clear();
+    if (!posing) {
+        m_poseParts->addItem(tr("Select a pose below the canvas to see the parts it sets."));
+        m_poseParts->item(0)->setFlags(Qt::NoItemFlags);
+        return;
+    }
+    const PuppetPose& pose = puppet->poses[m_pose];
+    for (int i = 0; i < puppet->parts.size(); ++i) {
+        const PuppetPart& part = puppet->parts[i];
+        const PuppetPoseSetting* setting = nullptr;
+        for (const PuppetPoseSetting& candidate : pose.settings) {
+            if (candidate.part == part.name) setting = &candidate;
+        }
+        QStringList sets;
+        if (setting) {
+            if (setting->angle) sets.append(QStringLiteral("%1°").arg(*setting->angle));
+            if (setting->offset) sets.append(tr("joint %1,%2").arg(setting->offset->x()).arg(setting->offset->y()));
+            if (setting->position) sets.append(tr("at %1,%2").arg(setting->position->x()).arg(setting->position->y()));
+            if (!setting->variant.isEmpty()) sets.append(setting->variant);
+        }
+        auto* item = new QListWidgetItem(sets.isEmpty() ? part.name
+                                                        : QStringLiteral("%1 · %2").arg(part.name, sets.join(QStringLiteral(" · "))),
+                                         m_poseParts);
+        item->setData(Qt::UserRole, i);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
+        item->setCheckState(setting ? Qt::Checked : Qt::Unchecked);
+        if (!setting) item->setForeground(palette().color(QPalette::PlaceholderText));
+        item->setToolTip(setting ? tr("This pose sets it. Untick to leave it as other poses have it")
+                                 : tr("This pose leaves it alone. Change it on the canvas, or tick it, to set it"));
+        if (i == m_selection.part) m_poseParts->setCurrentItem(item);
+    }
+}
+
+void PuppetWorkspace::updatePoseStrip() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet) {
+        m_pose = -1;
+        m_poseStrip->showFrames({}, {}, {}, -1);
+        m_poseStrip->setEnabled(false);
+        updatePoseButtons();
+        updatePoseParts();
+        return;
+    }
+    m_poseStrip->setEnabled(true);
+    if (m_pose >= puppet->poses.size()) m_pose = -1;
+    // One frame for all, so the thumbnails compare: what every pose and the rest pose cover.
+    QVector<QVector<PuppetPartState>> poseStates;
+    for (const PuppetPose& pose : puppet->poses) poseStates.append(PuppetPosing::statesOf(*puppet, pose));
+    QRectF frame;
+    const auto cover = [&](const QVector<PuppetPartState>& states) {
+        const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(*puppet, states, spriteLookup());
+        for (int i = 0; i < puppet->parts.size(); ++i) {
+            if (!placements[i].placed || puppet->parts[i].variants.isEmpty()) continue;
+            const int variant = i < states.size() ? states[i].variant : 0;
+            const QPixmap image = imageOf(spriteFor(puppet->parts[i].variants.value(variant)));
+            frame |= placements[i].transform.mapRect(QRectF(image.rect()));
+        }
+    };
+    cover({});
+    for (const QVector<PuppetPartState>& states : poseStates) cover(states);
+    QVector<QPixmap> thumbnails;
+    for (const QVector<PuppetPartState>& states : poseStates) thumbnails.append(renderThumbnail(*puppet, states, frame));
+    m_poseStrip->showFrames(renderThumbnail(*puppet, {}, frame), PuppetEditing::poseNames(*puppet), thumbnails, m_pose);
+    updatePoseButtons();
+    updatePoseParts();
+}
+
+QPixmap PuppetWorkspace::renderThumbnail(const Puppet& puppet, const QVector<PuppetPartState>& states,
+                                         const QRectF& frame) const {
+    const int size = PuppetPoseStrip::THUMBNAIL_SIZE;
+    QPixmap thumbnail(size, size);
+    thumbnail.fill(Qt::transparent);
+    if (frame.isEmpty()) return thumbnail;
+    QPainter painter(&thumbnail);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    const qreal scale = (size - 4) / qMax(frame.width(), frame.height());
+    QTransform fit;
+    fit.translate(size / 2.0, size / 2.0);
+    fit.scale(scale, scale);
+    fit.translate(-frame.center().x(), -frame.center().y());
+    const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(puppet, states, spriteLookup());
+    for (int i = 0; i < puppet.parts.size(); ++i) {
+        if (!placements[i].placed || puppet.parts[i].variants.isEmpty()) continue;
+        const int variant = i < states.size() ? states[i].variant : 0;
+        painter.setTransform(placements[i].transform * fit);
+        painter.drawPixmap(0, 0, imageOf(spriteFor(puppet.parts[i].variants.value(variant))));
+    }
+    return thumbnail;
+}
+
