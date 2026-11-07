@@ -1,8 +1,8 @@
 #include "PuppetEditing.h"
+#include "NaturalOrder.h"
 
 #include <algorithm>
 #include <numeric>
-#include <QCollator>
 #include <QHash>
 #include <QCoreApplication>
 
@@ -301,14 +301,12 @@ void removeVariant(Puppet& puppet, int partIndex, int variantIndex) {
 }
 
 QVector<int> variantsByName(const PuppetPart& part) {
-    QCollator collator;
-    collator.setNumericMode(true);
-    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    // Not QCollator: its numeric mode is ignored by Qt builds without ICU.
     const QStringList names = variantNames(part);
     QVector<int> order(names.size());
     std::iota(order.begin(), order.end(), 0);
     std::stable_sort(order.begin(), order.end(),
-                     [&](int a, int b) { return collator.compare(names[a], names[b]) < 0; });
+                     [&](int a, int b) { return compareNaturally(names[a], names[b]) < 0; });
     return order;
 }
 

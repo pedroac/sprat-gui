@@ -565,6 +565,7 @@ set(PROJECT_SOURCES
     src/Core/ArchiveExtractor.h
     src/Core/models.h
     src/Core/CliTextFormat.h
+    src/Core/NaturalOrder.h
     src/Core/MessageText.cpp
     src/Core/MessageText.h
     src/Core/AppIcons.cpp

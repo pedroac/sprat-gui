@@ -14,7 +14,6 @@
 #include <QPixmap>
 #include <QPoint>
 #include <QDebug>
-#include <QCollator>
 #include <QRegularExpression>
 #include <QtConcurrent>
 #include <algorithm>
