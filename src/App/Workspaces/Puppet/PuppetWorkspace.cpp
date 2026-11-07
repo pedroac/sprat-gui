@@ -180,14 +180,23 @@ void PuppetWorkspace::setupUi() {
         m_poseParts->setWordWrap(true);
         m_poseParts->setMaximumHeight(POSE_PARTS_HEIGHT);
         leftLayout->addWidget(m_poseParts);
+        // Both act once the list's own handling is done, since they rebuild it. They take what
+        // they need from the item now: by then a click's other signal may have deleted it.
         connect(m_poseParts, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
             const QVariant part = item->data(Qt::UserRole);
-            if (part.isValid()) setPartInPose(part.toInt(), item->checkState() == Qt::Checked);
-        }, Qt::QueuedConnection);  // the edit rebuilds the list, item included
+            if (!part.isValid()) return;
+            const bool included = item->checkState() == Qt::Checked;
+            QMetaObject::invokeMethod(this, [this, part = part.toInt(), included]() {
+                setPartInPose(part, included);
+            }, Qt::QueuedConnection);
+        });
         connect(m_poseParts, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
             const QVariant part = item->data(Qt::UserRole);
-            if (part.isValid() && part.toInt() != m_selection.part) select({m_selection.puppet, part.toInt(), -1});
-        }, Qt::QueuedConnection);
+            if (!part.isValid() || part.toInt() == m_selection.part) return;
+            QMetaObject::invokeMethod(this, [this, part = part.toInt()]() {
+                select({m_selection.puppet, part, -1});
+            }, Qt::QueuedConnection);
+        });
     }
     splitter->addWidget(left);
 
@@ -356,8 +365,13 @@ void PuppetWorkspace::setupUi() {
     });
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
         if (m_rebuilding || column != NAME_COLUMN) return;
-        m_selection = PuppetTreeWidget::selectionOf(item);
-        renameSelected(item->text(NAME_COLUMN));
+        // Renaming rebuilds the tree, so it waits until Qt is done with the edited item.
+        const PuppetSelection renamed = PuppetTreeWidget::selectionOf(item);
+        const QString name = item->text(NAME_COLUMN);
+        QMetaObject::invokeMethod(this, [this, renamed, name]() {
+            m_selection = renamed;
+            renameSelected(name);
+        }, Qt::QueuedConnection);
     });
     connect(m_tree, &PuppetTreeWidget::moveRequested, this, [this](const PuppetSelection& moved, int to) {
         m_selection = moved;

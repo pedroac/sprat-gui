@@ -32,7 +32,10 @@ PuppetPoseStrip::PuppetPoseStrip(QWidget* parent) : QListWidget(parent) {
     connect(this, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
         const int pose = poseOf(item);
         if (m_rebuilding || pose < 0 || pose >= m_names.size() || item->text() == m_names[pose]) return;
-        emit renameRequested(pose, item->text().trimmed());
+        // Renaming rebuilds the strip, so it waits until Qt is done with the edited item.
+        QMetaObject::invokeMethod(this, [this, pose, name = item->text().trimmed()]() {
+            emit renameRequested(pose, name);
+        }, Qt::QueuedConnection);
     });
 }
 

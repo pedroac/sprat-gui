@@ -872,6 +872,27 @@ void PuppetWorkspaceTests::testTickingPartsInAndOutOfThePose() {
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(20));
 }
 
+void PuppetWorkspaceTests::testClickingAPartOutOfThePose() {
+    // As a user does it: a new pose, the head turned, then a click on its checkbox.
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});
+    startPose(workspace);
+    workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->setValue(30);
+    QListWidget* parts = workspace.poseParts();
+    QCOMPARE(parts->item(1)->checkState(), Qt::Checked);
+
+    // The checkbox sits at the row's left edge.
+    const QRect row = parts->visualItemRect(parts->item(1));
+    QTest::mouseClick(parts->viewport(), Qt::LeftButton, {}, QPoint(row.left() + row.height() / 2, row.center().y()));
+    QCoreApplication::processEvents();
+    QVERIFY(doll.puppet().poses[0].settings.isEmpty());
+    QCOMPARE(parts->item(1)->checkState(), Qt::Unchecked);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
+}
+
 void PuppetWorkspaceTests::testPosingMovesPositionedPartsInThePose() {
     Doll doll;
     addDollPoses(doll);
@@ -905,9 +926,11 @@ void PuppetWorkspaceTests::testPoseStripRenamesReordersAndRemoves() {
 
     // Renaming in place; a taken name is put back.
     strip->item(1)->setText(QStringLiteral("smile"));
+    QCoreApplication::processEvents();
     QCOMPARE(frameNames(strip), (QStringList{"Rest", "nod", "smile"}));
     QVERIFY(!workspace.findChild<QLabel*>(QStringLiteral("puppetPoseStatus"))->text().isEmpty());
     strip->item(1)->setText(QStringLiteral("yes"));
+    QCoreApplication::processEvents();
     QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"yes", "smile"}));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Rename Pose"));
 
@@ -979,6 +1002,7 @@ void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {
     workspace.select({0, 0, -1});
 
     workspace.tree()->currentItem()->setText(0, QStringLiteral("torso"));
+    QCoreApplication::processEvents();
     QCOMPARE(doll.puppet().parts[0].name, QStringLiteral("torso"));
     QCOMPARE(doll.puppet().attachments[0].parent, QStringLiteral("torso"));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Rename Part"));

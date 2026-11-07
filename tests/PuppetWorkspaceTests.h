@@ -29,6 +29,7 @@ private slots:
     void testNewPoseSetsOnlyThePartsChanged();
     void testSelectingAPoseShowsIt();
     void testTickingPartsInAndOutOfThePose();
+    void testClickingAPartOutOfThePose();
     void testPosingMovesPositionedPartsInThePose();
     void testPoseStripRenamesReordersAndRemoves();
     void testRenamingAPartUpdatesItsAttachments();
