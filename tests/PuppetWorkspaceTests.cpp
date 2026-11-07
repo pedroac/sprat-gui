@@ -173,15 +173,26 @@ void PuppetWorkspaceTests::testBuildingAPuppetIsUndoable() {
 
 namespace {
 /// Drops @p spritePaths, as the Sprites tree drags them, on @p tree's viewport at @p pos.
-void dropSprites(QTreeWidget* tree, const QPoint& pos, const QStringList& spritePaths) {
+void dropSprites(QTreeWidget* tree, const QPoint& pos, const QStringList& spritePaths, const QString& folder = QString()) {
     QMimeData mime;
     mime.setData(QStringLiteral("application/x-sprat-sprite"), spritePaths.join(QLatin1Char('\n')).toUtf8());
+    if (!folder.isEmpty()) mime.setData(QStringLiteral("application/x-sprat-group-name"), folder.toUtf8());
     QDragEnterEvent enter(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(tree->viewport(), &enter);
     QDragMoveEvent move(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(tree->viewport(), &move);
     QDropEvent drop(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(tree->viewport(), &drop);
+}
+
+/// The texts of @p menu's actions, separators as "-", disabled ones in brackets.
+QStringList menuItems(QMenu* menu) {
+    QStringList items;
+    for (QAction* action : menu->actions())
+        items.append(action->isSeparator() ? QStringLiteral("-")
+                     : action->isEnabled() ? action->text()
+                                           : QStringLiteral("[%1]").arg(action->text()));
+    return items;
 }
 
 /// The dialog's parts list as rows, sprites indented by two spaces.
@@ -208,15 +219,23 @@ void PuppetWorkspaceTests::testNewPuppetDialogBuildsAPuppetFromDroppedSprites() 
     dialog.nameEdit()->setText(QStringLiteral("robot"));
     QVERIFY(create->isEnabled());
 
-    // Sprites dropped on empty space make a part each, named after the sprite.
+    // Sprites dropped on empty space make one part showing them, named after what they share.
     QTreeWidget* parts = dialog.partsTree();
-    dropSprites(parts, parts->viewport()->rect().bottomLeft() - QPoint(-10, 10), {doll.body->path, doll.head->path});
-    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head"}));
+    const QPoint empty = parts->viewport()->rect().bottomLeft() - QPoint(-10, 10);
+    dropSprites(parts, empty, {doll.body->path});
+    QCOMPARE(partRows(parts), (QStringList{"body", "  body"}));
+    dropSprites(parts, empty, {doll.head->path, doll.headSmiling->path});
+    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head", "  head-smiling"}));
     // Dropped on a part (or one of its sprites), they become its variants.
-    dropSprites(parts, parts->visualItemRect(parts->topLevelItem(1)->child(0)).center(), {doll.headSmiling->path});
+    dropSprites(parts, parts->visualItemRect(parts->topLevelItem(0)->child(0)).center(), {doll.head->path});
+    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "  head", "head", "  head", "  head-smiling"}));
+    parts->clearSelection();
+    parts->topLevelItem(0)->child(1)->setSelected(true);
+    dialog.removeSelected();
     QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head", "  head-smiling"}));
 
     // An empty part waits for sprites; a taken part name is refused.
+    parts->clearSelection();
     dialog.addPart();
     QCOMPARE(partRows(parts).mid(5), (QStringList{"part", "  (drop sprites here)"}));
     parts->topLevelItem(2)->setText(0, QStringLiteral("head"));
@@ -226,11 +245,13 @@ void PuppetWorkspaceTests::testNewPuppetDialogBuildsAPuppetFromDroppedSprites() 
     parts->topLevelItem(2)->setText(0, QStringLiteral("tail"));
     QCoreApplication::processEvents();
     QCOMPARE(parts->topLevelItem(2)->text(0), QStringLiteral("tail"));
+    parts->clearSelection();
     parts->setCurrentItem(parts->topLevelItem(2));
     dialog.findChild<QPushButton*>(QStringLiteral("newPuppetRemove"))->click();
     QCOMPARE(parts->topLevelItemCount(), 2);
 
     // The sprite list's own button adds its selection to the selected part.
+    parts->clearSelection();
     parts->setCurrentItem(parts->topLevelItem(0));
     auto* addToPart = dialog.findChild<QPushButton*>(QStringLiteral("newPuppetAddToPart"));
     QCOMPARE(addToPart->text(), QStringLiteral("Add to \"body\""));
@@ -252,6 +273,48 @@ void PuppetWorkspaceTests::testNewPuppetDialogBuildsAPuppetFromDroppedSprites() 
     QCOMPARE(doll.project.undoStack.count(), 1);
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("New Puppet"));
     QCOMPARE(workspace.selection(), (PuppetSelection{1, -1, -1}));
+}
+
+void PuppetWorkspaceTests::testNewPuppetDialogPartsMenu() {
+    // The new part's name: the dragged folder's, else what the sprites' names start with.
+    QCOMPARE(NewPuppetDialog::partNameFor({"/s/walk_01.png", "/s/walk_02.png", "/s/walk_10.png"}),
+             QStringLiteral("walk"));
+    QCOMPARE(NewPuppetDialog::partNameFor({"/s/arm.png", "/s/leg.png"}), QStringLiteral("arm"));
+    QCOMPARE(NewPuppetDialog::partNameFor({"/s/a1.png", "/s/a2.png"}, QStringLiteral("hands")), QStringLiteral("hands"));
+
+    Doll doll;
+    NewPuppetDialog dialog(&doll.project.session, {}, [](const SpritePtr&) { return true; });
+    dialog.resize(820, 560);
+    dialog.show();
+    QTreeWidget* parts = dialog.partsTree();
+    const QPoint empty = parts->viewport()->rect().bottomLeft() - QPoint(-10, 10);
+    dropSprites(parts, empty, {doll.head->path, doll.headSmiling->path, doll.body->path}, QStringLiteral("faces"));
+    dropSprites(parts, empty, {doll.body->path});
+    QCOMPARE(partRows(parts), (QStringList{"faces", "  head", "  head-smiling", "  body", "body", "  body"}));
+
+    // A part: rename or delete it. Sprites: take them out of their part, several at once.
+    parts->clearSelection();
+    parts->setCurrentItem(parts->topLevelItem(0));
+    std::unique_ptr<QMenu> partMenu(dialog.createPartsMenu());
+    QCOMPARE(menuItems(partMenu.get()), (QStringList{"Rename Part", "-", "Delete Part"}));
+    parts->clearSelection();
+    parts->topLevelItem(0)->child(1)->setSelected(true);
+    parts->topLevelItem(0)->child(2)->setSelected(true);
+    std::unique_ptr<QMenu> spriteMenu(dialog.createPartsMenu());
+    QCOMPARE(menuItems(spriteMenu.get()), QStringList{"Exclude 2 Sprites"});
+    spriteMenu->actions().first()->trigger();
+    QCOMPARE(partRows(parts), (QStringList{"faces", "  head", "body", "  body"}));
+
+    // A selected part takes its selected sprites with it; Delete deletes the selection.
+    parts->clearSelection();
+    parts->topLevelItem(1)->setSelected(true);
+    parts->topLevelItem(1)->child(0)->setSelected(true);
+    parts->topLevelItem(0)->setSelected(true);
+    std::unique_ptr<QMenu> bothMenu(dialog.createPartsMenu());
+    QCOMPARE(menuItems(bothMenu.get()), QStringList{"Delete 2 Parts"});
+    parts->setFocus();
+    QTest::keyClick(parts, Qt::Key_Delete);
+    QCOMPARE(parts->topLevelItemCount(), 0);
 }
 
 namespace {
@@ -962,16 +1025,6 @@ void PuppetWorkspaceTests::testPoseStripRenamesReordersAndRemoves() {
 }
 
 namespace {
-/// The texts of @p menu's actions, separators as "-", disabled ones in brackets.
-QStringList menuItems(QMenu* menu) {
-    QStringList items;
-    for (QAction* action : menu->actions())
-        items.append(action->isSeparator() ? QStringLiteral("-")
-                     : action->isEnabled() ? action->text()
-                                           : QStringLiteral("[%1]").arg(action->text()));
-    return items;
-}
-
 /// Triggers the action called @p text in frame @p frame's context menu.
 void triggerFrameAction(PuppetPoseStrip* strip, int frame, const QString& text) {
     std::unique_ptr<QMenu> menu(strip->createContextMenu(frame));
