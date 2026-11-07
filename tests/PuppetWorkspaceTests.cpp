@@ -180,9 +180,10 @@ void dropSprites(QTreeWidget* tree, const QPoint& pos, const QStringList& sprite
     QMimeData mime;
     mime.setData(QStringLiteral("application/x-sprat-sprite"), spritePaths.join(QLatin1Char('\n')).toUtf8());
     if (!folder.isEmpty()) mime.setData(QStringLiteral("application/x-sprat-group-name"), folder.toUtf8());
-    QDragEnterEvent enter(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    // A QPoint: Qt 6.5's drag enter and move events take no QPointF (later versions take either).
+    QDragEnterEvent enter(pos, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(tree->viewport(), &enter);
-    QDragMoveEvent move(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    QDragMoveEvent move(pos, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(tree->viewport(), &move);
     QDropEvent drop(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(tree->viewport(), &drop);
