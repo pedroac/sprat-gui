@@ -85,6 +85,40 @@ void keepRestPose(Puppet& puppet, const Puppet* before = nullptr);
 void moveSequence(Puppet& puppet, int from, int to);
 void moveStep(Puppet& puppet, int sequenceIndex, int from, int to);
 
+// Animation poses: poses an animation made as its own frames (PuppetPose::owner). The
+// Poses tab lists only the others, the shared poses, which any animation may play; an
+// animation edits only its own, so editing one animation never changes another.
+
+/// Keeps animation poses after the shared ones (each group in its order), so the shared
+/// poses are the first sharedPoseCount() poses.
+void keepAnimationPosesLast(Puppet& puppet);
+/// How many of the puppet's poses are shared (not made by an animation).
+int sharedPoseCount(const Puppet& puppet);
+/// The poses a step of sequence @p sequenceIndex may play: the shared ones, then its own.
+QStringList posesFor(const Puppet& puppet, int sequenceIndex);
+/// Adds a pose of sequence @p sequenceIndex with @p settings, named after the sequence
+/// ("walk 1", "walk 2"...), after every other pose. Returns its name.
+QString addAnimationPose(Puppet& puppet, int sequenceIndex, const QVector<PuppetPoseSetting>& settings);
+/// The index of the pose step @p stepIndex of sequence @p sequenceIndex plays, made the
+/// sequence's own first when it isn't: a copy of it, played by that step alone. -1 when the
+/// step plays no pose the puppet has.
+int ownStepPose(Puppet& puppet, int sequenceIndex, int stepIndex);
+/// Adds a shared copy of pose @p poseIndex named @p name, after the other shared poses.
+/// Returns its index.
+int addSharedCopy(Puppet& puppet, int poseIndex, const QString& name);
+/// Removes the animation poses that no step plays.
+void removeUnusedAnimationPoses(Puppet& puppet);
+/// Renames a sequence, with its poses: those named after it ("walk 1") are renamed after
+/// the new name when that name is free.
+void renameSequence(Puppet& puppet, int sequenceIndex, const QString& name);
+/// Removes a sequence, with its poses.
+void removeSequence(Puppet& puppet, int sequenceIndex);
+/// Adds a copy of a sequence after it, with copies of its poses. Returns the copy's index.
+int duplicateSequence(Puppet& puppet, int sequenceIndex);
+/// Duplicates step @p stepIndex: a step playing a pose of its own sequence gets a copy of
+/// the pose, so the two frames can be changed apart.
+void duplicateStep(Puppet& puppet, int sequenceIndex, int stepIndex);
+
 /// Adds a sprite variant for each path the part doesn't show yet. A sprite whose name
 /// another variant already goes by gets a unique explicit name. Returns how many it added.
 int addSpriteVariants(Puppet& puppet, int partIndex, const QStringList& spritePaths);

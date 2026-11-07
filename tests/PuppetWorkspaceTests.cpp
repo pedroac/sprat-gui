@@ -24,6 +24,8 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QTabBar>
 #include <QToolButton>
@@ -1172,12 +1174,13 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
     // Poses are added from the steps' context menu: on empty space at the end, or before
     // or after a step.
     std::unique_ptr<QMenu> emptyMenu(track->createContextMenu(-1));
-    QCOMPARE(menuItems(emptyMenu.get()), QStringList{"Add Pose"});
+    QCOMPARE(menuItems(emptyMenu.get()), (QStringList{"New Frame", "Add Pose"}));
     addPoseFromMenu(emptyMenu.get(), QStringLiteral("Add Pose"), QStringLiteral("nod"));
     QCOMPARE(stepRows(doll), QStringList{"nod 4/4"});
     QCOMPARE(workspace.selectedStep(), 0);
     std::unique_ptr<QMenu> menu(track->createContextMenu(0));
-    QCOMPARE(menuItems(menu.get()), (QStringList{"Add Pose Before", "Add Pose After", "-", "[Move to the left]",
+    QCOMPARE(menuItems(menu.get()), (QStringList{"New Frame Before", "New Frame After", "Add Pose Before",
+                                                 "Add Pose After", "-", "Save as Pose...", "-", "[Move to the left]",
                                                  "[Move to the right]", "Duplicate", "-", "Delete"}));
     addPoseFromMenu(menu.get(), QStringLiteral("Add Pose After"), QStringLiteral("smile"));
     QCOMPARE(stepRows(doll), (QStringList{"nod 4/4", "smile 4/4"}));
@@ -1212,6 +1215,16 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
     QTest::keyClick(track, Qt::Key_Delete);
     QCOMPARE(stepRows(doll).size(), 3);
 
+    // Steps beyond the view are reached by scrolling.
+    for (int i = 0; i < 30; ++i) emit track->duplicateRequested(0);
+    auto* trackScroll = qobject_cast<QScrollArea*>(track->parentWidget()->parentWidget());
+    QVERIFY(trackScroll);
+    QCOMPARE(track->width(), track->sizeHint().width());
+    QVERIFY(trackScroll->horizontalScrollBar()->maximum() > 0);
+    trackScroll->horizontalScrollBar()->setValue(trackScroll->horizontalScrollBar()->maximum());
+    const QPoint lastStep = track->mapTo(trackScroll->viewport(), QPoint(track->width() - 10, 40));
+    QVERIFY(trackScroll->viewport()->rect().contains(lastStep));
+
     // The animation's own settings, and its name.
     workspace.findChild<QSpinBox*>(QStringLiteral("puppetAnimationFps"))->setValue(12);
     workspace.findChild<QComboBox*>(QStringLiteral("puppetAnimationLoop"))->setCurrentIndex(2);
@@ -1229,6 +1242,113 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
     while (doll.project.undoStack.canUndo()) doll.project.undoStack.undo();
     QVERIFY(doll.puppet().sequences.isEmpty());
     QCOMPARE(list->count(), 0);
+}
+
+namespace {
+/// Triggers @p menu's action @p text.
+void triggerMenuItem(QMenu* menu, const QString& text) {
+    for (QAction* action : menu->actions()) {
+        if (action->text() == text) {
+            action->trigger();
+            return;
+        }
+    }
+    QFAIL(qPrintable(QStringLiteral("No %1").arg(text)));
+}
+
+/// The poses offered by @p menu's submenu @p title.
+QStringList submenuItems(QMenu* menu, const QString& title) {
+    for (QAction* action : menu->actions()) {
+        if (action->text() == title && action->menu()) return menuItems(action->menu());
+    }
+    return {};
+}
+
+/// The angle pose @p name sets for part @p part, if any.
+std::optional<int> poseAngle(const Puppet& puppet, const QString& name, const QString& part) {
+    for (const PuppetPose& pose : puppet.poses) {
+        if (pose.name != name) continue;
+        for (const PuppetPoseSetting& setting : pose.settings) {
+            if (setting.part == part) return setting.angle;
+        }
+    }
+    return std::nullopt;
+}
+}  // namespace
+
+void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations() {
+    Doll doll;
+    addDollPoses(doll);
+    Puppet& puppet = doll.project.session.activeAtlas().puppets.first();
+    puppet.sequences = {{QStringLiteral("walk"), 8, AnimationLoopMode::Loop, {{QStringLiteral("nod"), 2, 2, false}}},
+                        {QStringLiteral("talk"), 8, AnimationLoopMode::Loop, {{QStringLiteral("nod"), 2, 2, false}}}};
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.bottomTabs()->setCurrentIndex(1);
+    PuppetSequenceTrack* track = workspace.sequenceTrack();
+    workspace.select({0, 1, -1});  // the head
+
+    // A new frame after "nod" is the animation's own pose, starting as a copy of it.
+    std::unique_ptr<QMenu> menu(track->createContextMenu(0));
+    triggerMenuItem(menu.get(), QStringLiteral("New Frame After"));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk 1 2/2"}));
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("New Frame"));
+    QCOMPARE(doll.puppet().poses.last().owner, QStringLiteral("walk"));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk 1"), QStringLiteral("head")), std::optional<int>(20));
+    // The Poses tab lists only shared poses; steps of another animation can't play it.
+    QCOMPARE(workspace.poseStrip()->count(), 3);
+    std::unique_ptr<QMenu> walkMenu(track->createContextMenu(-1));
+    QCOMPARE(submenuItems(walkMenu.get(), QStringLiteral("Add Pose")), (QStringList{"rest", "nod", "smile", "walk 1"}));
+
+    // Stopped on the new frame, the canvas edits it, and only it.
+    QCOMPARE(workspace.selectedStep(), 1);
+    QVERIFY(workspace.editingStep());
+    workspace.setPartAngle(1, 45);
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk 1"), QStringLiteral("head")), std::optional<int>(45));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("nod"), QStringLiteral("head")), std::optional<int>(20));
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(45));
+
+    // Onion skin: the step before shows behind, two more images (body and head).
+    const int images = drawnParts(workspace.canvas()).size();
+    workspace.findChild<QCheckBox*>(QStringLiteral("puppetOnionSkin"))->setChecked(true);
+    QCOMPARE(drawnParts(workspace.canvas()).size(), images + 2);
+    QVERIFY(drawnParts(workspace.canvas()).contains(turnedHead(20)));  // the ghost of "nod"
+    workspace.findChild<QCheckBox*>(QStringLiteral("puppetOnionSkin"))->setChecked(false);
+
+    // A step playing a shared pose gets its own copy when edited: "talk" still nods by 20°.
+    workspace.selectStep(0);
+    workspace.setPartAngle(1, 30);
+    QCOMPARE(stepRows(doll), (QStringList{"walk 2 2/2", "walk 1 2/2"}));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk 2"), QStringLiteral("head")), std::optional<int>(30));
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("nod"), QStringLiteral("head")), std::optional<int>(20));
+    QCOMPARE(stepRows(doll, 1), QStringList{"nod 2/2"});
+    QVERIFY(workspace.findChild<QLabel*>(QStringLiteral("puppetStepNote"))->text().contains(QStringLiteral("walk 2")));
+    // More turns of that step go on the copy; undoing them puts "nod" back.
+    workspace.setPartAngle(1, 35);
+    QCOMPARE(doll.puppet().poses.size(), 5);
+    doll.project.undoStack.undo();
+    doll.project.undoStack.undo();
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk 1 2/2"}));
+    QCOMPARE(doll.puppet().poses.size(), 4);
+
+    // Mid-way to a pose, the canvas only plays.
+    emit track->playheadMoved(0);
+    QVERIFY(!workspace.editingStep());
+    workspace.setPartAngle(1, 60);
+    QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("nod"), QStringLiteral("head")), std::optional<int>(20));
+
+    // Saved as a pose, a frame is copied to the Poses tab.
+    QVERIFY(!workspace.savePoseFromStep(1, QStringLiteral("nod")).isEmpty());  // taken
+    QCOMPARE(workspace.savePoseFromStep(1, QStringLiteral("look up")), QString());
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "nod", "smile", "look up", "walk 1"}));
+    QCOMPARE(workspace.poseStrip()->count(), 4);
+
+    // Renaming the animation renames its frames; removing the frame's step removes it.
+    workspace.findChild<QListWidget*>(QStringLiteral("puppetAnimations"))->item(0)->setText(QStringLiteral("stroll"));
+    QCoreApplication::processEvents();
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "stroll 1 2/2"}));
+    workspace.removeStep(1);
+    QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "nod", "smile", "look up"}));
 }
 
 void PuppetWorkspaceTests::testPlayingAnAnimation() {

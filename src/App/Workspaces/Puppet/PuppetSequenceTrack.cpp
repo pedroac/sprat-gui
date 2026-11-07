@@ -35,6 +35,9 @@ void PuppetSequenceTrack::showSteps(const QVector<Block>& blocks, int selected, 
     m_poseNames = poseNames;
     m_selected = selected >= 0 && selected < blocks.size() ? selected : -1;
     m_playhead = std::min(m_playhead, totalFrames() - 1);
+    // As wide as the steps at least: the scroll area around it then scrolls to the last ones
+    // instead of squeezing it into view.
+    setMinimumWidth(sizeHint().width());
     updateGeometry();
     resize(std::max(sizeHint().width(), parentWidget() ? parentWidget()->width() : 0), sizeHint().height());
     update();
@@ -114,7 +117,8 @@ void PuppetSequenceTrack::paintEvent(QPaintEvent*) {
         const Block& block = m_blocks[i];
         const QRect box(blockLeft(i), top, blockWidth(i) - 2, BLOCK_HEIGHT);
         const bool selected = i == m_selected;
-        painter.setPen(QPen(selected ? colors.color(QPalette::Highlight) : colors.color(QPalette::Mid), selected ? 2 : 1));
+        painter.setPen(QPen(selected ? colors.color(QPalette::Highlight) : colors.color(QPalette::Mid), selected ? 2 : 1,
+                            block.shared ? Qt::DashLine : Qt::SolidLine));
         painter.setBrush(colors.color(QPalette::Base));
         painter.drawRoundedRect(box, 3, 3);
         // The ramp: the pose being reached over `in` frames (a step for ease:step), then held.
@@ -173,13 +177,15 @@ void PuppetSequenceTrack::mousePressEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton || m_blocks.isEmpty()) return;
     const int x = event->position().toPoint().x();
     const int step = stepAtX(x);
-    if (step >= 0 && step != m_selected) {
+    m_scrubbing = true;
+    if (step >= 0) {
+        // The workspace puts the playhead where the step's pose arrives; dragging scrubs.
         m_selected = step;
         emit stepSelected(step);
+    } else {
+        m_playhead = frameAtX(x);
+        emit playheadMoved(m_playhead);
     }
-    m_scrubbing = true;
-    m_playhead = frameAtX(x);
-    emit playheadMoved(m_playhead);
     update();
 }
 
@@ -228,12 +234,20 @@ QMenu* PuppetSequenceTrack::posesMenu(const QString& title, int stepIndex, QWidg
 
 QMenu* PuppetSequenceTrack::createContextMenu(int step) {
     auto* menu = new QMenu(this);
+    const QIcon add(QStringLiteral(":/icons/add-ellipse.svg"));
     if (step < 0) {
+        const int last = int(m_blocks.size()) - 1;
+        menu->addAction(add, tr("New Frame"), this, [this, last]() { emit newFrameRequested(last + 1, last); });
         menu->addMenu(posesMenu(tr("Add Pose"), m_blocks.size(), menu));
         return menu;
     }
+    menu->addAction(add, tr("New Frame Before"), this, [this, step]() { emit newFrameRequested(step, step); });
+    menu->addAction(add, tr("New Frame After"), this, [this, step]() { emit newFrameRequested(step + 1, step); });
     menu->addMenu(posesMenu(tr("Add Pose Before"), step, menu));
     menu->addMenu(posesMenu(tr("Add Pose After"), step + 1, menu));
+    menu->addSeparator();
+    QAction* save = menu->addAction(tr("Save as Pose..."), this, [this, step]() { emit savePoseRequested(step); });
+    save->setEnabled(!m_blocks[step].missing);
     menu->addSeparator();
     QAction* left = menu->addAction(tr("Move to the left"), this, [this, step]() { emit moveRequested(step, step - 1); });
     left->setEnabled(step > 0);

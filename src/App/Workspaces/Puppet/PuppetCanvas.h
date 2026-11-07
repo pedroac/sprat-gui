@@ -66,6 +66,17 @@ public:
         QPainterPath area;         ///< Where the joint may go; empty when it can't drift
     };
 
+    /// A puppet drawn faintly behind the shown one, in one colour: another frame of an
+    /// animation (onion skin). Its parts are drawn as Part draws them.
+    struct OnionSkin {
+        struct Ghost {
+            QPixmap image;
+            QTransform transform;
+        };
+        QVector<Ghost> parts;
+        QColor tint;
+    };
+
     explicit PuppetCanvas(QWidget* parent = nullptr);
 
     /// Shows @p parts, in draw order (the first at the back). @p selectedPart is outlined,
@@ -77,6 +88,11 @@ public:
     void setPosing(bool posing);
     /// Off while an animation plays: clicks still select parts, but nothing moves or attaches.
     void setEditable(bool editable);
+    /// Whether the pivot handle attaches and detaches parts (on by default). Off while
+    /// editing an animation's frame, which changes the frame's pose, not the rig.
+    void setRigEditable(bool rigEditable);
+    /// Drawn behind the parts from the next showPuppet() on; empty for none.
+    void setOnionSkins(const QVector<OnionSkin>& skins);
     /// Shows only the origin cross.
     void clearPuppet();
     /// Zooms to fit the puppet, and keeps fitting it as the view resizes until the user zooms
@@ -175,6 +191,8 @@ private:
 
     bool m_posing = false;
     bool m_editable = true;
+    bool m_rigEditable = true;
+    QVector<OnionSkin> m_onionSkins;
     bool m_handlePressed = false;  ///< The left button went down on the pivot handle
     bool m_attaching = false;      ///< The pivot handle is being dragged
     QPointF m_attachPointer;       ///< Where it is, in scene coordinates

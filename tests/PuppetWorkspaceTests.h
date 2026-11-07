@@ -37,6 +37,7 @@ private slots:
     void testPoseStripContextMenuWorksLikeTheFrameList();
     void testBuildingAnAnimationFromPoses();
     void testPlayingAnAnimation();
+    void testAnimationFramesAreEditedApartFromOtherAnimations();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();
     void testPositionEditsAreOneUndoStep();

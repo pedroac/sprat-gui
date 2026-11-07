@@ -185,6 +185,9 @@ listing the atlas's timelines, as the source for variants.
 6. **Animations**: done. An Animations tab lists the sequences; each shows its steps as
    blocks sized by frames, poses added from its context menu, and plays on the canvas, others
    playing along.
-7. **Later**: onion skin of the previous pose, then constraint solving while posing.
+7. **Animation frames**: done. Steps edited on the canvas once their pose arrives; New Frame
+   makes poses owned by the animation (hidden from the Poses tab); a shared pose is copied on
+   edit; Save as Pose; onion skin of the steps before and after.
+8. **Later**: constraint solving while posing.
 
 Each phase updates README.md (workspace section and hotkeys), CHANGELOG.md and AGENTS.md.

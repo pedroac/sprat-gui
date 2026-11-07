@@ -138,6 +138,7 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
     for (const PuppetPose& pose : puppet.poses) {
         QJsonObject poseObj;
         poseObj["name"] = pose.name;
+        if (!pose.owner.isEmpty()) poseObj["animation"] = pose.owner;
         QJsonArray settingsArr;
         for (const PuppetPoseSetting& s : pose.settings) {
             QJsonObject sObj;
@@ -215,6 +216,7 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
         const QJsonObject poseObj = poseVal.toObject();
         PuppetPose pose;
         pose.name = poseObj["name"].toString();
+        pose.owner = poseObj["animation"].toString();
         for (const auto& sVal : poseObj["parts"].toArray()) {
             const QJsonObject sObj = sVal.toObject();
             PuppetPoseSetting s;
@@ -1118,6 +1120,7 @@ ProjectPayloadApplyResult ProjectPayloadCodec::applyToLayout(const QJsonObject& 
                 atlas.puppets.append(puppetFromJson(pVal.toObject(), spDir));
                 // Projects from before the Rest pose get one.
                 PuppetEditing::keepRestPose(atlas.puppets.last());
+                PuppetEditing::keepAnimationPosesLast(atlas.puppets.last());
             }
 
             out.atlases.append(atlas);

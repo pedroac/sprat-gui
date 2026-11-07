@@ -74,6 +74,10 @@ struct PuppetPoseSetting {
 struct PuppetPose {
     QString name;
     QVector<PuppetPoseSetting> settings;
+    /// The animation (sequence) that made this pose as one of its frames, or empty for a pose
+    /// of the Poses tab, which any animation may play. Kept in the project only: sprat-cli
+    /// has no such setting, so it is exported as a plain pose.
+    QString owner;
 
     bool operator==(const PuppetPose&) const = default;
 };

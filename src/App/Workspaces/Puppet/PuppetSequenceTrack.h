@@ -12,9 +12,11 @@ class QMenu;
  *        `hold` frames, with the pose's thumbnail and name; a frame ruler and a playhead.
  *
  * It only shows them and asks for changes, like an animation's frame list: clicking selects
- * a step and moves the playhead there, dragging moves the playhead, double-clicking opens a
- * step's pose, Delete or Backspace removes the selected step, and the context menu adds poses
- * (at the end, or before or after a step), moves, duplicates and deletes steps.
+ * a step (the workspace puts the playhead where its pose arrives), dragging moves the
+ * playhead, double-clicking opens a step's pose, Delete or Backspace removes the selected
+ * step, and the context menu adds new frames (this animation's own poses) or poses (at the
+ * end, or before or after a step), saves a step's pose to the Poses tab, moves, duplicates
+ * and deletes steps. Steps playing a shared pose are drawn with a dashed border.
  * PuppetWorkspace applies the changes and calls showSteps().
  */
 class PuppetSequenceTrack : public QWidget {
@@ -30,6 +32,7 @@ public:
         bool snap = false;
         QPixmap thumbnail;
         bool missing = false;  ///< The puppet has no pose of that name
+        bool shared = false;   ///< A pose of the Poses tab, not one of this animation's own
     };
 
     explicit PuppetSequenceTrack(QWidget* parent = nullptr);
@@ -53,6 +56,11 @@ signals:
     void playheadMoved(int frame);
     /// Add a step showing @p pose at index @p stepIndex.
     void addRequested(int stepIndex, const QString& pose);
+    /// Add a step at index @p stepIndex playing a new pose of the animation, a copy of step
+    /// @p copyOf's pose (-1 for an empty pose).
+    void newFrameRequested(int stepIndex, int copyOf);
+    /// Copy step @p stepIndex's pose to the Poses tab.
+    void savePoseRequested(int stepIndex);
     /// Move step @p from to index @p to (its index afterwards).
     void moveRequested(int from, int to);
     void duplicateRequested(int stepIndex);

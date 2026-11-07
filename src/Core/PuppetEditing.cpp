@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <numeric>
 #include <QCollator>
+#include <QHash>
 #include <QCoreApplication>
 
 namespace {
@@ -407,6 +408,158 @@ int addSpriteVariants(Puppet& puppet, int partIndex, const QStringList& spritePa
         ++added;
     }
     return added;
+}
+
+}  // namespace PuppetEditing
+
+namespace {
+
+bool validSequence(const Puppet& puppet, int sequenceIndex) {
+    return sequenceIndex >= 0 && sequenceIndex < puppet.sequences.size();
+}
+
+int poseIndexOf(const Puppet& puppet, const QString& name) {
+    for (int i = 0; i < puppet.poses.size(); ++i) {
+        if (puppet.poses[i].name == name) return i;
+    }
+    return -1;
+}
+
+/// The first "SEQUENCE N" pose name not taken, N from 1.
+QString animationPoseName(const Puppet& puppet, const QString& sequence) {
+    const QStringList taken = PuppetEditing::poseNames(puppet);
+    for (int n = 1;; ++n) {
+        const QString candidate = QStringLiteral("%1 %2").arg(sequence).arg(n);
+        if (!taken.contains(candidate)) return candidate;
+    }
+}
+
+/// A copy of pose @p poseIndex owned by sequence @p sequence, added last. Returns its name.
+QString addAnimationCopy(Puppet& puppet, int poseIndex, const QString& sequence) {
+    PuppetPose copy = puppet.poses[poseIndex];
+    copy.name = animationPoseName(puppet, sequence);
+    copy.owner = sequence;
+    puppet.poses.append(copy);
+    return copy.name;
+}
+
+}  // namespace
+
+namespace PuppetEditing {
+
+void keepAnimationPosesLast(Puppet& puppet) {
+    std::stable_partition(puppet.poses.begin(), puppet.poses.end(),
+                          [](const PuppetPose& pose) { return pose.owner.isEmpty(); });
+}
+
+int sharedPoseCount(const Puppet& puppet) {
+    return int(std::count_if(puppet.poses.cbegin(), puppet.poses.cend(),
+                             [](const PuppetPose& pose) { return pose.owner.isEmpty(); }));
+}
+
+QStringList posesFor(const Puppet& puppet, int sequenceIndex) {
+    const QString owner = validSequence(puppet, sequenceIndex) ? puppet.sequences[sequenceIndex].name : QString();
+    QStringList shared;
+    QStringList own;
+    for (const PuppetPose& pose : puppet.poses) {
+        if (pose.owner.isEmpty()) shared.append(pose.name);
+        else if (!owner.isEmpty() && pose.owner == owner) own.append(pose.name);
+    }
+    return shared + own;
+}
+
+QString addAnimationPose(Puppet& puppet, int sequenceIndex, const QVector<PuppetPoseSetting>& settings) {
+    if (!validSequence(puppet, sequenceIndex)) return {};
+    PuppetPose pose;
+    pose.owner = puppet.sequences[sequenceIndex].name;
+    pose.name = animationPoseName(puppet, pose.owner);
+    pose.settings = settings;
+    puppet.poses.append(pose);
+    return pose.name;
+}
+
+int ownStepPose(Puppet& puppet, int sequenceIndex, int stepIndex) {
+    if (!validSequence(puppet, sequenceIndex)) return -1;
+    PuppetSequence& sequence = puppet.sequences[sequenceIndex];
+    if (stepIndex < 0 || stepIndex >= sequence.steps.size()) return -1;
+    const int pose = poseIndexOf(puppet, sequence.steps[stepIndex].pose);
+    if (pose < 0 || puppet.poses[pose].owner == sequence.name) return pose;
+    // Shared, or another animation's: only this step plays the copy.
+    sequence.steps[stepIndex].pose = addAnimationCopy(puppet, pose, sequence.name);
+    return int(puppet.poses.size()) - 1;
+}
+
+int addSharedCopy(Puppet& puppet, int poseIndex, const QString& name) {
+    if (poseIndex < 0 || poseIndex >= puppet.poses.size()) return -1;
+    PuppetPose copy = puppet.poses[poseIndex];
+    copy.name = name;
+    copy.owner.clear();
+    const int index = sharedPoseCount(puppet);
+    puppet.poses.insert(index, copy);
+    return index;
+}
+
+void removeUnusedAnimationPoses(Puppet& puppet) {
+    QSet<QString> played;
+    for (const PuppetSequence& sequence : puppet.sequences) {
+        for (const PuppetSequenceStep& step : sequence.steps) played.insert(step.pose);
+    }
+    puppet.poses.removeIf([&played](const PuppetPose& pose) {
+        return !pose.owner.isEmpty() && !played.contains(pose.name);
+    });
+}
+
+void renameSequence(Puppet& puppet, int sequenceIndex, const QString& name) {
+    if (!validSequence(puppet, sequenceIndex)) return;
+    const QString old = puppet.sequences[sequenceIndex].name;
+    if (old == name) return;
+    puppet.sequences[sequenceIndex].name = name;
+    const QString prefix = old + QLatin1Char(' ');
+    for (int i = 0; i < puppet.poses.size(); ++i) {
+        PuppetPose& pose = puppet.poses[i];
+        if (pose.owner != old) continue;
+        pose.owner = name;
+        // "walk 3" becomes "run 3"; a pose the user named otherwise keeps its name.
+        bool numbered = false;
+        const QString number = pose.name.startsWith(prefix) ? pose.name.mid(prefix.size()) : QString();
+        number.toInt(&numbered);
+        if (!numbered) continue;
+        const QString renamed = QStringLiteral("%1 %2").arg(name, number);
+        if (poseIndexOf(puppet, renamed) < 0) renamePose(puppet, i, renamed);
+    }
+}
+
+void removeSequence(Puppet& puppet, int sequenceIndex) {
+    if (!validSequence(puppet, sequenceIndex)) return;
+    puppet.sequences.removeAt(sequenceIndex);
+    removeUnusedAnimationPoses(puppet);
+}
+
+int duplicateSequence(Puppet& puppet, int sequenceIndex) {
+    if (!validSequence(puppet, sequenceIndex)) return -1;
+    PuppetSequence copy = puppet.sequences[sequenceIndex];
+    copy.name = uniqueName(copy.name, sequenceNames(puppet));
+    // The copy plays copies of the original's poses, so changing one changes only it.
+    QHash<QString, QString> copied;
+    for (PuppetSequenceStep& step : copy.steps) {
+        const int pose = poseIndexOf(puppet, step.pose);
+        if (pose < 0 || puppet.poses[pose].owner != puppet.sequences[sequenceIndex].name) continue;
+        if (!copied.contains(step.pose)) copied.insert(step.pose, addAnimationCopy(puppet, pose, copy.name));
+        step.pose = copied.value(step.pose);
+    }
+    puppet.sequences.insert(sequenceIndex + 1, copy);
+    return sequenceIndex + 1;
+}
+
+void duplicateStep(Puppet& puppet, int sequenceIndex, int stepIndex) {
+    if (!validSequence(puppet, sequenceIndex)) return;
+    QVector<PuppetSequenceStep>& steps = puppet.sequences[sequenceIndex].steps;
+    if (stepIndex < 0 || stepIndex >= steps.size()) return;
+    PuppetSequenceStep copy = steps[stepIndex];
+    const int pose = poseIndexOf(puppet, copy.pose);
+    const QString owner = puppet.sequences[sequenceIndex].name;
+    if (pose >= 0 && puppet.poses[pose].owner == owner) copy.pose = addAnimationCopy(puppet, pose, owner);
+    puppet.sequences[sequenceIndex].steps.insert(stepIndex + 1, copy);
 }
 
 }  // namespace PuppetEditing

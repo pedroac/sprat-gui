@@ -35,6 +35,9 @@ constexpr qreal MARKER_DOT_RADIUS = 3.5;
 constexpr qreal TURN_ARC_RADIUS = 36;
 /// Opacity of a part the shown pose doesn't set.
 constexpr qreal EXCLUDED_OPACITY = 0.35;
+/// Onion skins: how opaque, and their depth, behind every part.
+constexpr qreal ONION_SKIN_OPACITY = 0.3;
+constexpr qreal ONION_SKIN_Z = -1;
 /// Screen radius of the selected part's turn handle, at the end of its angle line.
 constexpr qreal TURN_HANDLE_RADIUS = 5;
 /// Degrees between the points of a drawn arc.
@@ -98,6 +101,14 @@ void PuppetCanvas::setEditable(bool editable) {
     m_editable = editable;
 }
 
+void PuppetCanvas::setRigEditable(bool rigEditable) {
+    m_rigEditable = rigEditable;
+}
+
+void PuppetCanvas::setOnionSkins(const QVector<OnionSkin>& skins) {
+    m_onionSkins = skins;
+}
+
 void PuppetCanvas::clearPuppet() {
     showPuppet({}, {}, -1, std::nullopt);
 }
@@ -110,6 +121,24 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& b
     m_bones = bones;
     m_selectedPart = selectedPart;
     m_selectedPivot = selectedPivot;
+    // Onion skins behind everything, tinted, and not parts: clicks and fits ignore them.
+    for (int skin = 0; skin < m_onionSkins.size(); ++skin) {
+        for (const OnionSkin::Ghost& ghost : m_onionSkins[skin].parts) {
+            if (ghost.image.isNull()) continue;
+            QPixmap tinted = ghost.image;
+            {
+                QPainter painter(&tinted);
+                painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+                painter.fillRect(tinted.rect(), m_onionSkins[skin].tint);
+            }
+            auto* item = m_scene->addPixmap(tinted);
+            item->setTransform(ghost.transform);
+            item->setTransformationMode(Qt::FastTransformation);
+            item->setZValue(ONION_SKIN_Z - skin);
+            item->setOpacity(ONION_SKIN_OPACITY);
+            item->setAcceptedMouseButtons(Qt::NoButton);
+        }
+    }
     for (int i = 0; i < parts.size(); ++i) {
         const Part& part = parts[i];
         if (!part.placed || part.image.isNull()) continue;
@@ -281,7 +310,8 @@ void PuppetCanvas::cancelAttach() {
 }
 
 void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
-    if (m_editable && event->button() == Qt::LeftButton && !m_spacePressed && onPivotHandle(event->pos())) {
+    if (m_editable && m_rigEditable && event->button() == Qt::LeftButton && !m_spacePressed
+        && onPivotHandle(event->pos())) {
         setFocus();
         m_handlePressed = true;
         m_pressPos = event->pos();
@@ -370,7 +400,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (event->buttons() == Qt::NoButton) {
         const int hovered = partAt(event->pos());
         const Qt::CursorShape cursor = !m_editable                  ? Qt::ArrowCursor
-            : onPivotHandle(event->pos())                           ? Qt::CrossCursor
+            : m_rigEditable && onPivotHandle(event->pos())          ? Qt::CrossCursor
             : onTurnHandle(event->pos())                            ? Qt::OpenHandCursor
             : isMovable(hovered)                                    ? Qt::SizeAllCursor
             : isAttached(hovered) && m_posing                       ? Qt::SizeAllCursor
@@ -461,7 +491,7 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     }
 
     // The pivot handle: a ring around the selected part's pivot cross.
-    if (m_selectedPivot) {
+    if (m_selectedPivot && m_rigEditable) {
         const qreal radius = PIVOT_HANDLE_RADIUS / qMax(0.01, zoom());
         QPen pen(highlight, 1.5);
         pen.setCosmetic(true);

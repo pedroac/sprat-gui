@@ -15,6 +15,7 @@ class PuppetPoseStrip;
 class PuppetSequenceTrack;
 class PuppetTreeWidget;
 class ProjectSession;
+class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -125,7 +126,10 @@ public:
     QListWidget* poseParts() const { return m_poseParts; }
 
     // Animations (sprat-cli's sequences): poses played one after another, each reached in
-    // `in` frames and held `hold` frames. Each edit is one undo step.
+    // `in` frames and held `hold` frames. Each edit is one undo step. While stopped on a
+    // step whose pose has arrived, the canvas edits that pose: the animation's own (a frame
+    // made for it), or, for a shared pose (from the Poses tab), a copy the step then plays,
+    // so editing one animation never changes another. The Poses tab lists shared poses only.
     void selectSequence(int sequenceIndex);
     void selectStep(int stepIndex);
     void addSequence(int sequenceIndex);
@@ -134,6 +138,14 @@ public:
     void renameSequence(int sequenceIndex, const QString& name);
     /// Adds a step showing @p pose at index @p stepIndex of the selected animation, and selects it.
     void addStep(int stepIndex, const QString& pose);
+    /// Adds a step at index @p stepIndex playing a new pose of the selected animation: a copy
+    /// of step @p copyOf's pose and timing (-1 for an empty pose), and selects it.
+    void addFrame(int stepIndex, int copyOf);
+    /// Copies step @p stepIndex's pose to the Poses tab as @p name. Returns why it couldn't,
+    /// or an empty string.
+    QString savePoseFromStep(int stepIndex, const QString& name);
+    /// Whether the canvas edits the selected step's pose: stopped where it has arrived.
+    bool editingStep() const;
     void moveStep(int from, int to);
     void duplicateStep(int stepIndex);
     void removeStep(int stepIndex);
@@ -211,7 +223,18 @@ private:
     /// Applies @p change to the selected animation (or its selected step) as one undo step.
     void editSequence(const QString& text, const QString& mergeKey, const std::function<void(PuppetSequence&)>& change);
     void editStep(const QString& text, const QString& mergeKey, const std::function<void(PuppetSequenceStep&)>& change);
-    /// The parts the selected pose sets.
+    /// The pose the canvas edits: the selected frame of the Poses tab, the selected step's
+    /// in the Animations tab while editingStep(), else -1.
+    int editedPose() const;
+    /// Merges the Angle field's edits of the selected part in the edited pose or step.
+    QString angleEditKey() const;
+    /// The selected animation where step @p stepIndex's pose has arrived.
+    QVector<PuppetPartState> arrivalStates(const Puppet& puppet, int stepIndex) const;
+    /// The steps before and after the selected one, when onion skin is on and it is edited.
+    QVector<PuppetCanvas::OnionSkin> onionSkins(const Puppet& puppet) const;
+    /// Asks a name for step @p stepIndex's pose, and copies it to the Poses tab.
+    void askSavePoseFromStep(int stepIndex);
+    /// The parts the edited pose sets.
     QSet<int> partsInPose(const Puppet& puppet) const;
     std::optional<PuppetCanvas::JointRange> jointRange(const Puppet& puppet,
                                                        const QVector<PuppetPartPlacement>& placements) const;
@@ -262,6 +285,9 @@ private:
     QSpinBox* m_stepIn = nullptr;
     QSpinBox* m_stepHold = nullptr;
     QComboBox* m_stepEase = nullptr;
+    QCheckBox* m_onionSkin = nullptr;
+    QLabel* m_stepNote = nullptr;  ///< Whose pose the selected step plays
+    QString m_copyNote;            ///< Set when an edit made a shared pose the step's own
     mutable QHash<QString, QPixmap> m_images;  ///< By sprite path
     QHash<QString, SpritePtr> m_spritesByPath;  ///< The active atlas's laid-out sprites
     QHash<QString, SpritePtr> m_spritesByName;
