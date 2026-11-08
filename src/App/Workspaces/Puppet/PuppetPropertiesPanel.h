@@ -2,14 +2,17 @@
 #include <functional>
 #include <optional>
 #include <QHash>
+#include <QColor>
 #include <QPixmap>
 #include <QPoint>
+#include <QPointF>
 #include <QStringList>
 #include <QVector>
 #include <QWidget>
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QFormLayout;
 class QHBoxLayout;
 class QLabel;
@@ -19,6 +22,7 @@ class QPushButton;
 class QRadioButton;
 class QSpinBox;
 class QStackedWidget;
+class QToolButton;
 
 /**
  * @brief The Puppet workspace's right panel: the selected puppet's, part's or variant's
@@ -57,7 +61,12 @@ public:
         QVector<MarkerChoice> childMarkers;
         /// The angle it is tried at: from its parent, or around its pivot. Not saved.
         int angle = 0;
-        /// A pose is shown: Angle and Shows edit it. Otherwise (an animation playing) they are off.
+        /// How the shown pose scales, fades and tints it.
+        QPointF scale{1.0, 1.0};
+        double opacity = 1.0;
+        QColor tint = Qt::white;
+        /// A pose is shown: Angle, Scale, Opacity, Tint and Shows edit it. Otherwise (an
+        /// animation playing) they are off.
         bool posing = false;
         /// Its variants' names, the order to list them in (indexes, by name), and the one the
         /// shown pose has it show.
@@ -94,6 +103,12 @@ signals:
     void limitsChanged(int leeway, bool limited, int angleMin, int angleMax);
     /// Try the part at @p angle (not saved).
     void angleChanged(int angle);
+    /// Scale the part by @p scale (x, y factors) in the selected pose.
+    void scaleChanged(const QPointF& scale);
+    /// Fade the part to @p opacity (0 to 1) in the selected pose.
+    void opacityChanged(double opacity);
+    /// Tint the part @p tint in the selected pose.
+    void tintChanged(const QColor& tint);
     /// Show variant @p variantIndex in the selected pose.
     void shownVariantChanged(int variantIndex);
     /// The markers the part should neither show nor offer for joints.
@@ -112,6 +127,11 @@ private:
     void updatePlacementRows();
     /// The Angle field's range: the joint's limits, or a free turn.
     void updateAngleRange();
+    void buildLooks(QWidget* page, QFormLayout* form);
+    void showLooks(const Placement& placement);
+    void emitScale();
+    void showTint(const QColor& tint);
+    void pickTint();
 
     QStackedWidget* m_pages = nullptr;
     NameValidator m_validator;
@@ -138,6 +158,18 @@ private:
     QSpinBox* m_angleMin = nullptr;
     QSpinBox* m_angleMax = nullptr;
     QSpinBox* m_angle = nullptr;
+    QHBoxLayout* m_scaleRow = nullptr;
+    QDoubleSpinBox* m_scaleX = nullptr;
+    QDoubleSpinBox* m_scaleY = nullptr;
+    QToolButton* m_scaleLinked = nullptr;
+    QHBoxLayout* m_flipRow = nullptr;
+    QToolButton* m_flipX = nullptr;
+    QToolButton* m_flipY = nullptr;
+    QSpinBox* m_opacity = nullptr;
+    QHBoxLayout* m_tintRow = nullptr;
+    QPushButton* m_tint = nullptr;
+    QToolButton* m_clearTint = nullptr;
+    QColor m_shownTint = Qt::white;
     QListWidget* m_markers = nullptr;
     QComboBox* m_shownVariant = nullptr;
     Placement m_placement;  ///< As shown

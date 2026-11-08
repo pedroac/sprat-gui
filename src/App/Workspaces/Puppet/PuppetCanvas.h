@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <QColor>
 #include <QPainterPath>
 #include <QPixmap>
 #include <QPointF>
@@ -44,6 +45,8 @@ public:
         QPointF joint;              ///< Where it turns: its pivot or its joint
         bool attachTarget = false;  ///< The selected part may hang from it
         bool included = true;       ///< Set by the pose shown; drawn faint when not
+        double opacity = 1.0;       ///< As the pose shown fades it
+        QColor tint = Qt::white;    ///< Multiplies its colors, as the pose shown tints it
         QVector<Marker> markers;    ///< Drawn faintly (the selected part's labelled); targets when attaching
     };
 
@@ -72,12 +75,17 @@ public:
         struct Ghost {
             QPixmap image;
             QTransform transform;
+            double opacity = 1.0;  ///< The part's own, as its frame fades it
         };
         QVector<Ghost> parts;
         QColor tint;
     };
 
     explicit PuppetCanvas(QWidget* parent = nullptr);
+
+    /// @p image with its colors multiplied by @p tint (white leaves it as it is), as sprat-cli
+    /// tints a part.
+    static QPixmap tinted(const QPixmap& image, const QColor& tint);
 
     /// Shows @p parts, in draw order (the first at the back). @p selectedPart is outlined,
     /// with its pivot handle at @p selectedPivot.

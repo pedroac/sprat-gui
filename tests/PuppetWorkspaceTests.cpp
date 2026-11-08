@@ -6,6 +6,7 @@
 #include "PuppetPoseStrip.h"
 #include "PuppetSequenceTrack.h"
 #include "PuppetEditing.h"
+#include "PuppetTextCodec.h"
 #include "PuppetTreeWidget.h"
 #include "PuppetWorkspace.h"
 #include "SpriteModels.h"
@@ -18,6 +19,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QMenu>
 #include <QMimeData>
 #include <QLineEdit>
@@ -1465,6 +1467,105 @@ void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {
     angle->setValue(10);
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(10));
     QCOMPARE(doll.puppet().poses[0].settings[1].angle, std::optional<int>(10));
+}
+
+void PuppetWorkspaceTests::testScalingFadingAndTintingAPart() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.select({0, 1, -1});  // the head
+    startPose(workspace);
+    auto* scaleX = workspace.findChild<QDoubleSpinBox*>(QStringLiteral("partScaleX"));
+    auto* scaleY = workspace.findChild<QDoubleSpinBox*>(QStringLiteral("partScaleY"));
+    auto* linked = workspace.findChild<QToolButton*>(QStringLiteral("partScaleLinked"));
+    auto* opacity = workspace.findChild<QSpinBox*>(QStringLiteral("partOpacity"));
+    auto* tint = workspace.findChild<QPushButton*>(QStringLiteral("partTint"));
+    QVERIFY(scaleX && scaleY && linked && opacity && tint);
+    QVERIFY(scaleX->isEnabled());
+    QCOMPARE(scaleX->value(), 1.0);
+    QVERIFY(linked->isChecked());
+    QCOMPARE(opacity->value(), 100);
+    const auto head = [&doll]() { return doll.puppet().poses[1].settings.value(0); };
+
+    // Linked, both axes follow; the head grows around its joint at the neck.
+    scaleX->setValue(2.0);
+    QCOMPARE(head().part, QStringLiteral("head"));
+    QCOMPARE(head().scale, std::optional<QPointF>(QPointF(2, 2)));
+    QCOMPARE(scaleY->value(), 2.0);
+    QCOMPARE(drawnParts(workspace.canvas())[1], QRectF(-16, -70, 32, 32));
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Scale Part"));
+    // Flipping turns one axis around and unlinks them; the field's edits are one undo step.
+    workspace.findChild<QToolButton*>(QStringLiteral("partFlipX"))->click();
+    QCOMPARE(head().scale, std::optional<QPointF>(QPointF(-2, 2)));
+    QVERIFY(!linked->isChecked());
+    QCOMPARE(doll.project.undoStack.count(), 2);
+
+    opacity->setValue(40);
+    QCOMPARE(head().opacity, std::optional<double>(0.4));
+    QCOMPARE(partOpacity(workspace.canvas(), 1), 0.4);
+
+    workspace.setPartTint(1, QColor(255, 0, 0));
+    QCOMPARE(head().tint, std::optional<QColor>(QColor(255, 0, 0)));
+    QCOMPARE(tint->text(), QStringLiteral("#ff0000"));
+    for (QGraphicsItem* item : workspace.canvas()->scene()->items()) {
+        if (item->data(0).toInt() != 1 || !item->data(0).isValid()) continue;
+        // The gray head, multiplied by red.
+        const QColor pixel = static_cast<QGraphicsPixmapItem*>(item)->pixmap().toImage().pixelColor(4, 4);
+        QCOMPARE(pixel, QColor(QColor(Qt::gray).red(), 0, 0));
+    }
+    QVERIFY(PuppetTextCodec::write({doll.puppet()})
+                .contains(QStringLiteral("- part \"head\" scale:-2,2 opacity:0.4 tint:#ff0000\n")));
+
+    // Rest puts them back, so an animation playing it resets the head.
+    const PuppetPoseSetting rest = doll.puppet().poses[0].settings[1];
+    QCOMPARE(rest.scale, std::optional<QPointF>(QPointF(1, 1)));
+    QCOMPARE(rest.opacity, std::optional<double>(1.0));
+    QCOMPARE(rest.tint, std::optional<QColor>(QColor(Qt::white)));
+    workspace.selectPose(0);
+    QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
+    QCOMPARE(scaleX->value(), 1.0);
+    QCOMPARE(tint->text(), QStringLiteral("None"));
+
+    // Undone, the pose sets nothing again, and Rest leaves them out.
+    while (doll.project.undoStack.index() > 1) doll.project.undoStack.undo();
+    QVERIFY(doll.puppet().poses[1].settings.isEmpty());
+    QVERIFY(!doll.puppet().poses[0].settings[1].opacity);
+}
+
+void PuppetWorkspaceTests::testStepPartsEaseTheOtherWay() {
+    Doll doll;
+    addDollPoses(doll);
+    Puppet& puppet = doll.project.session.activeAtlas().puppets.first();
+    PuppetPoseSetting lean;
+    lean.part = QStringLiteral("body");
+    lean.angle = 5;
+    puppet.poses[1].settings.prepend(lean);  // "nod" turns the body and the head
+    puppet.sequences = {{QStringLiteral("walk"), 8, AnimationLoopMode::Loop, {{QStringLiteral("nod"), 4, 0, false, {}}}}};
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.bottomTabs()->setCurrentIndex(1);
+    workspace.selectStep(0);
+    auto* eases = workspace.findChild<QToolButton*>(QStringLiteral("puppetStepPartEases"));
+    QVERIFY(eases && eases->isEnabled());
+    QCOMPARE(eases->text(), QStringLiteral("Snapping: none"));
+    QStringList offered;
+    for (QAction* action : eases->menu()->actions()) offered.append(action->text());
+    QCOMPARE(offered, (QStringList{"body", "head"}));  // what the step's pose sets
+
+    eases->menu()->actions()[1]->trigger();
+    QCoreApplication::processEvents();
+    QCOMPARE(doll.puppet().sequences[0].steps[0].otherEaseParts, QStringList{"head"});
+    QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("Part Ease"));
+    QCOMPARE(eases->text(), QStringLiteral("Snapping: head"));
+    QVERIFY(eases->menu()->actions()[1]->isChecked());
+    QVERIFY(PuppetTextCodec::write({doll.puppet()}).contains(QStringLiteral("- pose \"nod\" in:4 step:\"head\"\n")));
+
+    // A snapping step lists the parts that tween instead.
+    workspace.findChild<QComboBox*>(QStringLiteral("puppetStepEase"))->setCurrentIndex(1);
+    QCOMPARE(eases->text(), QStringLiteral("Tweening: head"));
+    doll.project.undoStack.undo();
+    doll.project.undoStack.undo();
+    QVERIFY(doll.puppet().sequences[0].steps[0].otherEaseParts.isEmpty());
 }
 
 void PuppetWorkspaceTests::testRenamingAPartUpdatesItsAttachments() {

@@ -164,6 +164,36 @@ PuppetPoseSetting restSetting(const Puppet& puppet, int partIndex) {
     return setting;
 }
 
+namespace {
+
+/// Has Rest's @p setting put back the scale, opacity and tint other poses give its part, so
+/// playing Rest resets them: a value some other pose sets is set on Rest too (to the rest
+/// value, unless Rest has its own); one no other pose sets is dropped when it is the rest value.
+void keepRestLooks(const Puppet& puppet, PuppetPoseSetting& setting) {
+    bool scaled = false;
+    bool faded = false;
+    bool tinted = false;
+    for (const PuppetPose& pose : puppet.poses) {
+        if (pose.name == PUPPET_REST_POSE) continue;
+        for (const PuppetPoseSetting& other : pose.settings) {
+            if (other.part != setting.part) continue;
+            scaled = scaled || other.scale.has_value();
+            faded = faded || other.opacity.has_value();
+            tinted = tinted || other.tint.has_value();
+        }
+    }
+    const QPointF restScale(1.0, 1.0);
+    if (scaled && !setting.scale) setting.scale = restScale;
+    if (!scaled && setting.scale == restScale) setting.scale.reset();
+    if (faded && !setting.opacity) setting.opacity = 1.0;
+    if (!faded && setting.opacity == 1.0) setting.opacity.reset();
+    const QColor white(Qt::white);
+    if (tinted && !setting.tint) setting.tint = white;
+    if (!tinted && setting.tint == white) setting.tint.reset();
+}
+
+}  // namespace
+
 void keepRestPose(Puppet& puppet, const Puppet* before) {
     int rest = poseNames(puppet).indexOf(PUPPET_REST_POSE);
     if (rest < 0) {
@@ -171,7 +201,7 @@ void keepRestPose(Puppet& puppet, const Puppet* before) {
         pose.name = PUPPET_REST_POSE;
         for (int i = 0; i < puppet.parts.size(); ++i) pose.settings.append(restSetting(puppet, i));
         puppet.poses.insert(0, pose);
-        return;
+        rest = 0;
     }
     if (rest > 0) puppet.poses.move(rest, 0);
     PuppetPose& pose = puppet.poses.first();
@@ -219,8 +249,9 @@ void keepRestPose(Puppet& puppet, const Puppet* before) {
             setting.offset.reset();
             if (setting.position && part->position) setting.position = *part->position;
         }
+        keepRestLooks(puppet, setting);
         // A pose line must set something.
-        if (setting.variant.isEmpty() && !setting.angle && !setting.offset && !setting.position) setting.angle = 0;
+        if (!setting.setsSomething()) setting.angle = 0;
     }
 }
 
@@ -251,6 +282,13 @@ void renamePart(Puppet& puppet, int partIndex, const QString& name) {
             if (setting.part == old) setting.part = name;
         }
     }
+    for (PuppetSequence& sequence : puppet.sequences) {
+        for (PuppetSequenceStep& step : sequence.steps) {
+            for (QString& part : step.otherEaseParts) {
+                if (part == old) part = name;
+            }
+        }
+    }
 }
 
 void removePart(Puppet& puppet, int partIndex) {
@@ -262,6 +300,9 @@ void removePart(Puppet& puppet, int partIndex) {
     });
     for (PuppetPose& pose : puppet.poses) {
         pose.settings.removeIf([&name](const PuppetPoseSetting& setting) { return setting.part == name; });
+    }
+    for (PuppetSequence& sequence : puppet.sequences) {
+        for (PuppetSequenceStep& step : sequence.steps) step.otherEaseParts.removeAll(name);
     }
 }
 

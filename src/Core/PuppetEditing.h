@@ -79,7 +79,9 @@ PuppetPoseSetting restSetting(const Puppet& puppet, int partIndex);
 /// when it has none. Parts that @p before didn't have join it, and it keeps up with the rig:
 /// a position only for a part placed by position (the rig's), an offset only for an attached one,
 /// and the variant it shows is the part's first, the rest variant: a variant Rest picks (since
-/// @p before) moves first, otherwise Rest follows the first.
+/// @p before) moves first, otherwise Rest follows the first. A scale, opacity or tint another
+/// pose gives a part is set on Rest too (at scale 1, opacity 1, white, unless Rest has its own),
+/// so playing Rest puts it back; Rest leaves out those no other pose sets, at their rest values.
 void keepRestPose(Puppet& puppet, const Puppet* before = nullptr);
 /// Moves a sequence, or a step within sequence @p sequenceIndex; @p to is its index afterwards.
 void moveSequence(Puppet& puppet, int from, int to);

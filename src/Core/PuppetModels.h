@@ -1,6 +1,8 @@
 #pragma once
 #include <optional>
+#include <QColor>
 #include <QPoint>
+#include <QPointF>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -12,6 +14,9 @@
 
 /// Most degrees a joint's angle limits, or a pose's angle, may reach either way.
 constexpr int PUPPET_MAX_ANGLE = 360;
+
+/// Most a pose may scale a part either way; a negative factor flips it.
+constexpr double PUPPET_MAX_SCALE = 16.0;
 
 /// Most frames a sequence step's `in` or `hold` may take.
 constexpr int PUPPET_MAX_STEP_FRAMES = 100000;
@@ -67,6 +72,16 @@ struct PuppetPoseSetting {
     std::optional<int> angle;      ///< Degrees clockwise from the rest angle
     std::optional<QPoint> offset;  ///< Attached parts: moves the joint from the parent marker
     std::optional<QPoint> position;  ///< Positioned parts: replaces `at:`
+    /// Stretches the part's sprite along its own axes (x, y), before it turns; a negative
+    /// factor flips it. The part's own: its children aren't scaled.
+    std::optional<QPointF> scale;
+    std::optional<double> opacity;  ///< 0 (invisible) to 1; the part's own
+    std::optional<QColor> tint;     ///< Multiplies the part's colors (white leaves them); its own
+
+    /// Whether it sets anything: a pose line must.
+    bool setsSomething() const {
+        return !variant.isEmpty() || angle || offset || position || scale || opacity || tint;
+    }
 
     bool operator==(const PuppetPoseSetting&) const = default;
 };
@@ -93,6 +108,9 @@ struct PuppetSequenceStep {
     int in = 0;
     int hold = 0;
     bool snap = false;  ///< ease:step: keep the old pose through `in`, then snap
+    /// Parts of the pose that ease the other way from the step (`step:` parts of a linear
+    /// step, `linear:` parts of a snapping one). Only parts the pose sets count.
+    QStringList otherEaseParts;
 
     bool operator==(const PuppetSequenceStep&) const = default;
 };
@@ -137,6 +155,11 @@ inline QString puppetVariantName(const PuppetVariant& variant) {
     if (!variant.name.isEmpty()) return variant.name;
     if (variant.kind == PuppetVariant::Kind::Animation || variant.byIndex) return variant.source;
     return puppetSpriteName(variant.source);
+}
+
+/// Whether part @p part snaps (keeps its old values through `in`) in @p step.
+inline bool puppetStepPartSnaps(const PuppetSequenceStep& step, const QString& part) {
+    return step.snap != step.otherEaseParts.contains(part);
 }
 
 /// Whether pose @p poseIndex is the puppet's Rest pose.

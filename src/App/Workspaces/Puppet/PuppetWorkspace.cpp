@@ -387,8 +387,16 @@ void PuppetWorkspace::setupUi() {
     connect(m_properties, &PuppetPropertiesPanel::hiddenMarkersChanged, this,
             &PuppetWorkspace::setSelectedPartHiddenMarkers);
     connect(m_properties, &PuppetPropertiesPanel::angleChanged, this, [this](int angle) {
-        setPartAngle(m_selection.part, angle, angleEditKey());
+        setPartAngle(m_selection.part, angle, partEditKey(QStringLiteral("angle")));
     });
+    connect(m_properties, &PuppetPropertiesPanel::scaleChanged, this, [this](const QPointF& scale) {
+        setPartScale(m_selection.part, scale, partEditKey(QStringLiteral("scale")));
+    });
+    connect(m_properties, &PuppetPropertiesPanel::opacityChanged, this, [this](double opacity) {
+        setPartOpacity(m_selection.part, opacity, partEditKey(QStringLiteral("opacity")));
+    });
+    connect(m_properties, &PuppetPropertiesPanel::tintChanged, this,
+            [this](const QColor& tint) { setPartTint(m_selection.part, tint); });
     connect(m_properties, &PuppetPropertiesPanel::limitsChanged, this,
             [this](int leeway, bool limited, int angleMin, int angleMax) {
         setSelectedPartLimits(leeway, limited ? std::optional<int>(angleMin) : std::nullopt,
@@ -693,6 +701,8 @@ void PuppetWorkspace::updateCanvas() {
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
         drawn.attached = puppetParentAttachment(*puppet, part.name) != nullptr;
         drawn.joint = placements[i].pivot;
+        drawn.opacity = placements[i].opacity;
+        drawn.tint = placements[i].tint;
         // Only the Poses tab fades the parts a pose leaves alone: in an animation, faint
         // parts would be mistaken for the onion skin.
         drawn.included = m_animating || editedPose() < 0 || inPose.contains(i);
@@ -794,6 +804,9 @@ void PuppetWorkspace::updateProperties() {
         const PuppetPartState shown = shownStates(*puppet)[i];
         placement.posing = editedPose() >= 0;
         placement.angle = int(std::lround(shown.angle));
+        placement.scale = shown.scale;
+        placement.opacity = shown.opacity;
+        placement.tint = shown.tint;
         placement.variant = shown.variant;
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
         m_properties->showPart(part.name, placement, placements[i].problem,
@@ -1247,6 +1260,37 @@ void PuppetWorkspace::setPartAngle(int partIndex, double angle, const QString& m
     if (partIndex == m_selection.part) m_properties->setAngle(limited);
 }
 
+void PuppetWorkspace::setPartScale(int partIndex, const QPointF& scale, const QString& mergeKey) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const QPointF limited(qBound(-PUPPET_MAX_SCALE, scale.x(), PUPPET_MAX_SCALE),
+                          qBound(-PUPPET_MAX_SCALE, scale.y(), PUPPET_MAX_SCALE));
+    const QString name = puppet->parts[partIndex].name;
+    editPose(tr("Scale Part"), mergeKey, [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, name).scale = limited;
+    });
+}
+
+void PuppetWorkspace::setPartOpacity(int partIndex, double opacity, const QString& mergeKey) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    const QString name = puppet->parts[partIndex].name;
+    editPose(tr("Fade Part"), mergeKey, [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, name).opacity = qBound(0.0, opacity, 1.0);
+    });
+}
+
+void PuppetWorkspace::setPartTint(int partIndex, const QColor& tint) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || !tint.isValid()) return;
+    const QString name = puppet->parts[partIndex].name;
+    // sprat-cli takes #RRGGBB: no alpha, 8 bits a channel.
+    const QColor color(tint.rgb());
+    editPose(tr("Tint Part"), QString(), [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
+        settingFor(settings, name).tint = color;
+    });
+}
+
 void PuppetWorkspace::driftPart(int partIndex, const QPointF& sceneOffset, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
@@ -1471,6 +1515,13 @@ void PuppetWorkspace::updatePoseParts() {
             if (setting->angle) sets.append(QStringLiteral("%1°").arg(*setting->angle));
             if (setting->offset) sets.append(tr("joint %1,%2").arg(setting->offset->x()).arg(setting->offset->y()));
             if (setting->position) sets.append(tr("at %1,%2").arg(setting->position->x()).arg(setting->position->y()));
+            if (setting->scale) {
+                const QPointF& scale = *setting->scale;
+                sets.append(scale.x() == scale.y() ? QStringLiteral("×%1").arg(scale.x())
+                                                   : QStringLiteral("×%1,%2").arg(scale.x()).arg(scale.y()));
+            }
+            if (setting->opacity) sets.append(QStringLiteral("%1 %").arg(std::lround(*setting->opacity * 100)));
+            if (setting->tint) sets.append(setting->tint->name());
             if (!setting->variant.isEmpty()) sets.append(setting->variant);
         }
         auto* item = new QListWidgetItem(sets.isEmpty() ? part.name
@@ -1544,7 +1595,9 @@ QPixmap PuppetWorkspace::renderThumbnail(const Puppet& puppet, const QVector<Pup
         if (!placements[i].placed || puppet.parts[i].variants.isEmpty()) continue;
         const int variant = i < states.size() ? states[i].variant : 0;
         painter.setTransform(placements[i].transform * fit);
-        painter.drawPixmap(0, 0, imageOf(spriteFor(puppet.parts[i].variants.value(variant))));
+        painter.setOpacity(placements[i].opacity);
+        painter.drawPixmap(0, 0, PuppetCanvas::tinted(imageOf(spriteFor(puppet.parts[i].variants.value(variant))),
+                                                      placements[i].tint));
     }
     return thumbnail;
 }
@@ -1657,6 +1710,11 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
     m_stepEase->addItem(tr("Step"));
     m_stepEase->setToolTip(tr("Linear moves to the pose over In frames; Step keeps the pose before, then snaps"));
     stepRow->addWidget(m_stepEase);
+    m_stepPartEases = new QToolButton(page);
+    m_stepPartEases->setObjectName(QStringLiteral("puppetStepPartEases"));
+    m_stepPartEases->setPopupMode(QToolButton::InstantPopup);
+    m_stepPartEases->setMenu(new QMenu(m_stepPartEases));
+    stepRow->addWidget(m_stepPartEases);
     right->addLayout(stepRow);
     m_stepNote = new QLabel(page);
     m_stepNote->setObjectName(QStringLiteral("puppetStepNote"));
@@ -1772,6 +1830,53 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
         editStep(tr("Step Ease"), QString(), [ease](PuppetSequenceStep& step) { step.snap = ease == 1; });
     });
     return page;
+}
+
+void PuppetWorkspace::updateStepPartEases(const Puppet& puppet, const PuppetSequenceStep& step) {
+    // The parts the step's pose sets, in draw order, ticked when they ease the other way.
+    QStringList posed;
+    for (const PuppetPose& pose : puppet.poses) {
+        if (pose.name != step.pose) continue;
+        for (const PuppetPart& part : puppet.parts) {
+            const bool sets = std::any_of(pose.settings.cbegin(), pose.settings.cend(),
+                [&part](const PuppetPoseSetting& setting) { return setting.part == part.name; });
+            if (sets) posed.append(part.name);
+        }
+    }
+    QMenu* menu = m_stepPartEases->menu();
+    menu->clear();
+    QStringList others;
+    for (const QString& part : posed) {
+        QAction* action = menu->addAction(part);
+        action->setCheckable(true);
+        action->setChecked(step.otherEaseParts.contains(part));
+        if (action->isChecked()) others.append(part);
+        const int stepIndex = m_step;
+        connect(action, &QAction::toggled, this, [this, stepIndex, part](bool checked) {
+            // The menu is rebuilt by the edit: act once Qt is done with the action.
+            QMetaObject::invokeMethod(this, [this, stepIndex, part, checked]() {
+                setStepPartEase(stepIndex, part, checked);
+            }, Qt::QueuedConnection);
+        });
+    }
+    const QString list = others.isEmpty() ? tr("none") : others.join(QStringLiteral(", "));
+    m_stepPartEases->setText(step.snap ? tr("Tweening: %1").arg(list) : tr("Snapping: %1").arg(list));
+    m_stepPartEases->setToolTip(step.snap
+        ? tr("Parts of the pose that move over In frames while the rest of the step snaps")
+        : tr("Parts of the pose that keep where they were through In frames, then snap, while the rest "
+             "of the step moves"));
+    m_stepPartEases->setEnabled(!posed.isEmpty());
+}
+
+void PuppetWorkspace::setStepPartEase(int stepIndex, const QString& part, bool otherWay) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_sequence < 0 || m_sequence >= puppet->sequences.size()) return;
+    if (stepIndex < 0 || stepIndex >= puppet->sequences[m_sequence].steps.size()) return;
+    m_step = stepIndex;
+    editStep(tr("Part Ease"), QString(), [&part, otherWay](PuppetSequenceStep& step) {
+        step.otherEaseParts.removeAll(part);
+        if (otherWay) step.otherEaseParts.append(part);
+    });
 }
 
 void PuppetWorkspace::selectSequence(int sequenceIndex) {
@@ -2046,10 +2151,11 @@ int PuppetWorkspace::editedPose() const {
     return PuppetEditing::poseNames(*puppet).indexOf(puppet->sequences[m_sequence].steps[m_step].pose);
 }
 
-QString PuppetWorkspace::angleEditKey() const {
+QString PuppetWorkspace::partEditKey(const QString& field) const {
     if (m_animating)
-        return QStringLiteral("step angle %1 %2 %3 %4").arg(m_selection.puppet).arg(m_sequence).arg(m_step).arg(m_selection.part);
-    return QStringLiteral("angle %1 %2 %3").arg(m_selection.puppet).arg(m_pose).arg(m_selection.part);
+        return QStringLiteral("step %1 %2 %3 %4 %5").arg(field).arg(m_selection.puppet).arg(m_sequence).arg(m_step)
+            .arg(m_selection.part);
+    return QStringLiteral("%1 %2 %3 %4").arg(field).arg(m_selection.puppet).arg(m_pose).arg(m_selection.part);
 }
 
 QVector<PuppetPartState> PuppetWorkspace::arrivalStates(const Puppet& puppet, int stepIndex) const {
@@ -2074,7 +2180,7 @@ QVector<PuppetCanvas::OnionSkin> PuppetWorkspace::onionSkins(const Puppet& puppe
         for (int i = 0; i < puppet.parts.size(); ++i) {
             if (!placements[i].placed || puppet.parts[i].variants.isEmpty()) continue;
             const SpritePtr sprite = spriteFor(puppet.parts[i].variants.value(states[i].variant));
-            skin.parts.append({imageOf(sprite), placements[i].transform});
+            skin.parts.append({imageOf(sprite), placements[i].transform, placements[i].opacity});
         }
         skins.append(skin);
     }
@@ -2141,7 +2247,8 @@ void PuppetWorkspace::updateSequences() {
     const bool hasStep = sequence && m_step >= 0 && m_step < sequence->steps.size();
     m_stepLabel->setText(hasStep ? tr("Step %1:").arg(m_step + 1) : tr("Select a step to change it."));
     for (QWidget* field : {static_cast<QWidget*>(m_stepPose), static_cast<QWidget*>(m_stepIn),
-                           static_cast<QWidget*>(m_stepHold), static_cast<QWidget*>(m_stepEase)})
+                           static_cast<QWidget*>(m_stepHold), static_cast<QWidget*>(m_stepEase),
+                           static_cast<QWidget*>(m_stepPartEases)})
         field->setVisible(hasStep);
     if (hasStep) {
         const PuppetSequenceStep& step = sequence->steps[m_step];
@@ -2152,6 +2259,7 @@ void PuppetWorkspace::updateSequences() {
         m_stepIn->setValue(step.in);
         m_stepHold->setValue(step.hold);
         m_stepEase->setCurrentIndex(step.snap ? 1 : 0);
+        updateStepPartEases(*puppet, step);
     }
     QString note;
     if (hasStep) {

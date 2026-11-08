@@ -20,6 +20,9 @@ QVector<PuppetPartState> statesOf(const Puppet& puppet, const PuppetPose& pose) 
         if (setting.angle) state.angle = *setting.angle;
         if (setting.offset) state.offset = QPointF(*setting.offset);
         if (setting.position) state.position = QPointF(*setting.position);
+        if (setting.scale) state.scale = *setting.scale;
+        if (setting.opacity) state.opacity = *setting.opacity;
+        if (setting.tint) state.tint = *setting.tint;
     }
     return states;
 }

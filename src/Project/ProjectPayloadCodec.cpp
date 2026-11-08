@@ -147,6 +147,9 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
             if (s.angle) sObj["angle"] = *s.angle;
             if (s.offset) sObj["offset"] = pointToJson(*s.offset);
             if (s.position) sObj["at"] = pointToJson(*s.position);
+            if (s.scale) sObj["scale"] = QJsonArray{s.scale->x(), s.scale->y()};
+            if (s.opacity) sObj["opacity"] = *s.opacity;
+            if (s.tint) sObj["tint"] = s.tint->name();
             settingsArr.append(sObj);
         }
         poseObj["parts"] = settingsArr;
@@ -167,6 +170,8 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
             if (step.in != 0) stepObj["in"] = step.in;
             if (step.hold != 0) stepObj["hold"] = step.hold;
             if (step.snap) stepObj["ease"] = QStringLiteral("step");
+            if (!step.otherEaseParts.isEmpty())
+                stepObj["other_ease_parts"] = QJsonArray::fromStringList(step.otherEaseParts);
             stepsArr.append(stepObj);
         }
         seqObj["steps"] = stepsArr;
@@ -225,6 +230,14 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
             if (sObj.contains("angle")) s.angle = sObj["angle"].toInt();
             s.offset = pointFromJson(sObj["offset"]);
             s.position = pointFromJson(sObj["at"]);
+            const QJsonArray scale = sObj["scale"].toArray();
+            if (scale.size() == 2) {
+                s.scale = QPointF(qBound(-PUPPET_MAX_SCALE, scale[0].toDouble(1.0), PUPPET_MAX_SCALE),
+                                  qBound(-PUPPET_MAX_SCALE, scale[1].toDouble(1.0), PUPPET_MAX_SCALE));
+            }
+            if (sObj.contains("opacity")) s.opacity = qBound(0.0, sObj["opacity"].toDouble(1.0), 1.0);
+            const QColor tint = QColor::fromString(sObj["tint"].toString());
+            if (tint.isValid()) s.tint = QColor(tint.rgb());
             pose.settings.append(s);
         }
         puppet.poses.append(pose);
@@ -242,6 +255,7 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
             step.in = qBound(0, stepObj["in"].toInt(0), PUPPET_MAX_STEP_FRAMES);
             step.hold = qBound(0, stepObj["hold"].toInt(0), PUPPET_MAX_STEP_FRAMES);
             step.snap = stepObj["ease"].toString() == QLatin1String("step");
+            for (const auto& part : stepObj["other_ease_parts"].toArray()) step.otherEaseParts.append(part.toString());
             sequence.steps.append(step);
         }
         puppet.sequences.append(sequence);

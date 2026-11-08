@@ -112,6 +112,16 @@ public:
     /// Pulls attached part @p partIndex by its point @p grip (in its sprite's pixels) towards
     /// @p target (puppet space), turning it and the parts it hangs from, in the selected pose.
     void pullPart(int partIndex, const QPointF& grip, const QPointF& target, const QString& mergeKey = QString());
+    /// Scales part @p partIndex by @p scale (x, y factors, within PUPPET_MAX_SCALE either way)
+    /// in the selected pose.
+    void setPartScale(int partIndex, const QPointF& scale, const QString& mergeKey = QString());
+    /// Fades part @p partIndex to @p opacity (0 to 1) in the selected pose.
+    void setPartOpacity(int partIndex, double opacity, const QString& mergeKey = QString());
+    /// Tints part @p partIndex @p tint in the selected pose.
+    void setPartTint(int partIndex, const QColor& tint);
+    /// Has part @p partIndex ease the other way from step @p stepIndex of the selected
+    /// animation (snap in a linear step, tween in a snapping one), or not.
+    void setStepPartEase(int stepIndex, const QString& part, bool otherWay);
     /// Has part @p partIndex show its variant @p variantIndex in the selected pose.
     void setPartVariant(int partIndex, int variantIndex);
     /// Shows @p variant (a tree selection) in the selected pose, as the tree's double-click and
@@ -218,6 +228,9 @@ private:
     /// Shows the current tab's page below the canvas, and only it.
     void fitBottomTabs();
     void updateSequences();
+    /// Lists the parts @p step's pose sets in the part-ease menu, ticked when they ease the
+    /// other way from the step.
+    void updateStepPartEases(const Puppet& puppet, const PuppetSequenceStep& step);
     void updatePlayhead();
     void advancePlayback();
     /// Applies @p change to the selected animation (or its selected step) as one undo step.
@@ -226,8 +239,9 @@ private:
     /// The pose the canvas edits: the selected frame of the Poses tab, the selected step's
     /// in the Animations tab while editingStep(), else -1.
     int editedPose() const;
-    /// Merges the Angle field's edits of the selected part in the edited pose or step.
-    QString angleEditKey() const;
+    /// Merges the panel's edits of the selected part's @p field (angle, scale...) in the
+    /// edited pose or step.
+    QString partEditKey(const QString& field) const;
     /// The selected animation where step @p stepIndex's pose has arrived.
     QVector<PuppetPartState> arrivalStates(const Puppet& puppet, int stepIndex) const;
     /// The steps before and after the selected one, when onion skin is on and it is edited.
@@ -285,6 +299,7 @@ private:
     QSpinBox* m_stepIn = nullptr;
     QSpinBox* m_stepHold = nullptr;
     QComboBox* m_stepEase = nullptr;
+    QToolButton* m_stepPartEases = nullptr;  ///< Its menu ticks the parts easing the other way
     QCheckBox* m_onionSkin = nullptr;
     QLabel* m_stepNote = nullptr;  ///< Whose pose the selected step plays
     QString m_copyNote;            ///< Set when an edit made a shared pose the step's own

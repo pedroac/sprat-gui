@@ -1,6 +1,7 @@
 #include "PuppetSequencing.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace {
 
@@ -24,21 +25,44 @@ QVector<int> cycleOrder(const PuppetSequence& sequence) {
     return order;
 }
 
-/// Moves what @p pose sets in @p states @p progress of the way (0..1) to the pose's values;
-/// variants switch only when it arrives.
-void approach(const Puppet& puppet, const PuppetPose& pose, double progress, QVector<PuppetPartState>& states) {
+/// How far a part has got @p frame frames into @p step: tweened over `in`, or, snapping,
+/// nowhere until `in` ends.
+double progressAt(const PuppetSequenceStep& step, int frame, bool snap) {
+    if (step.in <= 0) return 1.0;
+    const double progress = std::min(1.0, double(frame + 1) / step.in);
+    return snap ? (progress >= 1.0 ? 1.0 : 0.0) : progress;
+}
+
+double tweened(double from, double to, double progress) {
+    return from + (to - from) * progress;
+}
+
+/// Moves what @p pose sets in @p states towards the pose's values, each part as far as
+/// @p progressOf (0..1) says; variants switch only when it arrives.
+void approach(const Puppet& puppet, const PuppetPose& pose, const std::function<double(const QString&)>& progressOf,
+              QVector<PuppetPartState>& states) {
     for (const PuppetPoseSetting& setting : pose.settings) {
         int index = -1;
         for (int i = 0; i < puppet.parts.size(); ++i) {
             if (puppet.parts[i].name == setting.part) index = i;
         }
         if (index < 0 || index >= states.size()) continue;
+        const double progress = progressOf(setting.part);
         PuppetPartState& state = states[index];
         if (setting.angle) state.angle += (*setting.angle - state.angle) * progress;
         if (setting.offset) state.offset += (QPointF(*setting.offset) - state.offset) * progress;
         if (setting.position) {
             const QPointF from = state.position.value_or(QPointF(puppet.parts[index].position.value_or(QPoint())));
             state.position = from + (QPointF(*setting.position) - from) * progress;
+        }
+        if (setting.scale) state.scale += (*setting.scale - state.scale) * progress;
+        if (setting.opacity) state.opacity = tweened(state.opacity, *setting.opacity, progress);
+        if (setting.tint) {
+            const QColor from = state.tint;
+            const QColor& to = *setting.tint;
+            state.tint = QColor::fromRgbF(float(tweened(from.redF(), to.redF(), progress)),
+                                          float(tweened(from.greenF(), to.greenF(), progress)),
+                                          float(tweened(from.blueF(), to.blueF(), progress)));
         }
         if (!setting.variant.isEmpty() && progress >= 1.0) {
             const PuppetPart& part = puppet.parts[index];
@@ -49,11 +73,9 @@ void approach(const Puppet& puppet, const PuppetPose& pose, double progress, QVe
     }
 }
 
-/// How far a step has got, @p frame frames into it.
-double progressAt(const PuppetSequenceStep& step, int frame) {
-    if (step.in <= 0) return 1.0;
-    const double progress = std::min(1.0, double(frame + 1) / step.in);
-    return step.snap ? (progress >= 1.0 ? 1.0 : 0.0) : progress;
+/// Moves every value @p pose sets all the way to the pose's.
+void arrive(const Puppet& puppet, const PuppetPose& pose, QVector<PuppetPartState>& states) {
+    approach(puppet, pose, [](const QString&) { return 1.0; }, states);
 }
 
 }  // namespace
@@ -119,7 +141,7 @@ QVector<PuppetPartState> statesAt(const Puppet& puppet, const PuppetSequence& se
     QVector<PuppetPartState> states = base;
     const auto playWhole = [&]() {
         for (int index : order) {
-            if (const PuppetPose* pose = poseNamed(puppet, sequence.steps[index].pose)) approach(puppet, *pose, 1.0, states);
+            if (const PuppetPose* pose = poseNamed(puppet, sequence.steps[index].pose)) arrive(puppet, *pose, states);
         }
     };
     // Each later cycle starts from where the one before left off: wherever a whole cycle
@@ -131,11 +153,15 @@ QVector<PuppetPartState> statesAt(const Puppet& puppet, const PuppetSequence& se
         const PuppetPose* pose = poseNamed(puppet, step.pose);
         const int frames = stepFrames(step);
         if (local >= frames) {
-            if (pose) approach(puppet, *pose, 1.0, states);
+            if (pose) arrive(puppet, *pose, states);
             local -= frames;
             continue;
         }
-        if (pose) approach(puppet, *pose, progressAt(step, local), states);
+        if (pose) {
+            approach(puppet, *pose, [&step, local](const QString& part) {
+                return progressAt(step, local, puppetStepPartSnaps(step, part));
+            }, states);
+        }
         break;
     }
     return states;
