@@ -187,22 +187,20 @@ void PuppetTests::testReadsReadmeExample() {
     QVERIFY(!fuss.steps[0].snap);
     QCOMPARE(fuss.steps[1].pose, QStringLiteral("look left"));
     QVERIFY(fuss.steps[1].snap);
-    QCOMPARE(fuss.steps[1].otherEaseParts, QStringList{QStringLiteral("pupil")});
-    QVERIFY(!puppetStepPartSnaps(fuss.steps[1], QStringLiteral("pupil")));
-    QVERIFY(puppetStepPartSnaps(fuss.steps[1], QStringLiteral("fly")));
+    // The pupil tweens while the fly snaps.
+    QCOMPARE(fuss.steps[1].partSnaps, (QMap<QString, bool>{{QStringLiteral("pupil"), false}}));
+    QVERIFY(!fuss.steps[1].snaps(QStringLiteral("pupil")));
+    QVERIFY(fuss.steps[1].snaps(QStringLiteral("fly")));
 }
 
-void PuppetTests::testReadsScaleOpacityTintAndPartEases() {
+void PuppetTests::testReadsScaleOpacityTint() {
     const PuppetTextReadResult result = PuppetTextCodec::read(QStringLiteral(
         "puppet \"p\"\n"
         "part \"a\" at:0,0\n- sprite \"a.png\"\n"
         "part \"b\" at:0,0\n- sprite \"b.png\"\n"
         "pose \"x\"\n"
         "- part \"a\" scale:1.5 opacity:0 tint:#00FF7f\n"
-        "- part \"b\" scale:17 opacity:1.5 tint:red tint:#12345\n"
-        "sequence \"s\"\n"
-        "- pose \"x\" in:2 step:a,\"b\" linear:a\n"
-        "- pose \"x\" in:2 linear:b step:\n"));
+        "- part \"b\" scale:17 opacity:1.5 tint:red tint:#12345\n"));
     QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
     const Puppet& puppet = result.puppets.first();
     const PuppetPoseSetting& a = puppet.poses[0].settings[0];
@@ -211,29 +209,17 @@ void PuppetTests::testReadsScaleOpacityTintAndPartEases() {
     QCOMPARE(a.tint, std::optional<QColor>(QColor(0, 255, 127)));
     // Out of range or badly written: reported and ignored, so b's line sets nothing.
     QCOMPARE(puppet.poses[0].settings.size(), 1);
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("scale:17")));
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("opacity:1.5")));
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("tint:red")));
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("sets nothing")));
+    const QString warnings = result.warnings.join('\n');
+    QVERIFY(warnings.contains(QLatin1String("scale:17")));
+    QVERIFY(warnings.contains(QLatin1String("opacity:1.5")));
+    QVERIFY(warnings.contains(QLatin1String("tint:red")));
+    QVERIFY(warnings.contains(QLatin1String("sets nothing")));
 
-    // A comma-separated list, quoted or not; a part listed twice keeps the first; a part listed
-    // the way the whole step eases is ignored, and so is an empty one.
-    QCOMPARE(puppet.sequences[0].steps[0].otherEaseParts, (QStringList{"a", "b"}));
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("more than once")));
-    QVERIFY(puppet.sequences[0].steps[1].otherEaseParts.isEmpty());
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("as the whole step does")));
-    QVERIFY(result.warnings.join('\n').contains(QLatin1String("empty part")));
-
-    // Written back as sprat-cli takes them: one factor when both axes share it, #rrggbb, and
-    // the parts a step's pose doesn't set left out.
+    // Written back as sprat-cli takes them: one factor when both axes share it, and #rrggbb.
     Puppet written = puppet;
     written.poses[0].settings[0].scale = QPointF(0.5, -2);
-    PuppetSequenceStep snapping{QStringLiteral("x"), 2, 0, true, {QStringLiteral("a"), QStringLiteral("b")}};
-    written.sequences[0].steps = {puppet.sequences[0].steps[0], snapping};
     const QString text = PuppetTextCodec::write({written});
     QVERIFY2(text.contains(QLatin1String("- part \"a\" scale:0.5,-2 opacity:0 tint:#00ff7f\n")), qPrintable(text));
-    QVERIFY2(text.contains(QLatin1String("- pose \"x\" in:2 step:\"a\"\n")), qPrintable(text));
-    QVERIFY2(text.contains(QLatin1String("- pose \"x\" in:2 ease:step linear:\"a\"\n")), qPrintable(text));
     written.poses[0].settings[0].scale = QPointF(2, 2);
     QVERIFY(PuppetTextCodec::write({written}).contains(QLatin1String(" scale:2 ")));
 }
@@ -475,8 +461,13 @@ void PuppetTests::testProjectPayloadKeepsPuppets() {
     byName.source = QStringLiteral("eye");
     puppet.parts[3].variants = {byName};
     puppet.parts[1].hiddenMarkers = {QStringLiteral("chin"), QStringLiteral("ear")};
-    // The editor's own setting: never written to sprat-cli's puppets file.
+    // The editor's own settings: never written to sprat-cli's puppets file.
     QVERIFY(!PuppetTextCodec::write({puppet}).contains(QStringLiteral("chin")));
+    puppet.parts[2].rigLocked = true;
+    puppet.poses[0].lockedParts = {QStringLiteral("nose")};
+    QCOMPARE(PuppetTextCodec::read(PuppetTextCodec::write({puppet})).puppets.first().poses[0].lockedParts,
+             QStringList());
+    QVERIFY(!PuppetTextCodec::read(PuppetTextCodec::write({puppet})).puppets.first().parts[2].rigLocked);
     // A frame of an animation is written as a plain pose; whose it is stays in the project.
     PuppetEditing::addAnimationPose(puppet, 0, puppet.poses.first().settings);
     QVERIFY(PuppetTextCodec::write({puppet}).contains(QStringLiteral("pose \"fuss frame 1\"\n")));
@@ -795,6 +786,15 @@ void PuppetTests::testPullingAPartTurnsThePartsItHangsFrom() {
     const QVector<PuppetPartState> elbow = PuppetMotion::reach(puppet, {}, 2, QPointF(10, 0), QPointF(0, 20), lookup);
     QCOMPARE(elbow[3].angle, 0.0);
     QVERIFY(elbow[1].angle != 0.0);
+
+    // A fixed (locked) upper arm holds still: only the elbow and wrist bend.
+    const QVector<PuppetPartState> locked =
+        PuppetMotion::reach(puppet, {}, 3, fingers, QPointF(15, 10), lookup, {}, QSet<int>{1});
+    QCOMPARE(locked[1].angle, 0.0);
+    QVERIFY(locked[2].angle != 0.0);
+    // A fixed pulled part doesn't move at all.
+    const QVector<PuppetPartState> held = PuppetMotion::reach(puppet, {}, 3, fingers, target, lookup, {}, QSet<int>{3});
+    for (const PuppetPartState& state : held) QCOMPARE(state.angle, 0.0);
 }
 
 void PuppetTests::testPullingAPartSlidesItsJointFirst() {
@@ -940,6 +940,56 @@ void PuppetTests::testAnimationPosesBelongToTheirAnimation() {
     QCOMPARE(PuppetEditing::poseNames(puppet), (QStringList{"lie", "whisper", "chat 2 frame 1", "chat 2 frame 2"}));
 }
 
+void PuppetTests::testStepsEasePartsTheirOwnWay() {
+    // Read: comma lists, either way; a part listed twice keeps the first, and one easing as
+    // the whole step does is no exception.
+    const PuppetTextReadResult read = PuppetTextCodec::read(QStringLiteral(
+        "puppet \"p\"\npart \"a\" at:0,0\n- sprite a\npart \"b c\" at:0,0\n- sprite b\npart d at:0,0\n- sprite d\n"
+        "pose \"q\"\n- part a angle:1\n- part \"b c\" angle:2\n"
+        "sequence \"s\"\n- pose q in:2 step:a,\"b c\" linear:a\n- pose q in:2 ease:step step:d linear:d\n"));
+    QVERIFY2(read.error.isEmpty(), qPrintable(read.error));
+    const PuppetSequence& sequence = read.puppets.first().sequences.first();
+    QCOMPARE(sequence.steps[0].partSnaps,
+             (QMap<QString, bool>{{QStringLiteral("a"), true}, {QStringLiteral("b c"), true}}));
+    QVERIFY(sequence.steps[1].partSnaps.isEmpty());
+    QCOMPARE(read.warnings.size(), 3);
+    QVERIFY(read.warnings[0].contains(QLatin1String("eases part \"a\" more than once")));
+    QVERIFY(read.warnings[1].contains(QLatin1String("eases part \"d\" more than once")));
+    QVERIFY(read.warnings[2].contains(QLatin1String("eases part \"d\" step, as the whole step does")));
+
+    // Written in draw order, leaving out parts the pose doesn't set (sprat-cli would ignore them).
+    Puppet puppet = read.puppets.first();
+    puppet.sequences[0].steps[0].partSnaps.insert(QStringLiteral("d"), true);
+    QVERIFY(PuppetTextCodec::write({puppet}).contains(QStringLiteral("- pose \"q\" in:2 step:\"a\",\"b c\"\n")));
+    puppet.sequences[0].steps[1].partSnaps.insert(QStringLiteral("a"), false);
+    QVERIFY(PuppetTextCodec::write({puppet}).contains(QStringLiteral("- pose \"q\" in:2 ease:step linear:\"a\"\n")));
+
+    // Renaming or removing a part follows it.
+    PuppetEditing::renamePart(puppet, 0, QStringLiteral("arm"));
+    QVERIFY(puppet.sequences[0].steps[0].partSnaps.contains(QStringLiteral("arm")));
+    QVERIFY(!puppet.sequences[0].steps[0].partSnaps.contains(QStringLiteral("a")));
+    PuppetEditing::removePart(puppet, 1);
+    QVERIFY(!puppet.sequences[0].steps[0].partSnaps.contains(QStringLiteral("b c")));
+
+    // Played: the face tweens while the nose, easing its own way, snaps at the end of `in`.
+    Puppet face = faceWithNose();
+    PuppetPoseSetting faceUp;
+    faceUp.part = QStringLiteral("face");
+    faceUp.angle = 10;
+    PuppetPoseSetting noseUp = faceUp;
+    noseUp.part = QStringLiteral("nose");
+    face.poses = {{QStringLiteral("up"), {faceUp, noseUp}}};
+    PuppetSequenceStep step{QStringLiteral("up"), 4, 0, false};
+    step.partSnaps.insert(QStringLiteral("nose"), true);
+    const PuppetSequence nod{QStringLiteral("nod"), 8, AnimationLoopMode::Once, {step}};
+    const QVector<PuppetPartState> halfWay = PuppetSequencing::statesAt(face, nod, 1, {});
+    QCOMPARE(halfWay[0].angle, 5.0);
+    QCOMPARE(halfWay[1].angle, 0.0);
+    const QVector<PuppetPartState> arrived = PuppetSequencing::statesAt(face, nod, 3, {});
+    QCOMPARE(arrived[0].angle, 10.0);
+    QCOMPARE(arrived[1].angle, 10.0);
+}
+
 void PuppetTests::testSequencesTweenPosesOverTheirFrames() {
     // nose turns to 10° in "up", to -10° showing "nose-long" in "down".
     Puppet puppet = faceWithNose();
@@ -1028,35 +1078,6 @@ void PuppetTests::testSequencesTweenScaleOpacityAndTint() {
     const PuppetPartState posed = PuppetPosing::statesOf(puppet, puppet.poses.first())[1];
     QCOMPARE(posed.scale, QPointF(3, -1));
     QCOMPARE(posed.opacity, 0.0);
-}
-
-void PuppetTests::testStepPartsEaseTheOtherWay() {
-    // "turn" turns the face and the nose; the step tweens the face and snaps the nose.
-    Puppet puppet = faceWithNose();
-    PuppetPoseSetting face;
-    face.part = QStringLiteral("face");
-    face.angle = 40;
-    PuppetPoseSetting nose;
-    nose.part = QStringLiteral("nose");
-    nose.angle = 10;
-    puppet.poses = {{QStringLiteral("turn"), {face, nose}}};
-    PuppetSequence sequence{QStringLiteral("s"), 8, AnimationLoopMode::Once,
-                            {{QStringLiteral("turn"), 4, 0, false, {QStringLiteral("nose")}}}};
-    const auto at = [&](int frame) { return PuppetSequencing::statesAt(puppet, sequence, frame, {}); };
-    QCOMPARE(at(1)[0].angle, 20.0);
-    QCOMPARE(at(1)[1].angle, 0.0);
-    QCOMPARE(at(3)[1].angle, 10.0);
-    // A snapping step tweens the parts it lists.
-    sequence.steps[0].snap = true;
-    QCOMPARE(at(1)[0].angle, 0.0);
-    QCOMPARE(at(1)[1].angle, 5.0);
-
-    // Renaming or removing a part keeps the steps in step.
-    puppet.sequences = {sequence};
-    PuppetEditing::renamePart(puppet, 1, QStringLiteral("beak"));
-    QCOMPARE(puppet.sequences[0].steps[0].otherEaseParts, QStringList{QStringLiteral("beak")});
-    PuppetEditing::removePart(puppet, 1);
-    QVERIFY(puppet.sequences[0].steps[0].otherEaseParts.isEmpty());
 }
 
 void PuppetTests::testRestPosePutsBackScaleOpacityAndTint() {

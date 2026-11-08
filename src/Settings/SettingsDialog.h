@@ -22,6 +22,7 @@ public:
         Exportation,
         SpritesNavigator,
         NineSlice,
+        Puppets,
 #ifndef Q_OS_WASM
         CliTools
 #endif
@@ -62,6 +63,7 @@ private:
     QGroupBox* m_exportationGroup = nullptr;
     QGroupBox* m_navigatorGroup = nullptr;
     QGroupBox* m_nineSliceGroup = nullptr;
+    QGroupBox* m_puppetsGroup = nullptr;
 #ifndef Q_OS_WASM
     QGroupBox* m_cliGroup = nullptr;
 #endif
@@ -129,4 +131,26 @@ private:
     QPushButton* m_nineSliceCenterColorBtn       = nullptr;
     QPushButton* m_nineSliceEdgeLRColorBtn       = nullptr;
     QPushButton* m_nineSliceEdgeTBColorBtn       = nullptr;
+
+    // Puppets controls
+    QSpinBox* m_puppetPivotRingRadiusSpin = nullptr;
+    QSpinBox* m_puppetPivotDoubleClickRadiusSpin = nullptr;
+    QSpinBox* m_puppetTurnHandleDistanceSpin = nullptr;
+    QSpinBox* m_puppetMarkerSnapDistanceSpin = nullptr;
+    QSpinBox* m_puppetDragDistanceSpin = nullptr;
+    QSpinBox* m_puppetOnionSkinOpacitySpin = nullptr;
+    QSpinBox* m_puppetStepInSpin = nullptr;
+    QSpinBox* m_puppetStepHoldSpin = nullptr;
+    QSpinBox* m_puppetAnimationFpsSpin = nullptr;
+    QSpinBox* m_puppetTurnHandleRadiusSpin = nullptr;
+    QSpinBox* m_puppetPivotCrossSizeSpin = nullptr;
+    QSpinBox* m_puppetOriginCrossSizeSpin = nullptr;
+    QSpinBox* m_puppetFadedPartOpacitySpin = nullptr;
+    QDoubleSpinBox* m_puppetMarkerDotRadiusSpin = nullptr;
+    QDoubleSpinBox* m_puppetHandleLineWidthSpin = nullptr;
+    QPushButton* m_puppetHandleColorBtn = nullptr;
+    QPushButton* m_puppetRangeColorBtn = nullptr;
+    QPushButton* m_puppetOriginColorBtn = nullptr;
+    QPushButton* m_puppetOnionBeforeColorBtn = nullptr;
+    QPushButton* m_puppetOnionAfterColorBtn = nullptr;
 };

@@ -6,7 +6,7 @@ class PuppetTests : public QObject {
 private slots:
     void testReadsReadmeExample();
     void testWriteThenReadKeepsEverything();
-    void testReadsScaleOpacityTintAndPartEases();
+    void testReadsScaleOpacityTint();
     void testReadSkipsBadLinesWithWarnings();
     void testReadRejectsRepeatedNames();
     void testQuotedNamesAndSpriteIndexesRoundTrip();
@@ -31,8 +31,8 @@ private slots:
     void testEditingPosesKeepsSequencesInStep();
     void testAnimationPosesBelongToTheirAnimation();
     void testRestPoseStaysFirstAndFollowsTheRig();
+    void testStepsEasePartsTheirOwnWay();
     void testSequencesTweenPosesOverTheirFrames();
     void testSequencesTweenScaleOpacityAndTint();
-    void testStepPartsEaseTheOtherWay();
     void testRestPosePutsBackScaleOpacityAndTint();
 };

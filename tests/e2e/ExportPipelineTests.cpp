@@ -470,7 +470,7 @@ void ExportPipelineTests::testPuppetsAreExported() {
     puppet.poses = {{QStringLiteral("nod"), {nod}}};
     // The head snaps while the step tweens the rest.
     puppet.sequences = {{QStringLiteral("bob"), 8, AnimationLoopMode::Loop,
-                         {{QStringLiteral("nod"), 2, 1, false, {QStringLiteral("head")}}}}};
+                         {{QStringLiteral("nod"), 2, 1, false, {{QStringLiteral("head"), true}}}}}};
     const QString puppetsText = PuppetTextCodec::write({puppet});
 
     // raw is the transform that writes puppets.

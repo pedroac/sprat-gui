@@ -126,7 +126,7 @@ bool readPartMarker(const QString& line, qsizetype& pos, QString& part, QString&
 }
 
 // "KEY:VALUE" settings; a value may be quoted to hold spaces. A word without a colon has an
-// empty key. With @p lists, a value may be a comma-separated list of them (step:"eyes",mouth),
+// empty key. With `lists`, a value may be a comma-separated list of them (step:"eyes",mouth),
 // returned with a newline between items. False on a broken quote.
 bool splitSettings(const QString& text, QVector<QPair<QString, QString>>& out, bool lists = false) {
     qsizetype pos = 0;
@@ -172,17 +172,6 @@ QString lineKeyword(const QString& line) {
 // Position just past `word` in a line that starts with its keyword.
 qsizetype afterWord(const QString& line, const QString& word) {
     return line.indexOf(word) + word.size();
-}
-
-// Whether pose @p pose of @p puppet sets part @p part. A pose it doesn't have sets them all,
-// so a hand-written reference stays for spratconvert to check.
-bool poseSets(const Puppet& puppet, const QString& pose, const QString& part) {
-    for (const PuppetPose& candidate : puppet.poses) {
-        if (candidate.name != pose) continue;
-        return std::any_of(candidate.settings.cbegin(), candidate.settings.cend(),
-                           [&part](const PuppetPoseSetting& setting) { return setting.part == part; });
-    }
-    return true;
 }
 
 QString settingText(const QPair<QString, QString>& setting) {
@@ -473,7 +462,6 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
             bool hasIn = false;
             bool hasHold = false;
             bool hasEase = false;
-            QVector<QPair<QString, bool>> partEases;  // part, snaps
             for (const auto& item : settings) {
                 int frames = 0;
                 const bool isFrames = parseInt(item.second, frames) && frames >= 0 && frames <= PUPPET_MAX_STEP_FRAMES;
@@ -489,16 +477,14 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
                     hasEase = true;
                 } else if (item.first == QLatin1String("step") || item.first == QLatin1String("linear")) {
                     for (const QString& part : item.second.split(QLatin1Char('\n'))) {
-                        const bool repeated = std::any_of(partEases.cbegin(), partEases.cend(),
-                            [&part](const QPair<QString, bool>& ease) { return ease.first == part; });
                         if (part.isEmpty()) {
                             result.warnings.append(trPT("Step line \"%1\" %2 names an empty part; it is ignored")
                                                        .arg(line, item.first));
-                        } else if (repeated) {
+                        } else if (step.partSnaps.contains(part)) {
                             result.warnings.append(trPT("Step line \"%1\" eases part \"%2\" more than once; "
                                                         "the first is kept").arg(line, part));
                         } else {
-                            partEases.append({part, item.first == QLatin1String("step")});
+                            step.partSnaps.insert(part, item.first == QLatin1String("step"));
                         }
                     }
                 } else {
@@ -511,14 +497,15 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
                 continue;
             }
             // Only the parts that ease the other way from the step are kept.
-            for (const auto& [part, snaps] : partEases) {
-                if (snaps != step.snap) {
-                    step.otherEaseParts.append(part);
-                } else {
-                    result.warnings.append(trPT("Step line \"%1\" eases part \"%2\" %3, as the whole step does; "
-                                                "it is ignored").arg(line, part, snaps ? QStringLiteral("step")
-                                                                                       : QStringLiteral("linear")));
+            for (auto it = step.partSnaps.begin(); it != step.partSnaps.end();) {
+                if (it.value() != step.snap) {
+                    ++it;
+                    continue;
                 }
+                result.warnings.append(trPT("Step line \"%1\" eases part \"%2\" %3, as the whole step does; "
+                                            "it is ignored")
+                                           .arg(line, it.key(), step.snap ? QStringLiteral("step") : QStringLiteral("linear")));
+                it = step.partSnaps.erase(it);
             }
             puppet.sequences[currentSequence].steps.append(step);
         }
@@ -585,13 +572,20 @@ QString PuppetTextCodec::write(const QVector<Puppet>& puppets, const QString& ro
                 if (step.in != 0) out << " in:" << step.in;
                 if (step.hold != 0) out << " hold:" << step.hold;
                 if (step.snap) out << " ease:step";
-                // Only parts the step's pose sets: sprat-cli reports the others.
-                QStringList others;
-                for (const QString& part : step.otherEaseParts) {
-                    if (poseSets(puppet, step.pose, part)) others.append(cliQuoted(part));
+                // The parts easing the other way, in draw order; parts the pose doesn't set are
+                // left out, as sprat-cli would ignore them.
+                const PuppetPose* pose = nullptr;
+                for (const PuppetPose& candidate : puppet.poses) {
+                    if (candidate.name == step.pose) pose = &candidate;
                 }
-                if (!others.isEmpty())
-                    out << (step.snap ? " linear:" : " step:") << others.join(QLatin1Char(','));
+                QStringList others;
+                for (const PuppetPart& part : puppet.parts) {
+                    if (step.snaps(part.name) == step.snap) continue;
+                    const bool set = !pose || std::any_of(pose->settings.cbegin(), pose->settings.cend(),
+                        [&part](const PuppetPoseSetting& setting) { return setting.part == part.name; });
+                    if (set) others.append(cliQuoted(part.name));
+                }
+                if (!others.isEmpty()) out << (step.snap ? " linear:" : " step:") << others.join(QLatin1Char(','));
                 out << "\n";
             }
             out << "\n";

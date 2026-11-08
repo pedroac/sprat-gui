@@ -1,6 +1,6 @@
 #include "PuppetPropertiesPanel.h"
-#include "AppIcons.h"
 #include "PuppetModels.h"
+#include "AppIcons.h"
 
 #include <cmath>
 #include <QButtonGroup>
@@ -8,7 +8,9 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QCoreApplication>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -19,10 +21,23 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QStandardItemModel>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 namespace {
+
+/// A "Lock" check box with a lock icon, for a group's fields.
+QCheckBox* makeLock(QWidget* parent, const QString& objectName, const QString& toolTip) {
+    auto* lock = new QCheckBox(QCoreApplication::translate("PuppetPropertiesPanel", "Lock"), parent);
+    lock->setObjectName(objectName);
+    lock->setIcon(AppIcons::icon(QStringLiteral("lock")));
+    lock->setToolTip(toolTip);
+    return lock;
+}
+
+/// Marks the parent marker combo's item that asks for a new marker.
+constexpr int NEW_MARKER_ROLE = Qt::UserRole + 1;
 
 /// Largest distance from the puppet's origin a position spin box accepts.
 constexpr int MAX_POSITION = 99999;
@@ -108,7 +123,6 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         m_shownVariant->setObjectName(QStringLiteral("partShownVariant"));
         m_shownVariant->setToolTip(tr("The variant (★) the part shows in the selected pose or frame. "
                                       "At rest, parts show their first variant"));
-        form->addRow(tr("Shows:"), m_shownVariant);
         connect(m_shownVariant, &QComboBox::currentIndexChanged, this, [this](int index) {
             if (index >= 0) emit shownVariantChanged(m_shownVariant->itemData(index).toInt());
         });
@@ -116,13 +130,11 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
 
         // Rows hold widgets or plain layouts, never container widgets, so every label lines
         // up with its field whatever the style.
-        m_positionRow = new QHBoxLayout;
-        auto makeCoordinate = [this, page](const QString& prefix) {
+        auto makeCoordinate = [this, page]() {
             auto* spin = new QSpinBox(page);
             spin->setToolTip(tr("Where the part's pivot goes, from the puppet's origin (the large cross). "
                                 "Y grows downwards."));
             spin->setRange(-MAX_POSITION, MAX_POSITION);
-            spin->setPrefix(prefix);
             spin->setSuffix(tr(" px"));
             // Typing commits on Enter or leaving the field, not at every digit.
             spin->setKeyboardTracking(false);
@@ -131,18 +143,57 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
             });
             return spin;
         };
-        m_positionX = makeCoordinate(tr("X: "));
+        m_positionX = makeCoordinate();
         m_positionX->setObjectName(QStringLiteral("partPositionX"));
-        m_positionY = makeCoordinate(tr("Y: "));
+        m_positionY = makeCoordinate();
         m_positionY->setObjectName(QStringLiteral("partPositionY"));
-        m_positionRow->addWidget(m_positionX);
-        m_positionRow->addWidget(m_positionY);
-        m_partForm = form;
-        buildPlacement(page, form);
         pageLayout->addLayout(form);
+
+        // How the part is placed, the same in every pose.
+        m_rigGroup = new QGroupBox(tr("Rig"), page);
+        m_rigGroup->setObjectName(QStringLiteral("partRigGroup"));
+        m_partForm = new QFormLayout(m_rigGroup);
+        m_rigLock = makeLock(m_rigGroup, QStringLiteral("partRigLock"),
+                             tr("Keep how the part is placed from changing, in every pose: its position at "
+                                "rest, what it hangs from, its leeway, turn limits and markers"));
+        auto* rigRow = new QHBoxLayout;
+        auto* everyPose = new QLabel(tr("In every pose."), m_rigGroup);
+        everyPose->setForegroundRole(QPalette::PlaceholderText);
+        rigRow->addWidget(everyPose, 1);
+        rigRow->addWidget(m_rigLock);
+        m_partForm->addRow(rigRow);
+        connect(m_rigLock, &QCheckBox::toggled, this, &PuppetPropertiesPanel::rigLockChanged);
+        buildPlacement(page, m_partForm);
+        pageLayout->addWidget(m_rigGroup);
+        buildTransform(page);
+        pageLayout->addWidget(m_transformGroup);
+        // The groups are as tall as their rows; the room left stays below them.
+        for (QGroupBox* group : {m_rigGroup, m_transformGroup})
+            group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 
         m_partProblem = makeWarningLabel(page);
         pageLayout->addWidget(m_partProblem);
+
+        // How the part gets to the selected animation step's pose.
+        m_animationGroup = new QGroupBox(tr("Animation"), page);
+        m_animationGroup->setObjectName(QStringLiteral("partAnimationGroup"));
+        auto* animationForm = new QFormLayout(m_animationGroup);
+        m_stepEase = new QComboBox(m_animationGroup);
+        m_stepEase->setObjectName(QStringLiteral("partStepEase"));
+        m_stepEase->addItem(QString(), QVariant::fromValue(int(PartEase::AsStep)));
+        m_stepEase->addItem(tr("Linear"), QVariant::fromValue(int(PartEase::Linear)));
+        m_stepEase->addItem(tr("Step"), QVariant::fromValue(int(PartEase::Step)));
+        animationForm->addRow(tr("Ease:"), m_stepEase);
+        connect(m_stepEase, &QComboBox::currentIndexChanged, this, [this](int index) {
+            if (index >= 0) emit stepEaseChanged(PartEase(m_stepEase->itemData(index).toInt()));
+        });
+        m_stepEaseNote = new QLabel(m_animationGroup);
+        m_stepEaseNote->setObjectName(QStringLiteral("partStepEaseNote"));
+        m_stepEaseNote->setForegroundRole(QPalette::PlaceholderText);
+        m_stepEaseNote->setWordWrap(true);
+        animationForm->addRow(m_stepEaseNote);
+        m_animationGroup->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        pageLayout->addWidget(m_animationGroup);
         pageLayout->addStretch();
         m_pages->addWidget(page);
     }
@@ -269,6 +320,7 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     m_parentCombo->setCurrentIndex(qMax(0, m_parentCombo->findData(parent)));
     fillMarkers(m_parentMarkerCombo, placement.parentMarkers.value(parent),
                 attached ? placement.parentMarker : QString());
+    addNewMarkerItem(parent);
     fillMarkers(m_childMarkerCombo, placement.childMarkers,
                 attached ? placement.childMarker : QStringLiteral("pivot"));
     m_leeway->setValue(placement.leeway);
@@ -278,12 +330,10 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     m_angleMax->setValue(limited ? *placement.angleMax : 45);
     updatePlacementRows();
     m_angle->setValue(placement.angle);
-    m_angle->setEnabled(placement.posing);
     m_angle->setToolTip(placement.posing
         ? tr("Turns the part in the selected pose, clockwise: from its parent when attached, around its "
              "pivot when placed by position")
         : tr("Select a pose below the canvas to turn parts"));
-    showLooks(placement);
     {
         const QSignalBlocker blockVariant(m_shownVariant);
         m_shownVariant->clear();
@@ -292,8 +342,7 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
             m_shownVariant->addItem(v == placement.variant ? QStringLiteral("★ %1").arg(placement.variants[v])
                                                            : placement.variants[v], v);
         m_shownVariant->setCurrentIndex(m_shownVariant->findData(placement.variant));
-        m_shownVariant->setEnabled(placement.posing);
-        m_partForm->setRowVisible(m_shownVariant, placement.variants.size() > 1);
+        m_transformForm->setRowVisible(m_shownVariant, placement.variants.size() > 1);
     }
     {
         const QSignalBlocker blockMarkers(m_markers);
@@ -308,9 +357,44 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
         m_markers->setFixedHeight(qMin(MARKER_LIST_HEIGHT, rows + 2 * m_markers->frameWidth()));
     }
 
+    {
+        const QSignalBlocker blockRigLock(m_rigLock);
+        const QSignalBlocker blockPoseLock(m_poseLock);
+        m_rigLock->setChecked(placement.rigLocked);
+        m_poseLock->setChecked(placement.poseLocked);
+    }
+    m_poseLabel->setText(placement.pose.isEmpty() ? tr("No pose selected: stop the animation or pick a pose.")
+                                                  : tr("In pose \"%1\".").arg(placement.pose));
+    showLooks(placement);
+    applyLocks();
+    showStepEase(placement);
     m_partProblem->setText(problem);
     m_partProblem->setVisible(!problem.isEmpty());
     m_pages->setCurrentIndex(2);
+}
+
+void PuppetPropertiesPanel::showStepEase(const Placement& placement) {
+    m_animationGroup->setVisible(placement.animating);
+    const QSignalBlocker blockEase(m_stepEase);
+    const std::optional<StepEase>& ease = placement.stepEase;
+    const bool stepSnaps = ease && ease->stepSnaps;
+    // "As step" says what that is, so the choice is clear without looking at the step.
+    m_stepEase->setItemText(0, stepSnaps ? tr("As step (Step)") : tr("As step (Linear)"));
+    const PartEase current = !ease || !ease->snaps ? PartEase::AsStep
+                           : *ease->snaps          ? PartEase::Step
+                                                   : PartEase::Linear;
+    m_stepEase->setCurrentIndex(m_stepEase->findData(int(current)));
+    m_stepEase->setEnabled(ease && ease->setByPose);
+    m_stepEase->setToolTip(tr("How the part gets to the step's pose: Linear moves it over the step's In "
+                              "frames, Step keeps it where it was, then snaps"));
+    QString note;
+    if (!ease)
+        note = tr("Select a step of an animation to ease this part its own way there.");
+    else if (!ease->setByPose)
+        note = tr("Step %1 of \"%2\" doesn't move this part: its pose doesn't set it.").arg(ease->step).arg(ease->sequence);
+    else
+        note = tr("In step %1 of \"%2\".").arg(ease->step).arg(ease->sequence);
+    m_stepEaseNote->setText(note);
 }
 
 void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
@@ -324,7 +408,6 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     group->addButton(m_attached);
     form->addRow(tr("Placed:"), m_byPosition);
     form->addRow(static_cast<QWidget*>(nullptr), m_attached);
-    form->addRow(tr("Position:"), m_positionRow);
 
     m_parentCombo = new QComboBox(page);
     m_parentCombo->setObjectName(QStringLiteral("partParentCombo"));
@@ -372,13 +455,6 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     angleLayout->addStretch();
     form->addRow(tr("Turns:"), m_angleRow);
 
-    m_angle = new QSpinBox(page);
-    m_angle->setObjectName(QStringLiteral("partAngle"));
-    m_angle->setSuffix(QStringLiteral("°"));
-    m_angle->setKeyboardTracking(false);
-    form->addRow(tr("Angle:"), m_angle);
-    connect(m_angle, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::angleChanged);
-    buildLooks(page, form);
 
     m_markers = new QListWidget(page);
     m_markers->setObjectName(QStringLiteral("partMarkers"));
@@ -410,11 +486,17 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
         const QString parent = m_parentCombo->currentData().toString();
         const QSignalBlocker blocker(m_parentMarkerCombo);
         fillMarkers(m_parentMarkerCombo, m_placement.parentMarkers.value(parent), QString());
+        addNewMarkerItem(parent);
         const int same = m_parentMarkerCombo->findData(marker);
         if (same >= 0) m_parentMarkerCombo->setCurrentIndex(same);
         emitAttach();
     });
     connect(m_parentMarkerCombo, &QComboBox::currentIndexChanged, this, &PuppetPropertiesPanel::emitAttach);
+    // Only when picked: the item may be current when the parent has no markers yet.
+    connect(m_parentMarkerCombo, &QComboBox::activated, this, [this](int index) {
+        if (!m_parentMarkerCombo->itemData(index, NEW_MARKER_ROLE).toBool()) return;
+        emit newParentMarkerRequested(m_parentCombo->currentData().toString());
+    });
     connect(m_childMarkerCombo, &QComboBox::currentIndexChanged, this, &PuppetPropertiesPanel::emitAttach);
     connect(m_leeway, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::emitLimits);
     connect(m_limitAngle, &QCheckBox::toggled, this, [this]() {
@@ -423,6 +505,37 @@ void PuppetPropertiesPanel::buildPlacement(QWidget* page, QFormLayout* form) {
     });
     connect(m_angleMin, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::emitLimits);
     connect(m_angleMax, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::emitLimits);
+}
+
+void PuppetPropertiesPanel::buildTransform(QWidget* page) {
+    m_transformGroup = new QGroupBox(tr("Transformation"), page);
+    m_transformGroup->setObjectName(QStringLiteral("partTransformGroup"));
+    m_transformForm = new QFormLayout(m_transformGroup);
+    // Which pose it edits, and its lock there.
+    auto* poseRow = new QHBoxLayout;
+    m_poseLabel = new QLabel(m_transformGroup);
+    m_poseLabel->setObjectName(QStringLiteral("partPoseLabel"));
+    m_poseLabel->setForegroundRole(QPalette::PlaceholderText);
+    m_poseLabel->setWordWrap(true);
+    poseRow->addWidget(m_poseLabel, 1);
+    m_poseLock = makeLock(m_transformGroup, QStringLiteral("partPoseLock"),
+                          tr("Keep the part from changing in this pose: what it shows, its position, angle, "
+                             "scale, opacity and tint. "
+                             "Other poses aren't locked"));
+    poseRow->addWidget(m_poseLock);
+    m_transformForm->addRow(poseRow);
+    connect(m_poseLock, &QCheckBox::toggled, this, &PuppetPropertiesPanel::poseLockChanged);
+    m_transformForm->addRow(tr("Shows:"), m_shownVariant);
+    // X and Y on rows of their own: side by side they don't fit the panel's width.
+    m_transformForm->addRow(tr("X:"), m_positionX);
+    m_transformForm->addRow(tr("Y:"), m_positionY);
+    m_angle = new QSpinBox(m_transformGroup);
+    m_angle->setObjectName(QStringLiteral("partAngle"));
+    m_angle->setSuffix(QStringLiteral("°"));
+    m_angle->setKeyboardTracking(false);
+    m_transformForm->addRow(tr("Angle:"), m_angle);
+    connect(m_angle, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::angleChanged);
+    buildLooks(m_transformGroup, m_transformForm);
 }
 
 void PuppetPropertiesPanel::buildLooks(QWidget* page, QFormLayout* form) {
@@ -537,12 +650,6 @@ void PuppetPropertiesPanel::showLooks(const Placement& placement) {
     m_scaleLinked->setChecked(placement.scale.x() == placement.scale.y());
     m_opacity->setValue(int(std::lround(placement.opacity * OPACITY_PERCENT)));
     showTint(placement.tint);
-    for (QWidget* field : {static_cast<QWidget*>(m_scaleX), static_cast<QWidget*>(m_scaleY),
-                           static_cast<QWidget*>(m_scaleLinked), static_cast<QWidget*>(m_flipX),
-                           static_cast<QWidget*>(m_flipY), static_cast<QWidget*>(m_opacity),
-                           static_cast<QWidget*>(m_tint), static_cast<QWidget*>(m_clearTint)}) {
-        field->setEnabled(placement.posing);
-    }
 }
 
 void PuppetPropertiesPanel::emitScale() {
@@ -588,6 +695,24 @@ void PuppetPropertiesPanel::fillMarkers(QComboBox* combo, const QVector<MarkerCh
     combo->setCurrentIndex(qMax(0, combo->findData(current)));
 }
 
+void PuppetPropertiesPanel::addNewMarkerItem(const QString& parent) {
+    if (parent.isEmpty()) return;
+    const QSignalBlocker blocker(m_parentMarkerCombo);
+    const int current = m_parentMarkerCombo->currentIndex();
+    m_parentMarkerCombo->addItem(AppIcons::icon(QStringLiteral("add")), tr("New marker at its pivot"));
+    const int item = m_parentMarkerCombo->count() - 1;
+    m_parentMarkerCombo->setItemData(item, true, NEW_MARKER_ROLE);
+    const QString problem = m_placement.newMarkerProblems.value(parent);
+    m_parentMarkerCombo->setItemData(item, problem.isEmpty()
+        ? tr("Adds a point marker to every sprite of \"%1\" where this part's pivot is, and hangs it there").arg(parent)
+        : problem, Qt::ToolTipRole);
+    if (!problem.isEmpty()) {
+        if (auto* model = qobject_cast<QStandardItemModel*>(m_parentMarkerCombo->model()))
+            model->item(item)->setEnabled(false);
+    }
+    m_parentMarkerCombo->setCurrentIndex(current);
+}
+
 void PuppetPropertiesPanel::emitAttach() {
     const QString parent = m_parentCombo->currentData().toString();
     const QString parentMarker = m_parentMarkerCombo->currentData().toString();
@@ -602,15 +727,40 @@ void PuppetPropertiesPanel::emitLimits() {
 
 void PuppetPropertiesPanel::updatePlacementRows() {
     const bool attached = m_attached->isChecked();
-    m_partForm->setRowVisible(m_positionRow, !attached);
+    m_transformForm->setRowVisible(m_positionX, !attached);
+    m_transformForm->setRowVisible(m_positionY, !attached);
     m_partForm->setRowVisible(m_parentCombo, attached);
     m_partForm->setRowVisible(m_parentMarkerCombo, attached);
     m_partForm->setRowVisible(m_childMarkerCombo, attached);
     m_partForm->setRowVisible(m_leeway, attached);
     m_partForm->setRowVisible(m_angleRow, attached);
-    m_angleMin->setEnabled(m_limitAngle->isChecked());
-    m_angleMax->setEnabled(m_limitAngle->isChecked());
     updateAngleRange();
+    applyLocks();
+}
+
+void PuppetPropertiesPanel::applyLocks() {
+    const bool rig = !m_placement.rigLocked;
+    m_byPosition->setEnabled(rig);
+    // Nothing to hang from: only another part, not hanging from this one, can hold it.
+    m_attached->setEnabled(rig && (m_attached->isChecked() || !m_placement.parents.isEmpty()));
+    for (QWidget* field : {static_cast<QWidget*>(m_parentCombo), static_cast<QWidget*>(m_parentMarkerCombo),
+                           static_cast<QWidget*>(m_childMarkerCombo), static_cast<QWidget*>(m_leeway),
+                           static_cast<QWidget*>(m_limitAngle), static_cast<QWidget*>(m_markers)})
+        field->setEnabled(rig);
+    m_angleMin->setEnabled(rig && m_limitAngle->isChecked());
+    m_angleMax->setEnabled(rig && m_limitAngle->isChecked());
+
+    const bool posed = m_placement.posing && !m_placement.poseLocked;
+    m_shownVariant->setEnabled(posed);
+    m_angle->setEnabled(posed);
+    for (QWidget* field : {static_cast<QWidget*>(m_scaleX), static_cast<QWidget*>(m_scaleY),
+                           static_cast<QWidget*>(m_scaleLinked), static_cast<QWidget*>(m_flipX),
+                           static_cast<QWidget*>(m_flipY), static_cast<QWidget*>(m_opacity),
+                           static_cast<QWidget*>(m_tint), static_cast<QWidget*>(m_clearTint)})
+        field->setEnabled(posed);
+    m_positionX->setEnabled(!m_placement.positionLocked);
+    m_positionY->setEnabled(!m_placement.positionLocked);
+    m_poseLock->setEnabled(!m_placement.pose.isEmpty());
 }
 
 void PuppetPropertiesPanel::updateAngleRange() {

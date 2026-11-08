@@ -284,9 +284,12 @@ void renamePart(Puppet& puppet, int partIndex, const QString& name) {
     }
     for (PuppetSequence& sequence : puppet.sequences) {
         for (PuppetSequenceStep& step : sequence.steps) {
-            for (QString& part : step.otherEaseParts) {
-                if (part == old) part = name;
-            }
+            if (step.partSnaps.contains(old)) step.partSnaps.insert(name, step.partSnaps.take(old));
+        }
+    }
+    for (PuppetPose& pose : puppet.poses) {
+        for (QString& locked : pose.lockedParts) {
+            if (locked == old) locked = name;
         }
     }
 }
@@ -302,8 +305,9 @@ void removePart(Puppet& puppet, int partIndex) {
         pose.settings.removeIf([&name](const PuppetPoseSetting& setting) { return setting.part == name; });
     }
     for (PuppetSequence& sequence : puppet.sequences) {
-        for (PuppetSequenceStep& step : sequence.steps) step.otherEaseParts.removeAll(name);
+        for (PuppetSequenceStep& step : sequence.steps) step.partSnaps.remove(name);
     }
+    for (PuppetPose& pose : puppet.poses) pose.lockedParts.removeAll(name);
 }
 
 void movePart(Puppet& puppet, int from, int to) {

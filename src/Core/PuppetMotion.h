@@ -4,6 +4,7 @@
 #include <QPainterPath>
 #include <QPoint>
 #include <QPointF>
+#include <QSet>
 #include "MarkerModels.h"
 #include "PuppetEvaluator.h"
 #include "PuppetModels.h"
@@ -42,9 +43,10 @@ using PuppetParentMarker = std::function<std::optional<NamedPoint>(int partIndex
 /// to the first part placed by position (which stays), each joint first moves within its
 /// parent marker's shape and leeway (a pupil in its socket), then turns within its angle
 /// limits (moving a hand turns the forearm and the upper arm). Cyclic coordinate descent.
-/// Without @p parentMarker, joints only turn. Returns @p states with the new angles and offsets.
+/// Without @p parentMarker, joints only turn. Parts in @p fixed (locked) don't move: the chain
+/// stops below them. Returns @p states with the new angles and offsets.
 QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> states, int partIndex,
                                const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup,
-                               const PuppetParentMarker& parentMarker = {});
+                               const PuppetParentMarker& parentMarker = {}, const QSet<int>& fixed = {});
 
 }  // namespace PuppetMotion

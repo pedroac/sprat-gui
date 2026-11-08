@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QGraphicsItem>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsPolygonItem>
@@ -23,25 +24,14 @@ constexpr qreal SCENE_MARGIN = 64;
 constexpr double MAX_FIT_ZOOM = 4.0;
 /// Share of the view a fit fills: an exact fit makes the scroll bars flicker on and off.
 constexpr double FIT_FILL = 0.95;
-constexpr int ORIGIN_CROSS_HALF_SIZE = 24;
-constexpr int PIVOT_CROSS_HALF_SIZE = 8;
 /// Pixels Shift+arrow moves a part; an arrow alone moves it one.
 constexpr int NUDGE_STEP_LARGE = 10;
-/// Screen pixels around the selected part's pivot that grab its handle.
-constexpr int PIVOT_HANDLE_RADIUS = 7;
-/// Screen pixels from a marker within which the dragged handle snaps to it.
-constexpr int MARKER_SNAP_DISTANCE = 12;
-/// Screen size of a point marker's dot while attaching.
-constexpr qreal MARKER_DOT_RADIUS = 3.5;
-/// Screen radius of the selected part's turn range arc.
-constexpr qreal TURN_ARC_RADIUS = 36;
-/// Opacity of a part the shown pose doesn't set.
-constexpr qreal EXCLUDED_OPACITY = 0.35;
-/// Onion skins: how opaque, and their depth, behind every part.
-constexpr qreal ONION_SKIN_OPACITY = 0.3;
+/// Screen pixels between the pivot ring and the turn handle, at the least.
+constexpr int TURN_HANDLE_GAP = 4;
+/// Grid cells smaller than this, in view pixels, aren't drawn.
+constexpr double MIN_GRID_CELL_PIXELS = 4.0;
+/// Onion skins' depth, behind every part.
 constexpr qreal ONION_SKIN_Z = -1;
-/// Screen radius of the selected part's turn handle, at the end of its angle line.
-constexpr qreal TURN_HANDLE_RADIUS = 5;
 /// Degrees between the points of a drawn arc.
 constexpr double ARC_STEP = 4;
 
@@ -115,7 +105,7 @@ void PuppetCanvas::setOnionSkins(const QVector<OnionSkin>& skins) {
 }
 
 void PuppetCanvas::clearPuppet() {
-    showPuppet({}, {}, -1, std::nullopt);
+    showPuppet({}, -1, std::nullopt);
     // No puppet, no origin: the view is left for its empty text.
     m_scene->clear();
 }
@@ -139,12 +129,11 @@ QPixmap PuppetCanvas::tinted(const QPixmap& image, const QColor& tint) {
     return QPixmap::fromImage(result);
 }
 
-void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& bones, int selectedPart,
+void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart,
                               std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint) {
     m_scene->clear();
     m_selectedJoint = selectedJoint;
     m_parts = parts;
-    m_bones = bones;
     m_selectedPart = selectedPart;
     m_selectedPivot = selectedPivot;
     // Onion skins behind everything, tinted, and not parts: clicks and fits ignore them.
@@ -161,7 +150,7 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& b
             item->setTransform(ghost.transform);
             item->setTransformationMode(Qt::FastTransformation);
             item->setZValue(ONION_SKIN_Z - skin);
-            item->setOpacity(ONION_SKIN_OPACITY * ghost.opacity);
+            item->setOpacity(qBound(0, m_settings.onionSkinOpacity, 100) / 100.0 * ghost.opacity);
             item->setAcceptedMouseButtons(Qt::NoButton);
         }
     }
@@ -175,20 +164,21 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, const QVector<Bone>& b
         item->setData(PART_INDEX_KEY, i);
         item->setZValue(i);
         // A part the pose leaves alone shows faintly, at rest.
-        item->setOpacity(part.opacity * (part.included ? 1.0 : EXCLUDED_OPACITY));
+        const double faded = part.included ? 1.0 : qBound(0, m_settings.fadedPartOpacity, 100) / 100.0;
+        item->setOpacity(part.opacity * faded);
     }
     if (selectedPart >= 0 && selectedPart < parts.size() && parts[selectedPart].placed) {
         const Part& part = parts[selectedPart];
         auto* outline = m_scene->addPolygon(part.transform.map(QRectF(part.image.rect())));
-        QPen pen(palette().color(QPalette::Highlight), 0);
+        QPen pen(m_settings.handleColor, 0);
         pen.setStyle(Qt::DashLine);
         outline->setPen(pen);
         outline->setZValue(parts.size());
         outline->setAcceptedMouseButtons(Qt::NoButton);
     }
-    addCross(QPointF(0, 0), ORIGIN_CROSS_HALF_SIZE, QColor(255, 255, 255), parts.size() + 1);
+    addCross(QPointF(0, 0), m_settings.originCrossSize, m_settings.originColor, parts.size() + 1);
     if (selectedPivot)
-        addCross(*selectedPivot, PIVOT_CROSS_HALF_SIZE, palette().color(QPalette::Highlight), parts.size() + 2);
+        addCross(*selectedPivot, m_settings.pivotCrossSize, m_settings.handleColor, parts.size() + 2);
     // The origin is always in view, even when every part is off to one side.
     QRectF bounds(0, 0, 0, 0);
     for (QGraphicsItem* item : m_scene->items()) {
@@ -266,6 +256,19 @@ void PuppetCanvas::resizeEvent(QResizeEvent* event) {
     m_keptCenter = KeptCenter{center, QPoint(horizontalScrollBar()->value(), verticalScrollBar()->value()), zoom()};
 }
 
+void PuppetCanvas::setCanvasSettings(const CanvasSettings& settings) {
+    m_settings = settings;
+    m_settings.pivotRingRadius = std::max(1, settings.pivotRingRadius);
+    m_settings.turnHandleRadius = std::max(1, settings.turnHandleRadius);
+    m_settings.turnHandleDistance = std::max(settings.turnHandleDistance,
+                                             m_settings.pivotRingRadius + m_settings.turnHandleRadius + TURN_HANDLE_GAP);
+    viewport()->update();
+}
+
+int PuppetCanvas::dragDistance() const {
+    return m_settings.dragDistance > 0 ? m_settings.dragDistance : QApplication::startDragDistance();
+}
+
 int PuppetCanvas::partAt(const QPoint& viewPos) const {
     for (QGraphicsItem* item : items(viewPos)) {
         const QVariant index = item->data(PART_INDEX_KEY);
@@ -279,7 +282,9 @@ bool PuppetCanvas::isMovable(int part) const {
 }
 
 bool PuppetCanvas::isAttached(int part) const {
-    return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].attached;
+    // Only for pulling and moving its joint, which a part locked in the pose can't.
+    return part >= 0 && part < m_parts.size() && m_parts[part].placed && m_parts[part].attached
+        && !m_parts[part].locked;
 }
 
 double PuppetCanvas::angleAround(const QPointF& scenePos) const {
@@ -287,28 +292,41 @@ double PuppetCanvas::angleAround(const QPointF& scenePos) const {
     return qRadiansToDegrees(std::atan2(scenePos.y() - from.y(), scenePos.x() - from.x()));
 }
 
-bool PuppetCanvas::onPivotHandle(const QPoint& viewPos) const {
+bool PuppetCanvas::onPivotHandle(const QPoint& viewPos, bool doubleClick) const {
     if (!m_selectedPivot) return false;
-    const QPoint handle = mapFromScene(*m_selectedPivot);
-    return (viewPos - handle).manhattanLength() <= 2 * PIVOT_HANDLE_RADIUS
-        && QLineF(viewPos, handle).length() <= PIVOT_HANDLE_RADIUS;
+    const qreal distance = QLineF(QPointF(viewPos), QPointF(mapFromScene(*m_selectedPivot))).length();
+    const int radius = m_settings.pivotRingRadius;
+    return distance <= (doubleClick ? std::max(radius, m_settings.pivotDoubleClickRadius) : radius);
+}
+
+bool PuppetCanvas::onSelectedPart(const QPoint& viewPos) const {
+    if (m_selectedPart < 0 || m_selectedPart >= m_parts.size() || !m_parts[m_selectedPart].placed) return false;
+    if (m_selectedJoint
+        && QLineF(QPointF(viewPos), QPointF(mapFromScene(m_selectedJoint->point))).length() <= m_settings.turnHandleDistance)
+        return true;
+    for (QGraphicsItem* item : items(viewPos)) {
+        if (item->data(PART_INDEX_KEY) == m_selectedPart) return true;
+    }
+    return false;
 }
 
 std::optional<QPointF> PuppetCanvas::turnHandle() const {
-    if (!m_posing || !m_selectedJoint || m_selectedPart < 0 || m_selectedPart >= m_parts.size()) return std::nullopt;
+    if (!m_posing || !m_selectedJoint || m_selectedPart < 0 || m_selectedPart >= m_parts.size()
+        || m_parts[m_selectedPart].locked)
+        return std::nullopt;
     const JointRange& range = *m_selectedJoint;
-    return pointAt(range.point, range.restDirection + range.angle, TURN_ARC_RADIUS / qMax(0.01, zoom()));
+    return pointAt(range.point, range.restDirection + range.angle, m_settings.turnHandleDistance / qMax(0.01, zoom()));
 }
 
 bool PuppetCanvas::onTurnHandle(const QPoint& viewPos) const {
     const std::optional<QPointF> handle = turnHandle();
     // A little more than the drawn dot, so it's easy to grab.
-    return handle && QLineF(QPointF(viewPos), QPointF(mapFromScene(*handle))).length() <= TURN_HANDLE_RADIUS + 3;
+    return handle && QLineF(QPointF(viewPos), QPointF(mapFromScene(*handle))).length() <= m_settings.turnHandleRadius + 3;
 }
 
 PuppetCanvas::Target PuppetCanvas::targetAt(const QPoint& viewPos) const {
     Target nearest;
-    qreal nearestDistance = MARKER_SNAP_DISTANCE;
+    qreal nearestDistance = m_settings.markerSnapDistance;
     Target inside;
     const QPointF scenePos = mapToScene(viewPos);
     // Front parts first, so a marker drawn over another wins a tie.
@@ -328,10 +346,21 @@ PuppetCanvas::Target PuppetCanvas::targetAt(const QPoint& viewPos) const {
     return nearest.part >= 0 ? nearest : inside;
 }
 
+int PuppetCanvas::attachTargetPartAt(const QPoint& viewPos) const {
+    for (QGraphicsItem* item : items(viewPos)) {
+        const QVariant index = item->data(PART_INDEX_KEY);
+        if (!index.isValid()) continue;
+        const int part = index.toInt();
+        if (part >= 0 && part < m_parts.size() && m_parts[part].attachTarget && m_parts[part].placed) return part;
+    }
+    return -1;
+}
+
 void PuppetCanvas::cancelAttach() {
     m_handlePressed = false;
     m_attaching = false;
     m_attachTarget = {};
+    m_newMarkerPart = -1;
     viewport()->update();
 }
 
@@ -347,12 +376,17 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     ZoomableGraphicsView::mousePressEvent(event);
     if (event->button() != Qt::LeftButton || m_isPanning) return;
     const bool onHandle = m_editable && onTurnHandle(event->pos());
-    const int part = onHandle ? m_selectedPart : partAt(event->pos());
+    const int top = partAt(event->pos());
+    m_clickPart = -2;
     if (!m_editable) {
         m_pressedPart = m_pullPart = m_turnPart = -1;
-        emit partClicked(part);
+        emit partClicked(onHandle ? m_selectedPart : top);
         return;
     }
+    // Near the selected part, or on it under others, a drag changes the selected part; a click
+    // without a drag still selects the part on top, on release.
+    const bool selectedFirst = onHandle || onSelectedPart(event->pos());
+    const int part = selectedFirst ? m_selectedPart : top;
     const bool shift = event->modifiers() & Qt::ShiftModifier;
     // The handle turns any part; dragging a part moves it: a positioned one to a new place,
     // an attached one by pulling it (or, with Shift, by moving its joint).
@@ -365,22 +399,37 @@ void PuppetCanvas::mousePressEvent(QMouseEvent* event) {
     m_pressPos = event->pos();
     m_pressScenePos = mapToScene(event->pos());
     m_dragging = false;
+    if (selectedFirst && !onHandle && top != m_selectedPart) {
+        m_clickPart = top;  // -1 (empty space by the part) keeps the selection
+        return;
+    }
     emit partClicked(part);
+}
+
+void PuppetCanvas::contextMenuEvent(QContextMenuEvent* event) {
+    // Not while dragging, or the menu would take the release.
+    if (m_dragging || m_attaching || m_isPanning) return;
+    emit partContextMenuRequested(partAt(event->pos()), event->globalPos());
+    event->accept();
 }
 
 void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (m_handlePressed && (event->buttons() & Qt::LeftButton)) {
-        if (!m_attaching && (event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance())
+        if (!m_attaching && (event->pos() - m_pressPos).manhattanLength() < dragDistance())
             return;
         m_attaching = true;
         m_attachTarget = targetAt(event->pos());
+        // Away from the markers, over a part it could hang from: a new marker there. Shift
+        // places it by position instead.
+        m_newMarkerPart = m_attachTarget.part < 0 && !(event->modifiers() & Qt::ShiftModifier)
+            ? attachTargetPartAt(event->pos()) : -1;
         m_attachPointer = mapToScene(event->pos());
         viewport()->update();
         return;
     }
     if (m_pullPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
         if (!m_pulling) {
-            if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
+            if ((event->pos() - m_pressPos).manhattanLength() < dragDistance()) return;
             m_pulling = true;
             m_dragging = true;
             emit partPullStarted(m_pullPart, m_pressScenePos);
@@ -391,7 +440,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (m_turnPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
         const QPointF scenePos = mapToScene(event->pos());
         if (!m_turning) {
-            if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
+            if ((event->pos() - m_pressPos).manhattanLength() < dragDistance()) return;
             m_turning = true;
             m_dragging = true;
             m_turnTotal = 0;
@@ -414,7 +463,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     if (m_pressedPart >= 0 && (event->buttons() & Qt::LeftButton) && !m_isPanning) {
         if (!m_dragging) {
-            if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) return;
+            if ((event->pos() - m_pressPos).manhattanLength() < dragDistance()) return;
             m_dragging = true;
             emit partDragStarted(m_pressedPart);
         }
@@ -424,7 +473,7 @@ void PuppetCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     ZoomableGraphicsView::mouseMoveEvent(event);
     if (event->buttons() == Qt::NoButton) {
-        const int hovered = partAt(event->pos());
+        const int hovered = m_editable && onSelectedPart(event->pos()) ? m_selectedPart : partAt(event->pos());
         const Qt::CursorShape cursor = !m_editable                  ? Qt::ArrowCursor
             : m_rigEditable && onPivotHandle(event->pos())          ? Qt::CrossCursor
             : onTurnHandle(event->pos())                            ? Qt::OpenHandCursor
@@ -439,11 +488,16 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (m_handlePressed && event->button() == Qt::LeftButton) {
         const bool attaching = m_attaching;
         const Target target = m_attachTarget;
+        const int newMarkerPart = m_newMarkerPart;
         const QPointF dropped = mapToScene(event->pos());
         const int part = m_selectedPart;
         cancelAttach();
         if (attaching && target.part >= 0) {
             emit attachRequested(part, target.part, m_parts[target.part].markers[target.marker].name);
+        } else if (attaching && newMarkerPart >= 0) {
+            // A part that can't take a marker says why while hovered; dropping there does nothing.
+            if (m_parts[newMarkerPart].newMarkerProblem.isEmpty())
+                emit attachToNewMarkerRequested(part, newMarkerPart, dropped);
         } else if (attaching) {
             emit detachRequested(part, dropped);
         }
@@ -451,7 +505,14 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     const bool dragged = m_dragging;
+    if (event->button() == Qt::LeftButton && !dragged && m_clickPart >= 0) {
+        const int clicked = m_clickPart;
+        m_clickPart = -2;
+        m_pressedPart = m_turnPart = m_pullPart = -1;
+        emit partClicked(clicked);
+    }
     if (event->button() == Qt::LeftButton) {
+        m_clickPart = -2;
         m_pressedPart = -1;
         m_turnPart = -1;
         m_turning = false;
@@ -461,6 +522,27 @@ void PuppetCanvas::mouseReleaseEvent(QMouseEvent* event) {
     }
     if (dragged) setZoomManual(true);
     ZoomableGraphicsView::mouseReleaseEvent(event);
+}
+
+void PuppetCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (m_editable && m_rigEditable && event->button() == Qt::LeftButton && m_selectedPivot
+        && onPivotHandle(event->pos(), true)) {
+        cancelAttach();
+        // The parts drawn under the pivot itself (not just the ring), by their opaque pixels.
+        QVector<int> overlapping;
+        for (QGraphicsItem* item : items(mapFromScene(*m_selectedPivot))) {
+            const QVariant index = item->data(PART_INDEX_KEY);
+            if (!index.isValid()) continue;
+            const int part = index.toInt();
+            if (part >= 0 && part < m_parts.size() && m_parts[part].attachTarget && m_parts[part].placed
+                && !overlapping.contains(part))
+                overlapping.append(part);
+        }
+        emit pivotDoubleClicked(m_selectedPart, overlapping);
+        event->accept();
+        return;
+    }
+    ZoomableGraphicsView::mouseDoubleClickEvent(event);
 }
 
 void PuppetCanvas::keyPressEvent(QKeyEvent* event) {
@@ -486,6 +568,31 @@ void PuppetCanvas::keyPressEvent(QKeyEvent* event) {
     ZoomableGraphicsView::keyPressEvent(event);
 }
 
+void PuppetCanvas::setGrid(const Grid& grid) {
+    m_grid = grid;
+    viewport()->update();
+}
+
+void PuppetCanvas::drawGrid(QPainter* painter, const QRectF& rect) {
+    const int cellW = qMax(1, m_grid.cell.width());
+    const int cellH = qMax(1, m_grid.cell.height());
+    // Cells a few view pixels wide would only grey the view out.
+    if (qMin(cellW, cellH) * zoom() < MIN_GRID_CELL_PIXELS) return;
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, false);
+    QPen pen(m_grid.color, 0);
+    pen.setCosmetic(true);
+    painter->setPen(pen);
+    const auto firstLine = [](qreal from, int offset, int cell) {
+        return std::floor((from - offset) / cell) * cell + offset;
+    };
+    for (qreal x = firstLine(rect.left(), m_grid.offset.x(), cellW); x <= rect.right(); x += cellW)
+        painter->drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()));
+    for (qreal y = firstLine(rect.top(), m_grid.offset.y(), cellH); y <= rect.bottom(); y += cellH)
+        painter->drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y));
+    painter->restore();
+}
+
 void PuppetCanvas::drawLabel(QPainter* painter, const QPointF& scenePos, const QString& text, const QColor& color) {
     // Labels keep their size whatever the zoom: drawn in view pixels.
     painter->save();
@@ -500,27 +607,17 @@ void PuppetCanvas::drawLabel(QPainter* painter, const QPointF& scenePos, const Q
 
 void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
     ZoomableGraphicsView::drawForeground(painter, rect);
-    const QColor highlight = palette().color(QPalette::Highlight);
+    const QColor highlight = m_settings.handleColor;
+    const QColor range = m_settings.rangeColor;
+    // Over the parts, under the handles.
+    if (m_grid.visible && !m_parts.isEmpty()) drawGrid(painter, rect);
 
     painter->setRenderHint(QPainter::Antialiasing, true);
 
-    // What hangs from what: faint for every part, strong for the selected one.
-    for (const Bone& bone : m_bones) {
-        // A dark line under a light one, like the crosses, shows on any sprite.
-        QPen under(QColor(0, 0, 0, bone.selected ? 160 : 70), 3, Qt::SolidLine, Qt::RoundCap);
-        under.setCosmetic(true);
-        painter->setPen(under);
-        painter->drawLine(bone.from, bone.to);
-        QPen over(bone.selected ? highlight : QColor(255, 255, 255, 140), 1);
-        over.setCosmetic(true);
-        painter->setPen(over);
-        painter->drawLine(bone.from, bone.to);
-    }
-
     // The pivot handle: a ring around the selected part's pivot cross.
     if (m_selectedPivot && m_rigEditable) {
-        const qreal radius = PIVOT_HANDLE_RADIUS / qMax(0.01, zoom());
-        QPen pen(highlight, 1.5);
+        const qreal radius = m_settings.pivotRingRadius / qMax(0.01, zoom());
+        QPen pen(highlight, m_settings.handleLineWidth);
         pen.setCosmetic(true);
         painter->setPen(pen);
         painter->setBrush(Qt::NoBrush);
@@ -529,51 +626,64 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
 
     // The selected part's range: where its joint may drift, and how far it may turn.
     if (m_selectedJoint && !m_attaching) {
-        const JointRange& range = *m_selectedJoint;
-        QPen areaPen(QColor(255, 210, 0), 1, Qt::DashLine);
+        const JointRange& joint = *m_selectedJoint;
+        QPen areaPen(range, 1, Qt::DashLine);
         areaPen.setCosmetic(true);
-        if (!range.area.isEmpty()) {
+        QColor fill = range;
+        fill.setAlpha(40 * range.alpha() / 255);
+        if (!joint.area.isEmpty()) {
             painter->setPen(areaPen);
-            painter->setBrush(QColor(255, 210, 0, 40));
-            painter->drawPath(range.area);
+            painter->setBrush(fill);
+            painter->drawPath(joint.area);
         }
-        const qreal radius = TURN_ARC_RADIUS / qMax(0.01, zoom());
-        const bool limited = range.angleMin && range.angleMax;
-        const double from = range.restDirection + (limited ? *range.angleMin : -180.0);
-        const double to = range.restDirection + (limited ? *range.angleMax : 180.0);
+        const qreal radius = m_settings.turnHandleDistance / qMax(0.01, zoom());
+        const bool limited = joint.angleMin && joint.angleMax;
+        const double from = joint.restDirection + (limited ? *joint.angleMin : -180.0);
+        const double to = joint.restDirection + (limited ? *joint.angleMax : 180.0);
         QPolygonF arc;
-        arc << range.point;
-        for (double a = from; a < to; a += ARC_STEP) arc << pointAt(range.point, a, radius);
-        arc << pointAt(range.point, to, radius) << range.point;
+        arc << joint.point;
+        for (double a = from; a < to; a += ARC_STEP) arc << pointAt(joint.point, a, radius);
+        arc << pointAt(joint.point, to, radius) << joint.point;
         painter->setPen(areaPen);
-        painter->setBrush(QColor(255, 210, 0, limited ? 40 : 15));
+        QColor arcFill = range;
+        arcFill.setAlpha((limited ? 40 : 15) * range.alpha() / 255);
+        painter->setBrush(arcFill);
         painter->drawPolygon(arc);
-        QPen nowPen(highlight, 2);
+        if (limited) {
+            // Dragging moves the part anywhere within the whole circle, not just the arc.
+            QPen circlePen(range, 1, Qt::DotLine);
+            circlePen.setCosmetic(true);
+            painter->setPen(circlePen);
+            painter->setBrush(Qt::NoBrush);
+            painter->drawEllipse(joint.point, radius, radius);
+        }
+        QPen nowPen(highlight, m_settings.handleLineWidth + 0.5);
         nowPen.setCosmetic(true);
         painter->setPen(nowPen);
-        painter->drawLine(range.point, pointAt(range.point, range.restDirection + range.angle, radius));
-        const QPointF handle = pointAt(range.point, range.restDirection + range.angle, radius);
-        if (m_posing) {
-            const qreal handleRadius = TURN_HANDLE_RADIUS / qMax(0.01, zoom());
+        painter->drawLine(joint.point, pointAt(joint.point, joint.restDirection + joint.angle, radius));
+        const QPointF handle = pointAt(joint.point, joint.restDirection + joint.angle, radius);
+        if (turnHandle()) {  // none for a part locked in the pose
+            const qreal handleRadius = m_settings.turnHandleRadius / qMax(0.01, zoom());
             QPen handlePen(QColor(0, 0, 0, 160), 1);
             handlePen.setCosmetic(true);
             painter->setPen(handlePen);
             painter->setBrush(highlight);
             painter->drawEllipse(handle, handleRadius, handleRadius);
         }
-        if (std::lround(range.angle) != 0)
-            drawLabel(painter, handle, QStringLiteral("%1°").arg(std::lround(range.angle)), highlight);
+        if (std::lround(joint.angle) != 0)
+            drawLabel(painter, handle, QStringLiteral("%1°").arg(std::lround(joint.angle)), highlight);
     }
 
-    const qreal dot = MARKER_DOT_RADIUS / qMax(0.01, zoom());
+    const qreal dot = m_settings.markerDotRadius / qMax(0.01, zoom());
     if (!m_attaching) {
         // Every part's markers, faint, and the selected part's, labelled. Pivots have their
-        // crosses and bones.
+        // crosses.
         for (int p = 0; p < m_parts.size(); ++p) {
             const Part& part = m_parts[p];
             if (!part.placed) continue;
             const bool selected = p == m_selectedPart;
-            const QColor color(255, 210, 0, selected ? 230 : 120);
+            QColor color = range;
+            color.setAlpha((selected ? 230 : 120) * range.alpha() / 255);
             QPen pen(color, 1);
             pen.setCosmetic(true);
             for (const Marker& marker : part.markers) {
@@ -594,7 +704,7 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
         for (int m = 0; m < part.markers.size(); ++m) {
             const Marker& marker = part.markers[m];
             const bool hovered = m_attachTarget.part == p && m_attachTarget.marker == m;
-            const QColor color = hovered ? highlight : QColor(255, 210, 0);
+            const QColor color = hovered ? highlight : range;
             QPen pen(color, hovered ? 2 : 1);
             pen.setCosmetic(true);
             painter->setPen(pen);
@@ -604,6 +714,18 @@ void PuppetCanvas::drawForeground(QPainter* painter, const QRectF& rect) {
             painter->drawEllipse(marker.point, dot, dot);
             drawLabel(painter, marker.point, marker.name, color);
         }
+    }
+    // A new marker where the pointer is, on the part it would go on, or why it can't.
+    if (m_newMarkerPart >= 0) {
+        const QString& problem = m_parts[m_newMarkerPart].newMarkerProblem;
+        const QColor color = problem.isEmpty() ? highlight : QColor(230, 70, 60);
+        QPen outline(color, 1, Qt::DashLine);
+        outline.setCosmetic(true);
+        painter->setPen(outline);
+        painter->setBrush(Qt::NoBrush);
+        const Part& target = m_parts[m_newMarkerPart];
+        painter->drawPolygon(target.transform.map(QRectF(QPointF(), target.image.size())));
+        drawLabel(painter, m_attachPointer, problem.isEmpty() ? tr("New marker") : problem, color);
     }
     // The joint being dragged, from where it is now to where it would go.
     if (m_selectedPivot) {

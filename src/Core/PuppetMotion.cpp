@@ -107,7 +107,7 @@ QPoint clampOffset(const NamedPoint& marker, int leeway, const QPointF& offset) 
 
 QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> states, int partIndex,
                                const QPointF& grabbed, const QPointF& target, const PuppetSpriteLookup& lookup,
-                               const PuppetParentMarker& parentMarker) {
+                               const PuppetParentMarker& parentMarker, const QSet<int>& fixed) {
     constexpr int MAX_PASSES = 16;
     constexpr qreal CLOSE_ENOUGH = 0.5;  // pixels
     states.resize(puppet.parts.size());
@@ -121,7 +121,8 @@ QVector<PuppetPartState> reach(const Puppet& puppet, QVector<PuppetPartState> st
     };
     QVector<Link> chain;
     QSet<int> seen;
-    for (int i = partIndex; i >= 0 && !seen.contains(i);) {
+    // A fixed part stays as it is, like one placed by position: the chain stops there.
+    for (int i = partIndex; i >= 0 && !seen.contains(i) && !fixed.contains(i);) {
         seen.insert(i);
         const PuppetAttachment* joint = puppetParentAttachment(puppet, puppet.parts[i].name);
         if (!joint) break;

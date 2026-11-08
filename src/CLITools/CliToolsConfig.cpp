@@ -94,6 +94,30 @@ AppSettings CliToolsConfig::loadAppSettings() {
     if (settings.contains("settings/grid_color"))
         out.gridColor = QColor(settings.value("settings/grid_color").toString());
     out.nineSliceOverlayOpacity = settings.value("settings/nine_slice_overlay_opacity", out.nineSliceOverlayOpacity).toInt();
+    out.puppetPivotRingRadius = settings.value("puppets/pivot_ring_radius", out.puppetPivotRingRadius).toInt();
+    out.puppetPivotDoubleClickRadius = settings.value("puppets/pivot_double_click_radius", out.puppetPivotDoubleClickRadius).toInt();
+    out.puppetTurnHandleDistance = settings.value("puppets/turn_handle_distance", out.puppetTurnHandleDistance).toInt();
+    out.puppetTurnHandleRadius = settings.value("puppets/turn_handle_radius", out.puppetTurnHandleRadius).toInt();
+    out.puppetPivotCrossSize = settings.value("puppets/pivot_cross_size", out.puppetPivotCrossSize).toInt();
+    out.puppetOriginCrossSize = settings.value("puppets/origin_cross_size", out.puppetOriginCrossSize).toInt();
+    out.puppetMarkerDotRadius = settings.value("puppets/marker_dot_radius", out.puppetMarkerDotRadius).toDouble();
+    out.puppetHandleLineWidth = settings.value("puppets/handle_line_width", out.puppetHandleLineWidth).toDouble();
+    out.puppetFadedPartOpacity = settings.value("puppets/faded_part_opacity", out.puppetFadedPartOpacity).toInt();
+    const auto readColor = [&settings](const char* key, QColor& color) {
+        const QColor read(settings.value(key, color.name(QColor::HexArgb)).toString());
+        if (read.isValid()) color = read;
+    };
+    readColor("puppets/handle_color", out.puppetHandleColor);
+    readColor("puppets/range_color", out.puppetRangeColor);
+    readColor("puppets/origin_color", out.puppetOriginColor);
+    readColor("puppets/onion_before_color", out.puppetOnionBeforeColor);
+    readColor("puppets/onion_after_color", out.puppetOnionAfterColor);
+    out.puppetMarkerSnapDistance = settings.value("puppets/marker_snap_distance", out.puppetMarkerSnapDistance).toInt();
+    out.puppetDragDistance = settings.value("puppets/drag_distance", out.puppetDragDistance).toInt();
+    out.puppetOnionSkinOpacity = settings.value("puppets/onion_skin_opacity", out.puppetOnionSkinOpacity).toInt();
+    out.puppetStepIn = settings.value("puppets/step_in", out.puppetStepIn).toInt();
+    out.puppetStepHold = settings.value("puppets/step_hold", out.puppetStepHold).toInt();
+    out.puppetAnimationFps = settings.value("puppets/animation_fps", out.puppetAnimationFps).toInt();
     return out;
 }
 
@@ -161,6 +185,26 @@ void CliToolsConfig::saveAppSettings(const AppSettings& settings, const CliPaths
     qsettings.setValue("settings/grid_offset_y",    settings.gridOffsetY);
     qsettings.setValue("settings/grid_color",       settings.gridColor.name(QColor::HexArgb));
     qsettings.setValue("settings/nine_slice_overlay_opacity", settings.nineSliceOverlayOpacity);
+    qsettings.setValue("puppets/pivot_ring_radius",         settings.puppetPivotRingRadius);
+    qsettings.setValue("puppets/pivot_double_click_radius", settings.puppetPivotDoubleClickRadius);
+    qsettings.setValue("puppets/turn_handle_distance",      settings.puppetTurnHandleDistance);
+    qsettings.setValue("puppets/turn_handle_radius",        settings.puppetTurnHandleRadius);
+    qsettings.setValue("puppets/pivot_cross_size",          settings.puppetPivotCrossSize);
+    qsettings.setValue("puppets/origin_cross_size",         settings.puppetOriginCrossSize);
+    qsettings.setValue("puppets/marker_dot_radius",         settings.puppetMarkerDotRadius);
+    qsettings.setValue("puppets/handle_line_width",         settings.puppetHandleLineWidth);
+    qsettings.setValue("puppets/faded_part_opacity",        settings.puppetFadedPartOpacity);
+    qsettings.setValue("puppets/handle_color",              settings.puppetHandleColor.name(QColor::HexArgb));
+    qsettings.setValue("puppets/range_color",               settings.puppetRangeColor.name(QColor::HexArgb));
+    qsettings.setValue("puppets/origin_color",              settings.puppetOriginColor.name(QColor::HexArgb));
+    qsettings.setValue("puppets/onion_before_color",        settings.puppetOnionBeforeColor.name(QColor::HexArgb));
+    qsettings.setValue("puppets/onion_after_color",         settings.puppetOnionAfterColor.name(QColor::HexArgb));
+    qsettings.setValue("puppets/marker_snap_distance",      settings.puppetMarkerSnapDistance);
+    qsettings.setValue("puppets/drag_distance",             settings.puppetDragDistance);
+    qsettings.setValue("puppets/onion_skin_opacity",        settings.puppetOnionSkinOpacity);
+    qsettings.setValue("puppets/step_in",                   settings.puppetStepIn);
+    qsettings.setValue("puppets/step_hold",                 settings.puppetStepHold);
+    qsettings.setValue("puppets/animation_fps",             settings.puppetAnimationFps);
     qsettings.setValue("cli/base_dir", cliPaths.baseDir);
     qsettings.sync();
 

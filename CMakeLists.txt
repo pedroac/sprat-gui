@@ -145,8 +145,10 @@ if(NOT LibArchive_FOUND)
         message(STATUS "ZLIB not found, downloading it via FetchContent...")
         FetchContent_Declare(
             zlib
-            URL https://github.com/madler/zlib/archive/refs/tags/v1.3.1.tar.gz
-            URL_HASH SHA256=17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c
+            # Tried in order, so a GitHub outage falls back to zlib.net (same tarball).
+            URL https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+                https://zlib.net/fossils/zlib-1.3.1.tar.gz
+            URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
             DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         )
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -169,6 +171,7 @@ if(NOT LibArchive_FOUND)
     FetchContent_Declare(
         libarchive
         URL https://github.com/libarchive/libarchive/releases/download/v3.8.5/libarchive-3.8.5.tar.gz
+            https://www.libarchive.org/downloads/libarchive-3.8.5.tar.gz
         URL_HASH SHA256=8a60f3a7bfd59c54ce82ae805a93dba65defd04148c3333b7eaa2102f03b7ffd
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
@@ -827,6 +830,9 @@ if(BUILD_TESTING)
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
         src/CLITools/LayoutArguments.cpp
+        src/CLITools/CliToolsConfig.cpp
+        src/CLITools/SpratCliLocator.cpp
+        src/Settings/SettingsDialog.cpp
     )
     if(NOT EMSCRIPTEN)
         target_sources(sprat-gui-tests PRIVATE src/Update/UpdateChecker.cpp)
@@ -852,6 +858,7 @@ if(BUILD_TESTING)
         src/Update
         src/CLITools
         src/Profiles
+        src/Settings
     )
 
     target_link_libraries(sprat-gui-tests PRIVATE
@@ -864,6 +871,12 @@ if(BUILD_TESTING)
         Qt6::Test
         LibArchive::LibArchive
     )
+
+    # CliToolsConfig asks the in-process CLI for its transforms and profiles in embedded builds.
+    if(SPRAT_EMBEDDED_CLI)
+        target_sources(sprat-gui-tests PRIVATE src/CLITools/EmbeddedCli.cpp)
+        target_link_libraries(sprat-gui-tests PRIVATE spratpackcommand spratcore)
+    endif()
 
     add_test(NAME sprat-gui-tests COMMAND sprat-gui-tests)
     set_tests_properties(sprat-gui-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

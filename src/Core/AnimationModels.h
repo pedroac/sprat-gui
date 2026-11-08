@@ -72,6 +72,17 @@ inline QVector<int> animationPlayOrder(int frameCount, AnimationLoopMode mode) {
     return order;
 }
 
+/// The frame index an animation with @p frameCount frames shows at tick @p tick (frames
+/// played since it started, at its fps): repeating modes start over, the others hold their
+/// last frame. -1 with no frames.
+inline int animationFrameAt(int frameCount, AnimationLoopMode mode, int tick) {
+    const QVector<int> order = animationPlayOrder(frameCount, mode);
+    if (order.isEmpty()) return -1;
+    const int size = int(order.size());
+    if (animationLoopModeRepeats(mode)) return order[((tick % size) + size) % size];
+    return order[qBound(0, tick, size - 1)];
+}
+
 /**
  * @struct AnimationTimeline
  * @brief Represents an animation sequence.
