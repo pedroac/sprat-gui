@@ -21,7 +21,7 @@ If your pipeline is already fully scripted, you may not need this. If you want f
 
 ## Try online
 
-The **[web version](https://sprat-gui.itch.io)** runs in your browser with no installation. Frame detection and GIF/video export need the desktop version.
+The **[web version](https://pedroac.itch.io/sprat)** runs in your browser with no installation. Frame detection and GIF/video export need the desktop version.
 
 ## Download and install
 
