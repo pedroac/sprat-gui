@@ -8,6 +8,7 @@
 #include <QGraphicsPixmapItem>
 #include <QGraphicsPolygonItem>
 #include <QGraphicsScene>
+#include <QImage>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -110,6 +111,24 @@ void PuppetCanvas::clearPuppet() {
 }
 
 
+QPixmap PuppetCanvas::tinted(const QPixmap& image, const QColor& tint) {
+    if (image.isNull() || tint.rgb() == QColor(Qt::white).rgb()) return image;
+    // Premultiplied channels times the tint stay within their alpha, which is kept.
+    QImage result = image.toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    const int red = tint.red();
+    const int green = tint.green();
+    const int blue = tint.blue();
+    for (int y = 0; y < result.height(); ++y) {
+        auto* line = reinterpret_cast<QRgb*>(result.scanLine(y));
+        for (int x = 0; x < result.width(); ++x) {
+            const QRgb pixel = line[x];
+            line[x] = qRgba(qRed(pixel) * red / 255, qGreen(pixel) * green / 255, qBlue(pixel) * blue / 255,
+                            qAlpha(pixel));
+        }
+    }
+    return QPixmap::fromImage(result);
+}
+
 void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart,
                               std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint) {
     m_scene->clear();
@@ -131,21 +150,22 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart,
             item->setTransform(ghost.transform);
             item->setTransformationMode(Qt::FastTransformation);
             item->setZValue(ONION_SKIN_Z - skin);
-            item->setOpacity(qBound(0, m_settings.onionSkinOpacity, 100) / 100.0);
+            item->setOpacity(qBound(0, m_settings.onionSkinOpacity, 100) / 100.0 * ghost.opacity);
             item->setAcceptedMouseButtons(Qt::NoButton);
         }
     }
     for (int i = 0; i < parts.size(); ++i) {
         const Part& part = parts[i];
         if (!part.placed || part.image.isNull()) continue;
-        auto* item = m_scene->addPixmap(part.image);
+        auto* item = m_scene->addPixmap(tinted(part.image, part.tint));
         item->setTransform(part.transform);
         item->setShapeMode(QGraphicsPixmapItem::MaskShape);
         item->setTransformationMode(Qt::FastTransformation);
         item->setData(PART_INDEX_KEY, i);
         item->setZValue(i);
         // A part the pose leaves alone shows faintly, at rest.
-        if (!part.included) item->setOpacity(qBound(0, m_settings.fadedPartOpacity, 100) / 100.0);
+        const double faded = part.included ? 1.0 : qBound(0, m_settings.fadedPartOpacity, 100) / 100.0;
+        item->setOpacity(part.opacity * faded);
     }
     if (selectedPart >= 0 && selectedPart < parts.size() && parts[selectedPart].placed) {
         const Part& part = parts[selectedPart];

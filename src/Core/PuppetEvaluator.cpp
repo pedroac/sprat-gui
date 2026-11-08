@@ -52,6 +52,8 @@ QVector<PuppetPartPlacement> PuppetEvaluator::evaluate(const Puppet& puppet, con
         const PuppetPartState state = stateOf(index);
         const std::optional<PuppetSpriteGeometry> geometry = geometryOf(index);
         const auto done = [&]() { visit[index] = 2; };
+        result.opacity = state.opacity;
+        result.tint = state.tint;
 
         if (!geometry) {
             result.problem = part.variants.isEmpty()
@@ -71,6 +73,7 @@ QVector<PuppetPartPlacement> PuppetEvaluator::evaluate(const Puppet& puppet, con
             result.totalAngle = state.angle;
             result.transform.translate(at.x(), at.y());
             result.transform.rotate(state.angle);
+            result.transform.scale(state.scale.x(), state.scale.y());
             result.transform.translate(-geometry->pivot.x(), -geometry->pivot.y());
             result.placed = true;
             return done();
@@ -105,12 +108,13 @@ QVector<PuppetPartPlacement> PuppetEvaluator::evaluate(const Puppet& puppet, con
                       .arg(joint->parent, joint->parentMarker, part.name);
             return done();
         }
-        // The offset is in the parent's sprite pixels, so it turns with the parent.
+        // The offset is in the parent's sprite pixels, so it moves (turns, and scales) with the parent.
         const QPointF anchor = parent.transform.map(*parentPoint + state.offset);
         result.pivot = anchor;
         result.totalAngle = parent.totalAngle + state.angle;
         result.transform.translate(anchor.x(), anchor.y());
         result.transform.rotate(result.totalAngle);
+        result.transform.scale(state.scale.x(), state.scale.y());
         result.transform.translate(-childPoint->x(), -childPoint->y());
         result.placed = true;
         done();

@@ -34,6 +34,7 @@ private slots:
     void testMarkerListDoesNotSpreadThePanelRows();
     void testPosesTabIsAsTallAsItsContent();
     void testAngleFieldTurnsThePart();
+    void testScalingFadingAndTintingAPart();
     void testNewPoseSetsOnlyThePartsChanged();
     void testSelectingAPoseShowsIt();
     void testTickingPartsInAndOutOfThePose();

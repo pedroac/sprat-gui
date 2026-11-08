@@ -2,9 +2,12 @@
 #include "PuppetModels.h"
 #include "AppIcons.h"
 
+#include <cmath>
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QCoreApplication>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -12,12 +15,14 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStandardItemModel>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace {
@@ -39,6 +44,14 @@ constexpr int MAX_POSITION = 99999;
 /// Largest leeway the spin box accepts.
 constexpr int MAX_LEEWAY = 9999;
 constexpr int THUMBNAIL_SIZE = 128;
+
+/// Scale spin boxes: decimals shown and the step of their arrows.
+constexpr int SCALE_DECIMALS = 2;
+constexpr double SCALE_STEP = 0.1;
+/// Opacity is shown in percent.
+constexpr int OPACITY_PERCENT = 100;
+/// Size of the tint button's swatch.
+constexpr int TINT_SWATCH_SIZE = 14;
 
 /// Most height of the part's marker list; it scrolls beyond that.
 constexpr int MARKER_LIST_HEIGHT = 110;
@@ -352,6 +365,7 @@ void PuppetPropertiesPanel::showPart(const QString& name, const Placement& place
     }
     m_poseLabel->setText(placement.pose.isEmpty() ? tr("No pose selected: stop the animation or pick a pose.")
                                                   : tr("In pose \"%1\".").arg(placement.pose));
+    showLooks(placement);
     applyLocks();
     showStepEase(placement);
     m_partProblem->setText(problem);
@@ -505,7 +519,8 @@ void PuppetPropertiesPanel::buildTransform(QWidget* page) {
     m_poseLabel->setWordWrap(true);
     poseRow->addWidget(m_poseLabel, 1);
     m_poseLock = makeLock(m_transformGroup, QStringLiteral("partPoseLock"),
-                          tr("Keep the part from changing in this pose: what it shows, its position and angle. "
+                          tr("Keep the part from changing in this pose: what it shows, its position, angle, "
+                             "scale, opacity and tint. "
                              "Other poses aren't locked"));
     poseRow->addWidget(m_poseLock);
     m_transformForm->addRow(poseRow);
@@ -520,6 +535,146 @@ void PuppetPropertiesPanel::buildTransform(QWidget* page) {
     m_angle->setKeyboardTracking(false);
     m_transformForm->addRow(tr("Angle:"), m_angle);
     connect(m_angle, &QSpinBox::valueChanged, this, &PuppetPropertiesPanel::angleChanged);
+    buildLooks(m_transformGroup, m_transformForm);
+}
+
+void PuppetPropertiesPanel::buildLooks(QWidget* page, QFormLayout* form) {
+    m_scaleRow = new QHBoxLayout;
+    const auto makeScale = [page](const QString& objectName, const QString& axis) {
+        auto* spin = new QDoubleSpinBox(page);
+        spin->setObjectName(objectName);
+        spin->setRange(-PUPPET_MAX_SCALE, PUPPET_MAX_SCALE);
+        spin->setDecimals(SCALE_DECIMALS);
+        spin->setSingleStep(SCALE_STEP);
+        spin->setKeyboardTracking(false);
+        spin->setToolTip(tr("%1 factor: stretches the part along its own axes, around its pivot or joint, "
+                            "before it turns. 1 leaves it as it is, a negative factor flips it. Its children "
+                            "aren't scaled, but move with its markers").arg(axis));
+        return spin;
+    };
+    m_scaleX = makeScale(QStringLiteral("partScaleX"), tr("Horizontal"));
+    m_scaleY = makeScale(QStringLiteral("partScaleY"), tr("Vertical"));
+    const auto makeToolButton = [page](const QString& objectName, const QString& icon, const QString& tip) {
+        auto* button = new QToolButton(page);
+        button->setObjectName(objectName);
+        button->setIcon(AppIcons::icon(icon));
+        button->setToolTip(tip);
+        button->setAutoRaise(true);
+        return button;
+    };
+    m_scaleLinked = makeToolButton(QStringLiteral("partScaleLinked"), QStringLiteral("link"),
+                                   tr("Same factor for both axes"));
+    m_scaleLinked->setCheckable(true);
+    m_flipX = makeToolButton(QStringLiteral("partFlipX"), QStringLiteral("mirror-h"),
+                             tr("Flip horizontally: turns the horizontal factor around"));
+    m_flipY = makeToolButton(QStringLiteral("partFlipY"), QStringLiteral("mirror-v"),
+                             tr("Flip vertically: turns the vertical factor around"));
+    for (QToolButton* button : {m_flipX, m_flipY}) {
+        button->setText(tr("Flip"));
+        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    }
+    m_scaleRow->addWidget(m_scaleX, 1);
+    m_scaleRow->addWidget(m_scaleLinked);
+    m_scaleRow->addWidget(m_scaleY, 1);
+    form->addRow(tr("Scale:"), m_scaleRow);
+    m_flipRow = new QHBoxLayout;
+    m_flipRow->addWidget(m_flipX);
+    m_flipRow->addWidget(m_flipY);
+    m_flipRow->addStretch();
+    form->addRow(static_cast<QWidget*>(nullptr), m_flipRow);
+    connect(m_scaleX, &QDoubleSpinBox::valueChanged, this, [this](double x) {
+        if (m_scaleLinked->isChecked()) {
+            const QSignalBlocker blocker(m_scaleY);
+            m_scaleY->setValue(x);
+        }
+        emitScale();
+    });
+    connect(m_scaleY, &QDoubleSpinBox::valueChanged, this, [this](double y) {
+        if (m_scaleLinked->isChecked()) {
+            const QSignalBlocker blocker(m_scaleX);
+            m_scaleX->setValue(y);
+        }
+        emitScale();
+    });
+    connect(m_scaleLinked, &QToolButton::toggled, this, [this](bool linked) {
+        if (!linked || m_scaleY->value() == m_scaleX->value()) return;
+        const QSignalBlocker blocker(m_scaleY);
+        m_scaleY->setValue(m_scaleX->value());
+        emitScale();
+    });
+    // A flip turns one axis around, so the axes no longer share a factor.
+    const auto flip = [this](QDoubleSpinBox* axis) {
+        m_scaleLinked->setChecked(false);
+        const QSignalBlocker blocker(axis);
+        axis->setValue(-axis->value());
+        emitScale();
+    };
+    connect(m_flipX, &QToolButton::clicked, this, [this, flip]() { flip(m_scaleX); });
+    connect(m_flipY, &QToolButton::clicked, this, [this, flip]() { flip(m_scaleY); });
+
+    m_opacity = new QSpinBox(page);
+    m_opacity->setObjectName(QStringLiteral("partOpacity"));
+    m_opacity->setRange(0, OPACITY_PERCENT);
+    m_opacity->setSuffix(QStringLiteral(" %"));
+    m_opacity->setKeyboardTracking(false);
+    m_opacity->setToolTip(tr("How see-through the part is: 0 % hides it. Its children aren't faded"));
+    form->addRow(tr("Opacity:"), m_opacity);
+    connect(m_opacity, &QSpinBox::valueChanged, this,
+            [this](int percent) { emit opacityChanged(double(percent) / OPACITY_PERCENT); });
+
+    m_tintRow = new QHBoxLayout;
+    m_tint = new QPushButton(page);
+    m_tint->setObjectName(QStringLiteral("partTint"));
+    m_tint->setToolTip(tr("Multiplies the part's colors: white leaves them as they are, a light red "
+                          "reddens it. Its children aren't tinted"));
+    m_clearTint = makeToolButton(QStringLiteral("partClearTint"), QStringLiteral("reset"),
+                                 tr("Back to white: the part's own colors"));
+    m_tintRow->addWidget(m_tint, 1);
+    m_tintRow->addWidget(m_clearTint);
+    form->addRow(tr("Tint:"), m_tintRow);
+    connect(m_tint, &QPushButton::clicked, this, &PuppetPropertiesPanel::pickTint);
+    connect(m_clearTint, &QToolButton::clicked, this, [this]() {
+        if (m_shownTint == QColor(Qt::white)) return;
+        showTint(Qt::white);
+        emit tintChanged(m_shownTint);
+    });
+}
+
+void PuppetPropertiesPanel::showLooks(const Placement& placement) {
+    const QSignalBlocker blockX(m_scaleX);
+    const QSignalBlocker blockY(m_scaleY);
+    const QSignalBlocker blockLinked(m_scaleLinked);
+    const QSignalBlocker blockOpacity(m_opacity);
+    m_scaleX->setValue(placement.scale.x());
+    m_scaleY->setValue(placement.scale.y());
+    m_scaleLinked->setChecked(placement.scale.x() == placement.scale.y());
+    m_opacity->setValue(int(std::lround(placement.opacity * OPACITY_PERCENT)));
+    showTint(placement.tint);
+}
+
+void PuppetPropertiesPanel::emitScale() {
+    emit scaleChanged(QPointF(m_scaleX->value(), m_scaleY->value()));
+}
+
+void PuppetPropertiesPanel::showTint(const QColor& tint) {
+    m_shownTint = tint;
+    QPixmap swatch(TINT_SWATCH_SIZE, TINT_SWATCH_SIZE);
+    swatch.fill(tint);
+    {
+        QPainter painter(&swatch);
+        painter.setPen(palette().color(QPalette::WindowText));
+        painter.drawRect(swatch.rect().adjusted(0, 0, -1, -1));
+    }
+    m_tint->setIcon(QIcon(swatch));
+    m_tint->setText(tint == QColor(Qt::white) ? tr("None") : tint.name());
+    m_clearTint->setVisible(tint != QColor(Qt::white));
+}
+
+void PuppetPropertiesPanel::pickTint() {
+    const QColor picked = QColorDialog::getColor(m_shownTint, this, tr("Tint"));
+    if (!picked.isValid() || picked.rgb() == m_shownTint.rgb()) return;
+    showTint(QColor(picked.rgb()));
+    emit tintChanged(m_shownTint);
 }
 
 void PuppetPropertiesPanel::fillMarkers(QComboBox* combo, const QVector<MarkerChoice>& markers, const QString& current) {
@@ -598,6 +753,11 @@ void PuppetPropertiesPanel::applyLocks() {
     const bool posed = m_placement.posing && !m_placement.poseLocked;
     m_shownVariant->setEnabled(posed);
     m_angle->setEnabled(posed);
+    for (QWidget* field : {static_cast<QWidget*>(m_scaleX), static_cast<QWidget*>(m_scaleY),
+                           static_cast<QWidget*>(m_scaleLinked), static_cast<QWidget*>(m_flipX),
+                           static_cast<QWidget*>(m_flipY), static_cast<QWidget*>(m_opacity),
+                           static_cast<QWidget*>(m_tint), static_cast<QWidget*>(m_clearTint)})
+        field->setEnabled(posed);
     m_positionX->setEnabled(!m_placement.positionLocked);
     m_positionY->setEnabled(!m_placement.positionLocked);
     m_poseLock->setEnabled(!m_placement.pose.isEmpty());

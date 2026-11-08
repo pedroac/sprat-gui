@@ -6,7 +6,7 @@
 /// Plays a puppet's sequences as sprat-cli's "Playing a puppet" describes: at its fps, each
 /// step tweens what its pose sets from where it is to the pose's values over `in` frames
 /// (or keeps it and snaps at the end, with ease:step; a step's partSnaps ease their own
-/// way), switches variants when the pose
+/// way): angles, offsets, positions, scales, opacities and tints. It switches variants when the pose
 /// arrives, then holds `hold` frames. A loop's first step starts from where the last left
 /// off; ping-pong plays the steps back in reverse. Pure: the Puppet workspace's preview.
 namespace PuppetSequencing {

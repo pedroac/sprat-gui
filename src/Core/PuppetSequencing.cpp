@@ -25,23 +25,36 @@ QVector<int> cycleOrder(const PuppetSequence& sequence) {
     return order;
 }
 
+double tweened(double from, double to, double progress) {
+    return from + (to - from) * progress;
+}
+
 /// Moves what @p pose sets in @p states the way to the pose's values that @p progressOf
 /// gives for each part (0..1); variants switch only when it arrives.
 void approach(const Puppet& puppet, const PuppetPose& pose, const std::function<double(const QString&)>& progressOf,
               QVector<PuppetPartState>& states) {
     for (const PuppetPoseSetting& setting : pose.settings) {
-        const double progress = progressOf(setting.part);
         int index = -1;
         for (int i = 0; i < puppet.parts.size(); ++i) {
             if (puppet.parts[i].name == setting.part) index = i;
         }
         if (index < 0 || index >= states.size()) continue;
+        const double progress = progressOf(setting.part);
         PuppetPartState& state = states[index];
         if (setting.angle) state.angle += (*setting.angle - state.angle) * progress;
         if (setting.offset) state.offset += (QPointF(*setting.offset) - state.offset) * progress;
         if (setting.position) {
             const QPointF from = state.position.value_or(QPointF(puppet.parts[index].position.value_or(QPoint())));
             state.position = from + (QPointF(*setting.position) - from) * progress;
+        }
+        if (setting.scale) state.scale += (*setting.scale - state.scale) * progress;
+        if (setting.opacity) state.opacity = tweened(state.opacity, *setting.opacity, progress);
+        if (setting.tint) {
+            const QColor from = state.tint;
+            const QColor& to = *setting.tint;
+            state.tint = QColor::fromRgbF(float(tweened(from.redF(), to.redF(), progress)),
+                                          float(tweened(from.greenF(), to.greenF(), progress)),
+                                          float(tweened(from.blueF(), to.blueF(), progress)));
         }
         if (!setting.variant.isEmpty() && progress >= 1.0) {
             const PuppetPart& part = puppet.parts[index];

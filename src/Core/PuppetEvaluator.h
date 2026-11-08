@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <optional>
+#include <QColor>
 #include <QHash>
 #include <QPointF>
 #include <QString>
@@ -27,6 +28,9 @@ struct PuppetPartState {
     double angle = 0;  ///< Degrees clockwise: from the parent, or around the part's own pivot
     QPointF offset;    ///< Attached parts: moves the joint from the parent marker
     std::optional<QPointF> position;  ///< Positioned parts: replaces `at:`
+    QPointF scale{1.0, 1.0};  ///< Along the part's own axes, before it turns; the part's own
+    double opacity = 1.0;     ///< The part's own, not its children's
+    QColor tint = Qt::white;  ///< Multiplies the part's colors; the part's own
 };
 
 /// Where a part ended up.
@@ -37,10 +41,14 @@ struct PuppetPartPlacement {
     QTransform transform;
     double totalAngle = 0;  ///< The part's angle plus its parents'
     QPointF pivot;          ///< The point it turns around, in the puppet's space
+    double opacity = 1.0;   ///< To draw it with, from its state
+    QColor tint = Qt::white;
     QString problem;        ///< Why it couldn't be placed
 };
 
 /// Places a puppet's parts as sprat-cli's "Playing a puppet" describes. Pure: no I/O.
+/// A part is scaled around its pivot (or joint), then turned; a parent's scale moves its
+/// markers, and so where its children hang, but doesn't scale them.
 class PuppetEvaluator {
 public:
     /// Places every part (results in draw order, like puppet.parts).

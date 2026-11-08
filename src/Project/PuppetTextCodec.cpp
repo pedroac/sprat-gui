@@ -2,6 +2,7 @@
 #include "CliTextFormat.h"
 
 #include <algorithm>
+#include <cmath>
 #include <QCoreApplication>
 #include <QRegularExpression>
 #include <QSet>
@@ -39,6 +40,44 @@ bool parsePair(const QString& text, QPoint& out) {
     if (parts.size() != 2 || !parseInt(parts[0], x) || !parseInt(parts[1], y)) return false;
     out = QPoint(x, y);
     return true;
+}
+
+// A decimal number, as sprat-cli reads one (strtod): finite, nothing after it.
+bool parseNumber(const QString& text, double& out) {
+    static const QRegularExpression number(
+        QStringLiteral("^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?$"));
+    if (!number.match(text).hasMatch()) return false;
+    bool ok = false;
+    const double value = text.toDouble(&ok);
+    if (!ok || !std::isfinite(value)) return false;
+    out = value;
+    return true;
+}
+
+// A pose scale: one factor for both axes, or X,Y, each within PUPPET_MAX_SCALE either way.
+bool parseScale(const QString& text, QPointF& out) {
+    const QStringList parts = text.split(QLatin1Char(','));
+    double x = 0;
+    double y = 0;
+    if (parts.size() > 2 || !parseNumber(parts[0], x)) return false;
+    y = x;
+    if (parts.size() == 2 && !parseNumber(parts[1], y)) return false;
+    if (std::abs(x) > PUPPET_MAX_SCALE || std::abs(y) > PUPPET_MAX_SCALE) return false;
+    out = QPointF(x, y);
+    return true;
+}
+
+// A tint, #RRGGBB in hex.
+bool parseTint(const QString& text, QColor& out) {
+    static const QRegularExpression hexColor(QStringLiteral("^#[0-9A-Fa-f]{6}$"));
+    if (!hexColor.match(text).hasMatch()) return false;
+    out = QColor::fromRgb(text.mid(1).toUInt(nullptr, 16));
+    return true;
+}
+
+// A number as sprat-cli reads it back: up to 6 significant digits, no trailing zeros.
+QString formatNumber(double value) {
+    return QString::number(value, 'g', 6);
 }
 
 // A quoted string at `pos` (on its opening quote). \" and \\ are escapes; any other
@@ -333,7 +372,7 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
             QVector<QPair<QString, QString>> settings;
             if (!readName(line, pos, setting.part) || !splitSettings(line.mid(pos), settings)) {
                 warn("Puppets file line \"%1\" is not - part \"PART\" [variant:NAME] [angle:DEGREES] "
-                     "[offset:X,Y] [at:X,Y]; it is ignored", line);
+                     "[offset:X,Y] [at:X,Y] [scale:X,Y] [opacity:A] [tint:#RRGGBB]; it is ignored", line);
                 continue;
             }
             for (const auto& item : settings) {
@@ -341,6 +380,9 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
                 const QString& value = item.second;
                 int angle = 0;
                 QPoint pair;
+                QPointF scale;
+                double opacity = 0;
+                QColor tint;
                 if (key == QLatin1String("variant") && setting.variant.isEmpty() && !value.isEmpty()) {
                     setting.variant = value;
                 } else if (key == QLatin1String("angle") && !setting.angle && parseInt(value, angle)
@@ -350,12 +392,19 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
                     setting.offset = pair;
                 } else if (key == QLatin1String("at") && !setting.position && parsePair(value, pair)) {
                     setting.position = pair;
+                } else if (key == QLatin1String("scale") && !setting.scale && parseScale(value, scale)) {
+                    setting.scale = scale;
+                } else if (key == QLatin1String("opacity") && !setting.opacity && parseNumber(value, opacity)
+                           && opacity >= 0.0 && opacity <= 1.0) {
+                    setting.opacity = opacity;
+                } else if (key == QLatin1String("tint") && !setting.tint && parseTint(value, tint)) {
+                    setting.tint = tint;
                 } else {
                     result.warnings.append(trPT("Pose line \"%1\" has an unknown, repeated or unreadable "
                                                 "setting \"%2\"; it is ignored").arg(line, settingText(item)));
                 }
             }
-            if (setting.variant.isEmpty() && !setting.angle && !setting.offset && !setting.position) {
+            if (!setting.setsSomething()) {
                 warn("Pose line \"%1\" sets nothing; it is ignored", line);
                 continue;
             }
@@ -503,6 +552,12 @@ QString PuppetTextCodec::write(const QVector<Puppet>& puppets, const QString& ro
                 if (setting.angle) out << " angle:" << *setting.angle;
                 if (setting.offset) out << " offset:" << pair(*setting.offset);
                 if (setting.position) out << " at:" << pair(*setting.position);
+                if (setting.scale) {
+                    out << " scale:" << formatNumber(setting.scale->x());
+                    if (setting.scale->y() != setting.scale->x()) out << "," << formatNumber(setting.scale->y());
+                }
+                if (setting.opacity) out << " opacity:" << formatNumber(*setting.opacity);
+                if (setting.tint) out << " tint:" << setting.tint->name();
                 out << "\n";
             }
             out << "\n";

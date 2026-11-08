@@ -461,7 +461,16 @@ void ExportPipelineTests::testPuppetsAreExported() {
                     {QStringLiteral("head"), {headSprite, blink}, std::nullopt}};
     puppet.attachments = {{QStringLiteral("head"), QStringLiteral("pivot"), QStringLiteral("body"),
                            QStringLiteral("neck"), 1, -15, 15}};
-    puppet.poses = {{QStringLiteral("nod"), {{QStringLiteral("head"), QString(), 10, std::nullopt, std::nullopt}}}};
+    PuppetPoseSetting nod;
+    nod.part = QStringLiteral("head");
+    nod.angle = 10;
+    nod.scale = QPointF(1.5, -1);
+    nod.opacity = 0.5;
+    nod.tint = QColor(255, 128, 0);
+    puppet.poses = {{QStringLiteral("nod"), {nod}}};
+    // The head snaps while the step tweens the rest.
+    puppet.sequences = {{QStringLiteral("bob"), 8, AnimationLoopMode::Loop,
+                         {{QStringLiteral("nod"), 2, 1, false, {{QStringLiteral("head"), true}}}}}};
     const QString puppetsText = PuppetTextCodec::write({puppet});
 
     // raw is the transform that writes puppets.
@@ -475,12 +484,16 @@ void ExportPipelineTests::testPuppetsAreExported() {
         rawOutput += readTextFile(rawDir.filePath(name));
     // raw writes names length-prefixed and refers to parts, variants and sprites by index.
     const QStringList expectedRecords{
-        QStringLiteral("puppet 2 1 1 0 4:doll"),
+        QStringLiteral("puppet 2 1 1 1 4:doll"),
         QStringLiteral("part -1 1 0 -32 1 4:body"),       // positioned at 0,-32
         QStringLiteral("part 0 0 0 0 2 4:head"),          // hangs from part 0, two variants
         QStringLiteral("variant 1 0 5:blink"),            // an animation variant
         QStringLiteral("joint 1 0 0 1 1 -15 15 5:pivot 4:neck"),  // leeway 1, angle -15..15
-        QStringLiteral("pose 1 3:nod")};
+        QStringLiteral("pose 1 3:nod"),
+        // angle 10, scale 1.5,-1, opacity 0.5, tint 255,128,0
+        QStringLiteral("set 1 -1 1 10 0 0 0 0 0 0 1 1.5 -1 1 0.5 1 255 128 0"),
+        QStringLiteral("sequence 8 0 1 3:bob"),
+        QStringLiteral("step 0 2 1 0 1 1 1")};  // part 1 (head) eases by step
     const QStringList rawLines = rawOutput.split(QLatin1Char('\n'));
     for (const QString& record : expectedRecords)
         QVERIFY2(rawLines.contains(record), qPrintable(record + QStringLiteral(" not in:\n") + rawOutput));

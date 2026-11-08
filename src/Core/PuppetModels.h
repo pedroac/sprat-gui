@@ -1,6 +1,8 @@
 #pragma once
 #include <optional>
+#include <QColor>
 #include <QPoint>
+#include <QPointF>
 #include <QString>
 #include <QStringList>
 #include <QMap>
@@ -13,6 +15,9 @@
 
 /// Most degrees a joint's angle limits, or a pose's angle, may reach either way.
 constexpr int PUPPET_MAX_ANGLE = 360;
+
+/// Most a pose may scale a part either way; a negative factor flips it.
+constexpr double PUPPET_MAX_SCALE = 16.0;
 
 /// Most frames a sequence step's `in` or `hold` may take.
 constexpr int PUPPET_MAX_STEP_FRAMES = 100000;
@@ -71,6 +76,16 @@ struct PuppetPoseSetting {
     std::optional<int> angle;      ///< Degrees clockwise from the rest angle
     std::optional<QPoint> offset;  ///< Attached parts: moves the joint from the parent marker
     std::optional<QPoint> position;  ///< Positioned parts: replaces `at:`
+    /// Stretches the part's sprite along its own axes (x, y), before it turns; a negative
+    /// factor flips it. The part's own: its children aren't scaled.
+    std::optional<QPointF> scale;
+    std::optional<double> opacity;  ///< 0 (invisible) to 1; the part's own
+    std::optional<QColor> tint;     ///< Multiplies the part's colors (white leaves them); its own
+
+    /// Whether it sets anything: a pose line must.
+    bool setsSomething() const {
+        return !variant.isEmpty() || angle || offset || position || scale || opacity || tint;
+    }
 
     bool operator==(const PuppetPoseSetting&) const = default;
 };
