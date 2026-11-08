@@ -590,6 +590,8 @@ set(PROJECT_SOURCES
     src/Core/WasmResizeDebounce.cpp
     src/Core/WasmResizeDebounce.h
     assets/icons.qrc
+    src/App/MainWindow/MainWindow.ui
+    src/Update/UpdateDialog.ui
 )
 
 if(SPRAT_EMBEDDED_CLI)

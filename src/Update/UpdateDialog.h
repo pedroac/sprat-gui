@@ -2,6 +2,7 @@
 #ifndef Q_OS_WASM
 
 #include <QDialog>
+#include <memory>
 #include "UpdateChecker.h"
 
 class QLabel;
@@ -11,12 +12,16 @@ class QPushButton;
 class QStackedWidget;
 class UpdateInstaller;
 
+namespace Ui {
+    class UpdateDialog;
+}
+
 class UpdateDialog : public QDialog {
     Q_OBJECT
 public:
     explicit UpdateDialog(const UpdateChecker::ReleaseInfo& info,
                           QWidget* parent = nullptr);
-    ~UpdateDialog() override = default;
+    ~UpdateDialog() override;
 
 private slots:
     void onDownloadClicked();
@@ -38,6 +43,8 @@ private:
 
     QStackedWidget* m_stack = nullptr;
     QProgressBar* m_progressBar = nullptr;
+
+    std::unique_ptr<Ui::UpdateDialog> ui;
 };
 
 #endif // Q_OS_WASM

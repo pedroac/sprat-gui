@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ui_MainWindow.h"
 #include "AppIcons.h"
 #include "UiStyle.h"
 #include "AnimationPreviewPanel.h"
@@ -72,21 +73,21 @@
 #include <QUuid>
 
 void MainWindow::setupUi() {
-    resize(1400, 860);
+    // Generate UI from .ui file
+    ui->setupUi(this);
+
+    // Update window title to include version
     setWindowTitle(tr("Sprat GUI %1[*]").arg(SPRAT_GUI_VERSION));
+
+    // Get the central stack widget from generated UI
+    m_mainStack = ui->m_mainStack;
+
     setupToolbar();
 
     // Prepare fonts for dock titles
     QFont boldFont = this->font();
     boldFont.setBold(true);
     QFont normalFont = this->font();
-
-    // Set dock options
-    setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AllowNestedDocks);
-
-    // Central Widget is a Stack
-    m_mainStack = new QStackedWidget(this);
-    setCentralWidget(m_mainStack);
 
     // Page 1: Welcome
     m_welcomePage = new QWidget(this);

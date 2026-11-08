@@ -1,6 +1,7 @@
 #ifndef Q_OS_WASM
 
 #include "UpdateDialog.h"
+#include "ui_UpdateDialog.h"
 #include "UpdateInstaller.h"
 #include <QHBoxLayout>
 #include <QLabel>
@@ -16,6 +17,7 @@ UpdateDialog::UpdateDialog(const UpdateChecker::ReleaseInfo& info, QWidget* pare
       m_installer(new UpdateInstaller(this)),
       m_downloadUrl(info.downloadUrl),
       m_sha256(info.sha256) {
+    ui = std::make_unique<Ui::UpdateDialog>();
     setupUi(info);
 
     connect(m_installer, &UpdateInstaller::downloadProgress,
@@ -26,12 +28,13 @@ UpdateDialog::UpdateDialog(const UpdateChecker::ReleaseInfo& info, QWidget* pare
             this, &UpdateDialog::onInstallError);
 }
 
-void UpdateDialog::setupUi(const UpdateChecker::ReleaseInfo& info) {
-    setWindowTitle(tr("Update Available — %1").arg(info.version));
-    setModal(true);
-    setMinimumWidth(480);
+UpdateDialog::~UpdateDialog() = default;
 
-    m_stack = new QStackedWidget(this);
+void UpdateDialog::setupUi(const UpdateChecker::ReleaseInfo& info) {
+    ui->setupUi(this);
+    setWindowTitle(tr("Update Available — %1").arg(info.version));
+
+    m_stack = ui->m_stack;
 
     // ---- Page 1: Info ----
     m_infoPage = new QWidget;
@@ -101,9 +104,6 @@ void UpdateDialog::setupUi(const UpdateChecker::ReleaseInfo& info) {
     m_stack->addWidget(m_downloadPage);
     m_stack->addWidget(m_applyingPage);
     m_stack->setCurrentWidget(m_infoPage);
-
-    auto* topLayout = new QVBoxLayout(this);
-    topLayout->addWidget(m_stack);
 }
 
 void UpdateDialog::onDownloadClicked() {

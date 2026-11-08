@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1400</width>
+    <height>860</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Sprat GUI</string>
+  </property>
+  <property name="dockOptions">
+   <set>QMainWindow::AllowNestedDocks|QMainWindow::AllowTabbedDocks|QMainWindow::AnimatedDocks</set>
+  </property>
+  <widget class="QStackedWidget" name="m_mainStack"/>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>LayoutCanvas</class>
+   <extends>QGraphicsView</extends>
+   <header>LayoutCanvas.h</header>
+  </customwidget>
+  <customwidget>
+   <class>AnimationCanvas</class>
+   <extends>QGraphicsView</extends>
+   <header>AnimationCanvas.h</header>
+  </customwidget>
+  <customwidget>
+   <class>PuppetCanvas</class>
+   <extends>ZoomableGraphicsView</extends>
+   <header>PuppetCanvas.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ui_MainWindow.h"
 #include "AppIcons.h"
 #include "NineSliceWorkspace.h"
 #include "AnimationPreviewPanel.h"
@@ -153,6 +154,9 @@ MainWindow* MainWindow::s_wasmInstance = nullptr;
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     s_prevMessageHandler = qInstallMessageHandler(spratMessageHandler);
     s_eventLogTarget.storeRelease(this);
+
+    // Create generated UI (from .ui file)
+    ui = std::make_unique<Ui::MainWindow>();
 
     m_session = new ProjectSession(this);
     m_settings = CliToolsConfig::loadAppSettings();
