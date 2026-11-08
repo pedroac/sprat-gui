@@ -65,4 +65,26 @@ struct AppSettings {
     QColor nineSliceEdgeLRColor = QColor(80, 200, 120);
     QColor nineSliceEdgeTBColor = QColor(80, 200, 120);
     int nineSliceOverlayOpacity = 25;
+
+    // Puppets (canvas sizes are in screen pixels)
+    int puppetPivotRingRadius = 7;          ///< The selected part's pivot ring: dragged from inside to attach
+    int puppetPivotDoubleClickRadius = 10;  ///< How far from the pivot a double-click hangs the part
+    int puppetTurnHandleDistance = 36;      ///< From the pivot to the turn handle; dragging within moves the part
+    int puppetTurnHandleRadius = 5;
+    int puppetMarkerSnapDistance = 12;      ///< A dragged pivot ring snaps to markers this near
+    int puppetDragDistance = 0;             ///< Pointer travel before a drag starts; 0 = the system's
+    int puppetPivotCrossSize = 8;           ///< Half the selected part's pivot cross
+    int puppetOriginCrossSize = 24;         ///< Half the puppet's origin cross
+    double puppetMarkerDotRadius = 3.5;
+    double puppetHandleLineWidth = 1.5;
+    QColor puppetHandleColor = QColor(61, 174, 233);  ///< Pivot ring and cross, angle line, turn handle
+    QColor puppetRangeColor = QColor(255, 210, 0);    ///< Markers, the joint's area, the turn circle
+    QColor puppetOriginColor = QColor(255, 255, 255);
+    QColor puppetOnionBeforeColor = QColor(220, 50, 50);
+    QColor puppetOnionAfterColor = QColor(40, 170, 70);
+    int puppetOnionSkinOpacity = 30;        ///< Percent
+    int puppetFadedPartOpacity = 35;        ///< Percent: parts the pose leaves alone
+    int puppetStepIn = 4;                   ///< Frames a new animation step takes to reach its pose
+    int puppetStepHold = 0;                 ///< Frames a new animation step holds its pose
+    int puppetAnimationFps = 8;             ///< A new animation's frames per second
 };

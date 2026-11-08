@@ -829,6 +829,7 @@ public:
     void onSettingsAtlasLayoutClicked();
     void onSettingsExportationClicked();
     void onSettingsNineSliceClicked();
+    void onSettingsPuppetsClicked();
 #ifndef Q_OS_WASM
     void onSettingsCliToolsClicked();
 #endif

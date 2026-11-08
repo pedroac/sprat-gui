@@ -237,6 +237,10 @@ void MainWindow::onSettingsNineSliceClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::NineSlice);
 }
 
+void MainWindow::onSettingsPuppetsClicked() {
+    openSettingsDialogForSection(SettingsDialog::Section::Puppets);
+}
+
 #ifndef Q_OS_WASM
 void MainWindow::onSettingsCliToolsClicked() {
     openSettingsDialogForSection(SettingsDialog::Section::CliTools);

@@ -306,6 +306,9 @@ private:
     bool m_animating = false;  ///< The Animations tab is shown: the canvas plays
     int m_sequence = -1;       ///< The selected animation
     int m_step = -1;           ///< Its selected step
+    /// A new animation step's timing, and a new animation's speed (from the settings).
+    PuppetSequenceStep m_newStep{QString(), 4, 0};
+    int m_newAnimationFps = DEFAULT_ANIMATION_FPS;
     int m_playFrame = 0;       ///< The playhead, in the selected animation's frames
     QSet<QString> m_playAlong;  ///< Animations ticked to play along (preview only, not saved)
     bool m_rebuildingSequences = false;

@@ -6,6 +6,9 @@
 #include "PuppetCanvas.h"
 #include "PuppetPoseStrip.h"
 #include "PuppetSequenceTrack.h"
+#include "PuppetSequencing.h"
+#include "SettingsDialog.h"
+#include "CliToolsConfig.h"
 #include "PuppetEditing.h"
 #include "PuppetTreeWidget.h"
 #include "PuppetWorkspace.h"
@@ -784,10 +787,11 @@ void PuppetWorkspaceTests::testDoubleClickingThePivotHangsThePartWhereItIs() {
     popup->close();
     QVERIFY(doll.puppet().attachments.isEmpty());
 
-    // Over the body alone: it hangs from a new marker there at once, without moving.
+    // Over the body alone: it hangs from a new marker there at once, without moving. The
+    // double-click needn't be on the pivot itself: anywhere in its ring, on the head too, will do.
     doll.project.session.activeAtlas().puppets.first().parts[1].position = QPoint(3, -20);
     workspace.refresh();
-    doubleClickPivot(QPointF(3, -20));
+    doubleClickPivot(QPointF(4, -23));
     QCOMPARE(doubleClicked.last()[1].value<QVector<int>>(), QVector<int>{0});
     QCOMPARE(doll.puppet().attachments.first().parent, QStringLiteral("body"));
     QCOMPARE(doll.puppet().attachments.first().parentMarker, QStringLiteral("head"));
@@ -1434,7 +1438,9 @@ void addPoseFromMenu(QMenu* menu, const QString& title, const QString& pose) {
 }
 
 /// The selected animation's steps as "pose in/hold".
-QStringList stepRows(const Doll& doll, int sequence = 0) {
+/// The steps of animation @p sequence of the first puppet of @p doll (a Doll or a Face).
+template <typename Fixture>
+QStringList stepRows(const Fixture& doll, int sequence = 0) {
     QStringList rows;
     for (const PuppetSequenceStep& step : doll.project.session.atlases.first().puppets.first().sequences[sequence].steps)
         rows.append(QStringLiteral("%1 %2/%3%4").arg(step.pose).arg(step.in).arg(step.hold).arg(step.snap ? " step" : ""));
@@ -1513,23 +1519,25 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
     std::unique_ptr<QMenu> emptyMenu(track->createContextMenu(-1));
     QCOMPARE(menuItems(emptyMenu.get()), (QStringList{"New Frame", "Add Pose"}));
     addPoseFromMenu(emptyMenu.get(), QStringLiteral("Add Pose"), QStringLiteral("nod"));
-    QCOMPARE(stepRows(doll), QStringList{"nod 4/4"});
+    QCOMPARE(stepRows(doll), QStringList{"nod 4/0"});
     QCOMPARE(workspace.selectedStep(), 0);
     std::unique_ptr<QMenu> menu(track->createContextMenu(0));
     QCOMPARE(menuItems(menu.get()), (QStringList{"New Frame Before", "New Frame After", "Add Pose Before",
                                                  "Add Pose After", "-", "Save as Pose...", "-", "[Move to the left]",
                                                  "[Move to the right]", "Duplicate", "-", "Delete"}));
     addPoseFromMenu(menu.get(), QStringLiteral("Add Pose After"), QStringLiteral("smile"));
-    QCOMPARE(stepRows(doll), (QStringList{"nod 4/4", "smile 4/4"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 4/0", "smile 4/0"}));
     std::unique_ptr<QMenu> secondMenu(track->createContextMenu(1));
     addPoseFromMenu(secondMenu.get(), QStringLiteral("Add Pose Before"), QStringLiteral("smile"));
-    QCOMPARE(stepRows(doll), (QStringList{"nod 4/4", "smile 4/4", "smile 4/4"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 4/0", "smile 4/0", "smile 4/0"}));
     QCOMPARE(workspace.selectedStep(), 1);
 
     // The selected step's fields; a step lasts a frame at least.
     workspace.findChild<QSpinBox*>(QStringLiteral("puppetStepIn"))->setValue(2);
     workspace.findChild<QComboBox*>(QStringLiteral("puppetStepEase"))->setCurrentIndex(1);
-    QCOMPARE(stepRows(doll)[1], QStringLiteral("smile 2/4 step"));
+    QCOMPARE(stepRows(doll)[1], QStringLiteral("smile 2/0 step"));
+    workspace.findChild<QSpinBox*>(QStringLiteral("puppetStepHold"))->setValue(3);
+    QCOMPARE(stepRows(doll)[1], QStringLiteral("smile 2/3 step"));
     workspace.findChild<QSpinBox*>(QStringLiteral("puppetStepHold"))->setValue(0);
     workspace.findChild<QSpinBox*>(QStringLiteral("puppetStepIn"))->setValue(0);
     QCOMPARE(stepRows(doll)[1], QStringLiteral("smile 0/1 step"));
@@ -1543,7 +1551,7 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
 
     // Move, duplicate and delete, as frames.
     emit track->moveRequested(1, 0);
-    QCOMPARE(stepRows(doll), (QStringList{"nod 0/1 step", "nod 4/4", "smile 4/4"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 0/1 step", "nod 4/0", "smile 4/0"}));
     QCOMPARE(workspace.selectedStep(), 0);
     emit track->duplicateRequested(2);
     QCOMPARE(stepRows(doll).size(), 4);
@@ -1625,10 +1633,11 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     PuppetSequenceTrack* track = workspace.sequenceTrack();
     workspace.select({0, 1, -1});  // the head
 
-    // A new frame after "nod" is the animation's own pose, starting as a copy of it.
+    // A new frame after "nod" is the animation's own pose, starting as a copy of it, with a
+    // new step's timing.
     std::unique_ptr<QMenu> menu(track->createContextMenu(0));
     triggerMenuItem(menu.get(), QStringLiteral("New Frame After"));
-    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk frame 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk frame 1 4/0"}));
     QCOMPARE(doll.project.undoStack.undoText(), QStringLiteral("New Frame"));
     QCOMPARE(doll.puppet().poses.last().owner, QStringLiteral("walk"));
     QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk frame 1"), QStringLiteral("head")), std::optional<int>(20));
@@ -1655,7 +1664,7 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     // A step playing a shared pose gets its own copy when edited: "talk" still nods by 20°.
     workspace.selectStep(0);
     workspace.setPartAngle(1, 30);
-    QCOMPARE(stepRows(doll), (QStringList{"walk frame 2 2/2", "walk frame 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"walk frame 2 2/2", "walk frame 1 4/0"}));
     QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("walk frame 2"), QStringLiteral("head")), std::optional<int>(30));
     QCOMPARE(poseAngle(doll.puppet(), QStringLiteral("nod"), QStringLiteral("head")), std::optional<int>(20));
     QCOMPARE(stepRows(doll, 1), QStringList{"nod 2/2"});
@@ -1665,7 +1674,7 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     QCOMPARE(doll.puppet().poses.size(), 5);
     doll.project.undoStack.undo();
     doll.project.undoStack.undo();
-    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk frame 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "walk frame 1 4/0"}));
     QCOMPARE(doll.puppet().poses.size(), 4);
 
     // Mid-way to a pose, the canvas only plays.
@@ -1683,7 +1692,7 @@ void PuppetWorkspaceTests::testAnimationFramesAreEditedApartFromOtherAnimations(
     // Renaming the animation renames its frames; removing the frame's step removes it.
     workspace.findChild<QListWidget*>(QStringLiteral("puppetAnimations"))->item(0)->setText(QStringLiteral("stroll"));
     QCoreApplication::processEvents();
-    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "stroll frame 1 2/2"}));
+    QCOMPARE(stepRows(doll), (QStringList{"nod 2/2", "stroll frame 1 4/0"}));
     workspace.removeStep(1);
     QCOMPARE(PuppetEditing::poseNames(doll.puppet()), (QStringList{"rest", "nod", "smile", "look up"}));
 }
@@ -1757,6 +1766,234 @@ void PuppetWorkspaceTests::testPlayingAnAnimation() {
     workspace.bottomTabs()->setCurrentIndex(0);
     QCOMPARE(drawnParts(workspace.canvas())[1], turnedHead(0));
     QCOMPARE(drawnParts(workspace.canvas())[0], QRectF(-10, -40, 20, 40));
+}
+
+namespace {
+/// A face: a 40x30 head standing on the origin with two eye sockets, and a 3x3 pupil
+/// hanging from each by its middle, free to drift 3 px.
+struct Face {
+    PuppetProject project;
+
+    Face() {
+        const SpritePtr head = project.addSprite(QStringLiteral("face"), 40, 30, QPoint(20, 30),
+                                                 {pointMarker("eye_l", 12, 10), pointMarker("eye_r", 28, 10)});
+        const SpritePtr pupil = project.addSprite(QStringLiteral("pupil"), 3, 3, QPoint(1, 1));
+        Puppet face;
+        face.name = QStringLiteral("face");
+        face.parts = {{QStringLiteral("head"), {spriteVariant(head)}, QPoint(0, 0)},
+                      {QStringLiteral("left"), {spriteVariant(pupil)}, std::nullopt},
+                      {QStringLiteral("right"), {spriteVariant(pupil)}, std::nullopt}};
+        face.attachments = {{QStringLiteral("left"), QStringLiteral("pivot"), QStringLiteral("head"), QStringLiteral("eye_l"), 3},
+                            {QStringLiteral("right"), QStringLiteral("pivot"), QStringLiteral("head"), QStringLiteral("eye_r"), 3}};
+        PuppetEditing::keepRestPose(face);
+        project.session.activeAtlas().puppets = {face};
+    }
+
+    const Puppet& puppet() { return project.session.activeAtlas().puppets.first(); }
+};
+
+std::optional<QPoint> poseOffset(const Puppet& puppet, const QString& pose, const QString& part) {
+    for (const PuppetPose& found : puppet.poses) {
+        if (found.name != pose) continue;
+        for (const PuppetPoseSetting& setting : found.settings) {
+            if (setting.part == part) return setting.offset;
+        }
+    }
+    return std::nullopt;
+}
+
+/// An animation of two new frames, the second selected.
+void addTwoFrames(PuppetWorkspace& workspace) {
+    workspace.bottomTabs()->setCurrentIndex(1);
+    workspace.findChild<QPushButton*>(QStringLiteral("puppetAddAnimation"))->click();
+    std::unique_ptr<QMenu> empty(workspace.sequenceTrack()->createContextMenu(-1));
+    triggerMenuItem(empty.get(), QStringLiteral("New Frame"));
+    std::unique_ptr<QMenu> after(workspace.sequenceTrack()->createContextMenu(0));
+    triggerMenuItem(after.get(), QStringLiteral("New Frame After"));
+}
+}  // namespace
+
+void PuppetWorkspaceTests::testTinyPartsAreKeyedInEveryFrameAndLoop() {
+    Face face;
+    PuppetWorkspace workspace(&face.project.session, &face.project.undoStack);
+    showAtFullSize(workspace);
+    workspace.zoomSpin()->setValue(800.0);
+
+    // Selected, a pupil is dragged from anywhere in its move area outside its pivot ring,
+    // off its pixels too: it is pulled within the leeway.
+    workspace.select({0, 1, -1});
+    dragOnCanvas(workspace.canvas(), QPointF(-8, -18), QPointF(-6, -18));
+    QCOMPARE(poseOffset(face.puppet(), PUPPET_REST_POSE, QStringLiteral("left")), std::optional<QPoint>(QPoint(2, 0)));
+    QCOMPARE(face.puppet().attachments.size(), 2);
+    face.project.undoStack.undo();
+    // From inside the ring, on the pupil itself, the drag is the pivot's: away from every part,
+    // it detaches the pupil.
+    dragOnCanvas(workspace.canvas(), QPointF(-8, -20), QPointF(-30, 6));
+    QCOMPARE(face.puppet().attachments.size(), 1);
+    face.project.undoStack.undo();
+
+    addTwoFrames(workspace);
+    QCOMPARE(workspace.selectedStep(), 1);
+    QVERIFY(workspace.editingStep());
+    workspace.select({0, 1, -1});
+    dragOnCanvas(workspace.canvas(), QPointF(-8, -20), QPointF(-6, -20));
+    workspace.select({0, 2, -1});
+    dragOnCanvas(workspace.canvas(), QPointF(8, -20), QPointF(6, -20));
+    QCOMPARE(face.puppet().attachments.size(), 2);
+    const QString first = face.puppet().sequences[0].steps[0].pose;
+    const QString second = face.puppet().sequences[0].steps[1].pose;
+    QCOMPARE(poseOffset(face.puppet(), second, QStringLiteral("left")), std::optional<QPoint>(QPoint(2, 0)));
+    QCOMPARE(poseOffset(face.puppet(), second, QStringLiteral("right")), std::optional<QPoint>(QPoint(-2, 0)));
+    // The other frame keeps them where it showed them, so the loop goes back there.
+    QCOMPARE(poseOffset(face.puppet(), first, QStringLiteral("left")), std::optional<QPoint>(QPoint(0, 0)));
+    QCOMPARE(poseOffset(face.puppet(), first, QStringLiteral("right")), std::optional<QPoint>(QPoint(0, 0)));
+
+    const PuppetSequence& sequence = face.puppet().sequences[0];
+    const int cycle = PuppetSequencing::cycleFrames(sequence);
+    for (int loop = 0; loop < 3; ++loop) {
+        const QVector<PuppetPartState> back =
+            PuppetSequencing::statesAt(face.puppet(), sequence, loop * cycle + sequence.steps[0].in - 1, {});
+        QCOMPARE(back[1].offset, QPointF(0, 0));
+        QCOMPARE(back[2].offset, QPointF(0, 0));
+        const QVector<PuppetPartState> there = PuppetSequencing::statesAt(
+            face.puppet(), sequence, loop * cycle + PuppetSequencing::stepStart(sequence, 1) + sequence.steps[1].in - 1, {});
+        QCOMPARE(there[1].offset, QPointF(2, 0));
+        QCOMPARE(there[2].offset, QPointF(-2, 0));
+    }
+
+    // Each drag was one undo step, keying the other frame with it.
+    face.project.undoStack.undo();
+    QCOMPARE(poseOffset(face.puppet(), first, QStringLiteral("right")), std::nullopt);
+    QCOMPARE(poseOffset(face.puppet(), first, QStringLiteral("left")), std::optional<QPoint>(QPoint(0, 0)));
+}
+
+void PuppetWorkspaceTests::testStoppingLetsTheCanvasEditTheStep() {
+    Face face;
+    PuppetWorkspace workspace(&face.project.session, &face.project.undoStack);
+    showAtFullSize(workspace);
+    addTwoFrames(workspace);
+    workspace.findChild<QSpinBox*>(QStringLiteral("puppetAnimationFps"))->setValue(MAX_ANIMATION_FPS);
+
+    // Stopped after a few loops, the playhead is back in the first pass on a step's arrival.
+    auto* play = workspace.findChild<QToolButton*>(QStringLiteral("puppetPlay"));
+    play->click();
+    const int cycle = PuppetSequencing::cycleFrames(face.puppet().sequences[0]);
+    QTRY_VERIFY_WITH_TIMEOUT(workspace.playFrame() > 2 * cycle, 5000);
+    play->click();
+    QVERIFY(!play->isChecked());
+    QVERIFY(workspace.playFrame() < cycle);
+    QVERIFY(workspace.selectedStep() >= 0);
+    QVERIFY(workspace.editingStep());
+    workspace.setPartAngle(1, 30);
+    QCOMPARE(face.project.undoStack.undoText(), QStringLiteral("Turn Part"));
+}
+
+void PuppetWorkspaceTests::testSettingsTuneTheCanvasAndNewSteps() {
+    Face face;
+    PuppetWorkspace workspace(&face.project.session, &face.project.undoStack);
+    showAtFullSize(workspace);
+    AppSettings settings;
+    settings.puppetPivotRingRadius = 9;
+    settings.puppetPivotDoubleClickRadius = 30;
+    settings.puppetTurnHandleDistance = 50;
+    settings.puppetMarkerSnapDistance = 20;
+    settings.puppetDragDistance = 2;
+    settings.puppetOnionSkinOpacity = 60;
+    settings.puppetStepIn = 2;
+    settings.puppetStepHold = 1;
+    settings.puppetAnimationFps = 12;
+    workspace.setSettings(settings);
+    const PuppetCanvas::CanvasSettings& handles = workspace.canvas()->canvasSettings();
+    QCOMPARE(handles.pivotRingRadius, 9);
+    QCOMPARE(handles.pivotDoubleClickRadius, 30);
+    QCOMPARE(handles.turnHandleDistance, 50);
+    QCOMPARE(handles.markerSnapDistance, 20);
+    QCOMPARE(handles.onionSkinOpacity, 60);
+
+    // A short drag (3 px, under the system's distance) pulls the pupil, from its move area.
+    workspace.select({0, 1, -1});
+    dragOnCanvas(workspace.canvas(), QPointF(-8, -10), QPointF(-5, -10));
+    QCOMPARE(poseOffset(face.puppet(), PUPPET_REST_POSE, QStringLiteral("left")), std::optional<QPoint>(QPoint(3, 0)));
+    face.project.undoStack.undo();
+
+    // A double-click 25 px from the pivot still hangs the part.
+    QSignalSpy doubleClicked(workspace.canvas(), &PuppetCanvas::pivotDoubleClicked);
+    const QPoint pivot = workspace.canvas()->mapFromScene(QPointF(-8, -20));
+    QTest::mouseDClick(workspace.canvas()->viewport(), Qt::LeftButton, {}, pivot + QPoint(0, 25));
+    QCOMPARE(doubleClicked.count(), 1);
+    if (auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget())) popup->close();
+    QTest::mouseDClick(workspace.canvas()->viewport(), Qt::LeftButton, {}, pivot + QPoint(0, 35));
+    QCOMPARE(doubleClicked.count(), 1);
+    if (auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget())) popup->close();
+
+    // The move area is kept beyond the pivot ring and the turn handle.
+    settings.puppetTurnHandleDistance = 10;
+    workspace.setSettings(settings);
+    QCOMPARE(workspace.canvas()->canvasSettings().turnHandleDistance, 9 + 5 + 4);
+
+    // New animations, steps and frames take their speed and timing from the settings.
+    addTwoFrames(workspace);
+    QCOMPARE(face.puppet().sequences[0].fps, 12);
+    QCOMPARE(stepRows(face), (QStringList{"animation frame 1 2/1", "animation frame 2 2/1"}));
+}
+
+void PuppetWorkspaceTests::testDraggingNearTheSelectedPartChangesIt() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    showAtFullSize(workspace);
+    startPose(workspace);
+    workspace.select({0, 1, -1});  // the head, hanging from the body's neck at 0,-38
+
+    // Dragging on the body, within the head's move area, pulls the head: the selected part
+    // wins where they overlap. The body stays.
+    dragOnCanvas(workspace.canvas(), QPointF(0, -20), QPointF(20, -20));
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 1, -1}));
+    QVERIFY(workspace.findChild<QSpinBox*>(QStringLiteral("partAngle"))->value() != 0);
+    QCOMPARE(doll.puppet().parts[0].position, std::optional<QPoint>(QPoint(0, 0)));
+    QCOMPARE(doll.project.undoStack.count(), 2);
+
+    // A click there without a drag still selects the body.
+    QTest::mouseClick(workspace.canvas()->viewport(), Qt::LeftButton, {}, workspace.canvas()->mapFromScene(QPointF(0, -20)));
+    QCOMPARE(workspace.selection(), (PuppetSelection{0, 0, -1}));
+    QCOMPARE(doll.project.undoStack.count(), 2);
+}
+
+void PuppetWorkspaceTests::testPuppetsSettingsDialogEditsAndSavesTheSettings() {
+    AppSettings settings;
+    settings.puppetStepHold = 5;
+    SettingsDialog dialog(settings, CliPaths(), nullptr, SettingsDialog::Section::Puppets);
+    QCOMPARE(dialog.windowTitle(), QStringLiteral("Puppets Settings"));
+    QList<QSpinBox*> spins = dialog.findChildren<QSpinBox*>();
+    spins.removeIf([](QSpinBox* spin) { return !spin->isVisibleTo(spin->window()); });
+    QCOMPARE(spins.size(), 13);
+    for (QSpinBox* spin : spins) spin->setValue(spin->value() + 1);
+    AppSettings edited = dialog.getSettings();
+    QCOMPARE(edited.puppetPivotRingRadius, 8);
+    QCOMPARE(edited.puppetPivotDoubleClickRadius, 11);
+    QCOMPARE(edited.puppetDragDistance, 1);
+    QCOMPARE(edited.puppetStepHold, 6);
+    QCOMPARE(edited.puppetAnimationFps, 9);
+    QCOMPARE(edited.puppetPivotCrossSize, 9);
+
+    // Saved and read back.
+    const bool testMode = QStandardPaths::isTestModeEnabled();
+    QStandardPaths::setTestModeEnabled(true);
+    QFile::remove(CliToolsConfig::configPath());
+    CliToolsConfig::saveAppSettings(edited, CliPaths());
+    const AppSettings loaded = CliToolsConfig::loadAppSettings();
+    QFile::remove(CliToolsConfig::configPath());
+    QStandardPaths::setTestModeEnabled(testMode);
+    QCOMPARE(loaded.puppetPivotDoubleClickRadius, 11);
+    QCOMPARE(loaded.puppetStepIn, 5);
+    QCOMPARE(loaded.puppetStepHold, 6);
+    QCOMPARE(loaded.puppetTurnHandleDistance, 37);
+
+    // Reset puts the defaults back.
+    for (QPushButton* button : dialog.findChildren<QPushButton*>()) {
+        if (button->text() == QStringLiteral("Reset")) button->click();
+    }
+    QCOMPARE(dialog.getSettings().puppetStepHold, 0);
+    QCOMPARE(dialog.getSettings().puppetPivotDoubleClickRadius, AppSettings().puppetPivotDoubleClickRadius);
 }
 
 void PuppetWorkspaceTests::testAnimationVariantsPlayAlong() {

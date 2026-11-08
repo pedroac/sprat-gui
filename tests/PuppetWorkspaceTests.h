@@ -44,6 +44,11 @@ private slots:
     void testBuildingAnAnimationFromPoses();
     void testPlayingAnAnimation();
     void testAnimationVariantsPlayAlong();
+    void testTinyPartsAreKeyedInEveryFrameAndLoop();
+    void testStoppingLetsTheCanvasEditTheStep();
+    void testSettingsTuneTheCanvasAndNewSteps();
+    void testDraggingNearTheSelectedPartChangesIt();
+    void testPuppetsSettingsDialogEditsAndSavesTheSettings();
     void testAnimationFramesAreEditedApartFromOtherAnimations();
     void testRenamingAPartUpdatesItsAttachments();
     void testPanelRefusesATakenName();

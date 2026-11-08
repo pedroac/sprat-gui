@@ -827,6 +827,9 @@ if(BUILD_TESTING)
         src/SpriteSheetLayout/LayoutParser.cpp
         src/Core/ArchiveExtractor.cpp
         src/CLITools/LayoutArguments.cpp
+        src/CLITools/CliToolsConfig.cpp
+        src/CLITools/SpratCliLocator.cpp
+        src/Settings/SettingsDialog.cpp
     )
     if(NOT EMSCRIPTEN)
         target_sources(sprat-gui-tests PRIVATE src/Update/UpdateChecker.cpp)
@@ -852,6 +855,7 @@ if(BUILD_TESTING)
         src/Update
         src/CLITools
         src/Profiles
+        src/Settings
     )
 
     target_link_libraries(sprat-gui-tests PRIVATE

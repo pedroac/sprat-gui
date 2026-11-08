@@ -1,5 +1,6 @@
 #include "SettingsDialog.h"
 #include "AppIcons.h"
+#include "AnimationModels.h"
 #include <QDir>
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -34,6 +35,7 @@ void SettingsDialog::setupUi() {
         case Section::Exportation: setWindowTitle(tr("Exportation Settings")); break;
         case Section::SpritesNavigator: setWindowTitle(tr("Sprites Navigator Settings")); break;
         case Section::NineSlice: setWindowTitle(tr("Nine-Slice Editor Settings")); break;
+        case Section::Puppets: setWindowTitle(tr("Puppets Settings")); break;
 #ifndef Q_OS_WASM
         case Section::CliTools: setWindowTitle(tr("CLI Tools Settings")); break;
 #endif
@@ -559,6 +561,107 @@ void SettingsDialog::setupUi() {
     contentLayout->addWidget(m_nineSliceGroup);
     m_nineSliceGroup->setVisible(m_initialSection == Section::NineSlice);
 
+    m_puppetsGroup = new QGroupBox(tr("Puppets"), content);
+    QFormLayout* puppetsForm = new QFormLayout(m_puppetsGroup);
+    const auto addPuppetSpin = [this, puppetsForm](const QString& label, int value, int minimum, int maximum,
+                                                   const QString& suffix, const QString& toolTip) {
+        auto* spin = new QSpinBox(this);
+        spin->setRange(minimum, maximum);
+        spin->setSuffix(suffix);
+        spin->setValue(value);
+        spin->setToolTip(toolTip);
+        puppetsForm->addRow(label, spin);
+        return spin;
+    };
+    const auto addPuppetHeading = [this, puppetsForm](const QString& text) {
+        auto* heading = new QLabel(text, this);
+        heading->setWordWrap(true);
+        heading->setStyleSheet("color: #666; margin-top: 8px; margin-bottom: 4px;");
+        puppetsForm->addRow(heading);
+    };
+    const auto addPuppetColor = [this, puppetsForm](const QString& label, QColor& color, const QString& toolTip) {
+        QPushButton* button = createColorButton(color);
+        button->setToolTip(toolTip);
+        connect(button, &QPushButton::clicked, this, [this, button, &color]() { pickColorWithAlpha(button, color); });
+        puppetsForm->addRow(label, button);
+        return button;
+    };
+    const auto addPuppetDoubleSpin = [this, puppetsForm](const QString& label, double value, double minimum, double maximum,
+                                                         const QString& toolTip) {
+        auto* spin = new QDoubleSpinBox(this);
+        spin->setRange(minimum, maximum);
+        spin->setDecimals(1);
+        spin->setSingleStep(0.5);
+        spin->setSuffix(tr(" px"));
+        spin->setValue(value);
+        spin->setToolTip(toolTip);
+        puppetsForm->addRow(label, spin);
+        return spin;
+    };
+    addPuppetHeading(tr("Handles on the canvas, in screen pixels (the same at any zoom):"));
+    const QString px = tr(" px");
+    m_puppetPivotRingRadiusSpin = addPuppetSpin(tr("Pivot ring radius:"), m_settings.puppetPivotRingRadius, 3, 40, px,
+        tr("The ring around the selected part's pivot cross. Drag from inside it onto a marker or a part to "
+           "attach the part, or away to place it by position"));
+    m_puppetPivotDoubleClickRadiusSpin = addPuppetSpin(tr("Pivot double-click area:"), m_settings.puppetPivotDoubleClickRadius, 3, 60, px,
+        tr("How far from the pivot a double-click hangs the part from the part under its pivot. "
+           "Never less than the ring"));
+    m_puppetTurnHandleDistanceSpin = addPuppetSpin(tr("Move area radius:"), m_settings.puppetTurnHandleDistance, 8, 300, px,
+        tr("The dashed circle around the selected part's pivot. Dragging anywhere inside it (outside the pivot ring) "
+           "moves the selected part, even where other parts are; its turn handle sits on it. "
+           "Always larger than the pivot ring"));
+    m_puppetTurnHandleRadiusSpin = addPuppetSpin(tr("Turn handle radius:"), m_settings.puppetTurnHandleRadius, 2, 30, px,
+        tr("The round handle that turns the selected part"));
+    const auto keepMoveAreaOutside = [this]() {
+        m_puppetTurnHandleDistanceSpin->setMinimum(m_puppetPivotRingRadiusSpin->value()
+                                                   + m_puppetTurnHandleRadiusSpin->value() + 4);
+    };
+    connect(m_puppetPivotRingRadiusSpin, qOverload<int>(&QSpinBox::valueChanged), this, keepMoveAreaOutside);
+    connect(m_puppetTurnHandleRadiusSpin, qOverload<int>(&QSpinBox::valueChanged), this, keepMoveAreaOutside);
+    keepMoveAreaOutside();
+    m_puppetMarkerSnapDistanceSpin = addPuppetSpin(tr("Marker snap distance:"), m_settings.puppetMarkerSnapDistance, 0, 60, px,
+        tr("A pivot ring dragged this near a marker attaches the part to it"));
+    m_puppetDragDistanceSpin = addPuppetSpin(tr("Drag starts after:"), m_settings.puppetDragDistance, 0, 40, px,
+        tr("How far the pointer moves before pressing a part drags it. Lower moves small parts more "
+           "precisely; higher keeps clicks from moving parts by accident"));
+    m_puppetDragDistanceSpin->setSpecialValueText(tr("System default"));
+
+    addPuppetHeading(tr("Appearance:"));
+    m_puppetHandleColorBtn = addPuppetColor(tr("Handle color:"), m_settings.puppetHandleColor,
+        tr("The pivot ring and cross, the angle line, the turn handle and the selected part's outline"));
+    m_puppetRangeColorBtn = addPuppetColor(tr("Markers and range color:"), m_settings.puppetRangeColor,
+        tr("Markers, where the selected part's joint may drift, and the move area with its turn arc"));
+    m_puppetOriginColorBtn = addPuppetColor(tr("Origin cross color:"), m_settings.puppetOriginColor,
+        tr("The cross at the puppet's origin"));
+    m_puppetHandleLineWidthSpin = addPuppetDoubleSpin(tr("Handle line width:"), m_settings.puppetHandleLineWidth, 0.5, 6,
+        tr("Width of the pivot ring; the angle line is half a pixel wider"));
+    m_puppetPivotCrossSizeSpin = addPuppetSpin(tr("Pivot cross size:"), m_settings.puppetPivotCrossSize, 2, 60, px,
+        tr("Half the width of the selected part's pivot cross"));
+    m_puppetOriginCrossSizeSpin = addPuppetSpin(tr("Origin cross size:"), m_settings.puppetOriginCrossSize, 2, 200, px,
+        tr("Half the width of the puppet's origin cross"));
+    m_puppetMarkerDotRadiusSpin = addPuppetDoubleSpin(tr("Marker dot radius:"), m_settings.puppetMarkerDotRadius, 1, 20,
+        tr("Size of the markers' dots"));
+    m_puppetFadedPartOpacitySpin = addPuppetSpin(tr("Parts not in the pose:"), m_settings.puppetFadedPartOpacity, 5, 100, tr(" %"),
+        tr("How opaque the parts the selected pose leaves alone are drawn"));
+    m_puppetOnionSkinOpacitySpin = addPuppetSpin(tr("Onion skin opacity:"), m_settings.puppetOnionSkinOpacity, 5, 100, tr(" %"),
+        tr("How opaque the steps before and after the edited one are drawn"));
+    m_puppetOnionBeforeColorBtn = addPuppetColor(tr("Onion skin before:"), m_settings.puppetOnionBeforeColor,
+        tr("Tint of the step before the edited one"));
+    m_puppetOnionAfterColorBtn = addPuppetColor(tr("Onion skin after:"), m_settings.puppetOnionAfterColor,
+        tr("Tint of the step after the edited one"));
+
+    addPuppetHeading(tr("New animations and the steps and frames added to them:"));
+    const QString frames = tr(" frame(s)");
+    m_puppetStepInSpin = addPuppetSpin(tr("Step reaches its pose in:"), m_settings.puppetStepIn, 0, 1000, frames,
+        tr("Frames a new step takes to move from the pose before to its own (0 jumps there)"));
+    m_puppetStepHoldSpin = addPuppetSpin(tr("Step holds its pose for:"), m_settings.puppetStepHold, 0, 1000, frames,
+        tr("Frames a new step stays on its pose before the next step starts"));
+    m_puppetAnimationFpsSpin = addPuppetSpin(tr("Animation speed:"), m_settings.puppetAnimationFps, 1, MAX_ANIMATION_FPS, tr(" fps"),
+        tr("Frames per second of a new animation"));
+
+    contentLayout->addWidget(m_puppetsGroup);
+    m_puppetsGroup->setVisible(m_initialSection == Section::Puppets);
+
 #ifndef Q_OS_WASM
     m_cliGroup = new QGroupBox(tr("CLI Tools"), content);
     QFormLayout* cliForm = new QFormLayout(m_cliGroup);
@@ -730,6 +833,28 @@ void SettingsDialog::resetToDefaults() {
     if (m_nineSliceCenterColorBtn)       updateColorButton(m_nineSliceCenterColorBtn,       AppSettings().nineSliceCenterColor);
     if (m_nineSliceEdgeLRColorBtn)       updateColorButton(m_nineSliceEdgeLRColorBtn,       AppSettings().nineSliceEdgeLRColor);
     if (m_nineSliceEdgeTBColorBtn)       updateColorButton(m_nineSliceEdgeTBColorBtn,       AppSettings().nineSliceEdgeTBColor);
+
+    const AppSettings defaults;
+    m_puppetTurnHandleRadiusSpin->setValue(defaults.puppetTurnHandleRadius);
+    m_puppetPivotRingRadiusSpin->setValue(defaults.puppetPivotRingRadius);
+    m_puppetPivotDoubleClickRadiusSpin->setValue(defaults.puppetPivotDoubleClickRadius);
+    m_puppetTurnHandleDistanceSpin->setValue(defaults.puppetTurnHandleDistance);
+    m_puppetMarkerSnapDistanceSpin->setValue(defaults.puppetMarkerSnapDistance);
+    m_puppetDragDistanceSpin->setValue(defaults.puppetDragDistance);
+    m_puppetOnionSkinOpacitySpin->setValue(defaults.puppetOnionSkinOpacity);
+    m_puppetFadedPartOpacitySpin->setValue(defaults.puppetFadedPartOpacity);
+    m_puppetHandleLineWidthSpin->setValue(defaults.puppetHandleLineWidth);
+    m_puppetPivotCrossSizeSpin->setValue(defaults.puppetPivotCrossSize);
+    m_puppetOriginCrossSizeSpin->setValue(defaults.puppetOriginCrossSize);
+    m_puppetMarkerDotRadiusSpin->setValue(defaults.puppetMarkerDotRadius);
+    updateColorButton(m_puppetHandleColorBtn, defaults.puppetHandleColor);
+    updateColorButton(m_puppetRangeColorBtn, defaults.puppetRangeColor);
+    updateColorButton(m_puppetOriginColorBtn, defaults.puppetOriginColor);
+    updateColorButton(m_puppetOnionBeforeColorBtn, defaults.puppetOnionBeforeColor);
+    updateColorButton(m_puppetOnionAfterColorBtn, defaults.puppetOnionAfterColor);
+    m_puppetStepInSpin->setValue(defaults.puppetStepIn);
+    m_puppetStepHoldSpin->setValue(defaults.puppetStepHold);
+    m_puppetAnimationFpsSpin->setValue(defaults.puppetAnimationFps);
 }
 
 AppSettings SettingsDialog::getSettings() const {
@@ -769,6 +894,21 @@ AppSettings SettingsDialog::getSettings() const {
         s.nineSliceLineStyle = (Qt::PenStyle)m_nineSliceLineStyleCombo->currentData().toInt();
     if (m_nineSliceOverlayOpacitySpin)
         s.nineSliceOverlayOpacity = m_nineSliceOverlayOpacitySpin->value();
+    s.puppetPivotRingRadius = m_puppetPivotRingRadiusSpin->value();
+    s.puppetPivotDoubleClickRadius = m_puppetPivotDoubleClickRadiusSpin->value();
+    s.puppetTurnHandleDistance = m_puppetTurnHandleDistanceSpin->value();
+    s.puppetTurnHandleRadius = m_puppetTurnHandleRadiusSpin->value();
+    s.puppetFadedPartOpacity = m_puppetFadedPartOpacitySpin->value();
+    s.puppetHandleLineWidth = m_puppetHandleLineWidthSpin->value();
+    s.puppetPivotCrossSize = m_puppetPivotCrossSizeSpin->value();
+    s.puppetOriginCrossSize = m_puppetOriginCrossSizeSpin->value();
+    s.puppetMarkerDotRadius = m_puppetMarkerDotRadiusSpin->value();
+    s.puppetMarkerSnapDistance = m_puppetMarkerSnapDistanceSpin->value();
+    s.puppetDragDistance = m_puppetDragDistanceSpin->value();
+    s.puppetOnionSkinOpacity = m_puppetOnionSkinOpacitySpin->value();
+    s.puppetStepIn = m_puppetStepInSpin->value();
+    s.puppetStepHold = m_puppetStepHoldSpin->value();
+    s.puppetAnimationFps = m_puppetAnimationFpsSpin->value();
     return s;
 }
 

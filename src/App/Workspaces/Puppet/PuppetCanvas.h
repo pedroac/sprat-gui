@@ -83,9 +83,36 @@ public:
         QColor color{255, 255, 255, 80};
     };
 
+    /// How the canvas looks and how near the pointer must be to its handles. Sizes are in
+    /// screen pixels, so they stay the same at any zoom.
+    struct CanvasSettings {
+        int pivotRingRadius = 7;          ///< The pivot ring: pressing inside it attaches the part
+        int pivotDoubleClickRadius = 10;  ///< A double-click this near the pivot hangs the part
+        /// The turn handle's distance from the pivot, and the radius of the area around it where
+        /// dragging moves the selected part; always beyond the pivot ring and the turn handle.
+        int turnHandleDistance = 36;
+        int turnHandleRadius = 5;
+        int markerSnapDistance = 12;      ///< The dragged pivot ring snaps to markers this near
+        int dragDistance = 0;             ///< Pointer travel before a drag starts; 0 = the system's
+        int pivotCrossSize = 8;           ///< Half the selected part's pivot cross
+        int originCrossSize = 24;         ///< Half the puppet's origin cross
+        double markerDotRadius = 3.5;
+        double handleLineWidth = 1.5;     ///< The pivot ring; the angle line is half a pixel wider
+        QColor handleColor{61, 174, 233};  ///< The pivot ring and cross, angle line, turn handle, outline
+        QColor rangeColor{255, 210, 0};    ///< Markers, the joint's area and the turn arc
+        QColor originColor{255, 255, 255};
+        QColor onionBeforeColor{220, 50, 50};
+        QColor onionAfterColor{40, 170, 70};
+        int onionSkinOpacity = 30;        ///< Percent
+        int fadedPartOpacity = 35;        ///< Percent, for parts the pose leaves alone
+    };
+
     explicit PuppetCanvas(QWidget* parent = nullptr);
     void setGrid(const Grid& grid);
     const Grid& grid() const { return m_grid; }
+    /// Applies @p settings, keeping the move area beyond the pivot ring and the turn handle.
+    void setCanvasSettings(const CanvasSettings& settings);
+    const CanvasSettings& canvasSettings() const { return m_settings; }
 
     /// Shows @p parts, in draw order (the first at the back). @p selectedPart is outlined,
     /// with its pivot handle at @p selectedPivot.
@@ -165,8 +192,12 @@ private:
     bool isAttached(int part) const;
     /// Degrees clockwise of @p scenePos around the turned part's joint.
     double angleAround(const QPointF& scenePos) const;
-    /// Whether @p viewPos is on the selected part's pivot handle.
-    bool onPivotHandle(const QPoint& viewPos) const;
+    /// Whether @p viewPos is on the selected part's pivot handle, inside its ring; with
+    /// @p doubleClick, within the double-click radius.
+    bool onPivotHandle(const QPoint& viewPos, bool doubleClick = false) const;
+    /// Whether @p viewPos is where dragging changes the selected part: within its move area
+    /// (around its pivot, as far as the turn handle) or on its pixels, even under another part.
+    bool onSelectedPart(const QPoint& viewPos) const;
     /// Where the selected part's turn handle is, in scene coordinates, if it has one.
     std::optional<QPointF> turnHandle() const;
     bool onTurnHandle(const QPoint& viewPos) const;
@@ -202,6 +233,9 @@ private:
     QPointF m_pressScenePos;
     bool m_dragging = false;
 
+    /// The part a press selects on release when it isn't dragged: the topmost part under it,
+    /// pressed where a drag changes the selected part instead. -2 when the press selected at once.
+    int m_clickPart = -2;
     int m_pullPart = -1;         ///< The attached part pulled by the left button, or -1
     bool m_pulling = false;      ///< Past the drag distance
     int m_turnPart = -1;         ///< The part turned or drifted by the left button, or -1
@@ -216,6 +250,9 @@ private:
     bool m_rigEditable = true;
     QVector<OnionSkin> m_onionSkins;
     Grid m_grid;
+    CanvasSettings m_settings;
+    /// Pointer travel, in screen pixels, before a press becomes a drag.
+    int dragDistance() const;
     bool m_handlePressed = false;  ///< The left button went down on the pivot handle
     bool m_attaching = false;      ///< The pivot handle is being dragged
     QPointF m_attachPointer;       ///< Where it is, in scene coordinates

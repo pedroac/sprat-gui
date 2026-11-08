@@ -975,6 +975,11 @@ void MainWindow::setupToolbar() {
     nineSliceSettingsAction->setToolTip(tr("Open nine-slice editor settings"));
     connect(nineSliceSettingsAction, &QAction::triggered, this, &MainWindow::onSettingsNineSliceClicked);
 
+    QAction* puppetsSettingsAction = settingsMenu->addAction(
+        AppIcons::icon(QStringLiteral("puppet")), tr("Puppets..."));
+    puppetsSettingsAction->setToolTip(tr("Open puppet workspace settings: canvas handles and new animation steps"));
+    connect(puppetsSettingsAction, &QAction::triggered, this, &MainWindow::onSettingsPuppetsClicked);
+
 #ifndef Q_OS_WASM
     QAction* cliToolsAction = settingsMenu->addAction(
         AppIcons::icon(QStringLiteral("terminal")), tr("CLI Tools..."));
