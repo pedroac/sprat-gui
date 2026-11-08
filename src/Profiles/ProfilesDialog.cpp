@@ -1,5 +1,6 @@
 #include "ProfilesDialog.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "ResolutionsConfig.h"
 #include "ResolutionUtils.h"
 #include "MessageDialog.h"
@@ -24,6 +25,7 @@
 
 namespace {
 constexpr auto kTargetSameAsSourceValue = "same_source";
+constexpr int DESCRIPTION_SPACING = 8;  // between the description and the profiles
 
 SpratProfile makeDefaultProfile(const QString& name) {
     SpratProfile p;
@@ -74,6 +76,7 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     auto* descLabel = new QLabel(tr("Profiles define how the spritesheet is generated — resolution, padding, and other export settings."), this);
     descLabel->setWordWrap(true);
     rootLayout->addWidget(descLabel);
+    rootLayout->addSpacing(DESCRIPTION_SPACING);
 
     QHBoxLayout* contentLayout = new QHBoxLayout();
 
@@ -90,6 +93,8 @@ ProfilesDialog::ProfilesDialog(const QVector<SpratProfile>& profiles, QWidget* p
     QHBoxLayout* listActionsLayout = new QHBoxLayout();
     m_addButton = new QPushButton(AppIcons::icon(QStringLiteral("add")), tr("Add"), this);
     m_removeButton = new QPushButton(AppIcons::icon(QStringLiteral("delete")), tr("Remove"), this);
+    UiStyle::setRole(m_addButton, UiStyle::Role::Add);
+    UiStyle::setRole(m_removeButton, UiStyle::Role::Destructive);
     listActionsLayout->addWidget(m_addButton);
     listActionsLayout->addWidget(m_removeButton);
     listActionsLayout->addStretch();

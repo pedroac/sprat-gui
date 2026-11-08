@@ -1,5 +1,6 @@
 #include "PuppetWorkspace.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "AppSettings.h"
 #include "MessageDialog.h"
 #include "ProjectSession.h"
@@ -14,6 +15,7 @@
 #include "PuppetPropertiesPanel.h"
 #include "PuppetTreeWidget.h"
 #include "SpritePickerDialog.h"
+#include "SpriteTreeUtils.h"
 #include "MarkerCommands.h"
 
 #include <cmath>
@@ -56,7 +58,7 @@ constexpr int POSE_PARTS_HEIGHT = 160;
 /// The tabs below the canvas.
 constexpr int POSES_TAB = 0;
 constexpr int ANIMATIONS_TAB = 1;
-constexpr int SEQUENCE_LIST_WIDTH = 150;
+constexpr int SEQUENCE_LIST_WIDTH = 180;
 constexpr int NAME_COLUMN = 0;
 constexpr int DETAIL_COLUMN = 1;
 
@@ -128,6 +130,21 @@ void PuppetWorkspace::setupUi() {
     m_atlasRow->hide();
     leftLayout->addWidget(m_atlasRow);
 
+    m_treeFilter = new QLineEdit(left);
+    m_treeFilter->setObjectName(QStringLiteral("puppetFilter"));
+    m_treeFilter->setPlaceholderText(tr("Search puppets..."));
+    m_treeFilter->setToolTip(tr("Shows the puppets, parts and variants whose names contain this text"));
+    m_treeFilter->setClearButtonEnabled(true);
+    {
+        auto* row = new QHBoxLayout;
+        row->setContentsMargins(4, 4, 4, 4);
+        row->addWidget(m_treeFilter);
+        leftLayout->addLayout(row);
+    }
+    connect(m_treeFilter, &QLineEdit::textChanged, this, [this](const QString& text) {
+        SpriteTreeUtils::filterTree(m_tree, text, {NAME_COLUMN});
+    });
+
     m_tree = new PuppetTreeWidget(left);
     m_tree->setObjectName(QStringLiteral("puppetTree"));
     m_tree->setColumnCount(2);
@@ -144,18 +161,24 @@ void PuppetWorkspace::setupUi() {
     emptyState->setAlignment(Qt::AlignCenter);
     emptyState->setWordWrap(true);
     emptyState->setObjectName(QStringLiteral("puppetEmptyState"));
+    emptyState->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(emptyState, &QWidget::customContextMenuRequested, this, [this, emptyState](const QPoint& pos) {
+        QMenu* menu = createContextMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->popup(emptyState->mapToGlobal(pos));
+    });
     m_treeStack = new QStackedWidget(left);
     m_treeStack->addWidget(m_tree);
     m_treeStack->addWidget(emptyState);
     leftLayout->addWidget(m_treeStack, 1);
 
-    m_addPuppetAction = new QAction(tr("New Puppet"), this);
+    m_addPuppetAction = new QAction(AppIcons::icon(QStringLiteral("puppet")), tr("New Puppet..."), this);
     m_addPuppetAction->setToolTip(tr("Add a puppet to this atlas"));
     connect(m_addPuppetAction, &QAction::triggered, this, &PuppetWorkspace::newPuppet);
-    m_addPartAction = new QAction(tr("New Part"), this);
+    m_addPartAction = new QAction(AppIcons::icon(QStringLiteral("add")), tr("New Part"), this);
     m_addPartAction->setToolTip(tr("Add a part to the selected puppet, in front of the others"));
     connect(m_addPartAction, &QAction::triggered, this, &PuppetWorkspace::addPart);
-    m_addSpritesAction = new QAction(tr("Add Sprites..."), this);
+    m_addSpritesAction = new QAction(AppIcons::icon(QStringLiteral("image-add")), tr("Add Sprites..."), this);
     m_addSpritesAction->setToolTip(tr("Pick sprites the selected part can show"));
     connect(m_addSpritesAction, &QAction::triggered, this, &PuppetWorkspace::pickSpriteVariants);
     m_removeAction = new QAction(AppIcons::icon(QStringLiteral("delete")),
@@ -184,7 +207,10 @@ void PuppetWorkspace::setupUi() {
     addMenu->addAction(m_addPartAction);
     addMenu->addAction(m_addSpritesAction);
     m_addButton->setMenu(addMenu);
+    m_addButton->setToolTip(tr("Add a puppet, a part to the selected puppet, or sprites the selected part can show"));
+    UiStyle::setRole(m_addButton, UiStyle::Role::Add);
     m_removeButton = new QPushButton(m_removeAction->icon(), tr("Remove"), left);
+    UiStyle::setRole(m_removeButton, UiStyle::Role::Destructive);
     m_removeButton->setObjectName(QStringLiteral("puppetRemoveButton"));
     m_removeButton->setToolTip(m_removeAction->toolTip());
     m_removeButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -204,8 +230,17 @@ void PuppetWorkspace::setupUi() {
         m_poseParts = new QListWidget(left);
         m_poseParts->setObjectName(QStringLiteral("puppetPoseParts"));
         m_poseParts->setWordWrap(true);
-        m_poseParts->setMaximumHeight(POSE_PARTS_HEIGHT);
-        leftLayout->addWidget(m_poseParts);
+        m_posePartsHint = new QLabel(left);
+        m_posePartsHint->setObjectName(QStringLiteral("puppetPosePartsHint"));
+        m_posePartsHint->setAlignment(Qt::AlignCenter);
+        m_posePartsHint->setWordWrap(true);
+        m_posePartsHint->setForegroundRole(QPalette::PlaceholderText);
+        m_posePartsHint->setContentsMargins(8, 8, 8, 8);
+        m_posePartsStack = new QStackedWidget(left);
+        m_posePartsStack->addWidget(m_poseParts);
+        m_posePartsStack->addWidget(m_posePartsHint);
+        m_posePartsStack->setMaximumHeight(POSE_PARTS_HEIGHT);
+        leftLayout->addWidget(m_posePartsStack);
         // Both act once the list's own handling is done, since they rebuild it. They take what
         // they need from the item now: by then a click's other signal may have deleted it.
         connect(m_poseParts, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) {
@@ -239,7 +274,7 @@ void PuppetWorkspace::setupUi() {
         m_zoomSpin->setSuffix(QStringLiteral("%"));
         m_zoomSpin->setSingleStep(10.0);
         row->addWidget(m_zoomSpin);
-        auto* fitButton = new QPushButton(tr("Fit"), middle);
+        auto* fitButton = new QPushButton(AppIcons::icon(QStringLiteral("fit")), tr("Fit"), middle);
         fitButton->setObjectName(QStringLiteral("puppetFit"));
         fitButton->setToolTip(tr("Zoom to show the whole puppet"));
         row->addWidget(fitButton);
@@ -278,12 +313,14 @@ void PuppetWorkspace::setupUi() {
         m_newPoseButton->setObjectName(QStringLiteral("puppetNewPose"));
         m_newPoseButton->setToolTip(tr("Add a pose after the selected frame. It sets no part until you change one. "
                                        "Right-click a frame for more"));
-        m_duplicatePoseButton = new QPushButton(tr("Duplicate"), middle);
+        UiStyle::setRole(m_newPoseButton, UiStyle::Role::Add);
+        m_duplicatePoseButton = new QPushButton(AppIcons::icon(QStringLiteral("duplicate")), tr("Duplicate"), middle);
         m_duplicatePoseButton->setObjectName(QStringLiteral("puppetDuplicatePose"));
         m_duplicatePoseButton->setToolTip(tr("Add a copy of the selected pose after it"));
-        m_removePoseButton = new QPushButton(tr("Delete"), middle);
+        m_removePoseButton = new QPushButton(AppIcons::icon(QStringLiteral("delete")), tr("Delete"), middle);
         m_removePoseButton->setObjectName(QStringLiteral("puppetRemovePose"));
-        m_removePoseButton->setToolTip(tr("Delete the selected pose (Delete in the strip)"));
+        UiStyle::setRole(m_removePoseButton, UiStyle::Role::Destructive);
+        m_removePoseButton->setToolTip(tr("Animation steps that play the selected pose go with it (Delete in the strip)"));
         m_poseStatus = new QLabel(middle);
         m_poseStatus->setObjectName(QStringLiteral("puppetPoseStatus"));
         m_poseStatus->setForegroundRole(QPalette::PlaceholderText);
@@ -295,7 +332,8 @@ void PuppetWorkspace::setupUi() {
         m_poseStrip = new PuppetPoseStrip(posesPage);
         m_poseStrip->setObjectName(QStringLiteral("puppetPoseStrip"));
         posesLayout->addWidget(m_poseStrip);
-        m_bottomTabs->addTab(tr("Poses"));
+        m_bottomTabs->addTab(AppIcons::icon(QStringLiteral("pose")), tr("Poses"));
+        m_bottomTabs->setTabToolTip(POSES_TAB, tr("Still poses of the puppet, with Rest first"));
         m_bottomPages.append(posesPage);
         middleLayout->addWidget(posesPage);
         connect(m_newPoseButton, &QPushButton::clicked, this, [this]() { addPose(m_pose + 1); });
@@ -308,7 +346,8 @@ void PuppetWorkspace::setupUi() {
         connect(m_poseStrip, &PuppetPoseStrip::moveRequested, this, &PuppetWorkspace::movePose);
         connect(m_poseStrip, &PuppetPoseStrip::removeRequested, this, &PuppetWorkspace::removePose);
     }
-    m_bottomTabs->addTab(tr("Animations"));
+    m_bottomTabs->addTab(AppIcons::icon(QStringLiteral("keyframes")), tr("Animations"));
+    m_bottomTabs->setTabToolTip(ANIMATIONS_TAB, tr("Steps from pose to pose, played over time"));
     m_bottomPages.append(buildAnimationsTab(middle));
     middleLayout->addWidget(m_bottomPages.last());
     fitBottomTabs();
@@ -797,7 +836,9 @@ void PuppetWorkspace::rebuildTree() {
         }
     }
     m_tree->expandAll();
+    SpriteTreeUtils::filterTree(m_tree, m_treeFilter->text(), {NAME_COLUMN});
     m_treeStack->setCurrentIndex(all.isEmpty() ? 1 : 0);
+    m_treeFilter->setEnabled(!all.isEmpty());
     m_tree->setCurrentItem(itemFor(m_selection));
     m_rebuilding = false;
 }
@@ -1837,11 +1878,12 @@ void PuppetWorkspace::updatePoseParts() {
     const QSignalBlocker blocker(m_poseParts);
     m_poseParts->clear();
     if (edited < 0) {
-        m_poseParts->addItem(m_animating ? tr("Click a step of the animation to see the parts its pose sets.")
-                                         : tr("Select a pose below the canvas to see the parts it sets."));
-        m_poseParts->item(0)->setFlags(Qt::NoItemFlags);
+        m_posePartsHint->setText(m_animating ? tr("Click a step of the animation to see the parts its pose sets.")
+                                             : tr("Select a pose below the canvas to see the parts it sets."));
+        m_posePartsStack->setCurrentWidget(m_posePartsHint);
         return;
     }
+    m_posePartsStack->setCurrentWidget(m_poseParts);
     const PuppetPose& pose = puppet->poses[edited];
     for (int i = 0; i < puppet->parts.size(); ++i) {
         const PuppetPart& part = puppet->parts[i];
@@ -1962,15 +2004,18 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
     auto* layout = new QHBoxLayout(page);
     layout->setContentsMargins(4, 4, 4, 4);
 
-    // Left: the animations, ticked to play along with the selected one.
-    auto* listColumn = new QVBoxLayout;
+    // Left: the animations, ticked to play along with the selected one. The column is as wide
+    // as the list, so the buttons under it line up with it.
+    auto* listWidget = new QWidget(page);
+    listWidget->setFixedWidth(SEQUENCE_LIST_WIDTH);
+    auto* listColumn = new QVBoxLayout(listWidget);
+    listColumn->setContentsMargins(0, 0, 0, 0);
     auto* listCaption = new QLabel(tr("Tick to play along"), page);
     listCaption->setForegroundRole(QPalette::PlaceholderText);
     listCaption->setToolTip(tr("Ticked animations play with the selected one, as a game would combine them"));
     listColumn->addWidget(listCaption);
     m_sequenceList = new QListWidget(page);
     m_sequenceList->setObjectName(QStringLiteral("puppetAnimations"));
-    m_sequenceList->setFixedWidth(SEQUENCE_LIST_WIDTH);
     m_sequenceList->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     m_sequenceList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_sequenceList->setToolTip(tr("Double-click to rename. Tick others to play them along with the selected one, "
@@ -1979,13 +2024,19 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
     auto* listButtons = new QHBoxLayout;
     m_addSequenceButton = new QPushButton(AppIcons::icon(QStringLiteral("add")), tr("Add"), page);
     m_addSequenceButton->setObjectName(QStringLiteral("puppetAddAnimation"));
-    m_addSequenceButton->setToolTip(tr("Add an animation after the selected one"));
-    m_removeSequenceButton = new QPushButton(tr("Delete"), page);
+    m_addSequenceButton->setToolTip(tr("Add an animation after the selected one, then add its poses as steps"));
+    UiStyle::setRole(m_addSequenceButton, UiStyle::Role::Add);
+    m_removeSequenceButton = new QPushButton(AppIcons::icon(QStringLiteral("delete")), tr("Delete"), page);
     m_removeSequenceButton->setObjectName(QStringLiteral("puppetRemoveAnimation"));
-    listButtons->addWidget(m_addSequenceButton);
-    listButtons->addWidget(m_removeSequenceButton);
+    m_removeSequenceButton->setToolTip(tr("Its own frames go with it; shared poses stay"));
+    UiStyle::setRole(m_removeSequenceButton, UiStyle::Role::Destructive);
+    for (QPushButton* button : {m_addSequenceButton, m_removeSequenceButton}) {
+        // Narrower than their text and icon would ask for, so both fit the list's width.
+        button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        listButtons->addWidget(button);
+    }
     listColumn->addLayout(listButtons);
-    layout->addLayout(listColumn);
+    layout->addWidget(listWidget);
 
     // Right: the selected animation's settings, its steps and the selected step.
     auto* right = new QVBoxLayout;
@@ -2116,9 +2167,11 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
         menu->addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Animation"), this,
                         [this, row]() { addSequence(row >= 0 ? row + 1 : int(selectedPuppet()->sequences.size())); });
         if (row >= 0) {
-            menu->addAction(tr("Duplicate"), this, [this, row]() { duplicateSequence(row); });
+            menu->addAction(AppIcons::icon(QStringLiteral("duplicate")), tr("Duplicate"), this,
+                            [this, row]() { duplicateSequence(row); });
             menu->addSeparator();
-            menu->addAction(tr("Delete"), this, [this, row]() { removeSequence(row); });
+            menu->addAction(AppIcons::icon(QStringLiteral("delete")), tr("Delete"), this,
+                            [this, row]() { removeSequence(row); });
         }
         menu->popup(m_sequenceList->viewport()->mapToGlobal(pos));
     });

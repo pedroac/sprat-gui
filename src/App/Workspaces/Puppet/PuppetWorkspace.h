@@ -20,6 +20,7 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
 class QMenu;
 class QListWidget;
 class QPushButton;
@@ -307,6 +308,8 @@ private:
     QLabel* m_poseStatus = nullptr;
     QLabel* m_posePartsTitle = nullptr;
     QListWidget* m_poseParts = nullptr;
+    QStackedWidget* m_posePartsStack = nullptr;  ///< m_poseParts, or m_posePartsHint with no pose
+    QLabel* m_posePartsHint = nullptr;
     QVector<QPixmap> m_poseThumbnails;  ///< As the strip shows them, for the animations' steps
 
     QTabBar* m_bottomTabs = nullptr;
@@ -344,6 +347,7 @@ private:
     QWidget* m_atlasRow = nullptr;
     QComboBox* m_atlasCombo = nullptr;
     QStackedWidget* m_treeStack = nullptr;
+    QLineEdit* m_treeFilter = nullptr;  ///< Shows the puppets, parts and variants whose names contain it
     PuppetTreeWidget* m_tree = nullptr;
     QToolButton* m_addButton = nullptr;
     QPushButton* m_removeButton = nullptr;

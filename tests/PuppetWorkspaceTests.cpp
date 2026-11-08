@@ -378,6 +378,30 @@ void PuppetWorkspaceTests::testCanvasPlacesPartsByTheirPivot() {
                           QStringLiteral("    head-smiling | sprite")}));
 }
 
+void PuppetWorkspaceTests::testSearchFieldFiltersTheTree() {
+    Doll doll;
+    PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
+    workspace.refreshSprites();
+    auto* search = workspace.findChild<QLineEdit*>(QStringLiteral("puppetFilter"));
+    QVERIFY(search);
+    QVERIFY(search->isEnabled());
+    const auto visibleRows = [&workspace]() {
+        QStringList rows;
+        for (QTreeWidgetItemIterator it(workspace.tree()); *it; ++it)
+            if (!(*it)->isHidden()) rows.append((*it)->text(0));
+        return rows;
+    };
+
+    search->setText(QStringLiteral("smiling"));
+    QCOMPARE(visibleRows(), (QStringList{"doll", "head", "head-smiling"}));
+    // A rebuilt tree stays filtered.
+    workspace.select({0, 0, -1});
+    workspace.refreshSprites();
+    QCOMPARE(visibleRows(), (QStringList{"doll", "head", "head-smiling"}));
+    search->clear();
+    QCOMPARE(visibleRows().size(), 6);
+}
+
 void PuppetWorkspaceTests::testClickingAPartSelectsIt() {
     Doll doll;
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
@@ -1550,6 +1574,25 @@ void PuppetWorkspaceTests::testBuildingAnAnimationFromPoses() {
     QCOMPARE(stepRows(doll)[1], QStringLiteral("rest 0/1 step"));
     stepPose->setCurrentIndex(1);
     QCOMPARE(stepRows(doll)[1], QStringLiteral("nod 0/1 step"));
+
+    // A step is dragged by the round handle under it: the first one dropped past the last.
+    QCOMPARE(track->handleAt(track->handleCenter(0)), 0);
+    QCOMPARE(track->handleAt(track->handleCenter(0) - QPoint(0, 40)), -1);
+    const QPoint grab = track->handleCenter(0);
+    const QPoint drop = track->handleCenter(2) + QPoint(20, 0);
+    QTest::mousePress(track, Qt::LeftButton, Qt::NoModifier, grab);
+    QMouseEvent move(QEvent::MouseMove, QPointF(drop), track->mapToGlobal(QPointF(drop)),
+                     Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(track, &move);
+    QTest::mouseRelease(track, Qt::LeftButton, Qt::NoModifier, drop);
+    QCOMPARE(stepRows(doll), (QStringList{"nod 0/1 step", "smile 4/0", "nod 4/0"}));
+    QCOMPARE(workspace.selectedStep(), 2);
+    // Pressing a handle without dragging only selects; dropping it where it is changes nothing.
+    QTest::mouseClick(track, Qt::LeftButton, Qt::NoModifier, track->handleCenter(1));
+    QCOMPARE(workspace.selectedStep(), 1);
+    QCOMPARE(stepRows(doll), (QStringList{"nod 0/1 step", "smile 4/0", "nod 4/0"}));
+    doll.project.undoStack.undo();
+    QCOMPARE(stepRows(doll), (QStringList{"nod 4/0", "nod 0/1 step", "smile 4/0"}));
 
     // Move, duplicate and delete, as frames.
     emit track->moveRequested(1, 0);

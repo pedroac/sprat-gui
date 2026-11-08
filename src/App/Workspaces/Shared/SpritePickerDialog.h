@@ -9,6 +9,7 @@ class NavigatorPanel;
 class ProjectSession;
 class QDialogButtonBox;
 class QLabel;
+class QLineEdit;
 class QStackedWidget;
 class QTreeWidgetItem;
 
@@ -41,6 +42,11 @@ public:
         bool pickGroups = false;
         /// Lets the accept button work with nothing picked, e.g. to create an empty timeline.
         bool allowEmpty = false;
+        /// Shows a Name field above the sprites, starting with this text, for what the picked
+        /// sprites will make (e.g. a timeline). No field when empty; see name().
+        QString name;
+        /// What is wrong with a name typed in the Name field, shown under it; empty when it is fine.
+        std::function<QString(const QString&)> nameProblem;
     };
 
     /// A group that directly holds sprites.
@@ -60,6 +66,9 @@ public:
     /// sprites, in tree order, each once.
     QVector<Group> selectedGroups() const;
 
+    /// The Name field's text, trimmed; empty without the field (Options::name).
+    QString name() const;
+
     /// Shows the dialog and returns the picked sprites' paths, or nothing if it was cancelled.
     static QStringList pick(QWidget* parent, const ProjectSession* session, const Options& options);
     /// Shows the dialog in group mode and returns the picked groups, or nothing if it was cancelled.
@@ -76,6 +85,9 @@ private:
     QString m_doubleClickedPath;
 
     NavigatorPanel*   m_navigatorPanel = nullptr;
+    QLineEdit*        m_nameEdit       = nullptr;
+    QLabel*           m_nameProblem    = nullptr;
+    std::function<QString(const QString&)> m_nameProblemOf;
     QStackedWidget*   m_contentStack   = nullptr;
     QLabel*           m_previewImage   = nullptr;
     QLabel*           m_previewInfo    = nullptr;

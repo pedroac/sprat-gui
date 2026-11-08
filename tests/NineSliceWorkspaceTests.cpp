@@ -6,12 +6,15 @@
 #include "ProjectSession.h"
 #include "SpriteModels.h"
 #include "SpritePickerDialog.h"
+#include "SpriteTreeUtils.h"
 
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QTreeWidgetItemIterator>
 #include <QImage>
+#include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -352,4 +355,74 @@ void NineSliceWorkspaceTests::testPickerPicksGroups() {
     QCOMPARE(idleSprites, (QStringList{project.sprites[2]->path, project.sprites[3]->path}));
     QVERIFY(createButton->isEnabled());
     QCOMPARE(createButton->text(), QStringLiteral("OK (2)"));
+}
+
+void NineSliceWorkspaceTests::testPickerAsksForAName() {
+    SpriteProject project({QStringLiteral("hero")}, {30});
+    QVERIFY(project.dir.isValid());
+
+    // Without Options::name there is no Name field.
+    {
+        SpritePickerDialog dialog(&project.session, SpritePickerDialog::Options{});
+        QVERIFY(!dialog.findChild<QLineEdit*>(QStringLiteral("spritePickerName")));
+        QVERIFY(dialog.name().isEmpty());
+    }
+
+    SpritePickerDialog::Options options;
+    options.allowEmpty = true;
+    options.name = QStringLiteral("Timeline 1");
+    options.nameProblem = [](const QString& name) {
+        return name == QStringLiteral("walk") ? QStringLiteral("taken") : QString();
+    };
+    SpritePickerDialog dialog(&project.session, options);
+    auto* nameEdit = dialog.findChild<QLineEdit*>(QStringLiteral("spritePickerName"));
+    QVERIFY(nameEdit);
+    auto* problem = dialog.findChild<QLabel*>(QStringLiteral("spritePickerNameProblem"));
+    QVERIFY(problem);
+    QPushButton* accept = dialog.findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+    QCOMPARE(dialog.name(), QStringLiteral("Timeline 1"));
+    QVERIFY(accept->isEnabled());
+
+    // A taken name is refused, and says why; so is no name.
+    nameEdit->setText(QStringLiteral("walk"));
+    QVERIFY(!accept->isEnabled());
+    QCOMPARE(problem->text(), QStringLiteral("taken"));
+    nameEdit->setText(QStringLiteral("   "));
+    QVERIFY(!accept->isEnabled());
+    nameEdit->setText(QStringLiteral(" run "));
+    QVERIFY(accept->isEnabled());
+    QCOMPARE(dialog.name(), QStringLiteral("run"));
+}
+
+void NineSliceWorkspaceTests::testFilteringATreeKeepsAncestorsAndDescendants() {
+    QTreeWidget tree;
+    auto* doll = new QTreeWidgetItem(&tree, {QStringLiteral("doll")});
+    auto* head = new QTreeWidgetItem(doll, {QStringLiteral("head")});
+    auto* smile = new QTreeWidgetItem(head, {QStringLiteral("smile")});
+    auto* body = new QTreeWidgetItem(doll, {QStringLiteral("body")});
+    auto* robot = new QTreeWidgetItem(&tree, {QStringLiteral("robot")});
+    auto* arm = new QTreeWidgetItem(robot, {QStringLiteral("arm")});
+
+    // A match shows its ancestors and everything under it, whatever the case.
+    QCOMPARE(SpriteTreeUtils::filterTree(&tree, QStringLiteral("HEAD")), 1);
+    QVERIFY(!doll->isHidden());
+    QVERIFY(!head->isHidden());
+    QVERIFY(!smile->isHidden());
+    QVERIFY(body->isHidden());
+    QVERIFY(robot->isHidden());
+    QVERIFY(arm->isHidden());
+
+    QCOMPARE(SpriteTreeUtils::filterTree(&tree, QStringLiteral("robot")), 1);
+    QVERIFY(doll->isHidden());
+    QVERIFY(!robot->isHidden());
+    QVERIFY(!arm->isHidden());
+
+    // Other columns count when asked for.
+    head->setText(1, QStringLiteral("neck"));
+    QCOMPARE(SpriteTreeUtils::filterTree(&tree, QStringLiteral("neck")), 0);
+    QCOMPARE(SpriteTreeUtils::filterTree(&tree, QStringLiteral("neck"), {0, 1}), 1);
+
+    // No text shows everything.
+    QCOMPARE(SpriteTreeUtils::filterTree(&tree, QString()), 0);
+    for (QTreeWidgetItemIterator it(&tree); *it; ++it) QVERIFY(!(*it)->isHidden());
 }

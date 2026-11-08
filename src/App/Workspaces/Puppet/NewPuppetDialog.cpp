@@ -1,4 +1,6 @@
 #include "NewPuppetDialog.h"
+#include "AppIcons.h"
+#include "UiStyle.h"
 #include "NavigatorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "PuppetEditing.h"
@@ -178,9 +180,12 @@ NewPuppetDialog::NewPuppetDialog(const ProjectSession* session, const QVector<Pu
     m_partsProblem->hide();
     partsLayout->addWidget(m_partsProblem);
     auto* partButtons = new QHBoxLayout;
-    auto* addPartButton = new QPushButton(tr("Add Part"), partsPanel);
+    auto* addPartButton = new QPushButton(AppIcons::icon(QStringLiteral("add")), tr("Add Part"), partsPanel);
     addPartButton->setObjectName(QStringLiteral("newPuppetAddPart"));
-    m_removeButton = new QPushButton(tr("Remove"), partsPanel);
+    addPartButton->setToolTip(tr("Add an empty part, then drop sprites on it"));
+    UiStyle::setRole(addPartButton, UiStyle::Role::Add);
+    m_removeButton = new QPushButton(AppIcons::icon(QStringLiteral("delete")), tr("Remove"), partsPanel);
+    UiStyle::setRole(m_removeButton, UiStyle::Role::Destructive);
     m_removeButton->setObjectName(QStringLiteral("newPuppetRemove"));
     m_removeButton->setToolTip(tr("Delete the selected parts, and take the selected sprites out of their "
                                   "parts (Delete)"));

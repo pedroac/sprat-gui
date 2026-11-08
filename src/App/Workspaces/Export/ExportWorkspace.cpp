@@ -1,5 +1,6 @@
 #include "ExportWorkspace.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "IAtlasViewport.h"
 #include "ZoomableGraphicsView.h"
 #include "CliToolsConfig.h"
@@ -186,11 +187,12 @@ void ExportWorkspace::setupUi() {
         m_presetCombo->setToolTip(tr("Load a saved export preset"));
         m_presetCombo->addItem(tr("— (no preset) —"), QString());
         presetRow->addWidget(m_presetCombo, 1, Qt::AlignVCenter);
-        m_savePresetBtn = new QPushButton(tr("Save…"), rightWidget);
-        m_savePresetBtn->setToolTip(tr("Save current settings as a named preset"));
+        m_savePresetBtn = new QPushButton(AppIcons::icon(QStringLiteral("save")), tr("Save…"), rightWidget);
+        m_savePresetBtn->setToolTip(tr("Keep these export settings under a name, to load them again later"));
         m_savePresetBtn->setEnabled(false);  // enabled once an output path is set
-        m_delPresetBtn  = new QPushButton(tr("Delete"), rightWidget);
-        m_delPresetBtn->setToolTip(tr("Delete selected preset"));
+        m_delPresetBtn  = new QPushButton(AppIcons::icon(QStringLiteral("delete")), tr("Delete"), rightWidget);
+        m_delPresetBtn->setToolTip(tr("Forget the selected preset; the export settings stay as they are"));
+        UiStyle::setRole(m_delPresetBtn, UiStyle::Role::Destructive);
         m_delPresetBtn->setEnabled(false);
         presetRow->addWidget(m_savePresetBtn, 0, Qt::AlignVCenter);
         presetRow->addWidget(m_delPresetBtn, 0, Qt::AlignVCenter);
@@ -237,7 +239,7 @@ void ExportWorkspace::setupUi() {
 
     // Row 0: Atlas
     m_previewAtlasCombo = new QComboBox(profilesGroup);
-    m_previewAtlasCombo->setToolTip(tr("Atlas to preview"));
+    m_previewAtlasCombo->setToolTip(tr("The atlas the preview shows; Export writes every atlas"));
     connect(m_previewAtlasCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this]() {
         updatePreviewProfileCombo();
@@ -388,8 +390,10 @@ void ExportWorkspace::setupUi() {
     auto* buttonRow = new QHBoxLayout();
     buttonRow->addStretch();
     m_exportBtn = new QPushButton(tr("Export"), rightWidget);
-    m_exportBtn->setIcon(AppIcons::icon(QStringLiteral("save")));
+    m_exportBtn->setIcon(AppIcons::icon(QStringLiteral("export")));
+    m_exportBtn->setToolTip(tr("Write each atlas's image and metadata into the output folder"));
     m_exportBtn->setDefault(true);
+    UiStyle::setRole(m_exportBtn, UiStyle::Role::Accent);
     connect(m_exportBtn, &QPushButton::clicked, this, &ExportWorkspace::onExportClicked);
     buttonRow->addWidget(m_exportBtn);
     rightLayout->addLayout(buttonRow);

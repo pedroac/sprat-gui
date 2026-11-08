@@ -1,6 +1,8 @@
 #include "SpriteTreeUtils.h"
 #include "TimelineBuilder.h"
 
+#include <algorithm>
+#include <functional>
 #include <QMap>
 #include <QSet>
 #include <QTreeWidget>
@@ -180,6 +182,28 @@ QList<SpritePtr> collectCheckedSprites(QTreeWidget* tree) {
     for (int i = 0; i < tree->topLevelItemCount(); ++i)
         walk(tree->topLevelItem(i));
     return result;
+}
+
+int filterTree(QTreeWidget* tree, const QString& text, const QList<int>& columns) {
+    if (!tree) return 0;
+    const QString needle = text.trimmed();
+    int matches = 0;
+    // Returns whether item or one of its descendants is shown. ancestorMatched shows it anyway.
+    std::function<bool(QTreeWidgetItem*, bool)> apply = [&](QTreeWidgetItem* item, bool ancestorMatched) {
+        const bool matched = !needle.isEmpty()
+            && std::any_of(columns.begin(), columns.end(), [&](int column) {
+                   return item->text(column).contains(needle, Qt::CaseInsensitive);
+               });
+        if (matched) ++matches;
+        bool descendantShown = false;
+        for (int i = 0; i < item->childCount(); ++i)
+            descendantShown = apply(item->child(i), ancestorMatched || matched) || descendantShown;
+        const bool shown = needle.isEmpty() || ancestorMatched || matched || descendantShown;
+        item->setHidden(!shown);
+        return shown;
+    };
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) apply(tree->topLevelItem(i), false);
+    return matches;
 }
 
 } // namespace SpriteTreeUtils

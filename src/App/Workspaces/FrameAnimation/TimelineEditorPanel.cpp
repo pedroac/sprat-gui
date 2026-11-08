@@ -11,6 +11,8 @@
 #include "TimelineUi.h"
 #include "SpriteSelectionPresenter.h"
 #include "SpritePickerDialog.h"
+#include "SpriteTreeUtils.h"
+#include "UiStyle.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -45,6 +47,9 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <numeric>
+
+/// The columns with names: a group's (spanning the row) and a timeline's.
+static const QList<int> TIMELINE_NAME_COLUMNS = {0, 2};
 
 // ---------------------------------------------------------------------------
 // CenteredCheckDelegate — draws the checkbox centered in its cell
@@ -180,17 +185,12 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     m_atlasRow->setVisible(false);
     listLayout->addWidget(m_atlasRow);
 
-    auto* addLayout = new QHBoxLayout();
-    addLayout->addWidget(new QLabel(tr("Name:"), m_listArea));
-    m_timelineCreateEdit = new QLineEdit(m_listArea);
-    m_timelineCreateEdit->setPlaceholderText(tr("Timeline name (optional)"));
-    addLayout->addWidget(m_timelineCreateEdit);
-
-    m_addBtn = new QPushButton(
-        AppIcons::icon(QStringLiteral("add")), tr("Add"), m_listArea);
-    m_addBtn->setToolTip(tr("Add a timeline and pick its sprites"));
-    addLayout->addWidget(m_addBtn);
-    listLayout->addLayout(addLayout);
+    m_timelineFilterEdit = new QLineEdit(m_listArea);
+    m_timelineFilterEdit->setObjectName(QStringLiteral("timelineFilter"));
+    m_timelineFilterEdit->setPlaceholderText(tr("Search timelines..."));
+    m_timelineFilterEdit->setToolTip(tr("Shows the timelines and groups whose names contain this text"));
+    m_timelineFilterEdit->setClearButtonEnabled(true);
+    listLayout->addWidget(m_timelineFilterEdit);
 
     m_timelineList = new TimelineTreeWidget(m_listArea);
     m_timelineList->setColumnCount(5);
@@ -216,6 +216,28 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
         hdr->resizeSection(4, 42);         // FPS
     }
     listLayout->addWidget(m_timelineList, 1);
+
+    // Add / Remove under the list, as in the other workspaces' lists.
+    m_addBtn = new QPushButton(
+        AppIcons::icon(QStringLiteral("add")), tr("Add"), m_listArea);
+    m_addBtn->setObjectName(QStringLiteral("timelineAddButton"));
+    m_addBtn->setToolTip(tr("Name a timeline and pick its frames. Right-click the list to auto-create them"));
+    m_addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    UiStyle::setRole(m_addBtn, UiStyle::Role::Add);
+    m_removeBtn = new QPushButton(
+        AppIcons::icon(QStringLiteral("delete")), tr("Remove"), m_listArea);
+    m_removeBtn->setObjectName(QStringLiteral("timelineRemoveButton"));
+    m_removeBtn->setToolTip(tr("Remove the selected timeline (Delete). Right-click for more"));
+    m_removeBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_removeBtn->setEnabled(false);
+    UiStyle::setRole(m_removeBtn, UiStyle::Role::Destructive);
+    {
+        auto* row = new QHBoxLayout;
+        row->setContentsMargins(0, 2, 0, 2);
+        row->addWidget(m_addBtn);
+        row->addWidget(m_removeBtn);
+        listLayout->addLayout(row);
+    }
 
     // ── Bottom section: selected-timeline editor
     m_timelineEditorContainer = new QWidget(this);
@@ -269,11 +291,6 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
     m_timelineFpsSpin->setToolTip(tr("Frames per second for animation playback"));
     m_timelineFpsSpin->setAccessibleName(tr("Timeline FPS"));
     nameLayout->addWidget(m_timelineFpsSpin);
-    m_removeBtn = new QPushButton(
-        AppIcons::icon(QStringLiteral("delete")), "",
-        m_selectedTimelineGroup);
-    m_removeBtn->setToolTip(tr("Remove timeline"));
-    nameLayout->addWidget(m_removeBtn);
     groupLayout->addLayout(nameLayout);
 
     // Alias label
@@ -309,7 +326,9 @@ TimelineEditorPanel::TimelineEditorPanel(ProjectSession* session, QUndoStack* un
 
     // ── Wire internal signals to slots
     connect(m_addBtn, &QPushButton::clicked, this, &TimelineEditorPanel::onTimelineAddClicked);
-    connect(m_timelineCreateEdit, &QLineEdit::returnPressed, this, &TimelineEditorPanel::onTimelineAddClicked);
+    connect(m_timelineFilterEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        SpriteTreeUtils::filterTree(m_timelineList, text, TIMELINE_NAME_COLUMNS);
+    });
     connect(m_removeBtn, &QPushButton::clicked, this, &TimelineEditorPanel::onTimelineRemoveClicked);
     connect(m_timelineList, &QTreeWidget::itemSelectionChanged, this, &TimelineEditorPanel::onTimelineSelectionChanged);
     connect(m_timelineList, &QWidget::customContextMenuRequested, this, &TimelineEditorPanel::onTimelineContextMenu);
@@ -577,6 +596,7 @@ void TimelineEditorPanel::refreshTimelineList()
         }
     }
 
+    SpriteTreeUtils::filterTree(m_timelineList, m_timelineFilterEdit->text(), TIMELINE_NAME_COLUMNS);
     m_timelineList->setCurrentItem(timelineItemForIndex(savedIndex));
     m_timelineList->blockSignals(false);
 
@@ -698,11 +718,8 @@ void TimelineEditorPanel::refreshTimelineFrames()
 // ---------------------------------------------------------------------------
 void TimelineEditorPanel::onTimelineAddClicked()
 {
-    QString name = m_timelineCreateEdit->text().trimmed();
-    if (name.isEmpty()) {
-        name = getUniqueTimelineName(tr("Timeline %1").arg(m_session->activeAtlas().timelines.size() + 1));
-    }
-    addTimelineWithPickedSprites(name);
+    addTimelineWithPickedSprites(
+        getUniqueTimelineName(tr("Timeline %1").arg(m_session->activeAtlas().timelines.size() + 1)));
 }
 
 /// Picker options that list only the active atlas's sprites: a timeline's frames come from its atlas.
@@ -732,12 +749,19 @@ QStringList TimelineEditorPanel::pickActiveAtlasSprites(const QString& title, co
     return *accepted ? AnimationTimelineOps::naturallySorted(dialog.selectedSpritePaths()) : QStringList();
 }
 
-void TimelineEditorPanel::addTimelineWithPickedSprites(const QString& name)
+void TimelineEditorPanel::addTimelineWithPickedSprites(const QString& suggestedName)
 {
-    bool accepted = false;
-    const QStringList frames = pickActiveAtlasSprites(
-        tr("New Timeline \"%1\"").arg(name), tr("Create"), /*allowEmpty=*/true, &accepted);
-    if (!accepted) return;
+    SpritePickerDialog::Options options = activeAtlasPickerOptions(m_session, tr("New Timeline"), tr("Create"));
+    options.allowEmpty = true;
+    options.name = suggestedName;
+    options.nameProblem = [this](const QString& name) {
+        return hasDuplicateTimelineName(name) ? tr("A timeline is already called \"%1\".").arg(name) : QString();
+    };
+    SpritePickerDialog dialog(m_session, options, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    const QString name = dialog.name();
+    // Ticking has no order, and the tree lists "walk10" before "walk2".
+    const QStringList frames = AnimationTimelineOps::naturallySorted(dialog.selectedSpritePaths());
 
     AnimationTimeline timeline;
     timeline.name = name;
@@ -745,7 +769,6 @@ void TimelineEditorPanel::addTimelineWithPickedSprites(const QString& name)
     m_session->activeAtlas().timelines.append(timeline);
     m_session->selectedTimelineIndex = m_session->activeAtlas().timelines.size() - 1;
 
-    m_timelineCreateEdit->clear();
     refreshTimelineList();
     m_timelineList->setCurrentItem(timelineItemForIndex(m_session->selectedTimelineIndex));
 
@@ -1257,20 +1280,8 @@ void TimelineEditorPanel::onTimelineContextMenu(const QPoint& pos)
 
         menu.addSeparator();
 
-        menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Timeline Into Group"), this, [this, folderPath, refreshAndSelectLambda]() {
-            bool ok = false;
-            const QString suggested = folderPath + "/";
-            const QString name = QInputDialog::getText(this, tr("Add Timeline Into Group"),
-                tr("Timeline name:"), QLineEdit::Normal, suggested, &ok);
-            if (!ok || name.trimmed().isEmpty()) return;
-            const QString trimmed = name.trimmed();
-            if (hasDuplicateTimelineName(trimmed)) {
-                MessageDialog::warning(this, tr("Add Timeline"),
-                    tr("A timeline named \"%1\" already exists.").arg(trimmed));
-                return;
-            }
-
-            addTimelineWithPickedSprites(trimmed);
+        menu.addAction(AppIcons::icon(QStringLiteral("add")), tr("Add Timeline Into Group..."), this, [this, folderPath]() {
+            addTimelineWithPickedSprites(getUniqueTimelineName(tr("Timeline"), folderPath));
         });
         menu.addAction(AppIcons::icon(QStringLiteral("auto-create")), tr("Auto-create Timelines..."), this,
                        &TimelineEditorPanel::autoCreateTimelinesFromGroups);

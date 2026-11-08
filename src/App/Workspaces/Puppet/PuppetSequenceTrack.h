@@ -13,8 +13,9 @@ class QMenu;
  *
  * It only shows them and asks for changes, like an animation's frame list: clicking selects
  * a step (the workspace puts the playhead where its pose arrives), dragging moves the
- * playhead, double-clicking opens a step's pose, Delete or Backspace removes the selected
- * step, and the context menu adds new frames (this animation's own poses) or poses (at the
+ * playhead, dragging the round handle under a step moves the step (a line shows where it
+ * will land, Escape cancels), double-clicking opens a step's pose, Delete or Backspace
+ * removes the selected step, and the context menu adds new frames (this animation's own poses) or poses (at the
  * end, or before or after a step), saves a step's pose to the Poses tab, moves, duplicates
  * and deletes steps. Steps playing a shared pose are drawn with a dashed border.
  * PuppetWorkspace applies the changes and calls showSteps().
@@ -45,6 +46,10 @@ public:
     int playhead() const { return m_playhead; }
     /// The step at @p x, or -1.
     int stepAtX(int x) const;
+    /// The step whose drag handle is at @p pos, or -1.
+    int handleAt(const QPoint& pos) const;
+    /// Where the handle of step @p step is drawn (its middle).
+    QPoint handleCenter(int step) const;
     /// The context menu for step @p step, or for empty space with -1. The caller owns it.
     QMenu* createContextMenu(int step);
 
@@ -70,6 +75,8 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -79,6 +86,11 @@ private:
     int blockWidth(int step) const;
     int frameAtX(int x) const;
     int totalFrames() const;
+    /// The index the dragged step would have if dropped with the pointer at @p x.
+    int dropIndexAt(int x) const;
+    /// Where the line showing a drop at index @p to is drawn.
+    int dropLineX(int to) const;
+    void cancelStepDrag();
     /// A menu of the poses, each adding a step showing it at @p stepIndex.
     QMenu* posesMenu(const QString& title, int stepIndex, QWidget* parent);
 
@@ -87,4 +99,9 @@ private:
     int m_selected = -1;
     int m_playhead = -1;
     bool m_scrubbing = false;
+    int m_dragStep = -1;      ///< The step whose handle is held, -1 for none
+    int m_dragX = 0;          ///< The pointer's x while a step is dragged
+    int m_dragGrabX = 0;      ///< The pointer's x from the dragged block's left when grabbed
+    bool m_dragMoved = false; ///< Moved far enough to be a drag rather than a click
+    int m_hoveredHandle = -1;
 };
