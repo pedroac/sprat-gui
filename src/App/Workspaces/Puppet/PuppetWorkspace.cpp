@@ -1,5 +1,6 @@
 #include "PuppetWorkspace.h"
 #include "AppIcons.h"
+#include "AppSettings.h"
 #include "MessageDialog.h"
 #include "ProjectSession.h"
 #include "PuppetCanvas.h"
@@ -13,6 +14,7 @@
 #include "PuppetPropertiesPanel.h"
 #include "PuppetTreeWidget.h"
 #include "SpritePickerDialog.h"
+#include "MarkerCommands.h"
 
 #include <cmath>
 #include <QAction>
@@ -20,6 +22,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCursor>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
@@ -54,10 +57,6 @@ constexpr int POSE_PARTS_HEIGHT = 160;
 constexpr int POSES_TAB = 0;
 constexpr int ANIMATIONS_TAB = 1;
 constexpr int SEQUENCE_LIST_WIDTH = 150;
-/// A new step reaches its pose in this many frames, then holds it this many.
-constexpr int DEFAULT_STEP_IN = 4;
-constexpr int DEFAULT_STEP_HOLD = 4;
-
 constexpr int NAME_COLUMN = 0;
 constexpr int DETAIL_COLUMN = 1;
 
@@ -81,6 +80,15 @@ bool hasJointMarker(const Sprite& sprite, const QString& name, bool asChild) {
 }
 
 const QString PIVOT_MARKER = QStringLiteral("pivot");
+
+/// Where a part hangs by its pivot in @p sprite: its "pivot" point marker, else its pivot, as
+/// PuppetEvaluator and the export use.
+QPointF spritePivot(const Sprite& sprite) {
+    for (const NamedPoint& marker : sprite.points) {
+        if (marker.name == PIVOT_MARKER) return PuppetMotion::markerPoint(marker);
+    }
+    return QPointF(sprite.pivotX, sprite.pivotY);
+}
 
 }  // namespace
 
@@ -235,9 +243,19 @@ void PuppetWorkspace::setupUi() {
         fitButton->setObjectName(QStringLiteral("puppetFit"));
         fitButton->setToolTip(tr("Zoom to show the whole puppet"));
         row->addWidget(fitButton);
+        m_gridButton = new QPushButton(AppIcons::icon(QStringLiteral("grid")), tr("Grid"), middle);
+        m_gridButton->setObjectName(QStringLiteral("puppetGrid"));
+        m_gridButton->setCheckable(true);
+        m_gridButton->setToolTip(tr("Show a grid from the puppet's origin; its cells and colour are in Settings"));
+        row->addWidget(m_gridButton);
         row->addStretch();
         middleLayout->addLayout(row);
         connect(fitButton, &QPushButton::clicked, this, [this]() { m_canvas->fitPuppet(); });
+        connect(m_gridButton, &QPushButton::toggled, this, [this](bool checked) {
+            PuppetCanvas::Grid grid = m_canvas->grid();
+            grid.visible = checked;
+            m_canvas->setGrid(grid);
+        });
     }
     m_canvas = new PuppetCanvas(middle);
     m_canvas->setObjectName(QStringLiteral("puppetCanvas"));
@@ -316,6 +334,13 @@ void PuppetWorkspace::setupUi() {
         if (m_selection.puppet >= 0 && (part < 0 || part != m_selection.part))
             select({m_selection.puppet, part, -1});
     });
+    connect(m_canvas, &PuppetCanvas::partContextMenuRequested, this, [this](int part, const QPoint& globalPos) {
+        if (m_selection.puppet < 0) return;
+        if (part >= 0 && part != m_selection.part) select({m_selection.puppet, part, -1});
+        QMenu* menu = createContextMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->popup(globalPos);
+    });
     connect(m_canvas, &PuppetCanvas::partDragStarted, this, [this](int part) {
         const Puppet* puppet = selectedPuppet();
         if (!puppet || part < 0 || part >= puppet->parts.size()) return;
@@ -332,6 +357,22 @@ void PuppetWorkspace::setupUi() {
         // A part already hanging keeps the marker it hangs by; a new joint uses its pivot.
         const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[part].name);
         attachSelectedPart(parent, marker, joint ? joint->childMarker : PIVOT_MARKER);
+    });
+    connect(m_canvas, &PuppetCanvas::attachToNewMarkerRequested, this,
+            [this](int part, int parent, const QPointF& scenePos) {
+        if (part != m_selection.part) return;
+        attachSelectedPartToNewMarker(parent, scenePos);
+    });
+    connect(m_canvas, &PuppetCanvas::pivotDoubleClicked, this, [this](int part, const QVector<int>& overlapping) {
+        if (part != m_selection.part) return;
+        // One part under the pivot: that is the parent. Otherwise the user picks it.
+        if (overlapping.size() == 1) {
+            attachSelectedPartToNewMarkerAtPivot(overlapping.first());
+            return;
+        }
+        QMenu* menu = createNewMarkerParentMenu(overlapping);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->popup(QCursor::pos());
     });
     connect(m_canvas, &PuppetCanvas::detachRequested, this, [this](int part, const QPointF& scenePos) {
         if (part != m_selection.part) return;
@@ -384,8 +425,18 @@ void PuppetWorkspace::setupUi() {
         attachSelectedPart(PuppetEditing::partNames(*puppet).indexOf(parent), parentMarker, childMarker);
     });
     connect(m_properties, &PuppetPropertiesPanel::detachRequested, this, &PuppetWorkspace::detachSelectedPart);
+    connect(m_properties, &PuppetPropertiesPanel::newParentMarkerRequested, this, [this](const QString& parent) {
+        if (const Puppet* puppet = selectedPuppet())
+            attachSelectedPartToNewMarkerAtPivot(PuppetEditing::partNames(*puppet).indexOf(parent));
+    });
     connect(m_properties, &PuppetPropertiesPanel::hiddenMarkersChanged, this,
             &PuppetWorkspace::setSelectedPartHiddenMarkers);
+    connect(m_properties, &PuppetPropertiesPanel::rigLockChanged, this, &PuppetWorkspace::setSelectedPartRigLocked);
+    connect(m_properties, &PuppetPropertiesPanel::poseLockChanged, this, &PuppetWorkspace::setSelectedPartPoseLocked);
+    connect(m_properties, &PuppetPropertiesPanel::stepEaseChanged, this, [this](PuppetPropertiesPanel::PartEase ease) {
+        setSelectedPartStepEase(ease == PuppetPropertiesPanel::PartEase::AsStep ? std::nullopt
+                                : std::optional<bool>(ease == PuppetPropertiesPanel::PartEase::Step));
+    });
     connect(m_properties, &PuppetPropertiesPanel::angleChanged, this, [this](int angle) {
         setPartAngle(m_selection.part, angle, angleEditKey());
     });
@@ -431,6 +482,39 @@ void PuppetWorkspace::setupUi() {
     });
 
     updateButtons();
+}
+
+void PuppetWorkspace::setSettings(const AppSettings& settings) {
+    m_canvas->setBackgroundBrush(settings.workspaceColor);
+    PuppetCanvas::CanvasSettings canvas;
+    canvas.pivotRingRadius = settings.puppetPivotRingRadius;
+    canvas.pivotDoubleClickRadius = settings.puppetPivotDoubleClickRadius;
+    canvas.turnHandleDistance = settings.puppetTurnHandleDistance;
+    canvas.turnHandleRadius = settings.puppetTurnHandleRadius;
+    canvas.markerSnapDistance = settings.puppetMarkerSnapDistance;
+    canvas.dragDistance = settings.puppetDragDistance;
+    canvas.pivotCrossSize = settings.puppetPivotCrossSize;
+    canvas.originCrossSize = settings.puppetOriginCrossSize;
+    canvas.markerDotRadius = settings.puppetMarkerDotRadius;
+    canvas.handleLineWidth = settings.puppetHandleLineWidth;
+    canvas.handleColor = settings.puppetHandleColor;
+    canvas.rangeColor = settings.puppetRangeColor;
+    canvas.originColor = settings.puppetOriginColor;
+    canvas.onionBeforeColor = settings.puppetOnionBeforeColor;
+    canvas.onionAfterColor = settings.puppetOnionAfterColor;
+    canvas.onionSkinOpacity = settings.puppetOnionSkinOpacity;
+    canvas.fadedPartOpacity = settings.puppetFadedPartOpacity;
+    m_canvas->setCanvasSettings(canvas);
+    m_newStep.in = std::clamp(settings.puppetStepIn, 0, PUPPET_MAX_STEP_FRAMES);
+    m_newStep.hold = std::clamp(settings.puppetStepHold, 0, PUPPET_MAX_STEP_FRAMES);
+    m_newAnimationFps = sanitizedAnimationFps(settings.puppetAnimationFps);
+    {
+        const QSignalBlocker blocker(m_gridButton);
+        m_gridButton->setChecked(settings.showGrid);
+    }
+    m_canvas->setGrid({settings.showGrid, QSize(settings.gridCellWidth, settings.gridCellHeight),
+                       QPoint(settings.gridOffsetX, settings.gridOffsetY), settings.gridColor});
+    updateCanvas();  // the crosses and outline are drawn in the new colours and sizes
 }
 
 void PuppetWorkspace::enter() {
@@ -495,24 +579,78 @@ const Puppet* PuppetWorkspace::selectedPuppet() const {
     return (m_selection.puppet >= 0 && m_selection.puppet < all.size()) ? &all[m_selection.puppet] : nullptr;
 }
 
+const AnimationTimeline* PuppetWorkspace::timelineFor(const PuppetVariant& variant) const {
+    if (!m_session || variant.kind != PuppetVariant::Kind::Animation) return nullptr;
+    const QVector<AnimationTimeline>& timelines = m_session->activeAtlas().timelines;
+    const AnimationTimeline* timeline = nullptr;
+    QString name = variant.source;
+    // An alias shows its source's frames; the hop limit stops a loop of aliases.
+    for (int hops = 0; hops <= timelines.size() && !name.isEmpty(); ++hops) {
+        timeline = nullptr;
+        for (const AnimationTimeline& t : timelines) {
+            if (t.name == name) { timeline = &t; break; }
+        }
+        if (!timeline || timeline->aliasOf.isEmpty()) break;
+        name = timeline->aliasOf;
+    }
+    return timeline;
+}
+
+QVector<SpritePtr> PuppetWorkspace::spritesOf(const PuppetPart& part, QString* problem) const {
+    QVector<SpritePtr> sprites;
+    const auto add = [&](const SpritePtr& sprite) {
+        if (!sprites.contains(sprite)) sprites.append(sprite);
+    };
+    for (const PuppetVariant& variant : part.variants) {
+        if (variant.kind == PuppetVariant::Kind::Animation) {
+            const AnimationTimeline* timeline = timelineFor(variant);
+            if (!timeline || timeline->frames.isEmpty()) {
+                if (problem) *problem = tr("Animation \"%1\" isn't in the atlas").arg(variant.source);
+                continue;
+            }
+            for (const QString& frame : timeline->frames) {
+                SpritePtr sprite = m_spritesByPath.value(QDir::cleanPath(frame));
+                if (!sprite) sprite = m_spritesByName.value(frame);
+                if (sprite) add(sprite);
+                else if (problem) *problem = tr("A frame of animation \"%1\" isn't in the atlas").arg(variant.source);
+            }
+        } else if (const SpritePtr sprite = spriteFor(variant)) {
+            add(sprite);
+        } else if (problem) {
+            *problem = tr("Sprite \"%1\" isn't in the atlas").arg(puppetVariantName(variant));
+        }
+    }
+    return sprites;
+}
+
+QString PuppetWorkspace::newMarkerProblem(const PuppetPart& part) const {
+    if (part.variants.isEmpty()) return tr("Part \"%1\" has no sprites to add a marker to").arg(part.name);
+    // Every sprite gets the marker at its pivot's offset, so each must be found.
+    QString problem;
+    spritesOf(part, &problem);
+    return problem.isEmpty() ? QString() : tr("Can't add a marker: %1").arg(problem);
+}
+
+std::optional<double> PuppetWorkspace::animationSeconds() const {
+    const Puppet* puppet = selectedPuppet();
+    if (!m_animating || m_stillFrames || !puppet || m_sequence < 0 || m_sequence >= puppet->sequences.size())
+        return std::nullopt;
+    return double(m_playFrame) / sanitizedAnimationFps(puppet->sequences[m_sequence].fps);
+}
+
 SpritePtr PuppetWorkspace::spriteFor(const PuppetVariant& variant) const {
     if (!m_session) return nullptr;
     QString spriteSource = variant.source;
     if (variant.kind == PuppetVariant::Kind::Animation) {
-        const QVector<AnimationTimeline>& timelines = m_session->activeAtlas().timelines;
-        const AnimationTimeline* timeline = nullptr;
-        QString name = variant.source;
-        // An alias shows its source's frames; the hop limit stops a loop of aliases.
-        for (int hops = 0; hops <= timelines.size() && !name.isEmpty(); ++hops) {
-            timeline = nullptr;
-            for (const AnimationTimeline& t : timelines) {
-                if (t.name == name) { timeline = &t; break; }
-            }
-            if (!timeline || timeline->aliasOf.isEmpty()) break;
-            name = timeline->aliasOf;
-        }
+        const AnimationTimeline* timeline = timelineFor(variant);
         if (!timeline || timeline->frames.isEmpty()) return nullptr;
-        spriteSource = timeline->frames.first();
+        int frame = 0;
+        if (const std::optional<double> seconds = animationSeconds()) {
+            // The epsilon keeps a frame boundary from rounding down to the frame before.
+            const int tick = int(std::floor(*seconds * sanitizedAnimationFps(timeline->fps) + 1e-9));
+            frame = std::max(0, animationFrameAt(int(timeline->frames.size()), timeline->loopMode, tick));
+        }
+        spriteSource = timeline->frames[frame];
     } else if (variant.byIndex) {
         return nullptr;
     }
@@ -690,7 +828,12 @@ void PuppetWorkspace::updateCanvas() {
         drawn.transform = placements[i].transform;
         // A part placed by its attachment moves with its parent, not on its own.
         drawn.movable = part.position.has_value() && !puppetParentAttachment(*puppet, part.name);
+        // Locked in the pose it can't move or turn; on Rest, moving it moves the rig.
+        drawn.locked = lockedInPose(*puppet, i);
+        const bool onRest = !m_animating && (m_pose < 0 || puppetIsRestPose(*puppet, m_pose));
+        if (drawn.locked || (onRest && part.rigLocked)) drawn.movable = false;
         drawn.attachTarget = m_selection.part >= 0 && PuppetEditing::canAttach(*puppet, m_selection.part, i);
+        if (drawn.attachTarget) drawn.newMarkerProblem = newMarkerProblem(part);
         drawn.attached = puppetParentAttachment(*puppet, part.name) != nullptr;
         drawn.joint = placements[i].pivot;
         // Only the Poses tab fades the parts a pose leaves alone: in an animation, faint
@@ -712,14 +855,6 @@ void PuppetWorkspace::updateCanvas() {
         }
         parts.append(drawn);
     }
-    QVector<PuppetCanvas::Bone> bones;
-    const QStringList names = PuppetEditing::partNames(*puppet);
-    for (int i = 0; i < puppet->parts.size(); ++i) {
-        const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[i].name);
-        const int parent = joint ? names.indexOf(joint->parent) : -1;
-        if (parent < 0 || !placements[i].placed || !placements[parent].placed) continue;
-        bones.append({placements[parent].pivot, placements[i].pivot, i == m_selection.part});
-    }
     const int selectedPart = m_selection.part;
     std::optional<QPointF> pivot;
     if (selectedPart >= 0 && selectedPart < placements.size() && placements[selectedPart].placed)
@@ -728,9 +863,10 @@ void PuppetWorkspace::updateCanvas() {
     // the rig is changed in the Poses tab.
     m_canvas->setPosing(editedPose() >= 0);
     m_canvas->setEditable(!m_animating || editingStep());
-    m_canvas->setRigEditable(!m_animating);
+    m_canvas->setRigEditable(!m_animating && !(selectedPart >= 0 && selectedPart < puppet->parts.size()
+                                                 && puppet->parts[selectedPart].rigLocked));
     m_canvas->setOnionSkins(onionSkins(*puppet));
-    m_canvas->showPuppet(parts, bones, selectedPart, pivot, jointRange(*puppet, placements));
+    m_canvas->showPuppet(parts, selectedPart, pivot, jointRange(*puppet, placements));
     updatePoseButtons();
 
     // Fit when another puppet is shown, not after every edit of this one.
@@ -785,6 +921,8 @@ void PuppetWorkspace::updateProperties() {
             const QString used = parent.name == placement.parent ? placement.parentMarker : QString();
             placement.parents.append(parent.name);
             placement.parentMarkers.insert(parent.name, offered(jointMarkers(parent, false), parent.hiddenMarkers, used));
+            const QString problem = newMarkerProblem(parent);
+            if (!problem.isEmpty()) placement.newMarkerProblems.insert(parent.name, problem);
         }
         placement.childMarkers = offered(jointMarkers(part, true), part.hiddenMarkers, placement.childMarker);
         for (const PuppetPropertiesPanel::MarkerChoice& marker : jointMarkers(part, false)) {
@@ -795,6 +933,31 @@ void PuppetWorkspace::updateProperties() {
         placement.posing = editedPose() >= 0;
         placement.angle = int(std::lround(shown.angle));
         placement.variant = shown.variant;
+        placement.rigLocked = part.rigLocked;
+        const int edited = editedPose();
+        placement.pose = edited >= 0 ? puppet->poses[edited].name : QString();
+        placement.poseLocked = lockedInPose(*puppet, i);
+        // On Rest (or with no pose), X and Y move the rig.
+        const bool movesRig = !m_animating && (m_pose < 0 || puppetIsRestPose(*puppet, m_pose));
+        placement.positionLocked = placement.poseLocked || (movesRig && part.rigLocked);
+        placement.animating = m_animating;
+        if (m_animating && m_sequence >= 0 && m_step >= 0 && m_step < puppet->sequences[m_sequence].steps.size()) {
+            const PuppetSequence& sequence = puppet->sequences[m_sequence];
+            const PuppetSequenceStep& step = sequence.steps[m_step];
+            PuppetPropertiesPanel::StepEase ease;
+            ease.sequence = sequence.name;
+            ease.step = m_step + 1;
+            ease.stepSnaps = step.snap;
+            if (step.partSnaps.contains(part.name)) ease.snaps = step.partSnaps.value(part.name);
+            ease.setByPose = false;
+            for (const PuppetPose& pose : puppet->poses) {
+                if (pose.name != step.pose) continue;
+                for (const PuppetPoseSetting& setting : pose.settings) {
+                    if (setting.part == part.name) ease.setByPose = true;
+                }
+            }
+            placement.stepEase = ease;
+        }
         const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
         m_properties->showPart(part.name, placement, placements[i].problem,
                                [this, p, i](const QString& name) {
@@ -844,14 +1007,17 @@ QMenu* PuppetWorkspace::createContextMenu() {
             QAction* show = menu->addAction(posing ? tr("Show in Pose \"%1\"").arg(puppet.poses[edited].name)
                                                    : tr("Show in Pose"),
                                             this, [this, variant]() { showVariantInPose(variant); });
-            show->setEnabled(posing && shownStates(puppet)[variant.part].variant != variant.variant);
+            show->setEnabled(posing && shownStates(puppet)[variant.part].variant != variant.variant
+                             && !lockedInPose(puppet, variant.part));
         } else if (m_selection.part >= 0) {
             const int count = puppets()[m_selection.puppet].parts.size();
             const int part = m_selection.part;
-            QAction* forward = menu->addAction(tr("Bring Forward"), this, [this, part]() { moveSelected(part + 1); });
-            forward->setEnabled(part + 1 < count);
-            QAction* backward = menu->addAction(tr("Send Backward"), this, [this, part]() { moveSelected(part - 1); });
-            backward->setEnabled(part > 0);
+            const bool front = part + 1 >= count;
+            const bool back = part <= 0;
+            menu->addAction(tr("Bring to Front"), this, [this, count]() { moveSelected(count - 1); })->setEnabled(!front);
+            menu->addAction(tr("Bring Forward"), this, [this, part]() { moveSelected(part + 1); })->setEnabled(!front);
+            menu->addAction(tr("Send Backward"), this, [this, part]() { moveSelected(part - 1); })->setEnabled(!back);
+            menu->addAction(tr("Send to Back"), this, [this]() { moveSelected(0); })->setEnabled(!back);
         }
         menu->addSeparator();
         menu->addAction(m_renameAction);
@@ -1019,7 +1185,7 @@ void PuppetWorkspace::moveSelected(int to) {
 }
 
 void PuppetWorkspace::setSelectedPartPosition(const QPoint& position, const QString& mergeKey) {
-    if (!selectedPuppet() || m_selection.part < 0) return;
+    if (!selectedPuppet() || m_selection.part < 0 || selectedPuppet()->parts[m_selection.part].rigLocked) return;
     QVector<Puppet> after = puppets();
     PuppetPart& part = after[m_selection.puppet].parts[m_selection.part];
     if (part.position == position) return;
@@ -1056,16 +1222,100 @@ QVector<PuppetPropertiesPanel::MarkerChoice> PuppetWorkspace::jointMarkers(const
 
 void PuppetWorkspace::attachSelectedPart(int parentIndex, const QString& parentMarker, const QString& childMarker) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || m_selection.part < 0) return;
+    if (!puppet || m_selection.part < 0 || puppet->parts[m_selection.part].rigLocked) return;
     QVector<Puppet> after = puppets();
     PuppetEditing::attachPart(after[m_selection.puppet], m_selection.part, parentIndex, parentMarker, childMarker);
     if (after == puppets()) return;
     pushEdit(tr("Attach Part"), after, {m_selection.puppet, m_selection.part, -1});
 }
 
-void PuppetWorkspace::detachSelectedPart() {
+void PuppetWorkspace::attachSelectedPartToNewMarker(int parentIndex, const QPointF& scenePos) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0 || parentIndex < 0 || parentIndex >= puppet->parts.size()
+        || puppet->parts[m_selection.part].rigLocked || !PuppetEditing::canAttach(*puppet, m_selection.part, parentIndex))
+        return;
+    const PuppetPart& parent = puppet->parts[parentIndex];
+    const QString problem = newMarkerProblem(parent);
+    if (!problem.isEmpty()) {
+        MessageDialog::warning(this, tr("Can't Add a Marker"), problem);
+        return;
+    }
+    const QVector<PuppetPartState> states = shownStates(*puppet);
+    const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(*puppet, states, spriteLookup());
+    const SpritePtr shown = spriteFor(parent.variants.value(states[parentIndex].variant));
+    if (!placements[parentIndex].placed || !shown) return;
+    // Where the drop is on the sprite shown, from its pivot: the same offset on every sprite.
+    const QPointF offset = placements[parentIndex].transform.inverted().map(scenePos) - spritePivot(*shown);
+
+    const QVector<SpritePtr> sprites = spritesOf(parent, nullptr);
+    QStringList taken{PIVOT_MARKER};
+    for (const SpritePtr& sprite : sprites) {
+        for (const NamedPoint& marker : sprite->points) taken.append(marker.name);
+    }
+    const QString name = PuppetEditing::uniqueName(puppet->parts[m_selection.part].name, taken);
+
+    QVector<SetMarkersCommand::CoTarget> changes;
+    for (const SpritePtr& sprite : sprites) {
+        const QVector<NamedPoint> before = sprite->points;
+        NamedPoint marker;
+        marker.name = name;
+        const QPointF at = spritePivot(*sprite) + offset;
+        marker.x = int(std::lround(at.x()));
+        marker.y = int(std::lround(at.y()));
+        sprite->points.append(marker);
+        changes.append({sprite, before, sprite->points});
+    }
+    m_undoStack->beginMacro(tr("Attach to New Marker"));
+    // Applied above: the command only redoes and undoes them.
+    m_undoStack->push(new SetMarkersCommand(changes.first().sprite, changes.first().oldPoints,
+                                            changes.first().newPoints, [this]() {
+        refresh();
+        emit spriteMarkersChanged();
+    }, changes.mid(1)));
+    attachSelectedPart(parentIndex, name, PIVOT_MARKER);
+    m_undoStack->endMacro();
+    emit spriteMarkersChanged();
+}
+
+void PuppetWorkspace::attachSelectedPartToNewMarkerAtPivot(int parentIndex) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || m_selection.part < 0) return;
+    const QVector<PuppetPartState> states = shownStates(*puppet);
+    const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluate(*puppet, states, spriteLookup());
+    const PuppetPart& part = puppet->parts[m_selection.part];
+    const SpritePtr sprite = spriteFor(part.variants.value(states[m_selection.part].variant));
+    if (!sprite || !placements[m_selection.part].placed) return;
+    attachSelectedPartToNewMarker(parentIndex, placements[m_selection.part].transform.map(spritePivot(*sprite)));
+}
+
+QMenu* PuppetWorkspace::createNewMarkerParentMenu(const QVector<int>& overlapping) {
+    auto* menu = new QMenu(this);
+    menu->setToolTipsVisible(true);
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0) return menu;
+    QVector<int> candidates = overlapping;
+    if (candidates.size() < 2) {
+        candidates.clear();
+        for (int i = 0; i < puppet->parts.size(); ++i) {
+            if (PuppetEditing::canAttach(*puppet, m_selection.part, i)) candidates.append(i);
+        }
+    }
+    menu->addSection(tr("Hang From a New Marker On"));
+    if (candidates.isEmpty()) menu->addAction(tr("No part it can hang from"))->setEnabled(false);
+    for (const int candidate : candidates) {
+        const QString problem = newMarkerProblem(puppet->parts[candidate]);
+        QAction* action = menu->addAction(puppet->parts[candidate].name, this, [this, candidate]() {
+            attachSelectedPartToNewMarkerAtPivot(candidate);
+        });
+        action->setEnabled(problem.isEmpty());
+        action->setToolTip(problem);
+    }
+    return menu;
+}
+
+void PuppetWorkspace::detachSelectedPart() {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0 || puppet->parts[m_selection.part].rigLocked) return;
     const PuppetPart& part = puppet->parts[m_selection.part];
     // Keep it where it is: its sprite's pivot, wherever the attachment put it.
     const QVector<PuppetPartPlacement> placements = PuppetEvaluator::evaluateRest(*puppet, spriteLookup());
@@ -1082,7 +1332,7 @@ void PuppetWorkspace::detachSelectedPart() {
 
 void PuppetWorkspace::placeSelectedPartJointAt(const QPointF& scenePos) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || m_selection.part < 0) return;
+    if (!puppet || m_selection.part < 0 || puppet->parts[m_selection.part].rigLocked) return;
     const PuppetPart& part = puppet->parts[m_selection.part];
     // The handle is the part's joint: its pivot, or the marker it hangs by. The position
     // is where the pivot goes, so it keeps the marker's offset from the pivot.
@@ -1104,7 +1354,7 @@ void PuppetWorkspace::placeSelectedPartJointAt(const QPointF& scenePos) {
 }
 
 void PuppetWorkspace::setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax) {
-    if (!selectedPuppet() || m_selection.part < 0) return;
+    if (!selectedPuppet() || m_selection.part < 0 || selectedPuppet()->parts[m_selection.part].rigLocked) return;
     QVector<Puppet> after = puppets();
     PuppetEditing::setAttachmentLimits(after[m_selection.puppet], m_selection.part, leeway, angleMin, angleMax);
     if (after == puppets()) return;
@@ -1196,33 +1446,6 @@ std::optional<PuppetCanvas::JointRange> PuppetWorkspace::jointRange(const Puppet
     return range;
 }
 
-void PuppetWorkspace::editPose(const QString& text, const QString& mergeKey,
-                               const std::function<void(const Puppet&, QVector<PuppetPoseSetting>&)>& change) {
-    const Puppet* puppet = selectedPuppet();
-    int pose = editedPose();
-    if (!puppet || pose < 0) return;
-    QVector<Puppet> after = puppets();
-    Puppet& edited = after[m_selection.puppet];
-    if (m_animating) {
-        // A shared pose (or another animation's) is copied first: only this step plays the copy.
-        const QString played = puppet->poses[pose].name;
-        pose = PuppetEditing::ownStepPose(edited, m_sequence, m_step);
-        if (pose < 0) return;
-        if (edited.poses[pose].name != played)
-            m_copyNote = tr("This step now plays \"%1\", this animation's own copy of \"%2\"")
-                             .arg(edited.poses[pose].name, played);
-    }
-    QVector<PuppetPoseSetting>& settings = edited.poses[pose].settings;
-    change(*puppet, settings);
-    // Kept in part order, as the pose's lines are written.
-    const QStringList names = PuppetEditing::partNames(*puppet);
-    std::stable_sort(settings.begin(), settings.end(), [&names](const PuppetPoseSetting& a, const PuppetPoseSetting& b) {
-        return names.indexOf(a.part) < names.indexOf(b.part);
-    });
-    if (after == puppets()) return;
-    pushEdit(text, after, m_selection, mergeKey);
-}
-
 namespace {
 /// The setting of part @p name in @p settings, added when the pose doesn't set it yet.
 PuppetPoseSetting& settingFor(QVector<PuppetPoseSetting>& settings, const QString& name) {
@@ -1234,11 +1457,86 @@ PuppetPoseSetting& settingFor(QVector<PuppetPoseSetting>& settings, const QStrin
     settings.append(setting);
     return settings.last();
 }
+
+const PuppetPoseSetting* findSetting(const QVector<PuppetPoseSetting>& settings, const QString& name) {
+    for (const PuppetPoseSetting& setting : settings) {
+        if (setting.part == name) return &setting;
+    }
+    return nullptr;
+}
+
+/// Keys what pose @p poseIndex newly sets (compared with @p previous) in the other frames
+/// of animation @p sequenceIndex that are its own: each keeps the value it showed, given by
+/// @p shown (per step, from before the edit). Otherwise a frame that doesn't set a value
+/// keeps it from the frame before, and a loop would never go back.
+void keyOtherFrames(Puppet& puppet, int sequenceIndex, int poseIndex, const QVector<PuppetPoseSetting>& previous,
+                    const QVector<QVector<PuppetPartState>>& shown) {
+    const PuppetSequence& sequence = puppet.sequences[sequenceIndex];
+    const QVector<PuppetPoseSetting> settings = puppet.poses[poseIndex].settings;
+    QSet<int> keyed{poseIndex};
+    for (int step = 0; step < sequence.steps.size() && step < shown.size(); ++step) {
+        const int pose = PuppetEditing::poseNames(puppet).indexOf(sequence.steps[step].pose);
+        if (pose < 0 || keyed.contains(pose) || puppet.poses[pose].owner != sequence.name) continue;
+        keyed.insert(pose);
+        QVector<PuppetPoseSetting>& frame = puppet.poses[pose].settings;
+        for (const PuppetPoseSetting& setting : settings) {
+            const int part = PuppetEditing::partNames(puppet).indexOf(setting.part);
+            if (part < 0 || part >= shown[step].size()) continue;
+            const PuppetPartState& state = shown[step][part];
+            const PuppetPoseSetting* before = findSetting(previous, setting.part);
+            const PuppetPoseSetting* has = findSetting(frame, setting.part);
+            if (!setting.variant.isEmpty() && (!before || before->variant.isEmpty()) && (!has || has->variant.isEmpty())) {
+                const QVector<PuppetVariant>& variants = puppet.parts[part].variants;
+                if (state.variant >= 0 && state.variant < variants.size())
+                    settingFor(frame, setting.part).variant = puppetVariantName(variants[state.variant]);
+            }
+            if (setting.angle && !(before && before->angle) && !(has && has->angle))
+                settingFor(frame, setting.part).angle = int(std::lround(state.angle));
+            if (setting.offset && !(before && before->offset) && !(has && has->offset))
+                settingFor(frame, setting.part).offset = state.offset.toPoint();
+            if (setting.position && !(before && before->position) && !(has && has->position))
+                settingFor(frame, setting.part).position =
+                    state.position ? state.position->toPoint() : puppet.parts[part].position.value_or(QPoint());
+        }
+    }
+}
 }  // namespace
+
+void PuppetWorkspace::editPose(const QString& text, const QString& mergeKey,
+                               const std::function<void(const Puppet&, QVector<PuppetPoseSetting>&)>& change) {
+    const Puppet* puppet = selectedPuppet();
+    int pose = editedPose();
+    if (!puppet || pose < 0) return;
+    QVector<Puppet> after = puppets();
+    Puppet& edited = after[m_selection.puppet];
+    QVector<QVector<PuppetPartState>> shownBefore;
+    if (m_animating) {
+        for (int step = 0; step < puppet->sequences[m_sequence].steps.size(); ++step)
+            shownBefore.append(arrivalStates(*puppet, step));
+        // A shared pose (or another animation's) is copied first: only this step plays the copy.
+        const QString played = puppet->poses[pose].name;
+        pose = PuppetEditing::ownStepPose(edited, m_sequence, m_step);
+        if (pose < 0) return;
+        if (edited.poses[pose].name != played)
+            m_copyNote = tr("This step now plays \"%1\", this animation's own copy of \"%2\"")
+                             .arg(edited.poses[pose].name, played);
+    }
+    QVector<PuppetPoseSetting>& settings = edited.poses[pose].settings;
+    const QVector<PuppetPoseSetting> previous = settings;
+    change(*puppet, settings);
+    // Kept in part order, as the pose's lines are written.
+    const QStringList names = PuppetEditing::partNames(*puppet);
+    std::stable_sort(settings.begin(), settings.end(), [&names](const PuppetPoseSetting& a, const PuppetPoseSetting& b) {
+        return names.indexOf(a.part) < names.indexOf(b.part);
+    });
+    if (m_animating) keyOtherFrames(edited, m_sequence, pose, previous, shownBefore);
+    if (after == puppets()) return;
+    pushEdit(text, after, m_selection, mergeKey);
+}
 
 void PuppetWorkspace::setPartAngle(int partIndex, double angle, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || lockedInPose(*puppet, partIndex)) return;
     const int limited = limitedAngle(*puppet, partIndex, angle);
     const QString name = puppet->parts[partIndex].name;
     editPose(tr("Turn Part"), mergeKey, [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
@@ -1249,7 +1547,7 @@ void PuppetWorkspace::setPartAngle(int partIndex, double angle, const QString& m
 
 void PuppetWorkspace::driftPart(int partIndex, const QPointF& sceneOffset, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || lockedInPose(*puppet, partIndex)) return;
     const PuppetAttachment* joint = puppetParentAttachment(*puppet, puppet->parts[partIndex].name);
     const std::optional<NamedPoint> marker = parentMarkerOf(*puppet, partIndex);
     const int parent = joint ? PuppetEditing::partNames(*puppet).indexOf(joint->parent) : -1;
@@ -1268,11 +1566,16 @@ void PuppetWorkspace::driftPart(int partIndex, const QPointF& sceneOffset, const
 
 void PuppetWorkspace::pullPart(int partIndex, const QPointF& grip, const QPointF& target, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || lockedInPose(*puppet, partIndex)) return;
     const QVector<PuppetPartState> before = shownStates(*puppet);
+    // The parts locked in the pose hold still: the pull bends only the joints below them.
+    QSet<int> locked;
+    for (int i = 0; i < puppet->parts.size(); ++i) {
+        if (lockedInPose(*puppet, i)) locked.insert(i);
+    }
     const QVector<PuppetPartState> after = PuppetMotion::reach(
         *puppet, before, partIndex, grip, target, spriteLookup(),
-        [this, puppet](int part) { return parentMarkerOf(*puppet, part); });
+        [this, puppet](int part) { return parentMarkerOf(*puppet, part); }, locked);
     editPose(tr("Pull Part"), mergeKey, [&](const Puppet& posed, QVector<PuppetPoseSetting>& settings) {
         // Only what the pull changed joins the pose.
         for (int i = 0; i < posed.parts.size(); ++i) {
@@ -1289,7 +1592,7 @@ void PuppetWorkspace::setPartVariant(int partIndex, int variantIndex) {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
     const PuppetPart& part = puppet->parts[partIndex];
-    if (variantIndex < 0 || variantIndex >= part.variants.size()) return;
+    if (variantIndex < 0 || variantIndex >= part.variants.size() || lockedInPose(*puppet, partIndex)) return;
     const QString variant = puppetVariantName(part.variants[variantIndex]);
     editPose(tr("Show Variant"), QString(), [&](const Puppet&, QVector<PuppetPoseSetting>& settings) {
         settingFor(settings, part.name).variant = variant;
@@ -1311,7 +1614,10 @@ void PuppetWorkspace::showVariantInPose(const PuppetSelection& variant) {
 
 void PuppetWorkspace::setPartInPose(int partIndex, bool included) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size()) return;
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || lockedInPose(*puppet, partIndex)) {
+        updatePoseParts();  // puts the tick back
+        return;
+    }
     const QString name = puppet->parts[partIndex].name;
     const PuppetPartState shown = shownStates(*puppet)[partIndex];
     editPose(included ? tr("Add Part to Pose") : tr("Remove Part from Pose"), QString(),
@@ -1324,9 +1630,12 @@ void PuppetWorkspace::setPartInPose(int partIndex, bool included) {
 
 void PuppetWorkspace::movePositionedPart(int partIndex, const QPoint& position, const QString& mergeKey) {
     const Puppet* puppet = selectedPuppet();
-    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || !puppet->parts[partIndex].position) return;
+    if (!puppet || partIndex < 0 || partIndex >= puppet->parts.size() || !puppet->parts[partIndex].position
+        || lockedInPose(*puppet, partIndex))
+        return;
     // The Rest pose places a positioned part where the rig does, so moving it there moves the rig.
     if (!m_animating && (m_pose < 0 || puppetIsRestPose(*puppet, m_pose))) {
+        if (puppet->parts[partIndex].rigLocked) return;
         if (partIndex == m_selection.part) setSelectedPartPosition(position, mergeKey);
         return;
     }
@@ -1343,8 +1652,36 @@ QPoint PuppetWorkspace::shownPosition(const Puppet& puppet, int partIndex) const
     return puppet.parts[partIndex].position.value_or(QPoint());
 }
 
-void PuppetWorkspace::setSelectedPartHiddenMarkers(const QStringList& hiddenMarkers) {
+bool PuppetWorkspace::lockedInPose(const Puppet& puppet, int partIndex) const {
+    const int pose = editedPose();
+    return pose >= 0 && pose < puppet.poses.size() && partIndex >= 0 && partIndex < puppet.parts.size()
+        && puppet.poses[pose].lockedParts.contains(puppet.parts[partIndex].name);
+}
+
+void PuppetWorkspace::setSelectedPartRigLocked(bool locked) {
     if (!selectedPuppet() || m_selection.part < 0) return;
+    QVector<Puppet> after = puppets();
+    after[m_selection.puppet].parts[m_selection.part].rigLocked = locked;
+    if (after == puppets()) return;
+    pushEdit(locked ? tr("Lock Rig") : tr("Unlock Rig"), after, m_selection);
+}
+
+void PuppetWorkspace::setSelectedPartPoseLocked(bool locked) {
+    const Puppet* puppet = selectedPuppet();
+    const int pose = editedPose();
+    if (!puppet || m_selection.part < 0 || pose < 0) return;
+    // The lock is the editor's: it goes on the pose itself, never on a copy for a step.
+    QVector<Puppet> after = puppets();
+    QStringList& lockedParts = after[m_selection.puppet].poses[pose].lockedParts;
+    const QString name = puppet->parts[m_selection.part].name;
+    lockedParts.removeAll(name);
+    if (locked) lockedParts.append(name);
+    if (after == puppets()) return;
+    pushEdit(locked ? tr("Lock Part in Pose") : tr("Unlock Part in Pose"), after, m_selection);
+}
+
+void PuppetWorkspace::setSelectedPartHiddenMarkers(const QStringList& hiddenMarkers) {
+    if (!selectedPuppet() || m_selection.part < 0 || selectedPuppet()->parts[m_selection.part].rigLocked) return;
     QVector<Puppet> after = puppets();
     after[m_selection.puppet].parts[m_selection.part].hiddenMarkers = hiddenMarkers;
     if (after == puppets()) return;
@@ -1477,7 +1814,10 @@ void PuppetWorkspace::updatePoseParts() {
                                                         : QStringLiteral("%1 · %2").arg(part.name, sets.join(QStringLiteral(" · "))),
                                          m_poseParts);
         item->setData(Qt::UserRole, i);
-        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
+        const bool locked = pose.lockedParts.contains(part.name);
+        // A part locked in the pose can't be ticked in or out of it.
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | (locked ? Qt::NoItemFlags : Qt::ItemIsUserCheckable));
+        if (locked) item->setIcon(AppIcons::icon(QStringLiteral("lock")));
         item->setCheckState(setting ? Qt::Checked : Qt::Unchecked);
         if (!setting) item->setForeground(palette().color(QPalette::PlaceholderText));
         item->setToolTip(setting ? tr("This pose sets it. Untick to leave it as other poses have it")
@@ -1502,6 +1842,8 @@ void PuppetWorkspace::updatePoseStrip() {
     // The strip lists the shared poses, which come first; animations keep theirs.
     const int shared = PuppetEditing::sharedPoseCount(*puppet);
     if (m_pose < 0 || m_pose >= shared) m_pose = shared == 0 ? -1 : 0;
+    // Thumbnails show the poses as they look, not where the animation preview's clock is.
+    m_stillFrames = true;
     // One frame for all, so the thumbnails compare: what every pose and the rest pose cover.
     QVector<QVector<PuppetPartState>> poseStates;
     for (const PuppetPose& pose : puppet->poses) poseStates.append(PuppetPosing::statesOf(*puppet, pose));
@@ -1520,6 +1862,7 @@ void PuppetWorkspace::updatePoseStrip() {
     QVector<QPixmap> thumbnails;
     for (const QVector<PuppetPartState>& states : poseStates) thumbnails.append(renderThumbnail(*puppet, states, frame));
     m_poseThumbnails = thumbnails;
+    m_stillFrames = false;
     m_poseStrip->showFrames(PuppetEditing::poseNames(*puppet).mid(0, shared), thumbnails.mid(0, shared), m_pose);
     updatePoseButtons();
     updatePoseParts();
@@ -1669,7 +2012,19 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
     connect(m_playTimer, &QTimer::timeout, this, &PuppetWorkspace::advancePlayback);
     connect(m_playButton, &QToolButton::toggled, this, [this](bool playing) {
         setPlaying(playing);
-        // Stopped where a step's pose has arrived, the canvas edits it.
+        if (!playing) {
+            // Stopped, the playhead goes back into the first pass, where the step under it has
+            // arrived: the canvas edits that step. (Playing counts frames on past the loops.)
+            const Puppet* puppet = selectedPuppet();
+            if (puppet && m_sequence >= 0 && m_sequence < puppet->sequences.size()) {
+                const PuppetSequence& sequence = puppet->sequences[m_sequence];
+                const int step = PuppetSequencing::stepAt(sequence, PuppetSequencing::passFrameOf(sequence, m_playFrame));
+                if (step >= 0) {
+                    selectStep(step);
+                    return;
+                }
+            }
+        }
         rebuildTree();
         updateCanvas();
         updateProperties();
@@ -1769,7 +2124,11 @@ QWidget* PuppetWorkspace::buildAnimationsTab(QWidget* parent) {
         });
     });
     connect(m_stepEase, &QComboBox::currentIndexChanged, this, [this](int ease) {
-        editStep(tr("Step Ease"), QString(), [ease](PuppetSequenceStep& step) { step.snap = ease == 1; });
+        editStep(tr("Step Ease"), QString(), [ease](PuppetSequenceStep& step) {
+            step.snap = ease == 1;
+            // Parts that now ease as the whole step does are no longer exceptions.
+            step.partSnaps.removeIf([&step](const auto& part) { return part.value() == step.snap; });
+        });
     });
     return page;
 }
@@ -1816,6 +2175,17 @@ void PuppetWorkspace::editSequence(const QString& text, const QString& mergeKey,
     pushEdit(text, after, m_selection, mergeKey);
 }
 
+void PuppetWorkspace::setSelectedPartStepEase(std::optional<bool> snaps) {
+    const Puppet* puppet = selectedPuppet();
+    if (!puppet || m_selection.part < 0) return;
+    const QString part = puppet->parts[m_selection.part].name;
+    editStep(tr("Part Ease"), QString(), [&part, snaps](PuppetSequenceStep& step) {
+        // Kept only when it differs from the step's, as sprat-cli writes it.
+        if (snaps && *snaps != step.snap) step.partSnaps.insert(part, *snaps);
+        else step.partSnaps.remove(part);
+    });
+}
+
 void PuppetWorkspace::editStep(const QString& text, const QString& mergeKey,
                                const std::function<void(PuppetSequenceStep&)>& change) {
     const int step = m_step;
@@ -1831,6 +2201,7 @@ void PuppetWorkspace::addSequence(int sequenceIndex) {
     Puppet& animated = after[m_selection.puppet];
     PuppetSequence sequence;
     sequence.name = PuppetEditing::uniqueName(tr("animation"), PuppetEditing::sequenceNames(animated));
+    sequence.fps = m_newAnimationFps;
     const int index = std::clamp(sequenceIndex, 0, int(animated.sequences.size()));
     animated.sequences.insert(index, sequence);
     pushEdit(tr("New Animation"), after, m_selection);
@@ -1877,8 +2248,8 @@ void PuppetWorkspace::addStep(int stepIndex, const QString& pose) {
     editSequence(tr("Add Pose to Animation"), QString(), [&](PuppetSequence& edited) {
         PuppetSequenceStep step;
         step.pose = pose;
-        step.in = DEFAULT_STEP_IN;
-        step.hold = DEFAULT_STEP_HOLD;
+        step.in = m_newStep.in;
+        step.hold = m_newStep.hold;
         added = std::clamp(stepIndex, 0, int(edited.steps.size()));
         edited.steps.insert(added, step);
     });
@@ -1913,15 +2284,16 @@ void PuppetWorkspace::addFrame(int stepIndex, int copyOf) {
     Puppet& animated = after[m_selection.puppet];
     const QVector<PuppetSequenceStep>& steps = animated.sequences[m_sequence].steps;
     PuppetSequenceStep step;
-    step.in = DEFAULT_STEP_IN;
-    step.hold = DEFAULT_STEP_HOLD;
     QVector<PuppetPoseSetting> settings;
     if (copyOf >= 0 && copyOf < steps.size()) {
-        // From the neighbour, so the new frame starts where it is and is changed from there.
+        // From the neighbour, so the new frame starts where it is and is changed from there;
+        // its timing is a new step's, from the settings.
         step = steps[copyOf];
         const int pose = PuppetEditing::poseNames(animated).indexOf(step.pose);
         if (pose >= 0) settings = animated.poses[pose].settings;
     }
+    step.in = m_newStep.in;
+    step.hold = m_newStep.hold;
     step.pose = PuppetEditing::addAnimationPose(animated, m_sequence, settings);
     const int index = std::clamp(stepIndex, 0, int(steps.size()));
     animated.sequences[m_sequence].steps.insert(index, step);
@@ -1994,6 +2366,10 @@ void PuppetWorkspace::setPlaying(bool playing) {
     m_playButton->setIcon(AppIcons::icon(playing ? QStringLiteral("pause") : QStringLiteral("play")));
 }
 
+int PuppetWorkspace::playInterval() const {
+    return m_playTimer->isActive() ? m_playTimer->interval() : -1;
+}
+
 void PuppetWorkspace::advancePlayback() {
     const Puppet* puppet = selectedPuppet();
     if (!puppet || m_sequence < 0 || m_sequence >= puppet->sequences.size()) {
@@ -2063,8 +2439,9 @@ QVector<PuppetCanvas::OnionSkin> PuppetWorkspace::onionSkins(const Puppet& puppe
     if (!m_onionSkin || !m_onionSkin->isChecked() || !editingStep()) return skins;
     const QVector<PuppetSequenceStep>& steps = puppet.sequences[m_sequence].steps;
     const PuppetSpriteLookup lookup = spriteLookup();
-    // The step before in red, the one after in green, as animators' light tables tint them.
-    const QVector<QPair<int, QColor>> neighbours{{m_step - 1, QColor(220, 50, 50)}, {m_step + 1, QColor(40, 170, 70)}};
+    // The step before in red, the one after in green (by default), as animators' light tables tint them.
+    const PuppetCanvas::CanvasSettings& look = m_canvas->canvasSettings();
+    const QVector<QPair<int, QColor>> neighbours{{m_step - 1, look.onionBeforeColor}, {m_step + 1, look.onionAfterColor}};
     for (const auto& [step, tint] : neighbours) {
         if (step < 0 || step >= steps.size()) continue;
         const QVector<PuppetPartState> states = arrivalStates(puppet, step);
@@ -2117,6 +2494,11 @@ void PuppetWorkspace::updateSequences() {
     m_removeSequenceButton->setEnabled(hasSequence);
     m_addSequenceButton->setEnabled(puppet != nullptr);
     m_playButton->setEnabled(sequence && !sequence->steps.isEmpty());
+    // Playing on, at the speed the animation has now; nothing left to play stops it.
+    if (m_playTimer->isActive()) {
+        if (sequence && !sequence->steps.isEmpty()) m_playTimer->setInterval(1000 / sanitizedAnimationFps(sequence->fps));
+        else setPlaying(false);
+    }
     m_sequenceFps->setEnabled(hasSequence);
     m_sequenceLoop->setEnabled(hasSequence);
     m_sequenceFps->setValue(sequence ? sanitizedAnimationFps(sequence->fps) : DEFAULT_ANIMATION_FPS);

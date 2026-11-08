@@ -114,6 +114,7 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
         }
         partObj["variants"] = variantsArr;
         if (!part.hiddenMarkers.isEmpty()) partObj["hidden_markers"] = QJsonArray::fromStringList(part.hiddenMarkers);
+        if (part.rigLocked) partObj["rig_locked"] = true;
         partsArr.append(partObj);
     }
     pObj["parts"] = partsArr;
@@ -139,6 +140,7 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
         QJsonObject poseObj;
         poseObj["name"] = pose.name;
         if (!pose.owner.isEmpty()) poseObj["animation"] = pose.owner;
+        if (!pose.lockedParts.isEmpty()) poseObj["locked_parts"] = QJsonArray::fromStringList(pose.lockedParts);
         QJsonArray settingsArr;
         for (const PuppetPoseSetting& s : pose.settings) {
             QJsonObject sObj;
@@ -167,6 +169,12 @@ QJsonObject puppetToJson(const Puppet& puppet, const std::function<QString(const
             if (step.in != 0) stepObj["in"] = step.in;
             if (step.hold != 0) stepObj["hold"] = step.hold;
             if (step.snap) stepObj["ease"] = QStringLiteral("step");
+            if (!step.partSnaps.isEmpty()) {
+                QJsonObject partEases;
+                for (auto it = step.partSnaps.cbegin(); it != step.partSnaps.cend(); ++it)
+                    partEases[it.key()] = it.value() ? QStringLiteral("step") : QStringLiteral("linear");
+                stepObj["part_eases"] = partEases;
+            }
             stepsArr.append(stepObj);
         }
         seqObj["steps"] = stepsArr;
@@ -185,6 +193,7 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
         part.name = partObj["name"].toString();
         part.position = pointFromJson(partObj["at"]);
         for (const auto& marker : partObj["hidden_markers"].toArray()) part.hiddenMarkers.append(marker.toString());
+        part.rigLocked = partObj["rig_locked"].toBool();
         for (const auto& vVal : partObj["variants"].toArray()) {
             const QJsonObject vObj = vVal.toObject();
             PuppetVariant variant;
@@ -217,6 +226,7 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
         PuppetPose pose;
         pose.name = poseObj["name"].toString();
         pose.owner = poseObj["animation"].toString();
+        for (const auto& part : poseObj["locked_parts"].toArray()) pose.lockedParts.append(part.toString());
         for (const auto& sVal : poseObj["parts"].toArray()) {
             const QJsonObject sObj = sVal.toObject();
             PuppetPoseSetting s;
@@ -242,6 +252,11 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
             step.in = qBound(0, stepObj["in"].toInt(0), PUPPET_MAX_STEP_FRAMES);
             step.hold = qBound(0, stepObj["hold"].toInt(0), PUPPET_MAX_STEP_FRAMES);
             step.snap = stepObj["ease"].toString() == QLatin1String("step");
+            const QJsonObject partEases = stepObj["part_eases"].toObject();
+            for (auto it = partEases.begin(); it != partEases.end(); ++it) {
+                const bool snaps = it.value().toString() == QLatin1String("step");
+                if (snaps != step.snap) step.partSnaps.insert(it.key(), snaps);
+            }
             sequence.steps.append(step);
         }
         puppet.sequences.append(sequence);

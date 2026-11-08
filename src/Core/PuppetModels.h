@@ -3,6 +3,7 @@
 #include <QPoint>
 #include <QString>
 #include <QStringList>
+#include <QMap>
 #include <QVector>
 #include "AnimationModels.h"
 
@@ -41,6 +42,9 @@ struct PuppetPart {
     /// Markers of its sprites the editor neither shows nor offers for joints. Kept in the
     /// project only: sprat-cli has no such setting, so it is never exported.
     QStringList hiddenMarkers;
+    /// The editor won't change how the part is placed (by position, or its attachment and
+    /// limits) until unlocked. Kept in the project only, like hiddenMarkers.
+    bool rigLocked = false;
 
     bool operator==(const PuppetPart&) const = default;
 };
@@ -78,6 +82,9 @@ struct PuppetPose {
     /// of the Poses tab, which any animation may play. Kept in the project only: sprat-cli
     /// has no such setting, so it is exported as a plain pose.
     QString owner;
+    /// Parts the editor won't change in this pose (variant, angle, offset, position) until
+    /// unlocked. Kept in the project only.
+    QStringList lockedParts;
 
     bool operator==(const PuppetPose&) const = default;
 };
@@ -93,6 +100,12 @@ struct PuppetSequenceStep {
     int in = 0;
     int hold = 0;
     bool snap = false;  ///< ease:step: keep the old pose through `in`, then snap
+    /// Parts that ease the other way from `snap` (sprat-cli's step:PARTS / linear:PARTS):
+    /// part name → snaps. Only parts whose ease differs from the step's are kept.
+    QMap<QString, bool> partSnaps;
+
+    /// Whether @p part snaps in this step.
+    bool snaps(const QString& part) const { return partSnaps.value(part, snap); }
 
     bool operator==(const PuppetSequenceStep&) const = default;
 };

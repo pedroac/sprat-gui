@@ -33,6 +33,7 @@
         <file alias="globe-add.svg">icons/globe-add.svg</file>
         <file alias="globe.svg">icons/globe.svg</file>
         <file alias="grid.svg">icons/grid.svg</file>
+        <file alias="lock.svg">icons/lock.svg</file>
         <file alias="help.svg">icons/help.svg</file>
         <file alias="image-add.svg">icons/image-add.svg</file>
         <file alias="image-animated.svg">icons/image-animated.svg</file>

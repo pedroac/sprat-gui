@@ -29,5 +29,6 @@ private slots:
     void testEditingPosesKeepsSequencesInStep();
     void testAnimationPosesBelongToTheirAnimation();
     void testRestPoseStaysFirstAndFollowsTheRig();
+    void testStepsEasePartsTheirOwnWay();
     void testSequencesTweenPosesOverTheirFrames();
 };

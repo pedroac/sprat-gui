@@ -11,6 +11,7 @@
 #include "PuppetPropertiesPanel.h"
 #include "SpriteModels.h"
 
+struct AppSettings;
 class PuppetPoseStrip;
 class PuppetSequenceTrack;
 class PuppetTreeWidget;
@@ -56,6 +57,8 @@ public:
     /// Reloads the active atlas's sprites and images (after a layout, or an atlas switch),
     /// then refreshes.
     void refreshSprites();
+    /// The canvas's colours and grid (cell, offset, colour, and whether it starts shown).
+    void setSettings(const AppSettings& settings);
     /// Lists the atlases that can hold puppets, selecting the active one.
     void updateAtlasCombo(const QVector<AtlasEntry>& atlases, int activeIndex);
 
@@ -85,6 +88,17 @@ public:
     void attachSelectedPart(int parentIndex, const QString& parentMarker, const QString& childMarker);
     /// Places the selected part by position, where it is now.
     void detachSelectedPart();
+    /// Adds a point marker to every sprite part @p parentIndex shows (each frame of its
+    /// animations too) and hangs the selected part from it by its pivot, as one undo step.
+    /// The marker goes at @p scenePos on the sprite shown there, and at the same offset from
+    /// the pivot on the others; it is named after the selected part.
+    void attachSelectedPartToNewMarker(int parentIndex, const QPointF& scenePos);
+    /// The same, at the selected part's pivot, so it stays where it is.
+    void attachSelectedPartToNewMarkerAtPivot(int parentIndex);
+    /// The parts the selected part may hang from by a new marker at its pivot: @p overlapping
+    /// when several are under it, otherwise every part it may hang from. Those that can't
+    /// take a marker are off, saying why.
+    QMenu* createNewMarkerParentMenu(const QVector<int>& overlapping);
     /// Places the selected part by position so that its joint (the pivot handle) is at @p scenePos.
     void placeSelectedPartJointAt(const QPointF& scenePos);
     void setSelectedPartLimits(int leeway, std::optional<int> angleMin, std::optional<int> angleMax);
@@ -153,6 +167,8 @@ public:
     int selectedSequence() const { return m_sequence; }
     int selectedStep() const { return m_step; }
     int playFrame() const { return m_playFrame; }
+    /// Milliseconds between frames while playing, or -1 when stopped.
+    int playInterval() const;
     QTabBar* bottomTabs() const { return m_bottomTabs; }
     /// The page below the canvas for tab @p tab.
     QWidget* bottomPage(int tab) const { return m_bottomPages.value(tab); }
@@ -160,6 +176,8 @@ public:
 
 signals:
     void atlasSelected(int atlasIndex);
+    /// Markers were added to sprites (or such an addition was undone).
+    void spriteMarkersChanged();
 
 private:
     void setupUi();
@@ -179,7 +197,19 @@ private:
     const QVector<Puppet>& puppets() const;
     const Puppet* selectedPuppet() const;
     /// The sprite a variant shows (an animation's first frame), or nullptr.
+    /// The sprite @p variant shows: for an animation, its frame at the animation preview's
+    /// time (animationSeconds()), or its first frame.
     SpritePtr spriteFor(const PuppetVariant& variant) const;
+    /// Seconds into the animation preview while the Animations tab is shown, on the selected
+    /// animation's clock: animation variants play their frames along. Otherwise none.
+    std::optional<double> animationSeconds() const;
+    /// The timeline an animation variant plays (an alias's source), or nullptr.
+    const AnimationTimeline* timelineFor(const PuppetVariant& variant) const;
+    /// Every sprite @p part can show: its sprites and each frame of its animations. Sets
+    /// @p problem when one of them isn't in the atlas.
+    QVector<SpritePtr> spritesOf(const PuppetPart& part, QString* problem) const;
+    /// Why the selected part can't hang from a new marker on @p part; empty when it can.
+    QString newMarkerProblem(const PuppetPart& part) const;
     QPixmap imageOf(const SpritePtr& sprite) const;
     PuppetSpriteLookup spriteLookup() const;
     QString describeSource(const PuppetVariant& variant) const;
@@ -223,6 +253,14 @@ private:
     /// Applies @p change to the selected animation (or its selected step) as one undo step.
     void editSequence(const QString& text, const QString& mergeKey, const std::function<void(PuppetSequence&)>& change);
     void editStep(const QString& text, const QString& mergeKey, const std::function<void(PuppetSequenceStep&)>& change);
+    /// Locks or unlocks how the selected part is placed, in every pose.
+    void setSelectedPartRigLocked(bool locked);
+    /// Locks or unlocks the selected part in the edited pose.
+    void setSelectedPartPoseLocked(bool locked);
+    /// Whether part @p partIndex is locked in the edited pose.
+    bool lockedInPose(const Puppet& puppet, int partIndex) const;
+    /// Has the selected part ease @p snaps in the selected step, or as the step does (nullopt).
+    void setSelectedPartStepEase(std::optional<bool> snaps);
     /// The pose the canvas edits: the selected frame of the Poses tab, the selected step's
     /// in the Animations tab while editingStep(), else -1.
     int editedPose() const;
@@ -268,6 +306,9 @@ private:
     bool m_animating = false;  ///< The Animations tab is shown: the canvas plays
     int m_sequence = -1;       ///< The selected animation
     int m_step = -1;           ///< Its selected step
+    /// A new animation step's timing, and a new animation's speed (from the settings).
+    PuppetSequenceStep m_newStep{QString(), 4, 0};
+    int m_newAnimationFps = DEFAULT_ANIMATION_FPS;
     int m_playFrame = 0;       ///< The playhead, in the selected animation's frames
     QSet<QString> m_playAlong;  ///< Animations ticked to play along (preview only, not saved)
     bool m_rebuildingSequences = false;
@@ -305,6 +346,9 @@ private:
     QAction* m_renameAction = nullptr;
 
     QDoubleSpinBox* m_zoomSpin = nullptr;
+    QPushButton* m_gridButton = nullptr;
+    /// Set while drawing the pose thumbnails: animation variants show their first frame.
+    bool m_stillFrames = false;
     PuppetCanvas* m_canvas = nullptr;
     PuppetPropertiesPanel* m_properties = nullptr;
 };
