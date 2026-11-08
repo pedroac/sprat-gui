@@ -182,7 +182,7 @@ The UI must be **usable, performant, and useful** for game developers and UI art
 - **Other Dependencies** (LibArchive, ZLIB):
   - Use system-provided versions when possible
   - Fetch from reliable sources (FetchContent for safety)
-  - Document minimum versions in README.md
+  - Document minimum versions in `docs/building.md`
 
 #### Updating Dependencies
 1. Check release notes for breaking changes
@@ -1281,17 +1281,24 @@ All documentation must be **accurate, up-to-date, and helpful** for users and de
 ### Files to Maintain
 
 #### README.md (User-Facing)
-- Clear project description and feature list
-- Installation instructions for all platforms
-- Quick start guide with screenshots
-- Common use cases and workflows
-- Link to itch.io for web version
-- Attribution and license information
+- Short: project description, a one-line-per-area feature list, a screenshot
+- Download/install in a few lines per platform, link to itch.io for the web version
+- Quick start, links to the docs below, attribution and license
+- Keep detail out of it: it belongs in `docs/`
 
 **Update Trigger**:
-- New features added
+- A new area of features (a new workspace, export, source kind)
 - Installation process changed
-- Major bugs fixed that affected usage
+
+#### docs/ (User and Contributor Guides)
+- `docs/user-guide.md` - Each workspace in detail, sources, settings, projects, timeline naming, web limitations, troubleshooting
+- `docs/shortcuts.md` - Keyboard and pointer controls, per workspace and canvas
+- `docs/building.md` - Requirements, build scripts, local sprat-cli development, translations, code layout
+- `CONTRIBUTING.md` (repository root) - Issues, pull requests, packaging, AI-assisted work
+
+**Update Trigger**:
+- New features or changed behavior: `docs/user-guide.md` (and `docs/shortcuts.md` for new keys)
+- Build or dependency changes: `docs/building.md`
 
 #### CHANGELOG.md (Release Notes)
 - Entries for every release (MAJOR.MINOR.PATCH)
@@ -1388,13 +1395,13 @@ Each source file should have a header:
 
 #### During Development
 - **Small Changes**: Update relevant docs immediately
-- **New Features**: Add to README.md and AGENTS.md before PR merge
+- **New Features**: Add to `docs/user-guide.md` (README.md for a new area) and AGENTS.md before PR merge
 - **API Changes**: Update AGENTS.md and inline docs
 - **Bug Fixes**: Update CHANGELOG.md entry
 
 #### Before Release
 1. **Review Documentation**:
-   - README.md matches current behavior
+   - README.md and `docs/` match current behavior
    - AGENTS.md reflects actual architecture
    - CHANGELOG.md complete and accurate
    - Code comments still relevant
@@ -1410,7 +1417,7 @@ Each source file should have a header:
    - Consistent terminology
 
 #### Documentation Checklist
-- [ ] Feature described in README.md
+- [ ] Feature described in `docs/user-guide.md` (and README.md if it is a new area)
 - [ ] CHANGELOG.md updated
 - [ ] AGENTS.md updated if architecture affected
 - [ ] Code comments clear and accurate
@@ -1420,7 +1427,7 @@ Each source file should have a header:
 
 ### Writing Style
 
-**For Users (README.md)**:
+**For Users (README.md, `docs/`)**:
 - Clear and concise
 - Focus on "what" and "why"
 - Use examples and screenshots
