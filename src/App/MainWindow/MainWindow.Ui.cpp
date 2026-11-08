@@ -432,6 +432,12 @@ void MainWindow::setupUi() {
         selectActiveAtlas(atlasIndex);
         updateNavigatorAtlasCombo();  // the other workspaces show the same atlas
     });
+    // Markers added from the Puppets workspace belong to the sprites: the Sprites workspace shows them.
+    connect(m_puppetWorkspace, &PuppetWorkspace::spriteMarkersChanged, this, [this]() {
+        if (auto* preview = m_atlasWorkspace ? m_atlasWorkspace->spriteEditorPanel()->previewCanvas() : nullptr)
+            preview->overlay()->updateLayout();
+        refreshHandleCombo();
+    });
 
     // Install event filter on canvas viewport (handled by MainWindow::eventFilter for zoom/scroll)
     m_atlasWorkspace->canvas()->viewport()->installEventFilter(this);
@@ -439,7 +445,7 @@ void MainWindow::setupUi() {
     // Connect AtlasWorkspace signals that need MainWindow context
     connect(m_atlasWorkspace, &AtlasWorkspace::spriteSelected,
             this, &MainWindow::onSpriteSelected);
-    connect(m_atlasWorkspace, &AtlasWorkspace::canvasSelectionChanged,
+    connect(m_atlasWorkspace, &AtlasWorkspace::checkedSpritesChanged,
             this, [this](const QList<SpritePtr>&) { updateOnionSkinDisplay(); });
     connect(m_atlasWorkspace, &AtlasWorkspace::canvasZoomChanged,
             this, [this](double pct) {

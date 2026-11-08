@@ -162,7 +162,8 @@ signals:
     void reincludeAllFromSourceRequested(int sourceIdx);
     void spriteDroppedToTimeline(const QStringList& paths, const QString& targetFolder);
     void spriteSelected(SpritePtr sprite);
-    void canvasSelectionChanged(const QList<SpritePtr>& selection);
+    /// The checked sprites changed, from the canvas or the sprite tree's tick boxes.
+    void checkedSpritesChanged(const QList<SpritePtr>& checked);
 
     // ── Sprite editor ─────────────────────────────────────────────────────────
     void spriteRenameRequested(SpritePtr sprite, const QString& newName);

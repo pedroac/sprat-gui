@@ -329,7 +329,7 @@ void MainWindow::applySettings() {
         m_nineSliceWorkspace->setSettings(m_settings);
     }
     if (m_puppetWorkspace) {
-        m_puppetWorkspace->canvas()->setBackgroundBrush(m_settings.workspaceColor);
+        m_puppetWorkspace->setSettings(m_settings);
     }
     auto* navigatorPanel = m_atlasWorkspace ? m_atlasWorkspace->navigatorPanel() : nullptr;
     auto* spriteTree = navigatorPanel ? navigatorPanel->tree() : nullptr;

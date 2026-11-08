@@ -152,7 +152,7 @@ void AtlasWorkspace::setupUi() {
     connect(m_canvas, &LayoutCanvas::selectionChanged,
             this, [this](const QList<SpritePtr>& selection) {
         if (m_session) m_session->selectedSprites = selection;
-        emit canvasSelectionChanged(selection);
+        emit checkedSpritesChanged(selection);
     });
 
     connect(m_canvas, &LayoutCanvas::zoomChanged,
@@ -225,6 +225,7 @@ void AtlasWorkspace::setupUi() {
 
         if (m_session) {
             const QList<SpritePtr> checkedSprites = SpriteTreeUtils::collectCheckedSprites(tree);
+            const bool changed = m_session->selectedSprites != checkedSprites;
             m_session->selectedSprites = checkedSprites;
 
             if (m_spriteEditorPanel && m_spriteEditorPanel->multiSelectionLabel()) {
@@ -239,6 +240,8 @@ void AtlasWorkspace::setupUi() {
                     m_spriteEditorPanel->multiSelectionLabel()->setVisible(false);
                 }
             }
+            // The onion skin shows the checked sprites.
+            if (changed) emit checkedSpritesChanged(checkedSprites);
         }
     });
 
