@@ -27,32 +27,41 @@ The **[web version](https://sprat-gui.itch.io)** runs in your browser with no in
 
 Pre-built binaries are on **[itch.io](https://pedroac.itch.io/sprat)**, with the sprat-cli tools included.
 
-- **Linux**: download `sprat-gui-linux.AppImage`, make it executable (`chmod +x`), and run it.
-- **Windows**: extract `sprat-gui-windows.zip` and run `sprat-gui.exe`. The executable is unsigned, so SmartScreen may warn the first time: click **More info → Run anyway**.
-- **macOS**: open `sprat-gui-macos.dmg` and drag `sprat-gui.app` to **Applications**. The app isn't notarized, so the first launch is blocked: click **Done**, then **System Settings → Privacy & Security → Open Anyway**. Or run `xattr -dr com.apple.quarantine /Applications/sprat-gui.app`.
+- **Linux**: download `sprat-gui-linux.AppImage`, make it executable (`chmod +x`), and run it
+- **Windows**: extract `sprat-gui-windows.zip` and run `sprat-gui.exe`
+- **macOS**: drag `sprat-gui.app` to **Applications**
 
-For GIF export, install ImageMagick (`magick` or `convert`); for video, FFmpeg (`ffmpeg`).
+Optional for advanced features:
+- ImageMagick for GIF export
+- FFmpeg for video export
 
-To build from source, see [docs/building.md](docs/building.md).
+**[Quick Start →](docs/getting-started.md)** 5-minute walkthrough to create your first atlas
 
-## Quick start
-
-1. Launch the app. If the sprat-cli tools are missing, it offers to install them (or set their folder in **Settings → CLI Tools**).
-2. Drop a folder of sprites on the window, or use **File → Add Source Folder...** (also **Add Source File...** for a sprite sheet or GIF, and **Add Source URL...**).
-3. In **Sprites** (`Alt+S`), click a sprite to name it and place its pivot and markers.
-4. In **Atlases** (`Alt+A`), split sprites into atlases if you need several, and pick their profiles; **Settings → Manage Profiles** sets each profile's packing, compression and artifact reduction.
-5. In **Frame Animation** (`Alt+F`), add timelines, or auto-create them from folders and frame names, and preview them.
-6. Optionally, mark stretchable UI sprites in **Nine-Slice** (`Alt+N`) and build puppets in **Puppets** (`Alt+P`).
-7. **File → Save As** saves the project folder; **Exportation** (`Alt+X`) writes the atlases and metadata for your engine.
-
-Inside the app, **Help → Quick Start** gives a guided introduction and **Help → Hotkeys** lists every shortcut.
+For detailed guides or to build from source, see [Documentation](#documentation) below.
 
 ## Documentation
 
-- [User guide](docs/user-guide.md): each workspace, sources, settings, projects, timeline naming, troubleshooting
-- [Keyboard and pointer controls](docs/shortcuts.md)
-- [Building from source](docs/building.md): requirements, build scripts, translations, code layout
+**Start here**: [Getting Started](docs/getting-started.md) — 5-minute intro
+
+**Workspaces**:
+- [Sprites](docs/workspace-sprites.md) — Import and edit sprites
+- [Atlases](docs/workspace-atlases.md) — Organize and pack
+- [Animations](docs/workspace-animations.md) — Create and preview
+- [Nine-Slice](docs/workspace-nine-slice.md) — Scalable UI elements
+- [Puppets](docs/workspace-puppets.md) — Character rigs
+- [Export](docs/workspace-export.md) — Final export
+
+**Concepts**:
+- [Sources](docs/sources.md) — Loading and syncing sprites
+- [Projects](docs/projects.md) — Save, load, autosave
+- [Profiles](docs/profiles.md) — Compression and optimization
+- [Shortcuts](docs/shortcuts.md) — Keyboard and mouse controls
+- [Troubleshooting](docs/troubleshooting.md) — Common issues
+
+**For developers**:
+- [Building from source](docs/building.md)
 - [Contributing](CONTRIBUTING.md)
+- [Architecture Guide](AGENTS.md)
 - [Changelog](CHANGELOG.md)
 
 ## Attribution
