@@ -15,6 +15,7 @@
 #include <QUndoStack>
 #include <QPointer>
 #include <QMessageBox>
+#include <memory>
 
 #include "SourceFolderWatcher.h"
 #include "ProjectSession.h"
@@ -22,6 +23,11 @@
 #include "models.h"
 #include "DropAction.h"
 #include "SettingsDialog.h"
+
+// Forward declaration for generated UI code
+namespace Ui {
+    class MainWindow;
+}
 
 // Forward declarations for Qt classes
 class QComboBox;
@@ -1061,6 +1067,9 @@ private:
     QSize m_singleImageDimensions;  // Cache to avoid redundant image loads
     bool m_inResize = false;
     bool m_isRestoringProject = false;
+
+    // Generated UI code
+    std::unique_ptr<Ui::MainWindow> ui;
 
 #ifdef Q_OS_WASM
     static MainWindow* s_wasmInstance;
