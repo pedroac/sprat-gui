@@ -1,6 +1,9 @@
 #pragma once
 #include <QElapsedTimer>
 #include <QFutureWatcher>
+#include <QPointer>
+#include <atomic>
+#include <memory>
 #include <QPointF>
 #include <QWidget>
 #include "AppSettings.h"
@@ -33,6 +36,8 @@ public:
      * @param settings         App settings pointer (non-owning); used for onion-skin opacity.
      * @param parent           Parent widget.
      */
+    ~FrameAnimationWorkspace() override;
+
     explicit FrameAnimationWorkspace(NavigatorPanel*        sharedNavigator,
                                       AnimationPreviewPanel* animPanel,
                                       TimelineEditorPanel*   timelinePanel,
@@ -136,6 +141,8 @@ private:
 
     // ── Export state ─────────────────────────────────────────────────────────
     QFutureWatcher<bool> m_animExportWatcher;
+    /// Set when the window closes: the running export stops instead of outliving it.
+    std::shared_ptr<std::atomic<bool>> m_animExportCanceled = std::make_shared<std::atomic<bool>>(false);
     QString              m_animExportOutPath;
 
     // Saved animation canvas zoom/scroll position (for enter/leave)

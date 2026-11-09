@@ -617,6 +617,9 @@ private:
     /// @param clearHistory Also drops the undo history (loading), instead of marking it saved
     void markProjectUnmodified(bool clearHistory);
 
+    /// Clears undo history before a change that moves or reallocates atlases/sources.
+    void clearUndoHistoryForStructureChange();
+
     /**
      * @brief Updates the main content view.
      */
@@ -773,6 +776,20 @@ private:
      * @brief Applies project payload to the UI.
      */
     void applyProjectPayload();
+
+    /**
+     * @brief True when the source folder is one the app owns and may clear on Replace.
+     *
+     * A project file can name any folder as its source, so only the project's own
+     * sprites folder and temporary folders are safe to delete.
+     */
+    bool canReplaceSourceFolder() const;
+
+    /**
+     * @brief Warns that the source folder is outside the project and may not be cleared.
+     * @return False, for callers to return early.
+     */
+    bool refuseReplaceSourceFolder();
 
     /**
      * @brief Parses layout output.
@@ -1006,7 +1023,7 @@ private:
     bool m_updateCheckEnabled = true;
     bool m_cliInstallInProgress = false;
     bool m_loadingOverlayVisible = false;
-    std::atomic<bool> m_isCanceled{false};
+    std::shared_ptr<std::atomic<bool>> m_isCanceled = std::make_shared<std::atomic<bool>>(false);
     AppSettings m_settings;
     CliPaths m_cliPaths;
     SaveConfig m_lastSaveConfig;

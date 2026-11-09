@@ -38,6 +38,11 @@ CliSetupController::CliSetupController(QWidget* dialogParent, QObject* parent)
             this, &CliSetupController::onDownloadProgress);
     connect(m_installer, &CliToolInstaller::installLog,
             this, &CliSetupController::onInstallerLog);
+    connect(m_installer, &CliToolInstaller::errorOccurred, this,
+            [this](const QString& title, const QString& message) {
+                emit installLog(tr("%1: %2").arg(title, message));
+                MessageDialog::warning(m_dialogParent, title, message);
+            });
 
 #ifndef SPRAT_EMBEDDED_CLI
     connect(&m_checkWatcher, &QFutureWatcher<CliVersionResult>::finished,

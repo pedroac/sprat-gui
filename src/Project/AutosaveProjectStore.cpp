@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QStandardPaths>
@@ -51,16 +52,21 @@ bool AutosaveProjectStore::save(const QString& path, const QJsonObject& root, QS
         }
     }
 
-    QFile file(path);
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         error = "Autosave failed";
         return false;
     }
-    if (file.write(QJsonDocument(root).toJson()) < 0) {
+    const QByteArray json = QJsonDocument(root).toJson();
+    if (file.write(json) != json.size()) {
         error = "Autosave failed";
+        file.cancelWriting();
         return false;
     }
-    file.close();
+    if (!file.commit()) {
+        error = "Autosave failed: " + file.errorString();
+        return false;
+    }
 
 #ifdef Q_OS_WASM
     sync_idbfs();

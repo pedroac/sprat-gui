@@ -18,6 +18,14 @@ Testing/
 
 build/
 build_wasm/
+build-embedded/
+build_analysis/
+DartConfiguration.tcl
+deploy/sprat-gui-itch/sprat-gui.data
+deploy/sprat-gui-itch/sprat-gui.js
+deploy/sprat-gui-itch/sprat-gui.wasm
+deploy/sprat-gui-itch/sprat-gui.wasm.gz
+sprat-gui-itch*.zip
 *.o
 *.obj
 *.a

@@ -13,6 +13,7 @@ public:
         std::function<void(bool)>                           setLoading;
         std::function<void(const QString&)>                 setStatus;
         std::function<void(const QString&, const QString&)> showError; // title, msg
+        std::function<bool()>                               shouldCancel; // true to stop
     };
 
     static QString chooseOutputPath(QWidget* parent);

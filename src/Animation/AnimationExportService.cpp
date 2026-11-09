@@ -2,6 +2,7 @@
 #include "MessageDialog.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
 #include <QFileDialog>
@@ -11,6 +12,7 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QtGlobal>
 
 namespace {
 QString trAnimationExport(const char* text) {
@@ -79,6 +81,9 @@ bool AnimationExportService::exportAnimation(
     auto showError = [&](const QString& title, const QString& msg) {
         if (callbacks.showError) callbacks.showError(title, msg);
     };
+    auto canceled = [&]() {
+        return callbacks.shouldCancel && callbacks.shouldCancel();
+    };
     if (selectedTimelineIndex < 0 || selectedTimelineIndex >= timelines.size()) {
         return false;
     }
@@ -138,6 +143,11 @@ bool AnimationExportService::exportAnimation(
     bool first = true;
 
     for (const QString& path : frames) {
+        if (canceled()) {
+            setStatus(trAnimationExport("Export canceled"));
+            setLoading(false);
+            return false;
+        }
         int px = 0, py = 0;
         QImage pm(path);
         if (pm.isNull())
@@ -183,6 +193,11 @@ bool AnimationExportService::exportAnimation(
     }
 
     for (int i = 0; i < frameDataList.size(); ++i) {
+        if (canceled()) {
+            setStatus(trAnimationExport("Export canceled"));
+            setLoading(false);
+            return false;
+        }
         const auto& fd = frameDataList[i];
         QImage pm(fd.path);
         QImage img(canvasW, canvasH, QImage::Format_ARGB32);
@@ -201,7 +216,7 @@ bool AnimationExportService::exportAnimation(
     QProcess proc;
     QStringList args;
     if (useMagick) {
-        args << "-delay" << QString::number(100 / fps) << "-loop" << QString::number(gifLoopCount)
+        args << "-delay" << QString::number(qRound(100.0 / qMax(1, fps))) << "-loop" << QString::number(gifLoopCount)
              << tempDir.path() + "/frame_*.png" << outPath;
         proc.start(converterExe, args);
     } else if (!ffmpegExe.isEmpty()) {
@@ -214,8 +229,22 @@ bool AnimationExportService::exportAnimation(
         return false;
     }
     constexpr int kExportTimeoutMs = 5 * 60 * 1000; // 5 minutes
-    if (!proc.waitForFinished(kExportTimeoutMs)) {
+    QElapsedTimer waitTimer;
+    waitTimer.start();
+    while (proc.state() != QProcess::NotRunning) {
+        if (canceled()) {
+            proc.kill();
+            proc.waitForFinished(1000);
+            setStatus(trAnimationExport("Export canceled"));
+            setLoading(false);
+            return false;
+        }
+        if (waitTimer.elapsed() > kExportTimeoutMs) break;
+        proc.waitForFinished(100);
+    }
+    if (proc.state() != QProcess::NotRunning) {
         proc.kill();
+        proc.waitForFinished(1000);
         setStatus(trAnimationExport("Export timed out"));
         showError(trAnimationExport("Export Failed"), trAnimationExport("Export process timed out after 5 minutes."));
         setLoading(false);

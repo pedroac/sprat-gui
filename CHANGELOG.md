@@ -5,7 +5,7 @@ All notable changes to sprat-gui are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.0] - 2026-11-09
 
 ### Added
 - Puppet workspace: the part panel groups how a part is placed under **Rig** and what the pose does to it under **Transformation** (now with **Shows**), each with a **Lock**. Rig's keeps the placement from changing in every pose; Transformation's keeps the part as it is in that pose only ("In pose ..."), on the canvas too, and a pull bends only the joints below a locked part. Locks are saved in the project, not exported to sprat-cli
@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Messages are easier to read: each idea is its own paragraph (what went wrong, what sprat-cli said, what to do), and what sprat-cli printed is shown in a fixed-width block, cut when it is long. Layout errors during export now include spratlayout's own message. Messages that used internal terms ("temporary frame list", "No session.", "virtual animation group") say what happened and what to do instead
 - The status bar says when the project was autosaved ("Autosaved project at 07/11/2026 14:32", in your locale's format), and when a restored autosave was made
 - Exportation: the **Cancel** button is gone; the workspace tabs switch away
+- Puppet workspace: dragging, turning or pulling a part updates the canvas in place instead of rebuilding and re-tinting every sprite on each mouse move, so large puppets stay responsive
+- Closing the window during a GIF or animation export stops the export instead of leaving it running in the background
 - Frame Animation workspace: the sprite column is gone; the timeline list sits on the left and the selected timeline with its preview on the right. With several atlases, an **Atlas** selector above the timelines picks whose timelines are shown
 - Frame Animation workspace: **Add timeline** opens a sprite picker (as in the Nine-Slice workspace); tick sprites or whole groups, or create it empty. Right-click the timeline list for **Auto-create Timelines...**: pick one or more groups (or a source), and each group holding sprites becomes a timeline named after it, inside a folder named after its source and parent groups. Right-click a frame for **Add Frames Before...** / **Add Frames After...**, or empty space in the frames for **Add Frames...**
 - Sprites picked or dropped into a timeline are ordered by their numbers (`walk2` before `walk10`), not alphabetically
@@ -56,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Opening a sprite archive can no longer overwrite files outside the folder it is extracted to. Links inside archives (which a `.tar` could use to write to any of your files) are now skipped
 - Exporting can no longer delete folders outside the export folder. A project file could name a profile or atlas output folder with an absolute path or `..`, and the export cleared that folder before writing. Such names are now dropped when the project is opened, and the export refuses them
+- Replacing sprites can no longer clear a folder outside the project. A project file could name any folder as its source, and adding an image with Replace deleted that folder's contents; the source folder must now be the project's own sprites folder or a temporary folder
+- Exporting can no longer clear a destination folder the app has not written before. A project file could name a folder such as the user's home directory as its output path, and the export wiped each profile folder inside it; the export now only clears folders that hold its own export marker
+- A puppet's sprite path read from a project can no longer point outside the project
 - A post-export command stored in a project now asks before it runs for the first time, so a project from someone else can't run commands on your computer unnoticed. Commands you type in the Export workspace run without asking
 - In-app updates are checked against the SHA-256 checksum GitHub publishes for each release file before they are installed
 

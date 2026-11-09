@@ -1,4 +1,5 @@
 #include "TimelineEditorPanel.h"
+#include "NaturalOrder.h"
 #include "AppIcons.h"
 #include "AnimationModels.h"
 #include "ProjectSession.h"
@@ -484,9 +485,9 @@ void TimelineEditorPanel::refreshTimelineList()
     const int count = m_session->activeAtlas().timelines.size();
     QVector<int> sortedIndices(count);
     std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
-    std::sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b) {
-        return m_session->activeAtlas().timelines[a].name.compare(
-            m_session->activeAtlas().timelines[b].name, Qt::CaseInsensitive) < 0;
+    std::stable_sort(sortedIndices.begin(), sortedIndices.end(), [&](int a, int b) {
+        return compareNaturally(m_session->activeAtlas().timelines[a].name,
+                                m_session->activeAtlas().timelines[b].name) < 0;
     });
 
     const QIcon folderIcon = AppIcons::icon(QStringLiteral("folder"));

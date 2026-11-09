@@ -293,7 +293,7 @@ void CliToolInstaller::installFromDownloadedFile(const QString& filePath) {
                              "MOUNT_POINT=$(hdiutil mount %1 | grep -o '/Volumes/.*' | head -n 1)\n"
                              "if [ -z \"$MOUNT_POINT\" ]; then echo \"Failed to mount DMG\"; exit 1; fi\n"
                              "mkdir -p %2\n"
-                             "cp -R \"$MOUNT_POINT\"/. %2/ 2>/dev/null || true\n"
+                             "cp -R \"$MOUNT_POINT\"/. %2/\n"
                              "hdiutil unmount \"$MOUNT_POINT\"\n"
                              "echo \"Checking installed CLI tool versions:\"\n"
                              "echo \"Expected version: %3\"\n"

@@ -44,6 +44,15 @@ QPointF pointAt(const QPointF& center, double degrees, qreal radius) {
 /// The key of a pixmap item's part index (QGraphicsItem::data).
 constexpr int PART_INDEX_KEY = 0;
 
+/// @p image filled with @p tint, keeping its alpha: an onion skin's ghost.
+QPixmap onionTinted(const QPixmap& image, const QColor& tint) {
+    QPixmap result = image;
+    QPainter painter(&result);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    painter.fillRect(result.rect(), tint);
+    return result;
+}
+
 /// A cross of a fixed size on screen, whatever the zoom.
 class CrossItem : public QGraphicsItem {
 public:
@@ -105,9 +114,21 @@ void PuppetCanvas::setOnionSkins(const QVector<OnionSkin>& skins) {
 }
 
 void PuppetCanvas::clearPuppet() {
-    showPuppet({}, -1, std::nullopt);
     // No puppet, no origin: the view is left for its empty text.
     m_scene->clear();
+    m_partItems.clear();
+    m_onionItems.clear();
+    m_outlineItem = nullptr;
+    m_originCross = nullptr;
+    m_pivotCross = nullptr;
+    m_parts.clear();
+    m_selectedPart = -1;
+    m_selectedPivot.reset();
+    m_selectedJoint.reset();
+    if (!m_puppetBounds.isNull()) setZoomManual(true);
+    m_puppetBounds = QRectF(-SCENE_MARGIN, -SCENE_MARGIN, 2 * SCENE_MARGIN, 2 * SCENE_MARGIN);
+    updateSceneRect();
+    viewport()->update();
 }
 
 
@@ -131,58 +152,125 @@ QPixmap PuppetCanvas::tinted(const QPixmap& image, const QColor& tint) {
 
 void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart,
                               std::optional<QPointF> selectedPivot, std::optional<JointRange> selectedJoint) {
-    m_scene->clear();
     m_selectedJoint = selectedJoint;
     m_parts = parts;
     m_selectedPart = selectedPart;
     m_selectedPivot = selectedPivot;
-    // Onion skins behind everything, tinted, and not parts: clicks and fits ignore them.
-    for (int skin = 0; skin < m_onionSkins.size(); ++skin) {
-        for (const OnionSkin::Ghost& ghost : m_onionSkins[skin].parts) {
-            if (ghost.image.isNull()) continue;
-            QPixmap tinted = ghost.image;
-            {
-                QPainter painter(&tinted);
-                painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-                painter.fillRect(tinted.rect(), m_onionSkins[skin].tint);
-            }
-            auto* item = m_scene->addPixmap(tinted);
-            item->setTransform(ghost.transform);
-            item->setTransformationMode(Qt::FastTransformation);
-            item->setZValue(ONION_SKIN_Z - skin);
-            item->setOpacity(qBound(0, m_settings.onionSkinOpacity, 100) / 100.0 * ghost.opacity);
-            item->setAcceptedMouseButtons(Qt::NoButton);
+
+    int onionCount = 0;
+    for (const OnionSkin& skin : m_onionSkins) {
+        for (const OnionSkin::Ghost& ghost : skin.parts) {
+            if (!ghost.image.isNull()) ++onionCount;
         }
     }
+
+    // Edits during a drag change transforms, not the set of items: keep the scene and
+    // update it in place, so a move doesn't re-tint every sprite or rebuild every item.
+    const bool sameStructure = m_partItems.size() == parts.size()
+        && m_onionItems.size() == onionCount;
+    if (!sameStructure) {
+        m_scene->clear();
+        m_partItems.clear();
+        m_partItems.resize(parts.size());
+        m_onionItems.clear();
+        m_onionItems.resize(onionCount);
+        m_outlineItem = nullptr;
+        m_originCross = nullptr;
+        m_pivotCross = nullptr;
+    }
+
+    // Onion skins behind everything, tinted, and not parts: clicks and fits ignore them.
+    int onionIndex = 0;
+    for (int skin = 0; skin < m_onionSkins.size(); ++skin) {
+        const QColor tint = m_onionSkins[skin].tint;
+        for (const OnionSkin::Ghost& ghost : m_onionSkins[skin].parts) {
+            if (ghost.image.isNull()) continue;
+            PixmapItem& cache = m_onionItems[onionIndex++];
+            if (!cache.item) {
+                cache.item = m_scene->addPixmap(QPixmap());
+                cache.item->setTransformationMode(Qt::FastTransformation);
+                cache.item->setAcceptedMouseButtons(Qt::NoButton);
+            }
+            if (cache.source.cacheKey() != ghost.image.cacheKey() || cache.tint != tint) {
+                cache.item->setPixmap(onionTinted(ghost.image, tint));
+                cache.source = ghost.image;
+                cache.tint = tint;
+            }
+            cache.item->setTransform(ghost.transform);
+            cache.item->setZValue(ONION_SKIN_Z - skin);
+            cache.item->setOpacity(qBound(0, m_settings.onionSkinOpacity, 100) / 100.0 * ghost.opacity);
+        }
+    }
+
     for (int i = 0; i < parts.size(); ++i) {
         const Part& part = parts[i];
-        if (!part.placed || part.image.isNull()) continue;
-        auto* item = m_scene->addPixmap(tinted(part.image, part.tint));
-        item->setTransform(part.transform);
-        item->setShapeMode(QGraphicsPixmapItem::MaskShape);
-        item->setTransformationMode(Qt::FastTransformation);
-        item->setData(PART_INDEX_KEY, i);
-        item->setZValue(i);
+        PixmapItem& cache = m_partItems[i];
+        if (!part.placed || part.image.isNull()) {
+            if (cache.item) cache.item->setVisible(false);
+            continue;
+        }
+        if (!cache.item) {
+            cache.item = m_scene->addPixmap(QPixmap());
+            cache.item->setShapeMode(QGraphicsPixmapItem::MaskShape);
+            cache.item->setTransformationMode(Qt::FastTransformation);
+        }
+        if (cache.source.cacheKey() != part.image.cacheKey() || cache.tint != part.tint) {
+            cache.item->setPixmap(tinted(part.image, part.tint));
+            cache.source = part.image;
+            cache.tint = part.tint;
+        }
+        cache.item->setData(PART_INDEX_KEY, i);
+        cache.item->setTransform(part.transform);
+        cache.item->setZValue(i);
         // A part the pose leaves alone shows faintly, at rest.
         const double faded = part.included ? 1.0 : qBound(0, m_settings.fadedPartOpacity, 100) / 100.0;
-        item->setOpacity(part.opacity * faded);
+        cache.item->setOpacity(part.opacity * faded);
+        cache.item->setVisible(true);
     }
+
     if (selectedPart >= 0 && selectedPart < parts.size() && parts[selectedPart].placed) {
         const Part& part = parts[selectedPart];
-        auto* outline = m_scene->addPolygon(part.transform.map(QRectF(part.image.rect())));
+        if (!m_outlineItem) {
+            m_outlineItem = m_scene->addPolygon(QPolygonF());
+            m_outlineItem->setAcceptedMouseButtons(Qt::NoButton);
+        }
+        m_outlineItem->setPolygon(part.transform.map(QRectF(part.image.rect())));
         QPen pen(m_settings.handleColor, 0);
         pen.setStyle(Qt::DashLine);
-        outline->setPen(pen);
-        outline->setZValue(parts.size());
-        outline->setAcceptedMouseButtons(Qt::NoButton);
+        m_outlineItem->setPen(pen);
+        m_outlineItem->setZValue(parts.size());
+        m_outlineItem->setVisible(true);
+    } else if (m_outlineItem) {
+        m_outlineItem->setVisible(false);
     }
-    addCross(QPointF(0, 0), m_settings.originCrossSize, m_settings.originColor, parts.size() + 1);
-    if (selectedPivot)
-        addCross(*selectedPivot, m_settings.pivotCrossSize, m_settings.handleColor, parts.size() + 2);
+
+    // The crosses are two small items; recreating them is cheaper than tracking their
+    // settings, and they are not what a drag changes.
+    if (m_originCross) {
+        m_scene->removeItem(m_originCross);
+        delete m_originCross;
+    }
+    m_originCross = new CrossItem(m_settings.originCrossSize, m_settings.originColor);
+    m_originCross->setPos(QPointF(0, 0));
+    m_originCross->setZValue(parts.size() + 1);
+    m_scene->addItem(m_originCross);
+    if (m_pivotCross) {
+        m_scene->removeItem(m_pivotCross);
+        delete m_pivotCross;
+        m_pivotCross = nullptr;
+    }
+    if (selectedPivot) {
+        m_pivotCross = new CrossItem(m_settings.pivotCrossSize, m_settings.handleColor);
+        m_pivotCross->setPos(*selectedPivot);
+        m_pivotCross->setZValue(parts.size() + 2);
+        m_scene->addItem(m_pivotCross);
+    }
+
     // The origin is always in view, even when every part is off to one side.
     QRectF bounds(0, 0, 0, 0);
-    for (QGraphicsItem* item : m_scene->items()) {
-        if (item->data(PART_INDEX_KEY).isValid()) bounds |= item->sceneBoundingRect();
+    for (const PixmapItem& cache : m_partItems) {
+        if (cache.item && cache.item->isVisible())
+            bounds |= cache.item->sceneBoundingRect();
     }
     bounds.adjust(-SCENE_MARGIN, -SCENE_MARGIN, SCENE_MARGIN, SCENE_MARGIN);
     // Once the puppet changes, resizing the view no longer refits it: the view stays put.
@@ -190,13 +278,6 @@ void PuppetCanvas::showPuppet(const QVector<Part>& parts, int selectedPart,
     m_puppetBounds = bounds;
     updateSceneRect();
     viewport()->update();
-}
-
-void PuppetCanvas::addCross(const QPointF& at, int halfSize, const QColor& color, qreal z) {
-    auto* cross = new CrossItem(halfSize, color);
-    cross->setPos(at);
-    cross->setZValue(z);
-    m_scene->addItem(cross);
 }
 
 void PuppetCanvas::updateSceneRect() {
@@ -271,6 +352,7 @@ int PuppetCanvas::dragDistance() const {
 
 int PuppetCanvas::partAt(const QPoint& viewPos) const {
     for (QGraphicsItem* item : items(viewPos)) {
+        if (!item->isVisible()) continue;
         const QVariant index = item->data(PART_INDEX_KEY);
         if (index.isValid()) return index.toInt();
     }
@@ -305,7 +387,7 @@ bool PuppetCanvas::onSelectedPart(const QPoint& viewPos) const {
         && QLineF(QPointF(viewPos), QPointF(mapFromScene(m_selectedJoint->point))).length() <= m_settings.turnHandleDistance)
         return true;
     for (QGraphicsItem* item : items(viewPos)) {
-        if (item->data(PART_INDEX_KEY) == m_selectedPart) return true;
+        if (item->isVisible() && item->data(PART_INDEX_KEY) == m_selectedPart) return true;
     }
     return false;
 }
@@ -348,6 +430,7 @@ PuppetCanvas::Target PuppetCanvas::targetAt(const QPoint& viewPos) const {
 
 int PuppetCanvas::attachTargetPartAt(const QPoint& viewPos) const {
     for (QGraphicsItem* item : items(viewPos)) {
+        if (!item->isVisible()) continue;
         const QVariant index = item->data(PART_INDEX_KEY);
         if (!index.isValid()) continue;
         const int part = index.toInt();
@@ -531,6 +614,7 @@ void PuppetCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         // The parts drawn under the pivot itself (not just the ring), by their opaque pixels.
         QVector<int> overlapping;
         for (QGraphicsItem* item : items(mapFromScene(*m_selectedPivot))) {
+            if (!item->isVisible()) continue;
             const QVariant index = item->data(PART_INDEX_KEY);
             if (!index.isValid()) continue;
             const int part = index.toInt();

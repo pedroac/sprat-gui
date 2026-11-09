@@ -9,6 +9,7 @@
 #include <QVariantAnimation>
 #include <functional>
 #include <atomic>
+#include <memory>
 #include "SyncMode.h"
 #include "ViewEnums.h"
 #include "LayoutModels.h"
@@ -154,5 +155,5 @@ private:
     bool                 m_mergeReplaceAllDuplicates = true;
     int                  m_activeWorkspace    = 0;
 
-    std::atomic<bool>    m_isCanceled{false};
+    std::shared_ptr<std::atomic<bool>> m_isCanceled = std::make_shared<std::atomic<bool>>(false);
 };

@@ -34,11 +34,7 @@ void LayoutRunner::stop() {
 }
 
 bool LayoutRunner::isRunning() const {
-#ifdef SPRAT_EMBEDDED_CLI
-    return false;
-#else
     return m_running.load();
-#endif
 }
 
 void LayoutRunner::run(const LayoutRunConfig& config) {
@@ -193,6 +189,7 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         }
 
 #ifdef Q_OS_WASM
+        m_running.store(false);
         QMetaObject::invokeMethod(this, [this, result]() {
             emit finished(result);
         }, Qt::AutoConnection);
@@ -203,20 +200,16 @@ void LayoutRunner::run(const LayoutRunConfig& config) {
         // input event, causing onLayoutFinished() — and the "Loading images..."
         // overlay removal — to stall until cursor movement.
 #else
-#ifndef SPRAT_EMBEDDED_CLI
         m_running.store(false);
-#endif
         emit finished(result);
 #endif
     };
 
+    m_running.store(true);
 #ifdef Q_OS_WASM
     // QtConcurrent/QThreadPool may not run without pthreads/COOP+COEP.
     task();
 #else
-#ifndef SPRAT_EMBEDDED_CLI
-    m_running.store(true);
-#endif
     m_future = QtConcurrent::run(task);
 #endif
 }

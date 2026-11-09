@@ -117,7 +117,7 @@ void MainWindow::setupCliInstallOverlay() {
 }
 
 void MainWindow::onCancelLoading() {
-    m_isCanceled = true;
+    *m_isCanceled = true;
     if (m_layoutOrchestrator) {
         m_layoutOrchestrator->stop();
     }

@@ -605,6 +605,7 @@ void ProjectController::registerLoadedSource(const QString& sourcePath,
 
     if (action == DropAction::Replace) {
         m_session->sources.clear();
+        emit sourceStructureChanged();
     } else {
         for (const ProjectSource& existing : m_session->sources) {
             if (existing.originalPath == src.originalPath) {
@@ -627,6 +628,7 @@ void ProjectController::registerLoadedSource(const QString& sourcePath,
         }
     }
     m_session->sources.append(src);
+    emit sourceStructureChanged();
     syncFramePathsToNeutralAtlas(action);
     m_session->rebuildSpriteIndex();
 }

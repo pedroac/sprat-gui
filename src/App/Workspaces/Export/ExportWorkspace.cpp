@@ -816,6 +816,10 @@ SaveConfig ExportWorkspace::getConfig() const {
     return config;
 }
 
+void ExportWorkspace::setExporting(bool exporting) {
+    if (m_exportBtn) m_exportBtn->setEnabled(!exporting);
+}
+
 void ExportWorkspace::onExportClicked() {
     if (m_outputPathEdit && m_outputPathEdit->text().trimmed().isEmpty()) {
         MessageDialog::warning(this, tr("Missing Output Folder"),

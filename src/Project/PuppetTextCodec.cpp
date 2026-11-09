@@ -408,7 +408,22 @@ PuppetTextReadResult PuppetTextCodec::read(const QString& text) {
                 warn("Pose line \"%1\" sets nothing; it is ignored", line);
                 continue;
             }
-            puppet.poses[currentPose].settings.append(setting);
+            // A pose may name a part more than once. Playback applies the lines in order
+            // (the last wins), so merge them into one setting the editor edits as well.
+            QVector<PuppetPoseSetting>& poseSettings = puppet.poses[currentPose].settings;
+            auto existing = std::find_if(poseSettings.begin(), poseSettings.end(),
+                [&setting](const PuppetPoseSetting& s) { return s.part == setting.part; });
+            if (existing == poseSettings.end()) {
+                poseSettings.append(setting);
+            } else {
+                if (!setting.variant.isEmpty()) existing->variant = setting.variant;
+                if (setting.angle) existing->angle = setting.angle;
+                if (setting.offset) existing->offset = setting.offset;
+                if (setting.position) existing->position = setting.position;
+                if (setting.scale) existing->scale = setting.scale;
+                if (setting.opacity) existing->opacity = setting.opacity;
+                if (setting.tint) existing->tint = setting.tint;
+            }
         } else if (keyword == QLatin1String("sequence")) {
             currentPart = -1;
             skippingPart = false;

@@ -304,7 +304,7 @@ void LayoutOrchestrator::run(bool quiet) {
 
     m_cfg.session->lastRunUsedTrim = (hasSelectedProfile ? selectedProfile.trimTransparent : false) && !m_retryWithoutTrimOnFailure;
     m_runningLayoutProfile = requestedProfile;
-    m_isCanceled = false;
+    *m_isCanceled = false;
     emit statusMessageChanged(tr("Rebuilding layout..."));
     m_layoutFailureDialogShown = false;
 
@@ -690,9 +690,9 @@ void LayoutOrchestrator::onRunnerFinished(const LayoutResult& result) {
         }
         qInfo() << "[Layout] setModelsAsync start"
                 << "models=" << m_cfg.session->activeAtlas().layoutModels.size();
-        m_cfg.canvas->setModelsAsync(newModels, &m_isCanceled,
+        m_cfg.canvas->setModelsAsync(newModels, m_isCanceled,
             [this, selectedPaths, primaryPath, myGeneration]() {
-                if (m_isCanceled) {
+                if (*m_isCanceled) {
                     emit statusMessageChanged(tr("Loading images canceled"));
                     return;
                 }

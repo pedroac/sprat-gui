@@ -2069,6 +2069,57 @@ void PuppetWorkspaceTests::testPosesTabIsAsTallAsItsContent() {
     QCOMPARE(workspace.canvas()->height(), posesCanvas);
 }
 
+void PuppetWorkspaceTests::testCanvasReusesPartItemsAcrossEdits() {
+    PuppetCanvas canvas;
+    QPixmap white(8, 8);
+    white.fill(Qt::white);
+    QPixmap red(8, 8);
+    red.fill(Qt::red);
+    PuppetCanvas::Part first;
+    first.image = white;
+    first.placed = true;
+    PuppetCanvas::Part second;
+    second.image = red;
+    second.placed = true;
+    second.transform = QTransform::fromTranslate(20, 0);
+
+    auto pixmaps = [&canvas]() {
+        QVector<QGraphicsPixmapItem*> items;
+        for (QGraphicsItem* item : canvas.scene()->items()) {
+            if (auto* pixmap = qgraphicsitem_cast<QGraphicsPixmapItem*>(item)) items.append(pixmap);
+        }
+        std::sort(items.begin(), items.end(), [](auto* a, auto* b) { return a->zValue() < b->zValue(); });
+        return items;
+    };
+
+    canvas.showPuppet({first, second}, -1, std::nullopt);
+    const auto before = pixmaps();
+    QCOMPARE(before.size(), 2);
+    QCOMPARE(before[0]->pixmap().toImage().pixelColor(0, 0), QColor(Qt::white));
+
+    // Moving a part keeps its item and its tinted pixmap instead of rebuilding the scene.
+    first.transform = QTransform::fromTranslate(5, 5);
+    canvas.showPuppet({first, second}, 0, QPointF(4, 4));
+    const auto moved = pixmaps();
+    QCOMPARE(moved.size(), 2);
+    QCOMPARE(moved[0], before[0]);
+    QCOMPARE(moved[1], before[1]);
+
+    // A new tint updates the same item's pixmap.
+    first.tint = Qt::green;
+    canvas.showPuppet({first, second}, 0, QPointF(4, 4));
+    const auto tinted = pixmaps();
+    QCOMPARE(tinted[0], before[0]);
+    QCOMPARE(tinted[0]->pixmap().toImage().pixelColor(0, 0), QColor(Qt::green));
+
+    // A change in the number of parts rebuilds the items.
+    PuppetCanvas::Part third;
+    third.image = red;
+    third.placed = true;
+    canvas.showPuppet({first, second, third}, -1, std::nullopt);
+    QCOMPARE(pixmaps().size(), 3);
+}
+
 void PuppetWorkspaceTests::testAngleFieldTurnsThePart() {
     Doll doll;
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);

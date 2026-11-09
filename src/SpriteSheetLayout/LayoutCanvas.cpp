@@ -422,7 +422,7 @@ void LayoutCanvas::setModels(const QVector<LayoutModel>& models, std::atomic<boo
         setDimFilter(m_dimFilter);
 }
 
-void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomic<bool>* canceled, std::function<void()> onFinished) {
+void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::shared_ptr<std::atomic<bool>> canceled, std::function<void()> onFinished) {
     QSet<QString> activePaths;
     for (const auto& model : models) {
         for (const auto& sprite : model.sprites) {
@@ -469,7 +469,7 @@ void LayoutCanvas::setModelsAsync(const QVector<LayoutModel>& models, std::atomi
                 }
             }
 
-            setModels(models, canceled);
+            setModels(models, canceled.get());
             if (onFinished) onFinished();
             qInfo() << "[WASM] setModelsAsync UI apply done";
         }, Qt::AutoConnection);

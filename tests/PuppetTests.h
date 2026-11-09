@@ -9,6 +9,7 @@ private slots:
     void testReadsScaleOpacityTint();
     void testReadSkipsBadLinesWithWarnings();
     void testReadRejectsRepeatedNames();
+    void testReadMergesRepeatedPartLinesInAPose();
     void testQuotedNamesAndSpriteIndexesRoundTrip();
     void testDefaultVariantNamesFollowSpratCli();
     void testEvaluatorPlacesRestPose();
@@ -16,6 +17,7 @@ private slots:
     void testEvaluatorScalesPartsButNotTheirChildren();
     void testEvaluatorReportsPartsItCannotPlace();
     void testProjectPayloadKeepsPuppets();
+    void testProjectPayloadDropsVariantPathsOutsideTheProject();
     void testEditingChecksNames();
     void testRenamingAPartRenamesItsJointsAndPoses();
     void testRemovingAPartRemovesItsJointsAndPoses();

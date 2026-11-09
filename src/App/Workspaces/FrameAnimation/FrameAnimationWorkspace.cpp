@@ -375,9 +375,19 @@ void FrameAnimationWorkspace::onAnimZoomChanged(double value)
 // Export
 // ---------------------------------------------------------------------------
 
+FrameAnimationWorkspace::~FrameAnimationWorkspace()
+{
+    *m_animExportCanceled = true;
+    m_animExportWatcher.waitForFinished();
+}
+
 bool FrameAnimationWorkspace::exportAnimation(const QString& outPath)
 {
     if (!m_session) return false;
+
+    *m_animExportCanceled = false;
+    const auto cancelFlag = m_animExportCanceled;
+    const QPointer<FrameAnimationWorkspace> guard(this);
 
     auto timelines    = m_session->activeAtlas().timelines;
     int  tlIndex      = m_session->selectedTimelineIndex;
@@ -385,17 +395,18 @@ bool FrameAnimationWorkspace::exportAnimation(const QString& outPath)
     int  fps          = selectedTimelineFps(timelines, tlIndex);
 
     AnimationExportService::ExportCallbacks cbs;
-    cbs.setLoading = [this](bool v) {
-        QMetaObject::invokeMethod(this, [this, v]() { emit loadingStateChanged(v); }, Qt::QueuedConnection);
+    cbs.setLoading = [guard](bool v) {
+        if (guard) QMetaObject::invokeMethod(guard.data(), [guard, v]() { if (guard) emit guard->loadingStateChanged(v); }, Qt::QueuedConnection);
     };
-    cbs.setStatus = [this](const QString& s) {
-        QMetaObject::invokeMethod(this, [this, s]() { emit statusMessage(s); }, Qt::QueuedConnection);
+    cbs.setStatus = [guard](const QString& s) {
+        if (guard) QMetaObject::invokeMethod(guard.data(), [guard, s]() { if (guard) emit guard->statusMessage(s); }, Qt::QueuedConnection);
     };
-    cbs.showError = [this](const QString& t, const QString& msg) {
-        QMetaObject::invokeMethod(this, [this, t, msg]() {
-            MessageDialog::critical(parentWidget(), t, msg);
+    cbs.showError = [guard](const QString& t, const QString& msg) {
+        if (guard) QMetaObject::invokeMethod(guard.data(), [guard, t, msg]() {
+            if (guard) MessageDialog::critical(guard->parentWidget(), t, msg);
         }, Qt::QueuedConnection);
     };
+    cbs.shouldCancel = [cancelFlag]() { return cancelFlag->load(); };
 
     m_animExportOutPath = outPath;
     emit loadingStateChanged(true);

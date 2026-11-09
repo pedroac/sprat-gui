@@ -38,8 +38,8 @@ signals:
 private:
 #ifndef SPRAT_EMBEDDED_CLI
     std::atomic<bool> m_stopRequested{false};
-    std::atomic<bool> m_running{false};
 #endif
+    std::atomic<bool> m_running{false};
 #ifndef Q_OS_WASM
     QFuture<void> m_future;
 #endif

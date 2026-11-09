@@ -571,6 +571,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this, &MainWindow::onFrameExtractionFinished);
     connect(m_projectController, &ProjectController::runLayoutQuietNeeded,
             this, [this]() { onRunLayout(true); });
+    connect(m_projectController, &ProjectController::sourceStructureChanged,
+            this, [this]() { clearUndoHistoryForStructureChange(); });
 
     m_isRestoringProject = false;
 }
@@ -627,6 +629,13 @@ void MainWindow::updateWindowModified() {
 void MainWindow::markWorkspaceEdited() {
     m_hasUnsavedWorkspaceEdits = true;
     updateWindowModified();
+}
+
+void MainWindow::clearUndoHistoryForStructureChange() {
+    // Undo commands hold pointers into the project's atlases and sources. Adding or
+    // removing one can move or reallocate those containers, so the history cannot be
+    // replayed safely afterwards.
+    if (m_undoStack) m_undoStack->clear();
 }
 
 void MainWindow::markProjectUnmodified(bool clearHistory) {
@@ -706,7 +715,7 @@ MainWindow::~MainWindow() {
     s_eventLogTarget.storeRelease(nullptr);
     qInstallMessageHandler(s_prevMessageHandler);
 
-    m_isCanceled = true;
+    *m_isCanceled = true;
 
     // Ensure all background tasks are stopped/finished before we destroy members
     if (m_projectController) {
@@ -716,6 +725,14 @@ MainWindow::~MainWindow() {
 
     if (m_autosaveTimer)
         m_autosaveTimer->stop();
+
+    // These tasks capture `this` or its children; let them finish before members go away.
+    if (m_gifSyncWatcher.isRunning())
+        m_gifSyncWatcher.waitForFinished();
+    if (m_cliDiagnosticsWatcher.isRunning())
+        m_cliDiagnosticsWatcher.waitForFinished();
+    if (m_transparencyWatcher.isRunning())
+        m_transparencyWatcher.waitForFinished();
 
     if (m_session) m_session->removeFrameListFile();
 
@@ -845,7 +862,10 @@ bool MainWindow::runTool(const QString& tool, const QStringList& args, const QBy
         process.write(*input);
         process.closeWriteChannel();
     }
-    if (!process.waitForFinished(-1)) {
+    constexpr int kToolTimeoutMs = 5 * 60 * 1000;
+    if (!process.waitForFinished(kToolTimeoutMs)) {
+        process.kill();
+        process.waitForFinished(1000);
         qint64 ms = timer.elapsed();
         QString logEntry = QStringLiteral("[%1] %2 %3\n[%1] Failed to finish (%4 ms)")
             .arg(QTime::currentTime().toString("HH:mm:ss"), toolName, args.join(' '), QString::number(ms));

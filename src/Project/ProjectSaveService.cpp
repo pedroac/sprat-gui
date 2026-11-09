@@ -22,6 +22,7 @@
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QProcess>
+#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -33,6 +34,11 @@
 #include <cmath>
 
 namespace {
+    /// Written into a profile folder once the app has exported there. Only folders with
+    /// this marker are cleared before an export, so a project file naming an arbitrary
+    /// destination and profile cannot delete the user's files.
+    constexpr const char* kExportMarker = ".sprat-export";
+
     QString trPS(const char* text) {
         return QCoreApplication::translate("ProjectSaveService", text);
     }
@@ -126,16 +132,23 @@ bool ProjectSaveService::writeProjectJson(
             return false;
         }
     }
-    QFile projectFile(dir.filePath("project.spart.json"));
+    // QSaveFile writes a sibling temp file and renames it on commit, so a crash or a full
+    // disk never leaves a truncated project behind.
+    QSaveFile projectFile(dir.filePath("project.spart.json"));
     if (!projectFile.open(QIODevice::WriteOnly)) {
         error = trPS("Could not write project.spart.json.");
         return false;
     }
-    if (projectFile.write(QJsonDocument(payload).toJson()) < 0) {
+    const QByteArray json = QJsonDocument(payload).toJson();
+    if (projectFile.write(json) != json.size()) {
         error = trPS("Failed to write project.spart.json.");
+        projectFile.cancelWriting();
         return false;
     }
-    projectFile.close();
+    if (!projectFile.commit()) {
+        error = trPS("Failed to save project.spart.json: %1").arg(projectFile.errorString());
+        return false;
+    }
     return true;
 }
 
@@ -205,19 +218,32 @@ bool ProjectSaveService::save(
         }
     }
 
-    // For folder exports, remove stale output directories first.
+    // For folder exports, remove stale output directories first. Only folders this app
+    // created or has exported into before (they hold the marker) are cleared: the
+    // destination and profile names come from the project file, so they must not be able
+    // to delete a folder the app never wrote.
     if (!isZip) {
         const QDir wd(workingPath);
         for (const QString& profileNameRaw : config.profiles) {
             const QString profileName = profileNameRaw.trimmed();
             if (profileName.isEmpty()) continue;
+            const QString profileDir = wd.filePath(profileName);
+            const bool existed = QDir(profileDir).exists();
+            const bool managed = !existed
+                || QFileInfo::exists(QDir(profileDir).filePath(QLatin1String(kExportMarker)));
+            if (!managed) continue;
             // Single atlas: wipe the whole profile folder.
             // Multi-atlas: only wipe this atlas's subfolder within the profile.
             const QString staleDir = config.atlasSubdir.isEmpty()
-                ? wd.filePath(profileName)
-                : QDir(wd.filePath(profileName)).filePath(config.atlasSubdir);
+                ? profileDir
+                : QDir(profileDir).filePath(config.atlasSubdir);
             if (PathSafety::isInsideFolder(staleDir, wd.absolutePath()))
                 QDir(staleDir).removeRecursively();
+            // Mark it as the app's output folder, so the next export may clear it.
+            QDir().mkpath(profileDir);
+            QFile marker(QDir(profileDir).filePath(QLatin1String(kExportMarker)));
+            if (marker.open(QIODevice::WriteOnly))
+                marker.close();
         }
     }
 
@@ -839,7 +865,9 @@ bool ProjectSaveService::save(
         }
         QString absDest = QFileInfo(config.destination).absoluteFilePath();
         QDir().mkpath(QFileInfo(absDest).path());
-        QFile::remove(absDest);
+        // createZip writes through QSaveFile, which replaces absDest only on success, so
+        // there is no need to delete the old file first (and no way to delete a file the
+        // project merely named).
 
         if (!ArchiveExtractor::createZip(workingPath, absDest, error)) {
             return false;

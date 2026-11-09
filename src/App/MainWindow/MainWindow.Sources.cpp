@@ -100,6 +100,8 @@
 void MainWindow::removeSource(int index) {
     if (!m_session || index < 0 || index >= m_session->sources.size()) return;
 
+    clearUndoHistoryForStructureChange();
+
     // Save full state before any changes (needed for undo).
     const QVector<ProjectSource> savedSources       = m_session->sources;
     const QVector<SmartFolder>   savedSmartFolders  = m_session->smartFolders;
@@ -777,16 +779,23 @@ void MainWindow::syncLayoutToGif(const ProjectSource& src,
     auto layoutModels = m_session->activeAtlas().layoutModels;
     auto outPath      = src.originalPath;
 
+    // The export runs past the window's lifetime if it is closed mid-export, so the
+    // callbacks hold a QPointer and never touch a destroyed window.
+    const QPointer<MainWindow> guard(this);
+    // The flag is shared with the task, so closing the window stops the export even
+    // after the window itself is gone.
+    const auto cancelFlag = m_isCanceled;
     AnimationExportService::ExportCallbacks cbs;
-    cbs.setLoading = [this](bool v) {
-        QMetaObject::invokeMethod(this, [this, v]() { setLoading(v); }, Qt::QueuedConnection);
+    cbs.setLoading = [guard](bool v) {
+        if (guard) QMetaObject::invokeMethod(guard.data(), [guard, v]() { if (guard) guard->setLoading(v); }, Qt::QueuedConnection);
     };
-    cbs.setStatus = [this](const QString& s) {
-        QMetaObject::invokeMethod(this, [this, s]() { m_statusLabel->setText(s); }, Qt::QueuedConnection);
+    cbs.setStatus = [guard](const QString& s) {
+        if (guard) QMetaObject::invokeMethod(guard.data(), [guard, s]() { if (guard) guard->m_statusLabel->setText(s); }, Qt::QueuedConnection);
     };
-    cbs.showError = [this](const QString& t, const QString& msg) {
-        QMetaObject::invokeMethod(this, [this, t, msg]() { MessageDialog::critical(this, t, msg); }, Qt::QueuedConnection);
+    cbs.showError = [guard](const QString& t, const QString& msg) {
+        if (guard) QMetaObject::invokeMethod(guard.data(), [guard, t, msg]() { if (guard) MessageDialog::critical(guard.data(), t, msg); }, Qt::QueuedConnection);
     };
+    cbs.shouldCancel = [cancelFlag]() { return cancelFlag->load(); };
 
     // shared_ptr lets the background lambda write the error while the
     // m_gifSyncOnDone closure reads it after the future finishes (no race).

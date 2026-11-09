@@ -51,7 +51,14 @@ endif()
 if(NOT _SPRAT_CLI_DEPS_VERSION)
     set(_SPRAT_CLI_DEPS_VERSION "v0.0.0")
 endif()
-set(SPRAT_CLI_VERSION "${_SPRAT_CLI_DEPS_VERSION}" CACHE STRING "sprat-cli git tag to embed; reads DEPENDENCIES file if empty" FORCE)
+# Follow DEPENDENCIES when the user has not overridden the version, but let
+# -DSPRAT_CLI_VERSION=... win and keep winning across reconfigures.
+set(_SPRAT_CLI_VERSION_PREVIOUS "" CACHE INTERNAL "Previous DEPENDENCIES version")
+if(NOT DEFINED SPRAT_CLI_VERSION OR SPRAT_CLI_VERSION STREQUAL ""
+        OR SPRAT_CLI_VERSION STREQUAL "${_SPRAT_CLI_VERSION_PREVIOUS}")
+    set(SPRAT_CLI_VERSION "${_SPRAT_CLI_DEPS_VERSION}" CACHE STRING "sprat-cli git tag to embed; reads DEPENDENCIES file if empty" FORCE)
+endif()
+set(_SPRAT_CLI_VERSION_PREVIOUS "${_SPRAT_CLI_DEPS_VERSION}" CACHE INTERNAL "Previous DEPENDENCIES version" FORCE)
 add_definitions(-DSPRAT_CLI_VERSION="${SPRAT_CLI_VERSION}")
 
 # === Configuration ===

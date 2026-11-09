@@ -226,6 +226,9 @@ signals:
     // Emitted from registerLoadedSource when a duplicate source triggers re-layout.
     void runLayoutQuietNeeded();
 
+    // Emitted when the sources list is replaced or a source is added.
+    void sourceStructureChanged();
+
 private:
     void onProjectLoadWatcherFinished();
     void onZipDiscoveryWatcherFinished();

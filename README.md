@@ -2,7 +2,7 @@
 
 GUI frontend for [`sprat-cli`](https://github.com/pedroac/sprat-cli) to build sprite sheets and their metadata (animations, markers, nine-slices, puppets) for games and UIs.
 
-[![Changelog](https://img.shields.io/badge/changelog-v0.8.0-blue)](CHANGELOG.md)
+[![Changelog](https://img.shields.io/badge/changelog-v0.12.0-blue)](CHANGELOG.md)
 
 ![Sprites workspace](README_assets/sprites_workspace.png)
 

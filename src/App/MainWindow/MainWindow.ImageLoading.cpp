@@ -84,7 +84,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
     }
 #endif
 
-    m_isCanceled = false;
+    *m_isCanceled = false;
     m_loadingUiMessage = tr("Detecting frames in image...");
     setLoading(true);
 
@@ -110,7 +110,7 @@ void MainWindow::loadImageWithFrameDetection(const QString& imagePath, DropActio
         return;
     }
 
-    m_isCanceled = false;
+    *m_isCanceled = false;
     m_loadingUiMessage = tr("Detecting frames in image...");
     setLoading(true);
 
@@ -126,7 +126,7 @@ void MainWindow::onFrameDetectionFinished() {
 void MainWindow::processFrameDetectionResult(const ProjectController::FrameDetectionTaskResult& result) {
     setLoading(false);
 
-    if (m_isCanceled) {
+    if (*m_isCanceled) {
         m_statusLabel->setText(tr("Frame detection cancelled"));
         return;
     }
@@ -273,7 +273,7 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
     }
 
     m_loadingUiMessage = tr("Extracting frames from tar file...");
-    m_isCanceled = false;
+    *m_isCanceled = false;
     setLoading(true);
 
     if (action == DropAction::Replace) {
@@ -296,8 +296,8 @@ void MainWindow::loadTarFile(const QString& tarPath, DropAction action) {
         result.action = action;
         result.success = false;
         QString error;
-        if (ArchiveExtractor::extractToDirectory(tarPath, tempPath, error, &m_isCanceled)) {
-            result.success = !m_isCanceled;
+        if (ArchiveExtractor::extractToDirectory(tarPath, tempPath, error, m_isCanceled.get())) {
+            result.success = !*m_isCanceled;
         } else {
             qWarning() << "ArchiveExtractor (tar) error:" << error;
         }
@@ -317,7 +317,7 @@ void MainWindow::onTarExtractionFinished() {
 }
 
 void MainWindow::processTarExtractionResult(const ProjectController::TarExtractionResult& result) {
-    if (m_isCanceled) {
+    if (*m_isCanceled) {
         setLoading(false);
         m_statusLabel->setText(tr("Tar extraction canceled"));
         return;
@@ -379,6 +379,11 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
         if (m_layoutOrchestrator) m_layoutOrchestrator->markCenterPivotsOnNextLayout();
         scheduleLayoutRebuild(true);
+        return;
+    }
+
+    if (refuseReplaceSourceFolder()) {
+        setLoading(false);
         return;
     }
 
@@ -455,9 +460,9 @@ void MainWindow::handleSingleImageLayout(const QString& imagePath, DropAction ac
     if (canvas) {
         m_loadingUiMessage = tr("Loading image...");
         setLoading(true);
-        canvas->setModelsAsync(m_session->activeAtlas().layoutModels, &m_isCanceled, [this, sprite]() {
+        canvas->setModelsAsync(m_session->activeAtlas().layoutModels, m_isCanceled, [this, sprite]() {
             auto* canvas = m_atlasWorkspace ? m_atlasWorkspace->canvas() : nullptr;
-            if (m_isCanceled) {
+            if (*m_isCanceled) {
                 setLoading(false);
                 return;
             }
@@ -509,7 +514,7 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         // Run transparency processing in background thread
         auto transparencyTask = [this, framePaths, backgroundColor]() {
             for (int i = 0; i < framePaths.size(); ++i) {
-                if (m_isCanceled) {
+                if (*m_isCanceled) {
                     break;
                 }
                 QImage img(framePaths[i]);
@@ -539,6 +544,10 @@ bool MainWindow::processExtractedFrames(const QString& tempPath, const QString& 
         ensureFrameListInput();
         if (m_projectController) m_projectController->setShouldClearSpritesFolder(false);
     } else {
+        if (refuseReplaceSourceFolder()) {
+            setLoading(false);
+            return false;
+        }
         // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
             QDir dir(m_session->sourceFolder);
@@ -598,7 +607,7 @@ void MainWindow::onTransparencyProcessingFinished() {
     // Continue with the merge/replace logic
     setLoading(false);
 
-    if (m_isCanceled) {
+    if (*m_isCanceled) {
         m_statusLabel->setText(tr("Cancelled"));
         return;
     }
@@ -622,6 +631,10 @@ void MainWindow::onTransparencyProcessingFinished() {
         if (m_layoutOrchestrator) m_layoutOrchestrator->markCenterPivotsOnNextLayout();
         scheduleLayoutRebuild(true);
     } else {
+        if (refuseReplaceSourceFolder()) {
+            setLoading(false);
+            return;
+        }
         // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
             QDir dir(m_session->sourceFolder);

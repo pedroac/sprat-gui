@@ -29,8 +29,8 @@ A comprehensive guide for AI agents and developers working with the sprat-gui pr
 - Export animations as GIF or video for validation
 - Manage complete project state (save/load as JSON or ZIP)
 
-**Version**: v0.3.0 (current development)
-**Language**: C++17
+**Version**: v0.12.0 (current development)
+**Language**: C++20
 **Framework**: Qt6 (Core, Gui, Widgets, Concurrent, Network)
 **Dependencies**: LibArchive, ZLIB, sprat-cli (latest version)
 **Platforms**: Linux, Windows, macOS, WebAssembly
@@ -51,7 +51,7 @@ This section outlines the standards and best practices all code must follow to m
   - Avoid cryptic abbreviations: `spriteIndex` not `spIdx`
   - Use meaningful constants instead of magic numbers
 
-#### C++17 Best Practices
+#### C++20 Best Practices
 - Use `auto` where type is obvious from context
 - Prefer smart pointers (`std::shared_ptr`, `std::unique_ptr`) over raw pointers
 - Use `const` correctly (const references, const methods)
@@ -1291,14 +1291,14 @@ All documentation must be **accurate, up-to-date, and helpful** for users and de
 - Installation process changed
 
 #### docs/ (User and Contributor Guides)
-- `docs/user-guide.md` - Each workspace in detail, sources, settings, projects, timeline naming, web limitations, troubleshooting
+- `docs/` - Each workspace in detail (`workspace-*.md`), sources, settings, projects, timeline naming, web limitations, troubleshooting
 - `docs/shortcuts.md` - Keyboard and pointer controls, per workspace and canvas
-- `docs/building.md` - Requirements, build scripts, local sprat-cli development, translations, code layout
+- `docs/dev/building.md` - Requirements, build scripts, local sprat-cli development, translations, code layout
 - `CONTRIBUTING.md` (repository root) - Issues, pull requests, packaging, AI-assisted work
 
 **Update Trigger**:
-- New features or changed behavior: `docs/user-guide.md` (and `docs/shortcuts.md` for new keys)
-- Build or dependency changes: `docs/building.md`
+- New features or changed behavior: `docs/` (workspace pages; `docs/shortcuts.md` for new keys)
+- Build or dependency changes: `docs/dev/building.md`
 
 #### CHANGELOG.md (Release Notes)
 - Entries for every release (MAJOR.MINOR.PATCH)
@@ -1395,7 +1395,7 @@ Each source file should have a header:
 
 #### During Development
 - **Small Changes**: Update relevant docs immediately
-- **New Features**: Add to `docs/user-guide.md` (README.md for a new area) and AGENTS.md before PR merge
+- **New Features**: Add to `docs/` (README.md for a new area) and AGENTS.md before PR merge
 - **API Changes**: Update AGENTS.md and inline docs
 - **Bug Fixes**: Update CHANGELOG.md entry
 
@@ -1417,7 +1417,7 @@ Each source file should have a header:
    - Consistent terminology
 
 #### Documentation Checklist
-- [ ] Feature described in `docs/user-guide.md` (and README.md if it is a new area)
+- [ ] Feature described in `docs/` (and README.md if it is a new area)
 - [ ] CHANGELOG.md updated
 - [ ] AGENTS.md updated if architecture affected
 - [ ] Code comments clear and accurate
@@ -1466,7 +1466,7 @@ The codebase follows Qt conventions with proper signal/slot usage, async operati
 
 Every change to sprat-gui must uphold these standards:
 
-1. **Code Quality**: Readable, reusable, well-documented code following C++17 and Qt conventions
+1. **Code Quality**: Readable, reusable, well-documented code following C++20 and Qt conventions
 2. **Testing**: All tests passing before commit; new tests for new functionality
 3. **UI/UX**: Smooth, responsive, useful for game developers and designers
 4. **Cross-Platform**: Works on Linux, macOS, Windows, and WebAssembly

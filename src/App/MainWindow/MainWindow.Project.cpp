@@ -29,6 +29,7 @@
 #endif
 #include "ProjectPayloadCodec.h"
 #include "ProjectSaveService.h"
+#include "PathSafety.h"
 #include "CliToolsConfig.h"
 #include "MessageDialog.h"
 #include "ExportDiffDialog.h"
@@ -510,7 +511,7 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
     }
 
     m_loadingUiMessage = tr("Downloading from URL...");
-    m_isCanceled = false;
+    *m_isCanceled = false;
     setLoading(true);
 
     QNetworkRequest request(url);
@@ -532,7 +533,7 @@ bool MainWindow::tryHandleRemoteUrl(const QUrl& url, DropAction action) {
         const QString fileName = suggestedNameFromReply(url, reply);
         const bool success = (reply->error() == QNetworkReply::NoError);
         const QString errorText = reply->errorString();
-        const bool canceled = (reply->error() == QNetworkReply::OperationCanceledError) || m_isCanceled;
+        const bool canceled = (reply->error() == QNetworkReply::OperationCanceledError) || *m_isCanceled;
         reply->deleteLater();
 
         setLoading(false);
@@ -1211,7 +1212,7 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
     }
 
     m_loadingUiMessage = tr("Extracting ZIP...");
-    m_isCanceled = false;
+    *m_isCanceled = false;
     setLoading(true);
 
     if (action == DropAction::Replace) {
@@ -1235,14 +1236,14 @@ bool MainWindow::loadImagesFromZip(const QString& zipPath, DropAction action) {
         result.canceled = false;
 
         QString error;
-        if (ArchiveExtractor::extractToDirectory(zipPath, tempPath, error, &m_isCanceled)) {
-            if (m_isCanceled) {
+        if (ArchiveExtractor::extractToDirectory(zipPath, tempPath, error, m_isCanceled.get())) {
+            if (*m_isCanceled) {
                 result.canceled = true;
             } else {
                 result.selections = ImageDiscoveryService::imageDirectoriesRecursive(tempPath);
             }
         } else {
-            if (m_isCanceled) {
+            if (*m_isCanceled) {
                 result.canceled = true;
             } else {
                 result.error = error;
@@ -1400,6 +1401,10 @@ void MainWindow::processZipDiscoveryResult(const ProjectController::ZipDiscovery
         m_session->activeFramePaths.append(copied);
         m_projectController->registerLoadedSource(zipPath, action, subfolderPath);
     } else {
+        if (refuseReplaceSourceFolder()) {
+            setLoading(false);
+            return;
+        }
         // On Replace, delete all contents from sprites folder (including subdirectories)
         if (!m_session->sourceFolder.isEmpty()) {
             QDir dir(m_session->sourceFolder);
@@ -1501,6 +1506,35 @@ void MainWindow::promoteSourceFolderAfterSave(const QString& saveDestination) {
     }
 
     updateOpenSourceFolderAction();
+}
+
+bool MainWindow::canReplaceSourceFolder() const {
+    if (!m_session || m_session->sourceFolder.isEmpty())
+        return true;
+    // Temporary folders are created and owned by the app.
+    if (m_projectController && m_projectController->isSourceFolderTemp())
+        return true;
+    const QString tempRoot = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (!tempRoot.isEmpty() && PathSafety::isInsideFolder(m_session->sourceFolder, tempRoot))
+        return true;
+    // The project's own sprites folder is safe; a folder the project file merely names is not.
+    const QString projectFile = m_projectController ? m_projectController->projectFilePath() : QString();
+    if (!projectFile.isEmpty()) {
+        const QString projectDir = QFileInfo(projectFile).absolutePath();
+        if (PathSafety::isInsideFolder(m_session->sourceFolder, projectDir))
+            return true;
+    }
+    return false;
+}
+
+bool MainWindow::refuseReplaceSourceFolder() {
+    if (canReplaceSourceFolder())
+        return false;
+    MessageDialog::warning(this, tr("Can't Replace Sprites"),
+        tr("This project's sprite folder is outside the project:\n\n%1\n\n"
+           "Replacing would delete it. Add the images to the project instead, "
+           "or open a project folder first.").arg(m_session ? m_session->sourceFolder : QString()));
+    return true;
 }
 
 void MainWindow::applyProjectPayload() {

@@ -5,6 +5,7 @@
 #include "AppSettings.h"
 #include "SpriteItem.h"
 #include <atomic>
+#include <memory>
 #include <optional>
 
 class QFocusEvent;
@@ -40,7 +41,7 @@ public:
      * @param canceled Optional atomic cancellation flag
      * @param onFinished Optional callback for completion
      */
-    void setModelsAsync(const QVector<LayoutModel>& models, std::atomic<bool>* canceled = nullptr, std::function<void()> onFinished = nullptr);
+    void setModelsAsync(const QVector<LayoutModel>& models, std::shared_ptr<std::atomic<bool>> canceled = nullptr, std::function<void()> onFinished = nullptr);
 
     /**
      * @brief Clears all sprites from the canvas.

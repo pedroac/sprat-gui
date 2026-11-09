@@ -3,6 +3,7 @@
 #include "MarkerUtils.h"
 #include "NineSliceInsets.h"
 #include "PathSafety.h"
+#include <QDebug>
 #include "PuppetEditing.h"
 #include "ResolutionUtils.h"
 
@@ -203,7 +204,14 @@ Puppet puppetFromJson(const QJsonObject& pObj, const QDir& spriteDir) {
             variant.kind = vObj["kind"].toString() == QLatin1String("animation")
                 ? PuppetVariant::Kind::Animation : PuppetVariant::Kind::Sprite;
             variant.source = vObj["source"].toString();
-            if (vObj["relative"].toBool(false)) variant.source = spriteDir.filePath(variant.source);
+            if (vObj["relative"].toBool(false)) {
+                if (PathSafety::isContainedRelativePath(variant.source)) {
+                    variant.source = spriteDir.filePath(variant.source);
+                } else {
+                    qWarning() << "Ignoring puppet variant path outside the project:" << variant.source;
+                    variant.source.clear();
+                }
+            }
             variant.byIndex = vObj["by_index"].toBool(false);
             variant.name = vObj["name"].toString();
             part.variants.append(variant);

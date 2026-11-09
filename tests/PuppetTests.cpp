@@ -293,6 +293,23 @@ void PuppetTests::testReadRejectsRepeatedNames() {
     QVERIFY(errorOf("puppet \"p\"\npart \"a\" at:0,0\npuppet \"q\"\npart \"a\" at:0,0\n").error.isEmpty());
 }
 
+void PuppetTests::testReadMergesRepeatedPartLinesInAPose() {
+    const PuppetTextReadResult result = PuppetTextCodec::read(QStringLiteral(
+        "puppet \"p\"\n"
+        "part \"a\"\n"
+        "- sprite \"a.png\"\n"
+        "pose \"p\"\n"
+        "- part \"a\" angle:10\n"
+        "- part \"a\" angle:20 offset:1,2\n"));
+    QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+    QCOMPARE(result.puppets.size(), 1);
+    const PuppetPose& pose = result.puppets.first().poses.first();
+    QCOMPARE(pose.settings.size(), 1);
+    QCOMPARE(pose.settings.first().part, QStringLiteral("a"));
+    QCOMPARE(pose.settings.first().angle.value_or(0), 20);
+    QCOMPARE(pose.settings.first().offset.value_or(QPoint()), QPoint(1, 2));
+}
+
 void PuppetTests::testQuotedNamesAndSpriteIndexesRoundTrip() {
     Puppet puppet;
     puppet.name = QStringLiteral("say \"hi\"");
@@ -532,6 +549,39 @@ Puppet faceWithNose() {
 }
 
 }  // namespace
+
+void PuppetTests::testProjectPayloadDropsVariantPathsOutsideTheProject() {
+    QJsonObject variant;
+    variant["kind"] = QStringLiteral("sprite");
+    variant["source"] = QStringLiteral("../../secret.png");
+    variant["relative"] = true;
+    QJsonObject part;
+    part["name"] = QStringLiteral("a");
+    part["variants"] = QJsonArray{variant};
+    QJsonObject puppetJson;
+    puppetJson["name"] = QStringLiteral("p");
+    puppetJson["parts"] = QJsonArray{part};
+    QJsonObject atlas;
+    atlas["id"] = QStringLiteral("main");
+    atlas["name"] = QStringLiteral("Main");
+    atlas["puppets"] = QJsonArray{puppetJson};
+    QJsonObject root;
+    root["schema_version"] = 6;
+    root["atlases"] = QJsonArray{atlas};
+
+    QVector<LayoutModel> layoutModels;
+    const ProjectPayloadApplyResult applied =
+        ProjectPayloadCodec::applyToLayout(root, QStringLiteral("/tmp/project"), layoutModels);
+    const AtlasEntry* main = nullptr;
+    for (const AtlasEntry& atlasEntry : applied.atlases) {
+        if (atlasEntry.id == QStringLiteral("main")) main = &atlasEntry;
+    }
+    QVERIFY(main);
+    QCOMPARE(main->puppets.size(), 1);
+    QCOMPARE(main->puppets.first().parts.size(), 1);
+    QCOMPARE(main->puppets.first().parts.first().variants.size(), 1);
+    QVERIFY(main->puppets.first().parts.first().variants.first().source.isEmpty());
+}
 
 void PuppetTests::testEditingChecksNames() {
     using namespace PuppetEditing;

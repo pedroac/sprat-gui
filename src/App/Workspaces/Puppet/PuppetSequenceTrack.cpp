@@ -15,6 +15,9 @@ constexpr int RULER_HEIGHT = 14;
 constexpr int BLOCK_HEIGHT = 64;
 /// Narrowest a block is drawn, so a one-frame step can still be clicked and read.
 constexpr int MIN_BLOCK_WIDTH = 28;
+/// Widest a block is drawn: a step can hold tens of thousands of frames, and the widget
+/// must not demand a multi-megapixel width for them.
+constexpr int MAX_BLOCK_WIDTH = 4000;
 constexpr int THUMBNAIL_SIZE = 36;
 /// A ruler number every this many frames.
 constexpr int RULER_STEP = 4;
@@ -58,7 +61,8 @@ int PuppetSequenceTrack::totalFrames() const {
 
 int PuppetSequenceTrack::blockWidth(int step) const {
     const Block& block = m_blocks[step];
-    return std::max(MIN_BLOCK_WIDTH, std::max(1, block.in + block.hold) * FRAME_WIDTH);
+    return std::max(MIN_BLOCK_WIDTH,
+                    std::min(MAX_BLOCK_WIDTH, std::max(1, block.in + block.hold) * FRAME_WIDTH));
 }
 
 int PuppetSequenceTrack::blockLeft(int step) const {
@@ -106,12 +110,17 @@ void PuppetSequenceTrack::paintEvent(QPaintEvent*) {
     int frame = 0;
     for (int i = 0; i < m_blocks.size(); ++i) {
         const int frames = std::max(1, m_blocks[i].in + m_blocks[i].hold);
-        for (int f = 0; f < frames; ++f, ++frame) {
-            const int x = blockLeft(i) + f * blockWidth(i) / frames;
-            const bool numbered = frame % RULER_STEP == 0;
+        const int width = blockWidth(i);
+        // Bound the tick count by the pixels drawn: a step can hold tens of thousands
+        // of frames, and one drawLine per frame would freeze the workspace.
+        const int tickStep = std::max(1, frames / std::max(1, width / 2));
+        for (int f = 0; f < frames; f += tickStep) {
+            const int x = blockLeft(i) + f * width / frames;
+            const bool numbered = (frame + f) % RULER_STEP == 0;
             painter.drawLine(x, top - (numbered ? 6 : 3), x, top);
-            if (numbered) painter.drawText(QPoint(x + 2, top - 5), QString::number(frame + 1));
+            if (numbered) painter.drawText(QPoint(x + 2, top - 5), QString::number(frame + f + 1));
         }
+        frame += frames;
     }
 
     for (int i = 0; i < m_blocks.size(); ++i) {

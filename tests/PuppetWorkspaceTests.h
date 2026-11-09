@@ -33,6 +33,7 @@ private slots:
     void testHiddenMarkersAreNotOffered();
     void testMarkerListDoesNotSpreadThePanelRows();
     void testPosesTabIsAsTallAsItsContent();
+    void testCanvasReusesPartItemsAcrossEdits();
     void testAngleFieldTurnsThePart();
     void testScalingFadingAndTintingAPart();
     void testNewPoseSetsOnlyThePartsChanged();

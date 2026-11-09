@@ -41,6 +41,9 @@ public:
 
     void showExportLog(const QVector<ExportLogEntry>& entries, const QString& destination);
 
+    /// Disables Export while an export is running, so a second click can't be lost.
+    void setExporting(bool exporting);
+
     /** Populate the preview atlas combo with atlas names.
      *  @param names          Display names (one per non-excluded atlas).
      *  @param activeSessionIndex  Real session atlas index to pre-select.

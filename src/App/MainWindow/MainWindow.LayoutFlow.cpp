@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ExportWorkspace.h"
 #include "AppIcons.h"
 #include "LayoutCanvas.h"
 #include "LayoutOrchestrator.h"
@@ -71,6 +72,7 @@ void MainWindow::captureOldSpritePositions() {
 
 void MainWindow::setLoading(bool loading) {
     m_isLoading = loading;
+    if (m_exportWorkspace) m_exportWorkspace->setExporting(loading);
     auto showLoadingOverlayNow = [this]() {
         if (!m_cliInstallOverlay || !m_cliInstallOverlayLabel) {
             return;

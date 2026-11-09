@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "AnimationPreviewService.h"
 #include "ui_MainWindow.h"
 #include "AppIcons.h"
 #include "AnimationPreviewPanel.h"
@@ -205,6 +206,7 @@ void MainWindow::setupUi() {
                 AtlasEntry newAtlas;
                 newAtlas.id   = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 newAtlas.name = tr("Atlas %1").arg(m_session->atlases.size());
+                clearUndoHistoryForStructureChange();
                 m_session->atlases.append(newAtlas);
                 emit m_session->atlasesChanged();
                 m_atlasesManagementWorkspace->setAtlases(
@@ -231,6 +233,7 @@ void MainWindow::setupUi() {
                     if (!m_session->atlases[neutralIdx].spritePaths.contains(p))
                         m_session->atlases[neutralIdx].spritePaths.append(p);
                 }
+                clearUndoHistoryForStructureChange();
                 m_session->atlases.remove(index);
                 m_session->activeAtlasIndex = qBound(0, m_session->activeAtlasIndex,
                                                       m_session->atlases.size() - 1);
@@ -267,6 +270,7 @@ void MainWindow::setupUi() {
                 newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 newAtlas.name         = groupName;
                 newAtlas.outputSubdir = PathSafety::folderNameFromLabel(groupName);
+                clearUndoHistoryForStructureChange();
                 m_session->atlases.append(newAtlas);
                 moveAtlasSprites(paths, srcIdx, m_session->atlases.size() - 1);
                 emit m_session->atlasesChanged();
@@ -277,6 +281,7 @@ void MainWindow::setupUi() {
                 if (!m_session || groups.isEmpty()) return;
                 const int srcIdx = m_atlasesManagementWorkspace->selectedAtlasIndex();
                 if (srcIdx < 0 || srcIdx >= m_session->atlases.size()) return;
+                clearUndoHistoryForStructureChange();
                 for (const auto& [groupName, paths] : groups) {
                     AtlasEntry newAtlas;
                     newAtlas.id           = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -1835,6 +1840,8 @@ void MainWindow::updateNavigatorAtlasCombo() {
     auto* timelinePanel = m_frameAnimWorkspace ? m_frameAnimWorkspace->timelinePanel() : nullptr;
     if (timelinePanel)
         timelinePanel->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
+    if (m_frameAnimWorkspace)
+        m_frameAnimWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
     if (m_puppetWorkspace)
         m_puppetWorkspace->updateAtlasCombo(m_session->atlases, m_session->activeAtlasIndex);
 }
@@ -1843,6 +1850,9 @@ void MainWindow::selectActiveAtlas(int atlasIndex) {
     if (!m_session) return;
     if (atlasIndex >= 0 && atlasIndex < m_session->atlases.size()) {
         m_session->activeAtlasIndex = atlasIndex;
+        // The preview caches are keyed by timeline index, which repeats across atlases.
+        AnimationPreviewService::invalidateSpriteMap();
+        AnimationPreviewService::invalidateBounds();
         refreshSpriteTree();
         refreshTimelineList();
         refreshAnimationTest();

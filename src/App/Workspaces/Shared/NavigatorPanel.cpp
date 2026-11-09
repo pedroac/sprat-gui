@@ -605,7 +605,7 @@ void NavigatorPanel::buildTree(const ProjectSession* session, bool showHidden, i
         return;
     }
 
-    const bool nothingToShow = (atlasFilter >= 0)
+    const bool nothingToShow = (atlasFilter >= 0 && atlasFilter < session->atlases.size())
         ? session->atlases[atlasFilter].spritePaths.isEmpty()
         : session->activeFramePaths.isEmpty();
 

@@ -8,6 +8,9 @@
 #include <QVector>
 #include "ZoomableGraphicsView.h"
 
+class QGraphicsItem;
+class QGraphicsPixmapItem;
+class QGraphicsPolygonItem;
 class QGraphicsScene;
 
 /**
@@ -218,7 +221,6 @@ private:
     /// Draws the grid over @p rect (scene coordinates), unless its cells are too small to see.
     void drawGrid(QPainter* painter, const QRectF& rect);
 
-    void addCross(const QPointF& at, int halfSize, const QColor& color, qreal z);
     void updateSceneRect();
 
     QGraphicsScene* m_scene = nullptr;
@@ -233,6 +235,18 @@ private:
     std::optional<KeptCenter> m_keptCenter;
     QRectF m_puppetBounds;  ///< The parts and the origin, with a margin: what a fit shows
     QVector<Part> m_parts;  ///< As last shown
+    /// A part's or onion skin's pixmap item, with the image and tint it was drawn from, so
+    /// an edit that only moves it doesn't tint (a per-pixel pass) or rebuild the scene.
+    struct PixmapItem {
+        QGraphicsPixmapItem* item = nullptr;
+        QPixmap source;
+        QColor tint = Qt::white;
+    };
+    QVector<PixmapItem> m_partItems;   ///< One per part in draw order
+    QVector<PixmapItem> m_onionItems;  ///< One per drawn onion skin ghost
+    QGraphicsPolygonItem* m_outlineItem = nullptr;  ///< The selected part's outline
+    QGraphicsItem* m_originCross = nullptr;
+    QGraphicsItem* m_pivotCross = nullptr;
     int m_selectedPart = -1;
     std::optional<QPointF> m_selectedPivot;
 
