@@ -8,6 +8,7 @@ class PuppetWorkspaceTests : public QObject {
 private slots:
     void testBuildingAPuppetIsUndoable();
     void testNewPuppetDialogBuildsAPuppetFromDroppedSprites();
+    void testNewPuppetDialogAddButtons();
     void testNewPuppetDialogPartsMenu();
     void testCanvasPlacesPartsByTheirPivot();
     void testSearchFieldFiltersTheTree();

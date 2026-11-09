@@ -171,7 +171,7 @@ NewPuppetDialog::NewPuppetDialog(const ProjectSession* session, const QVector<Pu
     m_partsTree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_partsTree->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     m_partsTree->setToolTip(tr("Drag sprites onto a part to add them to it, or onto empty space to make a "
-                               "part of them. Double-click a part to rename it; right-click for more"));
+                               "part for each. Double-click a part to rename it; right-click for more"));
     partsLayout->addWidget(m_partsTree, 1);
     m_partsProblem = new QLabel(partsPanel);
     m_partsProblem->setObjectName(QStringLiteral("newPuppetPartProblem"));
@@ -211,9 +211,18 @@ NewPuppetDialog::NewPuppetDialog(const ProjectSession* session, const QVector<Pu
     m_sprites->setSpriteFilter(std::move(filter));
     m_sprites->refresh(session, false);
     spritesLayout->addWidget(m_sprites, 1);
-    m_addToPartButton = new QPushButton(spritesPanel);
+    auto* addButtons = new QHBoxLayout;
+    m_addAsNewPartButton = new QPushButton(AppIcons::icon(QStringLiteral("add")),
+                                           tr("Add as New Part"), spritesPanel);
+    m_addAsNewPartButton->setObjectName(QStringLiteral("newPuppetAddAsNewPart"));
+    m_addAsNewPartButton->setToolTip(tr("Add each selected sprite as its own new part"));
+    UiStyle::setRole(m_addAsNewPartButton, UiStyle::Role::Add);
+    m_addToPartButton = new QPushButton(tr("Add to Part"), spritesPanel);
     m_addToPartButton->setObjectName(QStringLiteral("newPuppetAddToPart"));
-    spritesLayout->addWidget(m_addToPartButton);
+    UiStyle::setRole(m_addToPartButton, UiStyle::Role::Add);
+    addButtons->addWidget(m_addAsNewPartButton);
+    addButtons->addWidget(m_addToPartButton);
+    spritesLayout->addLayout(addButtons);
 
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->addWidget(partsPanel);
@@ -222,7 +231,7 @@ NewPuppetDialog::NewPuppetDialog(const ProjectSession* session, const QVector<Pu
     splitter->setSizes({DIALOG_WIDTH / 2, DIALOG_WIDTH / 2});
     layout->addWidget(splitter, 1);
 
-    auto* hint = new QLabel(tr("Drag sprites onto a part, or onto empty space to make a part of them. "
+    auto* hint = new QLabel(tr("Drag sprites onto a part, or onto empty space to make a part for each. "
                                "Attach the parts to each other in the workspace."), this);
     hint->setWordWrap(true);
     hint->setForegroundRole(QPalette::PlaceholderText);
@@ -254,6 +263,9 @@ NewPuppetDialog::NewPuppetDialog(const ProjectSession* session, const QVector<Pu
         menu->popup(m_partsTree->viewport()->mapToGlobal(pos));
     });
     connect(m_sprites->tree(), &QTreeWidget::itemSelectionChanged, this, &NewPuppetDialog::updateButtons);
+    connect(m_addAsNewPartButton, &QPushButton::clicked, this, [this]() {
+        addSprites(-1, m_sprites->selectedSpritePaths());
+    });
     connect(m_addToPartButton, &QPushButton::clicked, this, [this]() {
         addSprites(selectedPart(), m_sprites->selectedSpritePaths());
     });
@@ -279,16 +291,25 @@ void NewPuppetDialog::addPart() {
 
 void NewPuppetDialog::addSprites(int partIndex, const QStringList& spritePaths, const QString& groupName) {
     if (spritePaths.isEmpty()) return;
-    if (partIndex < 0 || partIndex >= m_puppet.parts.size()) {
-        // One new part showing them all, as its variants.
+    if (partIndex >= 0 && partIndex < m_puppet.parts.size()) {
+        PuppetEditing::addSpriteVariants(m_puppet, partIndex, spritePaths);
+        rebuildParts(partIndex);
+        return;
+    }
+    // Empty space (or "Add as New Part"): one part per sprite, so several can be added
+    // at once. A single sprite keeps the dragged folder's name when there is one.
+    int last = -1;
+    const bool single = spritePaths.size() == 1;
+    for (const QString& path : spritePaths) {
         PuppetPart part;
-        part.name = PuppetEditing::uniqueName(partNameFor(spritePaths, groupName), PuppetEditing::partNames(m_puppet));
+        part.name = PuppetEditing::uniqueName(partNameFor({path}, single ? groupName : QString()),
+                                              PuppetEditing::partNames(m_puppet));
         part.position = QPoint(0, 0);
         m_puppet.parts.append(part);
-        partIndex = m_puppet.parts.size() - 1;
+        last = m_puppet.parts.size() - 1;
+        PuppetEditing::addSpriteVariants(m_puppet, last, {path});
     }
-    PuppetEditing::addSpriteVariants(m_puppet, partIndex, spritePaths);
-    rebuildParts(partIndex);
+    rebuildParts(last);
 }
 
 NewPuppetDialog::Selection NewPuppetDialog::selection() const {
@@ -405,10 +426,12 @@ int NewPuppetDialog::selectedPart() const {
 void NewPuppetDialog::updateButtons() {
     const Selection selected = selection();
     m_removeButton->setEnabled(!selected.parts.isEmpty() || !selected.sprites.isEmpty());
+    const bool hasSprites = !m_sprites->selectedSpritePaths().isEmpty();
+    m_addAsNewPartButton->setEnabled(hasSprites);
     const int part = selectedPart();
+    m_addToPartButton->setEnabled(part >= 0 && hasSprites);
     m_addToPartButton->setText(part >= 0 ? tr("Add to \"%1\"").arg(m_puppet.parts[part].name)
-                                         : tr("Add as New Part"));
-    m_addToPartButton->setToolTip(part >= 0 ? tr("Add the selected sprites to the selected part")
-                                            : tr("Make a part showing the selected sprites"));
-    m_addToPartButton->setEnabled(!m_sprites->selectedSpritePaths().isEmpty());
+                                         : tr("Add to Part"));
+    m_addToPartButton->setToolTip(part >= 0 ? tr("Add the selected sprites to \"%1\"").arg(m_puppet.parts[part].name)
+                                            : tr("Select a part to add the selected sprites to it"));
 }

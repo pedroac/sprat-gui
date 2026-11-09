@@ -22,12 +22,13 @@ class QTreeWidgetItem;
  * @brief Modal "new puppet" window: its name at the top, its parts on the left and the
  *        atlas's sprites on the right.
  *
- * Sprites dragged onto a part (or added with "Add to Part") become its variants; sprites
- * dropped on empty space become one new part showing them all, named after the dragged
- * folder or what the sprites' names share (see partNameFor()). Right-clicking a part offers
- * to rename or delete it, and selected sprites can be taken out of their part. Parts are
- * placed at the puppet's origin; they are attached in the workspace. Nothing changes until Create:
- * puppet() is then the new puppet, which the workspace adds as one undo step.
+ * Sprites dragged onto a part (or added with "Add to ...") become its variants; sprites
+ * dropped on empty space (or added with "Add as New Part") each become a new part, named
+ * after the sprite or, for a single sprite, the dragged folder (see partNameFor()).
+ * Right-clicking a part offers to rename or delete it, and selected sprites can be taken
+ * out of their part. Parts are placed at the puppet's origin; they are attached in the
+ * workspace. Nothing changes until Create: puppet() is then the new puppet, which the
+ * workspace adds as one undo step.
  */
 class NewPuppetDialog : public QDialog {
     Q_OBJECT
@@ -83,6 +84,7 @@ private:
     QLabel* m_partsProblem = nullptr;
     QPushButton* m_removeButton = nullptr;
     NavigatorPanel* m_sprites = nullptr;
+    QPushButton* m_addAsNewPartButton = nullptr;
     QPushButton* m_addToPartButton = nullptr;
     QDialogButtonBox* m_buttons = nullptr;
 };

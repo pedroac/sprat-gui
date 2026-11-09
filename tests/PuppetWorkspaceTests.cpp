@@ -2,6 +2,7 @@
 #include "AppSettings.h"
 #include "ProjectSession.h"
 #include "NavigatorPanel.h"
+#include "NavigatorTreeWidget.h"
 #include "NewPuppetDialog.h"
 #include "PuppetCanvas.h"
 #include "PuppetPoseStrip.h"
@@ -230,51 +231,59 @@ void PuppetWorkspaceTests::testNewPuppetDialogBuildsAPuppetFromDroppedSprites() 
     dialog.nameEdit()->setText(QStringLiteral("robot"));
     QVERIFY(create->isEnabled());
 
-    // Sprites dropped on empty space make one part showing them, named after what they share.
     QTreeWidget* parts = dialog.partsTree();
     const QPoint empty = parts->viewport()->rect().bottomLeft() - QPoint(-10, 10);
+
+    // A sprite dropped on empty space makes its own part.
     dropSprites(parts, empty, {doll.body->path});
     QCOMPARE(partRows(parts), (QStringList{"body", "  body"}));
+
+    // Each sprite dropped on empty space makes its own part, several at once.
     dropSprites(parts, empty, {doll.head->path, doll.headSmiling->path});
-    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head", "  head-smiling"}));
+    QCOMPARE(partRows(parts), (QStringList{
+        "body", "  body",
+        "head", "  head",
+        "head-smiling", "  head-smiling"}));
+
     // Dropped on a part (or one of its sprites), they become its variants.
     dropSprites(parts, parts->visualItemRect(parts->topLevelItem(0)->child(0)).center(), {doll.head->path});
-    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "  head", "head", "  head", "  head-smiling"}));
+    QCOMPARE(partRows(parts), (QStringList{
+        "body", "  body", "  head",
+        "head", "  head",
+        "head-smiling", "  head-smiling"}));
+
+    // A sprite can be taken out of its part.
     parts->clearSelection();
     parts->topLevelItem(0)->child(1)->setSelected(true);
     dialog.removeSelected();
-    QCOMPARE(partRows(parts), (QStringList{"body", "  body", "head", "  head", "  head-smiling"}));
+    QCOMPARE(partRows(parts), (QStringList{
+        "body", "  body",
+        "head", "  head",
+        "head-smiling", "  head-smiling"}));
 
     // An empty part waits for sprites; a taken part name is refused.
     parts->clearSelection();
     dialog.addPart();
-    QCOMPARE(partRows(parts).mid(5), (QStringList{"part", "  (drop sprites here)"}));
-    parts->topLevelItem(2)->setText(0, QStringLiteral("head"));
+    QCOMPARE(partRows(parts).mid(6), (QStringList{"part", "  (drop sprites here)"}));
+    parts->topLevelItem(3)->setText(0, QStringLiteral("head"));
     QCoreApplication::processEvents();
-    QCOMPARE(parts->topLevelItem(2)->text(0), QStringLiteral("part"));
+    QCOMPARE(parts->topLevelItem(3)->text(0), QStringLiteral("part"));
     QVERIFY(dialog.findChild<QLabel*>(QStringLiteral("newPuppetPartProblem"))->isVisibleTo(&dialog));
-    parts->topLevelItem(2)->setText(0, QStringLiteral("tail"));
+    parts->topLevelItem(3)->setText(0, QStringLiteral("tail"));
     QCoreApplication::processEvents();
-    QCOMPARE(parts->topLevelItem(2)->text(0), QStringLiteral("tail"));
+    QCOMPARE(parts->topLevelItem(3)->text(0), QStringLiteral("tail"));
     parts->clearSelection();
-    parts->setCurrentItem(parts->topLevelItem(2));
+    parts->setCurrentItem(parts->topLevelItem(3));
     dialog.findChild<QPushButton*>(QStringLiteral("newPuppetRemove"))->click();
-    QCOMPARE(parts->topLevelItemCount(), 2);
-
-    // The sprite list's own button adds its selection to the selected part.
-    parts->clearSelection();
-    parts->setCurrentItem(parts->topLevelItem(0));
-    auto* addToPart = dialog.findChild<QPushButton*>(QStringLiteral("newPuppetAddToPart"));
-    QCOMPARE(addToPart->text(), QStringLiteral("Add to \"body\""));
-    dialog.sprites()->findSpriteItem(doll.headSmiling->path)->setSelected(true);
-    addToPart->click();
-    QCOMPARE(partRows(parts).mid(0, 3), (QStringList{"body", "  body", "  head-smiling"}));
+    QCOMPARE(parts->topLevelItemCount(), 3);
 
     const Puppet built = dialog.puppet();
     QCOMPARE(built.name, QStringLiteral("robot"));
-    QCOMPARE(built.parts.size(), 2);
-    QCOMPARE(built.parts[1].variants.size(), 2);
-    QCOMPARE(built.parts[1].position, std::optional<QPoint>(QPoint(0, 0)));
+    QCOMPARE(built.parts.size(), 3);
+    QCOMPARE(built.parts[0].variants.size(), 1);
+    QCOMPARE(built.parts[1].variants.size(), 1);
+    QCOMPARE(built.parts[2].variants.size(), 1);
+    QCOMPARE(built.parts[0].position, std::optional<QPoint>(QPoint(0, 0)));
 
     // Created as one undo step, and selected.
     PuppetWorkspace workspace(&doll.project.session, &doll.project.undoStack);
@@ -286,8 +295,49 @@ void PuppetWorkspaceTests::testNewPuppetDialogBuildsAPuppetFromDroppedSprites() 
     QCOMPARE(workspace.selection(), (PuppetSelection{1, -1, -1}));
 }
 
+void PuppetWorkspaceTests::testNewPuppetDialogAddButtons() {
+    Doll doll;
+    NewPuppetDialog dialog(&doll.project.session, {}, [](const SpritePtr&) { return true; });
+    dialog.resize(820, 560);
+    dialog.show();
+    QTreeWidget* parts = dialog.partsTree();
+    auto* addAsNewPart = dialog.findChild<QPushButton*>(QStringLiteral("newPuppetAddAsNewPart"));
+    auto* addToPart = dialog.findChild<QPushButton*>(QStringLiteral("newPuppetAddToPart"));
+    QVERIFY(addAsNewPart);
+    QVERIFY(addToPart);
+
+    // Nothing is selected: neither button can add.
+    QVERIFY(!addAsNewPart->isEnabled());
+    QVERIFY(!addToPart->isEnabled());
+
+    // Sprites selected, no part: only "Add as New Part" is available.
+    dialog.sprites()->findSpriteItem(doll.head->path)->setSelected(true);
+    dialog.sprites()->findSpriteItem(doll.headSmiling->path)->setSelected(true);
+    QVERIFY(addAsNewPart->isEnabled());
+    QVERIFY(!addToPart->isEnabled());
+    QCOMPARE(addToPart->text(), QStringLiteral("Add to Part"));
+
+    // It adds one part per selected sprite, several at once.
+    addAsNewPart->click();
+    QCOMPARE(partRows(parts), (QStringList{
+        "head", "  head",
+        "head-smiling", "  head-smiling"}));
+
+    // With a part selected, "Add to ..." adds the selected sprites to it.
+    parts->clearSelection();
+    parts->setCurrentItem(parts->topLevelItem(0));
+    QVERIFY(addToPart->isEnabled());
+    QCOMPARE(addToPart->text(), QStringLiteral("Add to \"head\""));
+    dialog.sprites()->tree()->clearSelection();
+    dialog.sprites()->findSpriteItem(doll.body->path)->setSelected(true);
+    addToPart->click();
+    QCOMPARE(partRows(parts), (QStringList{
+        "head", "  head", "  body",
+        "head-smiling", "  head-smiling"}));
+}
+
 void PuppetWorkspaceTests::testNewPuppetDialogPartsMenu() {
-    // The new part's name: the dragged folder's, else what the sprites' names start with.
+    // A part's name: the dragged folder's, else what the sprites' names start with.
     QCOMPARE(NewPuppetDialog::partNameFor({"/s/walk_01.png", "/s/walk_02.png", "/s/walk_10.png"}),
              QStringLiteral("walk"));
     QCOMPARE(NewPuppetDialog::partNameFor({"/s/arm.png", "/s/leg.png"}), QStringLiteral("arm"));
@@ -299,33 +349,44 @@ void PuppetWorkspaceTests::testNewPuppetDialogPartsMenu() {
     dialog.show();
     QTreeWidget* parts = dialog.partsTree();
     const QPoint empty = parts->viewport()->rect().bottomLeft() - QPoint(-10, 10);
+    // Each sprite dropped on empty space becomes its own part; a repeated name gets a suffix.
     dropSprites(parts, empty, {doll.head->path, doll.headSmiling->path, doll.body->path}, QStringLiteral("faces"));
     dropSprites(parts, empty, {doll.body->path});
-    QCOMPARE(partRows(parts), (QStringList{"faces", "  head", "  head-smiling", "  body", "body", "  body"}));
+    QCOMPARE(partRows(parts), (QStringList{
+        "head", "  head",
+        "head-smiling", "  head-smiling",
+        "body", "  body",
+        "body 2", "  body"}));
 
-    // A part: rename or delete it. Sprites: take them out of their part, several at once.
+    // A part: rename or delete it.
     parts->clearSelection();
     parts->setCurrentItem(parts->topLevelItem(0));
     std::unique_ptr<QMenu> partMenu(dialog.createPartsMenu());
     QCOMPARE(menuItems(partMenu.get()), (QStringList{"Rename Part", "-", "Delete Part"}));
+
+    // Sprites: take them out of their parts, several at once.
     parts->clearSelection();
-    parts->topLevelItem(0)->child(1)->setSelected(true);
-    parts->topLevelItem(0)->child(2)->setSelected(true);
+    parts->topLevelItem(0)->child(0)->setSelected(true);
+    parts->topLevelItem(1)->child(0)->setSelected(true);
     std::unique_ptr<QMenu> spriteMenu(dialog.createPartsMenu());
     QCOMPARE(menuItems(spriteMenu.get()), QStringList{"Exclude 2 Sprites"});
     spriteMenu->actions().first()->trigger();
-    QCOMPARE(partRows(parts), (QStringList{"faces", "  head", "body", "  body"}));
+    QCOMPARE(partRows(parts), (QStringList{
+        "head", "  (drop sprites here)",
+        "head-smiling", "  (drop sprites here)",
+        "body", "  body",
+        "body 2", "  body"}));
 
     // A selected part takes its selected sprites with it; Delete deletes the selection.
     parts->clearSelection();
-    parts->topLevelItem(1)->setSelected(true);
-    parts->topLevelItem(1)->child(0)->setSelected(true);
-    parts->topLevelItem(0)->setSelected(true);
+    parts->topLevelItem(2)->setSelected(true);
+    parts->topLevelItem(2)->child(0)->setSelected(true);
+    parts->topLevelItem(3)->setSelected(true);
     std::unique_ptr<QMenu> bothMenu(dialog.createPartsMenu());
     QCOMPARE(menuItems(bothMenu.get()), QStringList{"Delete 2 Parts"});
     parts->setFocus();
     QTest::keyClick(parts, Qt::Key_Delete);
-    QCOMPARE(parts->topLevelItemCount(), 0);
+    QCOMPARE(parts->topLevelItemCount(), 2);
 }
 
 namespace {
