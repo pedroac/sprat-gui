@@ -60,7 +60,6 @@ Optional for advanced features: ImageMagick (GIF export), FFmpeg (video export)
 
 **For developers**:
 - [Building from source](docs/dev/building.md)
-- [WebAssembly deployment](docs/dev/WASM_DEPLOYMENT.md)
 - [Contributing](CONTRIBUTING.md)
 - [Architecture Guide](AGENTS.md)
 - [Changelog](CHANGELOG.md)

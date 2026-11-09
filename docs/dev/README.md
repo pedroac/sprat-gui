@@ -4,8 +4,7 @@ Guides for building, architecture, and contributing to sprat-gui.
 
 ## Getting Started
 
-- **[Building from Source](building.md)** — Requirements, build scripts, platform-specific instructions
-- **[WebAssembly Deployment](WASM_DEPLOYMENT.md)** — Building and deploying the web version
+- **[Building from Source](building.md)** — Requirements, build scripts, platform-specific instructions (includes `./build.sh wasm` for web builds)
 
 ## Architecture & Code
 
