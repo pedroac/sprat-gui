@@ -31,13 +31,11 @@ Pre-built binaries are on **[itch.io](https://pedroac.itch.io/sprat)**, with the
 - **Windows**: extract `sprat-gui-windows.zip` and run `sprat-gui.exe`
 - **macOS**: drag `sprat-gui.app` to **Applications**
 
-Optional for advanced features:
-- ImageMagick for GIF export
-- FFmpeg for video export
+[Detailed installation guide →](docs/installation.md)
+
+Optional for advanced features: ImageMagick (GIF export), FFmpeg (video export)
 
 **[Quick Start →](docs/getting-started.md)** 5-minute walkthrough to create your first atlas
-
-For detailed guides or to build from source, see [Documentation](#documentation) below.
 
 ## Documentation
 
