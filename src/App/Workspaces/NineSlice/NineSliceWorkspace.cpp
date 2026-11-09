@@ -1,5 +1,6 @@
 #include "NineSliceWorkspace.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "NavigatorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "NineSliceEditorCanvas.h"
@@ -93,6 +94,12 @@ void NineSliceWorkspace::setupUi()
         emptyLayout->addWidget(emptyLabel);
     }
     m_emptyState->setObjectName(QStringLiteral("nineSliceEmptyState"));
+    m_emptyState->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_emptyState, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        QMenu menu(this);
+        menu.addAction(m_addBtn->icon(), tr("Add..."), this, &NineSliceWorkspace::onAddSpritesClicked);
+        menu.exec(m_emptyState->mapToGlobal(pos));
+    });
     m_navigatorStack = new QStackedWidget(this);
     m_navigatorStack->setObjectName(QStringLiteral("nineSliceNavigatorStack"));
     m_navigatorStack->addWidget(m_navigatorPanel);
@@ -102,7 +109,8 @@ void NineSliceWorkspace::setupUi()
     m_addBtn = new QPushButton(AppIcons::icon(QStringLiteral("add")),
                                tr("Add"), leftWidget);
     m_addBtn->setObjectName(QStringLiteral("nineSliceAddButton"));
-    m_addBtn->setToolTip(tr("Pick sprites to nine-slice"));
+    m_addBtn->setToolTip(tr("Pick the sprites that stretch; they start split in thirds"));
+    UiStyle::setRole(m_addBtn, UiStyle::Role::Add);
     m_addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_removeBtn = new QPushButton(AppIcons::icon(QStringLiteral("exclude")),
                                   tr("Remove"), leftWidget);
@@ -111,6 +119,7 @@ void NineSliceWorkspace::setupUi()
                                "if you add them again"));
     m_removeBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_removeBtn->setEnabled(false);
+    UiStyle::setRole(m_removeBtn, UiStyle::Role::Destructive);
     {
         auto* row = new QHBoxLayout;
         row->setContentsMargins(4, 2, 4, 2);

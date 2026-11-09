@@ -15,4 +15,6 @@ private slots:
     void testRemovingTheLastSpriteShowsTheEmptyState();
     void testPickerListsOnlyFilteredSprites();
     void testPickerPicksGroups();
+    void testPickerAsksForAName();
+    void testFilteringATreeKeepsAncestorsAndDescendants();
 };

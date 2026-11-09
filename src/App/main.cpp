@@ -7,6 +7,7 @@
 #include <QTranslator>
 #include <QTimer>
 #include <QStyleFactory>
+#include <QTabBar>
 #include <QPixmapCache>
 #include <QProxyStyle>
 #include <QStyleOptionButton>
@@ -16,6 +17,7 @@
 #include <QStandardPaths>
 #include <QSysInfo>
 #include "MainWindow.h"
+#include "UiStyle.h"
 #include "CliToolsConfig.h"
 #include <chrono>
 #include <cstdio>
@@ -23,7 +25,8 @@
 #include <thread>
 
 // Increases the gap between icon and text in QPushButton / QToolButton from Qt's
-// hardcoded 4 px to kIconTextSpacing.
+// hardcoded 4 px to kIconTextSpacing, and fills buttons and tabs given a UiStyle role
+// with its colour.
 class SpratStyle : public QProxyStyle {
 public:
     SpratStyle() : QProxyStyle(QStyleFactory::create("Fusion")) {}
@@ -48,10 +51,55 @@ public:
                     return;
                 }
         }
+        if (element == CE_TabBarTabShape) {
+            if (const auto* tab = qstyleoption_cast<const QStyleOptionTab*>(opt)) {
+                const UiStyle::Role role = UiStyle::tabRole(qobject_cast<const QTabBar*>(w), tab->tabIndex);
+                if (role != UiStyle::Role::None && (tab->state & State_Enabled)) {
+                    QStyleOptionTab tinted = *tab;
+                    tint(tinted.palette, role);
+                    QProxyStyle::drawControl(element, &tinted, p, w);
+                    return;
+                }
+            }
+        }
         QProxyStyle::drawControl(element, opt, p, w);
     }
 
+    // Buttons with a UiStyle role are filled with its colour while enabled.
+    void drawPrimitive(PrimitiveElement element, const QStyleOption* opt,
+                       QPainter* p, const QWidget* w) const override
+    {
+        if ((element == PE_PanelButtonCommand || element == PE_PanelButtonTool)
+                && (opt->state & State_Enabled)) {
+            const UiStyle::Role role = UiStyle::role(w);
+            if (role != UiStyle::Role::None) {
+                // Fusion reads the button's subclass (default, flat), so copy that, not the base.
+                if (const auto* button = qstyleoption_cast<const QStyleOptionButton*>(opt)) {
+                    QStyleOptionButton tinted = *button;
+                    tint(tinted.palette, role);
+                    QProxyStyle::drawPrimitive(element, &tinted, p, w);
+                } else if (const auto* tool = qstyleoption_cast<const QStyleOptionToolButton*>(opt)) {
+                    QStyleOptionToolButton tinted = *tool;
+                    tint(tinted.palette, role);
+                    QProxyStyle::drawPrimitive(element, &tinted, p, w);
+                } else {
+                    QStyleOption tinted = *opt;
+                    tint(tinted.palette, role);
+                    QProxyStyle::drawPrimitive(element, &tinted, p, w);
+                }
+                return;
+            }
+        }
+        QProxyStyle::drawPrimitive(element, opt, p, w);
+    }
+
 private:
+    static void tint(QPalette& palette, UiStyle::Role role) {
+        const QColor colour = UiStyle::roleColor(role, palette);
+        palette.setColor(QPalette::Button, colour);
+        palette.setColor(QPalette::Window, colour);
+    }
+
     static constexpr int kIconTextSpacing = 8;
 
     void drawIconLabel(const QRect& r, const QIcon& icon, const QSize& isz,

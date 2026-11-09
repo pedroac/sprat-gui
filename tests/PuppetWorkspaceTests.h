@@ -10,6 +10,7 @@ private slots:
     void testNewPuppetDialogBuildsAPuppetFromDroppedSprites();
     void testNewPuppetDialogPartsMenu();
     void testCanvasPlacesPartsByTheirPivot();
+    void testSearchFieldFiltersTheTree();
     void testClickingAPartSelectsIt();
     void testDraggingAPartMovesIt();
     void testArrowKeysNudgeTheSelectedPart();

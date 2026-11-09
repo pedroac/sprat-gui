@@ -1,5 +1,6 @@
 #include "AtlasesManagementWorkspace.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "NavigatorPanel.h"
 #include "NavigatorTreeWidget.h"
 #include "ProjectSession.h"
@@ -82,10 +83,12 @@ void AtlasesManagementWorkspace::setupUi() {
 
     auto* btnRow = new QHBoxLayout();
     m_addBtn = new QPushButton(AppIcons::icon(QStringLiteral("add")), tr("Add"), leftPanel);
-    m_addBtn->setToolTip(tr("Add atlas"));
+    m_addBtn->setToolTip(tr("Make another atlas, then move sprites into it from the tree"));
+    UiStyle::setRole(m_addBtn, UiStyle::Role::Add);
     m_addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_removeBtn = new QPushButton(AppIcons::icon(QStringLiteral("delete")), tr("Remove"), leftPanel);
-    m_removeBtn->setToolTip(tr("Remove selected atlas"));
+    m_removeBtn->setToolTip(tr("Its sprites go back to the default atlas"));
+    UiStyle::setRole(m_removeBtn, UiStyle::Role::Destructive);
     m_removeBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     btnRow->addWidget(m_addBtn);
     btnRow->addWidget(m_removeBtn);
@@ -129,6 +132,8 @@ void AtlasesManagementWorkspace::setupUi() {
     modeRow->setSpacing(2);
     auto* navBtn    = new QPushButton(AppIcons::icon(QStringLiteral("tree")), tr("Navigation"), rightPanel);
     auto* layoutBtn = new QPushButton(AppIcons::icon(QStringLiteral("atlases")), tr("Layout"), rightPanel);
+    navBtn->setToolTip(tr("Browse the atlas's sprites as a tree"));
+    layoutBtn->setToolTip(tr("See where the sprites land in the packed atlas"));
     navBtn->setCheckable(true);
     layoutBtn->setCheckable(true);
     navBtn->setChecked(true);
@@ -569,20 +574,26 @@ bool AtlasesManagementWorkspace::eventFilter(QObject* obj, QEvent* event) {
         const int srcRow      = m_contextMenuSourceAtlasRow;
         m_contextMenuSourceAtlasRow = -1;
 
-        // Only show when right-clicking a different atlas while checked sprites exist.
+        QMenu menu(this);
+        // Moving is offered when right-clicking a different atlas while checked sprites exist.
         const QStringList checked = m_navigator ? m_navigator->checkedPaths() : QStringList{};
         if (tgtRow >= 0 && tgtRow < m_atlases.size()
                 && tgtRow != srcRow && srcRow >= 0
                 && !checked.isEmpty()) {
-            QMenu menu(this);
             menu.addAction(tr("Move checked sprites to \"%1\"").arg(m_atlases[tgtRow].name),
                            this, [this, checked, srcRow, tgtRow]() {
                 emit moveSpritesRequested(checked, srcRow, tgtRow);
             });
-            menu.exec(m_atlasList->viewport()->mapToGlobal(vpPos));
-            return true;
+            menu.addSeparator();
         }
-        return QWidget::eventFilter(obj, event);
+        menu.addAction(m_addBtn->icon(), tr("Add Atlas"), this, &AtlasesManagementWorkspace::onAddClicked);
+        if (tgtRow >= 0 && tgtRow < m_atlases.size()
+                && !m_atlases[tgtRow].isNeutral && !m_atlases[tgtRow].isExcluded) {
+            menu.addAction(m_removeBtn->icon(), tr("Remove Atlas \"%1\"").arg(m_atlases[tgtRow].name),
+                           this, [this, tgtRow]() { emit removeAtlasRequested(tgtRow); });
+        }
+        menu.exec(m_atlasList->viewport()->mapToGlobal(vpPos));
+        return true;
     }
     case QEvent::DragEnter: {
         auto* e = static_cast<QDragEnterEvent*>(event);

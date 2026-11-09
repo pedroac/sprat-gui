@@ -2,6 +2,8 @@
 #include "AppIcons.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <QApplication>
 #include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QMenu>
@@ -19,22 +21,33 @@ constexpr int MIN_BLOCK_WIDTH = 28;
 /// must not demand a multi-megapixel width for them.
 constexpr int MAX_BLOCK_WIDTH = 4000;
 constexpr int THUMBNAIL_SIZE = 36;
+/// The row under the blocks holding each step's round drag handle.
+constexpr int HANDLE_ROW_HEIGHT = 16;
+constexpr int HANDLE_RADIUS = 5;
+/// How far from a handle's middle a press still grabs it.
+constexpr int HANDLE_GRAB_RADIUS = 8;
+/// Opacity of a dragged step left in place and of the copy following the pointer.
+constexpr qreal DRAGGED_SOURCE_OPACITY = 0.35;
+constexpr qreal DRAGGED_GHOST_OPACITY = 0.8;
 /// A ruler number every this many frames.
 constexpr int RULER_STEP = 4;
 }  // namespace
 
 PuppetSequenceTrack::PuppetSequenceTrack(QWidget* parent) : QWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);  // to show the grab cursor over the handles
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setMinimumHeight(sizeHint().height());
 }
 
 QSize PuppetSequenceTrack::sizeHint() const {
     const int width = m_blocks.isEmpty() ? 200 : blockLeft(m_blocks.size()) + MARGIN;
-    return QSize(width, MARGIN + RULER_HEIGHT + BLOCK_HEIGHT + MARGIN);
+    return QSize(width, MARGIN + RULER_HEIGHT + BLOCK_HEIGHT + HANDLE_ROW_HEIGHT + MARGIN);
 }
 
 void PuppetSequenceTrack::showSteps(const QVector<Block>& blocks, int selected, const QStringList& poseNames) {
+    // Selecting the dragged step makes the workspace show the steps again: the drag goes on.
+    if (m_dragStep >= blocks.size()) cancelStepDrag();
     m_blocks = blocks;
     m_poseNames = poseNames;
     m_selected = selected >= 0 && selected < blocks.size() ? selected : -1;
@@ -78,6 +91,47 @@ int PuppetSequenceTrack::stepAtX(int x) const {
     return -1;
 }
 
+QPoint PuppetSequenceTrack::handleCenter(int step) const {
+    return QPoint(blockLeft(step) + (blockWidth(step) - 2) / 2,
+                  MARGIN + RULER_HEIGHT + BLOCK_HEIGHT + HANDLE_ROW_HEIGHT / 2);
+}
+
+int PuppetSequenceTrack::handleAt(const QPoint& pos) const {
+    for (int i = 0; i < m_blocks.size(); ++i) {
+        const QPoint offset = pos - handleCenter(i);
+        if (offset.x() * offset.x() + offset.y() * offset.y() <= HANDLE_GRAB_RADIUS * HANDLE_GRAB_RADIUS) return i;
+    }
+    return -1;
+}
+
+int PuppetSequenceTrack::dropIndexAt(int x) const {
+    // The steps other than the dragged one whose middle is left of the pointer go before it.
+    int index = 0;
+    for (int i = 0; i < m_blocks.size(); ++i) {
+        if (i != m_dragStep && blockLeft(i) + blockWidth(i) / 2 < x) ++index;
+    }
+    return index;
+}
+
+int PuppetSequenceTrack::dropLineX(int to) const {
+    QVector<int> others;
+    for (int i = 0; i < m_blocks.size(); ++i) {
+        if (i != m_dragStep) others.append(i);
+    }
+    if (others.isEmpty()) return blockLeft(m_dragStep);
+    if (to <= 0) return blockLeft(others.first()) - 1;
+    const int before = others[std::min(to, int(others.size())) - 1];
+    return blockLeft(before) + blockWidth(before) - 1;
+}
+
+void PuppetSequenceTrack::cancelStepDrag() {
+    if (m_dragStep < 0) return;
+    m_dragStep = -1;
+    m_dragMoved = false;
+    unsetCursor();
+    update();
+}
+
 int PuppetSequenceTrack::frameAtX(int x) const {
     // Within a block, frames share its width evenly (a short step's block is widened).
     int frame = 0;
@@ -101,7 +155,7 @@ void PuppetSequenceTrack::paintEvent(QPaintEvent*) {
 
     if (m_blocks.isEmpty()) {
         painter.setPen(colors.color(QPalette::PlaceholderText));
-        painter.drawText(rect().adjusted(MARGIN, top, -MARGIN, -MARGIN), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextWordWrap,
+        painter.drawText(rect().adjusted(MARGIN, top, -MARGIN, -MARGIN), Qt::AlignCenter | Qt::TextWordWrap,
                          tr("No poses yet: right-click here to add one."));
     }
 
@@ -123,9 +177,10 @@ void PuppetSequenceTrack::paintEvent(QPaintEvent*) {
         frame += frames;
     }
 
-    for (int i = 0; i < m_blocks.size(); ++i) {
+    const bool dragging = m_dragStep >= 0 && m_dragMoved;
+    const auto drawBlock = [&](int i, int left) {
         const Block& block = m_blocks[i];
-        const QRect box(blockLeft(i), top, blockWidth(i) - 2, BLOCK_HEIGHT);
+        const QRect box(left, top, blockWidth(i) - 2, BLOCK_HEIGHT);
         const bool selected = i == m_selected;
         painter.setPen(QPen(selected ? colors.color(QPalette::Highlight) : colors.color(QPalette::Mid), selected ? 2 : 1,
                             block.shared ? Qt::DashLine : Qt::SolidLine));
@@ -163,7 +218,17 @@ void PuppetSequenceTrack::paintEvent(QPaintEvent*) {
         const QString name = block.missing ? QStringLiteral("⚠ %1").arg(block.pose) : block.pose;
         painter.drawText(box.adjusted(2, 0, -2, -3), Qt::AlignHCenter | Qt::AlignBottom,
                          painter.fontMetrics().elidedText(name, Qt::ElideRight, box.width() - 4));
+    };
+    for (int i = 0; i < m_blocks.size(); ++i) {
+        painter.setOpacity(dragging && i == m_dragStep ? DRAGGED_SOURCE_OPACITY : 1.0);
+        drawBlock(i, blockLeft(i));
+        // The round handle under the step, to drag it elsewhere.
+        const bool active = i == m_dragStep || i == m_hoveredHandle;
+        painter.setPen(QPen(colors.color(active ? QPalette::Highlight : QPalette::Mid), 1.5));
+        painter.setBrush(active ? colors.color(QPalette::Highlight) : colors.color(QPalette::Button));
+        painter.drawEllipse(handleCenter(i), HANDLE_RADIUS, HANDLE_RADIUS);
     }
+    painter.setOpacity(1.0);
 
     if (m_playhead >= 0 && !m_blocks.isEmpty()) {
         // The middle of the playhead's frame, in its block.
@@ -180,12 +245,36 @@ void PuppetSequenceTrack::paintEvent(QPaintEvent*) {
         painter.setPen(QPen(QColor(0xd9, 0x53, 0x4f), 2));
         painter.drawLine(x, MARGIN, x, top + BLOCK_HEIGHT);
     }
+
+    if (dragging) {
+        // Where the step will land, then the step itself following the pointer.
+        const int lineX = dropLineX(dropIndexAt(m_dragX));
+        painter.setPen(QPen(colors.color(QPalette::Highlight), 3));
+        painter.drawLine(lineX, top - 2, lineX, top + BLOCK_HEIGHT + 2);
+        painter.setOpacity(DRAGGED_GHOST_OPACITY);
+        drawBlock(m_dragStep, m_dragX - m_dragGrabX);
+        painter.setOpacity(1.0);
+    }
 }
 
 void PuppetSequenceTrack::mousePressEvent(QMouseEvent* event) {
     setFocus();
     if (event->button() != Qt::LeftButton || m_blocks.isEmpty()) return;
     const int x = event->position().toPoint().x();
+    if (const int handle = handleAt(event->position().toPoint()); handle >= 0) {
+        // The handle selects its step and, once dragged, moves it.
+        m_dragStep = handle;
+        m_dragX = x;
+        m_dragGrabX = x - blockLeft(handle);
+        m_dragMoved = false;
+        setCursor(Qt::ClosedHandCursor);
+        if (handle != m_selected) {
+            m_selected = handle;
+            emit stepSelected(handle);
+        }
+        update();
+        return;
+    }
     const int step = stepAtX(x);
     m_scrubbing = true;
     if (step >= 0) {
@@ -200,6 +289,27 @@ void PuppetSequenceTrack::mousePressEvent(QMouseEvent* event) {
 }
 
 void PuppetSequenceTrack::mouseMoveEvent(QMouseEvent* event) {
+    const QPoint pos = event->position().toPoint();
+    if (m_dragStep >= 0) {
+        if (!(event->buttons() & Qt::LeftButton)) {
+            cancelStepDrag();
+            return;
+        }
+        if (!m_dragMoved && std::abs(pos.x() - m_dragX) < QApplication::startDragDistance()) return;
+        m_dragMoved = true;
+        m_dragX = pos.x();
+        update();
+        return;
+    }
+    if (!(event->buttons() & Qt::LeftButton)) {
+        const int hovered = handleAt(pos);
+        if (hovered != m_hoveredHandle) {
+            m_hoveredHandle = hovered;
+            if (hovered >= 0) setCursor(Qt::OpenHandCursor);
+            else unsetCursor();
+            update();
+        }
+    }
     if (!m_scrubbing || !(event->buttons() & Qt::LeftButton)) {
         m_scrubbing = false;
         return;
@@ -211,12 +321,38 @@ void PuppetSequenceTrack::mouseMoveEvent(QMouseEvent* event) {
     update();
 }
 
+void PuppetSequenceTrack::mouseReleaseEvent(QMouseEvent* event) {
+    m_scrubbing = false;
+    if (event->button() != Qt::LeftButton || m_dragStep < 0) return;
+    const int from = m_dragStep;
+    const int to = dropIndexAt(event->position().toPoint().x());
+    const bool moved = m_dragMoved;
+    cancelStepDrag();
+    m_hoveredHandle = handleAt(event->position().toPoint());
+    if (m_hoveredHandle >= 0) setCursor(Qt::OpenHandCursor);
+    if (moved && to != from) emit moveRequested(from, to);
+}
+
+void PuppetSequenceTrack::leaveEvent(QEvent* event) {
+    if (m_hoveredHandle >= 0 && m_dragStep < 0) {
+        m_hoveredHandle = -1;
+        unsetCursor();
+        update();
+    }
+    QWidget::leaveEvent(event);
+}
+
 void PuppetSequenceTrack::mouseDoubleClickEvent(QMouseEvent* event) {
     const int step = stepAtX(event->position().toPoint().x());
     if (step >= 0) emit stepActivated(step);
 }
 
 void PuppetSequenceTrack::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Escape && m_dragStep >= 0) {
+        cancelStepDrag();
+        event->accept();
+        return;
+    }
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selected >= 0) {
         emit removeRequested(m_selected);
         event->accept();

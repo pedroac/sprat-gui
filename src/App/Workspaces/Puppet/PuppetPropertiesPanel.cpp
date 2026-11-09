@@ -90,8 +90,8 @@ PuppetPropertiesPanel::PuppetPropertiesPanel(QWidget* parent)
         auto* hint = new QLabel(tr("Select a puppet, part or variant to see its properties."), page);
         hint->setWordWrap(true);
         hint->setAlignment(Qt::AlignCenter);
-        pageLayout->addWidget(hint);
-        pageLayout->addStretch();
+        hint->setForegroundRole(QPalette::PlaceholderText);
+        pageLayout->addWidget(hint, 1);
         m_pages->addWidget(page);
     }
 

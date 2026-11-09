@@ -96,6 +96,26 @@ SpritePickerDialog::SpritePickerDialog(const ProjectSession* session, const Opti
 
     auto* layout = new QVBoxLayout(this);
 
+    if (!options.name.isEmpty()) {
+        auto* nameRow = new QHBoxLayout;
+        auto* nameLabel = new QLabel(tr("Name:"), this);
+        m_nameEdit = new QLineEdit(options.name, this);
+        m_nameEdit->setObjectName(QStringLiteral("spritePickerName"));
+        m_nameEdit->selectAll();
+        nameLabel->setBuddy(m_nameEdit);
+        nameRow->addWidget(nameLabel);
+        nameRow->addWidget(m_nameEdit, 1);
+        layout->addLayout(nameRow);
+        m_nameProblemOf = options.nameProblem;
+        m_nameProblem = new QLabel(this);
+        m_nameProblem->setObjectName(QStringLiteral("spritePickerNameProblem"));
+        m_nameProblem->setStyleSheet(QStringLiteral("color: #d9534f;"));
+        m_nameProblem->setWordWrap(true);
+        m_nameProblem->hide();
+        layout->addWidget(m_nameProblem);
+        connect(m_nameEdit, &QLineEdit::textChanged, this, &SpritePickerDialog::updateAcceptButton);
+    }
+
     m_navigatorPanel = new NavigatorPanel(this);
     m_navigatorPanel->configure({
         /* atlasCombo      */ false,
@@ -165,7 +185,13 @@ SpritePickerDialog::SpritePickerDialog(const ProjectSession* session, const Opti
 
     updatePreview(nullptr);
     updateAcceptButton();
-    if (m_navigatorPanel->filterEdit()) m_navigatorPanel->filterEdit()->setFocus();
+    if (m_nameEdit) m_nameEdit->setFocus();
+    else if (m_navigatorPanel->filterEdit()) m_navigatorPanel->filterEdit()->setFocus();
+}
+
+QString SpritePickerDialog::name() const
+{
+    return m_nameEdit ? m_nameEdit->text().trimmed() : QString();
 }
 
 QStringList SpritePickerDialog::selectedSpritePaths() const
@@ -240,7 +266,15 @@ void SpritePickerDialog::updateAcceptButton()
 {
     const int count = m_pickGroups ? selectedGroups().size() : selectedSpritePaths().size();
     QPushButton* acceptButton = m_buttons->button(QDialogButtonBox::Ok);
-    acceptButton->setEnabled(count > 0 || m_allowEmpty);
+    bool named = true;
+    if (m_nameEdit) {
+        const QString problem = name().isEmpty() ? tr("Type a name.")
+                              : m_nameProblemOf ? m_nameProblemOf(name()) : QString();
+        m_nameProblem->setText(problem);
+        m_nameProblem->setVisible(!problem.isEmpty() && !name().isEmpty());
+        named = problem.isEmpty();
+    }
+    acceptButton->setEnabled((count > 0 || m_allowEmpty) && named);
     const bool showCount = (m_multiSelect || m_pickGroups) && count > 0;
     acceptButton->setText(showCount ? tr("%1 (%2)").arg(m_acceptText).arg(count) : m_acceptText);
 }

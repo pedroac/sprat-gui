@@ -580,6 +580,8 @@ set(PROJECT_SOURCES
     src/Core/MessageText.h
     src/Core/AppIcons.cpp
     src/Core/AppIcons.h
+    src/Core/UiStyle.cpp
+    src/Core/UiStyle.h
     src/Core/PuppetModels.h
     src/Core/PuppetEvaluator.cpp
     src/Core/PuppetEvaluator.h
@@ -810,6 +812,7 @@ if(BUILD_TESTING)
         src/Core/MessageDialog.cpp
         src/Core/MessageText.cpp
         src/Core/AppIcons.cpp
+        src/Core/UiStyle.cpp
         src/App/Workspaces/Shared/NavigatorPanel.cpp
         src/App/Workspaces/Shared/SpritePickerDialog.cpp
         src/App/Workspaces/Shared/NavigatorTreeWidget.cpp

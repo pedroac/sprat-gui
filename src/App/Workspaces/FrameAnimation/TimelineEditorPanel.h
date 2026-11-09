@@ -37,7 +37,6 @@ public:
     explicit TimelineEditorPanel(ProjectSession* session, QUndoStack* undoStack, QWidget* parent = nullptr);
 
     // ── Accessors for the timeline-list section ───────────────────────────────
-    QLineEdit*          timelineCreateEdit() const { return m_timelineCreateEdit; }
     TimelineTreeWidget* timelineList()       const { return m_timelineList; }
 
     // ── Accessors for the selected-timeline editor section ───────────────────
@@ -131,8 +130,8 @@ private:
     void refreshAndSelect();
     /** Shows @p mode in the loop combo without emitting a change. */
     void setLoopComboMode(AnimationLoopMode mode);
-    /** Adds a timeline named @p name with sprites picked in a dialog (it may be left empty). */
-    void addTimelineWithPickedSprites(const QString& name);
+    /** Adds a timeline with sprites picked in a dialog (it may be left empty), named in that dialog, starting with @p suggestedName. */
+    void addTimelineWithPickedSprites(const QString& suggestedName);
     /** Selects the first new timeline and pushes one undo step, or shows @p status when
      *  nothing changed. */
     void commitGeneratedTimelines(bool changed, const QVector<AnimationTimeline>& oldState,
@@ -145,7 +144,7 @@ private:
     QWidget*            m_listArea            = nullptr;
     QWidget*            m_atlasRow            = nullptr;
     QComboBox*          m_atlasCombo          = nullptr;
-    QLineEdit*          m_timelineCreateEdit  = nullptr;
+    QLineEdit*          m_timelineFilterEdit  = nullptr;  ///< Shows the timelines whose names contain it
     TimelineTreeWidget* m_timelineList        = nullptr;
     QPushButton*        m_addBtn              = nullptr;
     QPushButton*        m_removeBtn           = nullptr;

@@ -60,6 +60,13 @@ QStringList collectDescendantPaths(QTreeWidgetItem* item);
 QStringList collectCheckedPaths(QTreeWidget* tree);
 
 /**
+ * Shows the items of @p tree with @p text (any case) in one of @p columns, with their
+ * ancestors and descendants, and hides the others. An empty @p text shows every item.
+ * @return The number of items whose own text matched
+ */
+int filterTree(QTreeWidget* tree, const QString& text, const QList<int>& columns = {0});
+
+/**
  * Collect SpritePtr from all checked leaf items across all top-level items in @p tree.
  */
 QList<SpritePtr> collectCheckedSprites(QTreeWidget* tree);

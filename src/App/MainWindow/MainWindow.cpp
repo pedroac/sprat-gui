@@ -1080,12 +1080,12 @@ void MainWindow::onShowHotkeys() {
     endSection();
 
     beginSection(tr("Workspaces"));
-    row(tr("Sprites"), actionKeys(m_atlasWorkspaceAction));
+    row(tr("Exportation"), actionKeys(m_exportationWorkspaceAction));
     row(tr("Atlases"), actionKeys(m_atlasesManagementWorkspaceAction));
-    row(tr("Nine-Slice"), actionKeys(m_nineSliceWorkspaceAction));
-    row(tr("Frame Animation"), actionKeys(m_frameAnimWorkspaceAction));
+    row(tr("Sprites"), actionKeys(m_atlasWorkspaceAction));
+    row(tr("Animations"), actionKeys(m_frameAnimWorkspaceAction));
+    row(tr("Nine-Slices"), actionKeys(m_nineSliceWorkspaceAction));
     row(tr("Puppets"), actionKeys(m_puppetWorkspaceAction));
-    row(tr("Export"), actionKeys(m_exportationWorkspaceAction));
     endSection();
 
     beginSection(tr("Canvas Views (Layout, Preview, Animation)"));

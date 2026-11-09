@@ -51,6 +51,10 @@
         <file alias="mirror-v.svg">icons/mirror-v.svg</file>
         <file alias="nine-slice.svg">icons/nine-slice.svg</file>
         <file alias="onion.svg">icons/onion.svg</file>
+        <file alias="duplicate.svg">icons/duplicate.svg</file>
+        <file alias="fit.svg">icons/fit.svg</file>
+        <file alias="keyframes.svg">icons/keyframes.svg</file>
+        <file alias="pose.svg">icons/pose.svg</file>
         <file alias="pause.svg">icons/pause.svg</file>
         <file alias="play.svg">icons/play.svg</file>
         <file alias="profiles.svg">icons/profiles.svg</file>

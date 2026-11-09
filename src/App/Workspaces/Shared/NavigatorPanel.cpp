@@ -1,5 +1,6 @@
 #include "NavigatorPanel.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "NavigatorTreeWidget.h"
 #include "ProjectSession.h"
 #include "SpriteTreeUtils.h"
@@ -255,6 +256,8 @@ NavigatorPanel::NavigatorPanel(QWidget* parent)
     m_addSourceBtn = new QPushButton(
         AppIcons::icon(QStringLiteral("add")),
         tr("Add Source"), this);
+    m_addSourceBtn->setToolTip(tr("Add sprites from a folder, an image, an archive or a URL"));
+    UiStyle::setRole(m_addSourceBtn, UiStyle::Role::Add);
     m_addSourceBtn->setVisible(false);
     layout->addWidget(m_addSourceBtn);
 

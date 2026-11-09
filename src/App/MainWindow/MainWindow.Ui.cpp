@@ -2,6 +2,7 @@
 #include "AnimationPreviewService.h"
 #include "ui_MainWindow.h"
 #include "AppIcons.h"
+#include "UiStyle.h"
 #include "AnimationPreviewPanel.h"
 #include "TimelineEditorPanel.h"
 #include "ExportWorkspace.h"
@@ -763,8 +764,9 @@ void MainWindow::setupUi() {
     auto* workspaceGroup = new QActionGroup(this);
     workspaceGroup->setExclusive(true);
     auto addWorkspaceAction = [this, workspaceGroup](const QIcon& icon, const QString& text,
-                                                     const QKeySequence& shortcut) {
+                                                     const QKeySequence& shortcut, const QString& explanation) {
         auto* action = new QAction(icon, text, this);
+        action->setToolTip(explanation);
         action->setShortcut(shortcut);
         action->setCheckable(true);
         workspaceGroup->addAction(action);
@@ -775,30 +777,35 @@ void MainWindow::setupUi() {
     // Not Alt+E: that is the Edit menu's mnemonic, and the clash disables both.
     m_exportationWorkspaceAction = addWorkspaceAction(
         AppIcons::icon(QStringLiteral("export")), tr("Exportation"),
-        QKeySequence(Qt::ALT | Qt::Key_X));
+        QKeySequence(Qt::ALT | Qt::Key_X), tr("Write the atlases and their metadata for your engine"));
     connect(m_exportationWorkspaceAction, &QAction::triggered, this, &MainWindow::onExportAsClicked);
 
     m_atlasesManagementWorkspaceAction = addWorkspaceAction(
-        AppIcons::icon(QStringLiteral("atlases")), tr("Atlases"), QKeySequence(Qt::ALT | Qt::Key_A));
+        AppIcons::icon(QStringLiteral("atlases")), tr("Atlases"), QKeySequence(Qt::ALT | Qt::Key_A),
+        tr("Sort the sprites into atlases and pick their layout profiles"));
     connect(m_atlasesManagementWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_atlasesManagementWorkspace); });
 
     m_atlasWorkspaceAction = addWorkspaceAction(
-        AppIcons::icon(QStringLiteral("sprite-edit")), tr("Sprites"), QKeySequence(Qt::ALT | Qt::Key_S));
+        AppIcons::icon(QStringLiteral("sprite-edit")), tr("Sprites"), QKeySequence(Qt::ALT | Qt::Key_S),
+        tr("Add sources and set each sprite's name, pivot and markers"));
     m_atlasWorkspaceAction->setChecked(true);
     connect(m_atlasWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_atlasWorkspace); });
 
     m_nineSliceWorkspaceAction = addWorkspaceAction(
-        AppIcons::icon(QStringLiteral("nine-slice")), tr("Nine-Slice"), QKeySequence(Qt::ALT | Qt::Key_N));
+        AppIcons::icon(QStringLiteral("nine-slice")), tr("Nine-Slices"), QKeySequence(Qt::ALT | Qt::Key_N),
+        tr("Mark the borders of sprites that stretch, such as panels and buttons"));
     connect(m_nineSliceWorkspaceAction, &QAction::triggered,
             this, [this]() { switchWorkspace(m_nineSliceWorkspace); });
 
     m_frameAnimWorkspaceAction = addWorkspaceAction(
-        AppIcons::icon(QStringLiteral("frame-animation")), tr("Frame Animation"), QKeySequence(Qt::ALT | Qt::Key_F));
+        AppIcons::icon(QStringLiteral("frame-animation")), tr("Animations"), QKeySequence(Qt::ALT | Qt::Key_F),
+        tr("Play sprites one after another as frame-by-frame animations"));
     connect(m_frameAnimWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_frameAnimWorkspace); });
 
     m_puppetWorkspaceAction = addWorkspaceAction(
-        AppIcons::icon(QStringLiteral("puppet")), tr("Puppets"), QKeySequence(Qt::ALT | Qt::Key_P));
+        AppIcons::icon(QStringLiteral("puppet")), tr("Puppets"), QKeySequence(Qt::ALT | Qt::Key_P),
+        tr("Rig sprites into cutout characters, then pose and animate them"));
     connect(m_puppetWorkspaceAction, &QAction::triggered, this, [this]() { switchWorkspace(m_puppetWorkspace); });
 
     setupWorkspaceTabs();
@@ -977,7 +984,7 @@ void MainWindow::setupToolbar() {
     connect(exportationAction, &QAction::triggered, this, &MainWindow::onSettingsExportationClicked);
 
     QAction* nineSliceSettingsAction = settingsMenu->addAction(
-        AppIcons::icon(QStringLiteral("nine-slice")), tr("Nine-Slice..."));
+        AppIcons::icon(QStringLiteral("nine-slice")), tr("Nine-Slices..."));
     nineSliceSettingsAction->setToolTip(tr("Open nine-slice editor settings"));
     connect(nineSliceSettingsAction, &QAction::triggered, this, &MainWindow::onSettingsNineSliceClicked);
 
@@ -1174,20 +1181,25 @@ void MainWindow::setupWorkspaceTabs() {
     m_workspaceTabBar->setFocusPolicy(Qt::NoFocus);
     m_workspaceToolBar->addWidget(m_workspaceTabBar);
 
-    // The order the work flows in: sort sources into atlases, edit sprites, use them, export.
+    // Exportation first, set apart in blue: it is where the work ends up, whatever the
+    // workspace. Then the order the work flows in: sort sources into atlases, edit sprites,
+    // animate them, stretch them, rig them.
     m_workspaceTabs = {
+        {m_exportWorkspace, m_exportationWorkspaceAction},
         {m_atlasesManagementWorkspace, m_atlasesManagementWorkspaceAction},
         {m_atlasWorkspace, m_atlasWorkspaceAction},
-        {m_nineSliceWorkspace, m_nineSliceWorkspaceAction},
         {m_frameAnimWorkspace, m_frameAnimWorkspaceAction},
+        {m_nineSliceWorkspace, m_nineSliceWorkspaceAction},
         {m_puppetWorkspace, m_puppetWorkspaceAction},
-        {m_exportWorkspace, m_exportationWorkspaceAction},
     };
     for (const auto& [workspace, action] : m_workspaceTabs) {
         const int index = m_workspaceTabBar->addTab(action->icon(), action->text());
+        // The action's tool tip explains the workspace; the tab already shows its name.
         const QString keys = action->shortcut().toString(QKeySequence::NativeText);
-        m_workspaceTabBar->setTabToolTip(index, keys.isEmpty() ? action->text()
-                                                               : tr("%1 (%2)").arg(action->text(), keys));
+        m_workspaceTabBar->setTabToolTip(index, keys.isEmpty() ? action->toolTip()
+                                                               : tr("%1 (%2)").arg(action->toolTip(), keys));
+        if (workspace == m_exportWorkspace)
+            UiStyle::setTabRole(m_workspaceTabBar, index, UiStyle::Role::Accent);
     }
 
     connect(m_workspaceTabBar, &QTabBar::currentChanged, this, [this](int index) {
