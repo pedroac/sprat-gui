@@ -59,7 +59,8 @@ For detailed guides or to build from source, see [Documentation](#documentation)
 - [Troubleshooting](docs/troubleshooting.md) — Common issues
 
 **For developers**:
-- [Building from source](docs/building.md)
+- [Building from source](docs/dev/building.md)
+- [WebAssembly deployment](docs/dev/WASM_DEPLOYMENT.md)
 - [Contributing](CONTRIBUTING.md)
 - [Architecture Guide](AGENTS.md)
 - [Changelog](CHANGELOG.md)
