@@ -39,7 +39,9 @@ Optional for advanced features: ImageMagick (GIF export), FFmpeg (video export)
 
 ## Documentation
 
-**Start here**: [Getting Started](docs/getting-started.md) — 5-minute intro
+**Start here**: 
+- [Visual Guide](docs/visual-guide.md) — Pictures + steps (10 min)
+- [Getting Started](docs/getting-started.md) — Text walkthrough (5 min)
 
 **Workspaces**:
 - [Sprites](docs/workspace-sprites.md) — Import and edit sprites

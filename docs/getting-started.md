@@ -2,6 +2,8 @@
 
 Build a sprite sheet and animation in 5 minutes.
 
+> **Prefer pictures?** See the [Visual Guide](visual-guide.md) for a step-by-step walkthrough with screenshots.
+
 ## 1. Install and Launch
 
 **Download** from [itch.io](https://pedroac.itch.io/sprat) (or try the [web version](https://sprat-gui.itch.io)):
